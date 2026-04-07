@@ -9,9 +9,9 @@ const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
 const createZone = async (req, res) => {
-    const { name, displayName, cityId } = req.body;
-    if (!name || !displayName || !cityId) {
-        throw new BadRequest_1.BadRequest("Name, displayName and cityId are required");
+    const { name, displayName, cityId, lat, lng } = req.body;
+    if (!name || !displayName || !cityId || !lat || !lng) {
+        throw new BadRequest_1.BadRequest("Name, displayName, cityId, lat, and lng are required");
     }
     const existingCity = await connection_1.db
         .select()
@@ -24,7 +24,7 @@ const createZone = async (req, res) => {
     const existingZone = await connection_1.db
         .select()
         .from(schema_1.zones)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.zones.name, name), (0, drizzle_orm_1.eq)(schema_1.zones.cityId, cityId)))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.zones.name, name), (0, drizzle_orm_1.eq)(schema_1.zones.cityId, cityId), (0, drizzle_orm_1.eq)(schema_1.zones.status, "active"), (0, drizzle_orm_1.eq)(schema_1.zones.lat, lat), (0, drizzle_orm_1.eq)(schema_1.zones.lng, lng)))
         .limit(1);
     if (existingZone[0]) {
         throw new BadRequest_1.BadRequest("Zone already exists in this city");
@@ -34,6 +34,9 @@ const createZone = async (req, res) => {
         id,
         name,
         displayName,
+        lat,
+        lng,
+        status: "active",
         cityId,
     });
     return (0, response_1.SuccessResponse)(res, { message: "Create zone success", data: { id } }, 201);
@@ -46,6 +49,8 @@ const getAllZones = async (req, res) => {
         name: schema_1.zones.name,
         displayName: schema_1.zones.displayName,
         status: schema_1.zones.status,
+        lat: schema_1.zones.lat,
+        lng: schema_1.zones.lng,
         cityId: schema_1.zones.cityId,
         createdAt: schema_1.zones.createdAt,
         updatedAt: schema_1.zones.updatedAt,
@@ -68,6 +73,8 @@ const getZoneById = async (req, res) => {
         name: schema_1.zones.name,
         displayName: schema_1.zones.displayName,
         status: schema_1.zones.status,
+        lat: schema_1.zones.lat,
+        lng: schema_1.zones.lng,
         cityId: schema_1.zones.cityId,
         createdAt: schema_1.zones.createdAt,
         updatedAt: schema_1.zones.updatedAt,

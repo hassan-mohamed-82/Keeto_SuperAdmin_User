@@ -8,10 +8,10 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
 export const createZone = async (req: Request, res: Response) => {
-    const { name, displayName, cityId } = req.body;
+    const { name, displayName, cityId,lat,lng } = req.body;
 
-    if (!name || !displayName || !cityId) {
-        throw new BadRequest("Name, displayName and cityId are required");
+    if (!name || !displayName || !cityId || !lat || !lng) {
+        throw new BadRequest("Name, displayName, cityId, lat, and lng are required");
     }
 
     const existingCity = await db
@@ -27,7 +27,7 @@ export const createZone = async (req: Request, res: Response) => {
     const existingZone = await db
         .select()
         .from(zones)
-        .where(and(eq(zones.name, name), eq(zones.cityId, cityId)))
+        .where(and(eq(zones.name, name), eq(zones.cityId, cityId), eq(zones.status, "active"), eq(zones.lat, lat), eq(zones.lng, lng)))
         .limit(1);
 
     if (existingZone[0]) {
@@ -40,6 +40,9 @@ export const createZone = async (req: Request, res: Response) => {
         id,
         name,
         displayName,
+        lat,
+        lng,
+        status: "active",
         cityId,
     });
 
@@ -53,6 +56,8 @@ export const getAllZones = async (req: Request, res: Response) => {
             name: zones.name,
             displayName: zones.displayName,
             status: zones.status,
+            lat: zones.lat,
+            lng: zones.lng,
             cityId: zones.cityId,
             createdAt: zones.createdAt,
             updatedAt: zones.updatedAt,
@@ -77,6 +82,8 @@ export const getZoneById = async (req: Request, res: Response) => {
             name: zones.name,
             displayName: zones.displayName,
             status: zones.status,
+            lat: zones.lat,
+            lng: zones.lng,
             cityId: zones.cityId,
             createdAt: zones.createdAt,
             updatedAt: zones.updatedAt,
