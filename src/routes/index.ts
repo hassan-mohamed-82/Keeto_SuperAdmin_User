@@ -3,7 +3,7 @@ import adminRouter from './admin/index';
 
 const route = Router();
 
-route.use('/admin', adminRouter);
+route.use('/superadmin', adminRouter);
 
 
 export default route;

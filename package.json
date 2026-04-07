@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "dist/src/server.js",
   "scripts": {
-    "dev": "npm run swagger && tsx watch src/server.ts",
+    "dev": " tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "build": "tsc",
     "swagger": "tsx src/utils/swagger.ts",

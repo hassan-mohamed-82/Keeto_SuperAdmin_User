@@ -49,6 +49,7 @@ export async function login(req: Request, res: Response) {
             roleId: admin[0].roleId,
             permissions: admin[0].permissions,
             status: admin[0].status,
+            type: admin[0].type
         }
     }, 200);
 }
