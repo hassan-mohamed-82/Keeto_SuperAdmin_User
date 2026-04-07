@@ -9,4 +9,5 @@ router.get("/", (0, catchAsync_1.catchAsync)(city_1.getAllCities));
 router.get("/:id", (0, catchAsync_1.catchAsync)(city_1.getCityById));
 router.put("/:id", (0, catchAsync_1.catchAsync)(city_1.updateCity));
 router.delete("/:id", (0, catchAsync_1.catchAsync)(city_1.deleteCity));
+router.get("/countries/active", (0, catchAsync_1.catchAsync)(city_1.getAllCountries));
 exports.default = router;

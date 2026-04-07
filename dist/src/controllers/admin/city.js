@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteCity = exports.updateCity = exports.getCityById = exports.getAllCities = exports.createCity = void 0;
+exports.getAllCountries = exports.deleteCity = exports.updateCity = exports.getCityById = exports.getAllCities = exports.createCity = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -138,3 +138,11 @@ const deleteCity = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Delete city success" });
 };
 exports.deleteCity = deleteCity;
+const getAllCountries = async (req, res) => {
+    const allCountries = await connection_1.db
+        .select()
+        .from(schema_1.countries)
+        .where((0, drizzle_orm_1.eq)(schema_1.countries.status, "active"));
+    return (0, response_1.SuccessResponse)(res, { message: "Get all active countries success", data: allCountries });
+};
+exports.getAllCountries = getAllCountries;

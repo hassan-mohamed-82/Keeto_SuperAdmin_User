@@ -158,3 +158,11 @@ export const deleteCity = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, { message: "Delete city success" });
 };
+
+export const getAllCountries = async (req: Request, res: Response) => {
+    const allCountries = await db
+        .select()
+        .from(countries)
+        .where(eq(countries.status, "active"));
+    return SuccessResponse(res, { message: "Get all active countries success", data: allCountries });
+};
