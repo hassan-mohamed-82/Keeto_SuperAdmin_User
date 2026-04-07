@@ -6,7 +6,7 @@
     "dev": "npm run swagger && tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "build": "tsc",
-    "swagger": "tsx swagger.ts",
+    "swagger": "tsx src/utils/swagger.ts",
     "generate-db": "npx drizzle-kit generate",
     "dbcreate": "tsx src/models/setup.ts",
     "migrate-db": "npx drizzle-kit push",
