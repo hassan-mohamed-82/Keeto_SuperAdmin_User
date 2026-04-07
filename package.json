@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "main": "dist/src/server.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "npm run swagger && tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "build": "tsc",
+    "swagger": "tsx swagger.ts",
     "generate-db": "npx drizzle-kit generate",
     "dbcreate": "tsx src/models/setup.ts",
     "migrate-db": "npx drizzle-kit push",
@@ -45,6 +46,7 @@
     "resend": "^6.5.2",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
+    "swagger-ui-express": "^5.0.1",
     "tesseract.js": "^7.0.0",
     "uuid": "^11.1.0",
     "xss-clean": "^0.1.4",
@@ -62,7 +64,10 @@
     "@types/node": "^24.0.10",
     "@types/nodemailer": "^6.4.17",
     "@types/socket.io": "^3.0.1",
+    "@types/swagger-ui-express": "^4.1.8",
     "drizzle-kit": "^0.31.8",
+    "swagger-autogen": "^2.23.7",
+    "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "tsx": "^4.21.0"
   }
