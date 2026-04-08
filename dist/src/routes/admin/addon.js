@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const catchAsync_1 = require("../../utils/catchAsync");
+const addon_1 = require("../../controllers/admin/addon");
+const router = (0, express_1.Router)();
+router.get("/select", (0, catchAsync_1.catchAsync)(addon_1.getAllRestaurantsandaddonscategory));
+router.post("/", (0, catchAsync_1.catchAsync)(addon_1.createAddon));
+router.get("/", (0, catchAsync_1.catchAsync)(addon_1.getAllAddons));
+router.get("/:id", (0, catchAsync_1.catchAsync)(addon_1.getAddonById));
+router.put("/:id", (0, catchAsync_1.catchAsync)(addon_1.updateAddon));
+router.delete("/:id", (0, catchAsync_1.catchAsync)(addon_1.deleteAddon));
+exports.default = router;

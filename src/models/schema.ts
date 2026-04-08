@@ -9,3 +9,4 @@ export * from "./schema/admin/Category";
 export * from "./schema/admin/subcategory";
 export * from "./schema/admin/adonescategory";
 export * from "./schema/admin/restaurants";
+export * from "./schema/admin/addon";
