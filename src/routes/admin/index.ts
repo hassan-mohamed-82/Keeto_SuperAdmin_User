@@ -9,6 +9,7 @@ import CuisineRouter from "./Cuisine ";
 import CategoryRouter from "./Category";
 import SubcategoryRouter from "./subcategory";
 import AdonecategoryRouter from "./adonescategory";
+import RestaurantRouter from "./restaurants";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -25,5 +26,6 @@ router.use("/cuisines", CuisineRouter);
 router.use("/categories", CategoryRouter);
 router.use("/subcategories", SubcategoryRouter);
 router.use("/adonescategory", AdonecategoryRouter);
+router.use("/restaurants", RestaurantRouter);
 
 export default router;    
