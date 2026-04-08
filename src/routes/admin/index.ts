@@ -11,6 +11,7 @@ import SubcategoryRouter from "./subcategory";
 import AdonecategoryRouter from "./adonescategory";
 import AddonRouter from "./addon";
 import RestaurantRouter from "./restaurants";
+import FoodRouter from "./food";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -29,5 +30,6 @@ router.use("/subcategories", SubcategoryRouter);
 router.use("/adonescategory", AdonecategoryRouter);
 router.use("/restaurants", RestaurantRouter);
 router.use("/addons", AddonRouter);
+router.use("/food", FoodRouter);
 
 export default router;    
