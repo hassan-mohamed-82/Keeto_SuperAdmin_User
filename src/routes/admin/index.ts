@@ -6,6 +6,7 @@ import CountryRouter from "./country";
 import CityRouter from "./city";
 import ZoneRouter from "./zone";
 import CuisineRouter from "./Cuisine ";
+import CategoryRouter from "./Category";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -19,5 +20,6 @@ router.use("/countries", CountryRouter);
 router.use("/cities", CityRouter);
 router.use("/zones", ZoneRouter);
 router.use("/cuisines", CuisineRouter);
+router.use("/categories", CategoryRouter);
 
 export default router;    

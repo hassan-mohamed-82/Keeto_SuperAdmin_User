@@ -21,3 +21,4 @@ __exportStar(require("./schema/admin/country"), exports);
 __exportStar(require("./schema/admin/city"), exports);
 __exportStar(require("./schema/admin/zone"), exports);
 __exportStar(require("./schema/admin/Cuisine "), exports);
+__exportStar(require("./schema/admin/Category"), exports);
