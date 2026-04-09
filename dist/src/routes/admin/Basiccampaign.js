@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const Basiccampaign_1 = require("../../controllers/admin/Basiccampaign");
+const catchAsync_1 = require("../../utils/catchAsync");
+const router = (0, express_1.Router)();
+router.post("/", (0, catchAsync_1.catchAsync)(Basiccampaign_1.createBasiccampaign));
+router.get("/", (0, catchAsync_1.catchAsync)(Basiccampaign_1.getAllBasiccampaigns));
+router.get("/:id", (0, catchAsync_1.catchAsync)(Basiccampaign_1.getBasiccampaignById));
+router.put("/:id", (0, catchAsync_1.catchAsync)(Basiccampaign_1.updateBasiccampaign));
+router.delete("/:id", (0, catchAsync_1.catchAsync)(Basiccampaign_1.deleteBasiccampaign));
+router.put("/:id/status", (0, catchAsync_1.catchAsync)(Basiccampaign_1.updateBasiccampaignStatus));
+exports.default = router;

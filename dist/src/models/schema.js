@@ -28,3 +28,4 @@ __exportStar(require("./schema/admin/restaurants"), exports);
 __exportStar(require("./schema/admin/addon"), exports);
 __exportStar(require("./schema/admin/variation"), exports);
 __exportStar(require("./schema/admin/food"), exports);
+__exportStar(require("./schema/admin/Basiccampaign"), exports);
