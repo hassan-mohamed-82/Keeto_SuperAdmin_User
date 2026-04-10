@@ -13,3 +13,4 @@ export * from "./schema/admin/addon";
 export * from "./schema/admin/variation";
 export * from "./schema/admin/food";
 export * from "./schema/admin/Basiccampaign";
+export * from "./schema/admin/BusinessPlans";

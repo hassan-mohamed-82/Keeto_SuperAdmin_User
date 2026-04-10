@@ -13,6 +13,7 @@ import AddonRouter from "./addon";
 import RestaurantRouter from "./restaurants";
 import FoodRouter from "./food";
 import BasiccampaignRouter from "./Basiccampaign";
+import BussinessplanRouter from "./BusinessPlans";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -32,6 +33,7 @@ router.use("/adonescategory", AdonecategoryRouter);
 router.use("/restaurants", RestaurantRouter);
 router.use("/addons", AddonRouter);
 router.use("/food", FoodRouter);
+router.use("/businessplans", BussinessplanRouter);
 router.use("/basiccampaign", BasiccampaignRouter);
 
 export default router;    
