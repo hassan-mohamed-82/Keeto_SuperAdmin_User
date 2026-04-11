@@ -30,7 +30,7 @@ export const createFood = async (req: Request, res: Response) => {
     } = req.body;
 
     // Required fields
-    if (!name || !description || !image || !restaurantid || !categoryid || !subcategoryid || !startTime || !endTime || !price) {
+    if (!name || !description || !image || !categoryid || !subcategoryid || !startTime || !endTime || !price) {
         throw new BadRequest("Missing required fields: name, description, image, restaurantid, categoryid, subcategoryid, startTime, endTime, price");
     }
 
@@ -174,6 +174,73 @@ export const getAllFoods = async (req: Request, res: Response) => {
     );
 
     return SuccessResponse(res, { message: "Get all foods success", data: result });
+};
+
+// =============================================
+// GET ALL Foods By Restaurant ID (with variations & options)
+// =============================================
+export const getFoodsByRestaurantId = async (req: Request, res: Response) => {
+    const { id: restaurantId } = req.params;
+
+    const allFoods = await db
+        .select({
+            id: food.id,
+            name: food.name,
+            description: food.description,
+            image: food.image,
+            restaurantid: food.restaurantid,
+            categoryid: food.categoryid,
+            subcategoryid: food.subcategoryid,
+            foodtype: food.foodtype,
+            Nutrition: food.Nutrition,
+            Allegren_Ingredients: food.Allegren_Ingredients,
+            is_Halal: food.is_Halal,
+            addonsId: food.addonsId,
+            startTime: food.startTime,
+            endTime: food.endTime,
+            search_tages: food.search_tages,
+            price: food.price,
+            discount_type: food.discount_type,
+            discount_value: food.discount_value,
+            Maximum_Purchase: food.Maximum_Purchase,
+            stock_type: food.stock_type,
+            status: food.status,
+            createdAt: food.createdAt,
+            updatedAt: food.updatedAt,
+            restaurant: {
+                id: restaurants.id,
+                name: restaurants.name,
+            },
+            category: {
+                id: categories.id,
+                name: categories.name,
+            },
+            subcategory: {
+                id: subcategories.id,
+                name: subcategories.name,
+            },
+        })
+        .from(food)
+        .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
+        .leftJoin(categories, eq(food.categoryid, categories.id))
+        .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
+        .where(eq(food.restaurantid, restaurantId));
+
+    // Attach variations + options to each food
+    const result = await Promise.all(
+        allFoods.map(async (f) => {
+            const vars = await db.select().from(foodVariations).where(eq(foodVariations.foodId, f.id));
+            const variationsWithOptions = await Promise.all(
+                vars.map(async (v) => {
+                    const opts = await db.select().from(variationOptions).where(eq(variationOptions.variationId, v.id));
+                    return { ...v, options: opts };
+                })
+            );
+            return { ...f, variations: variationsWithOptions };
+        })
+    );
+
+    return SuccessResponse(res, { message: "Get foods by restaurant id success", data: result });
 };
 
 // =============================================

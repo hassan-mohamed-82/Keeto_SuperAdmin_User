@@ -13,6 +13,7 @@ import AddonRouter from "./addon";
 import RestaurantRouter from "./restaurants";
 import FoodRouter from "./food";
 import BasiccampaignRouter from "./Basiccampaign";
+import walletsRouter from "./restaurant_wallets"
 import BussinessplanRouter from "./BusinessPlans";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
@@ -35,5 +36,6 @@ router.use("/addons", AddonRouter);
 router.use("/food", FoodRouter);
 router.use("/businessplans", BussinessplanRouter);
 router.use("/basiccampaign", BasiccampaignRouter);
+router.use("/wallets", walletsRouter);
 
 export default router;    

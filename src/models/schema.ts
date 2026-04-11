@@ -14,3 +14,4 @@ export * from "./schema/admin/variation";
 export * from "./schema/admin/food";
 export * from "./schema/admin/Basiccampaign";
 export * from "./schema/admin/BusinessPlans";
+export * from "./schema/admin/restaurant_wallets";
