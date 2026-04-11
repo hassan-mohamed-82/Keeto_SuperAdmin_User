@@ -1,5 +1,8 @@
 import { Router } from "express";
-import { createBasiccampaign, getAllBasiccampaigns, getBasiccampaignById, updateBasiccampaign, deleteBasiccampaign, updateBasiccampaignStatus } from "../../controllers/admin/Basiccampaign";
+import { createBasiccampaign, getAllBasiccampaigns,
+     getBasiccampaignById, updateBasiccampaign, 
+     deleteBasiccampaign, updateBasiccampaignStatus 
+     } from "../../controllers/admin/Basiccampaign";
 import { catchAsync } from "../../utils/catchAsync";
 
 const router = Router();
