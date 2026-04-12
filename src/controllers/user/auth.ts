@@ -23,7 +23,7 @@ const generateOTP = (length: number = 6): string => {
 // 1. Signup
 // ===================================
 export const signup = async (req: Request, res: Response) => {
-    const { name, email, phone, password, countryId, cityId, zoneId, address } = req.body;
+    const { name, email, phone, password, countryId, cityId, zoneId, address ,photo} = req.body;
 
     if (!name || !email || !phone || !password || !countryId || !cityId || !zoneId) {
         throw new BadRequest("Please provide all required fields");
@@ -56,6 +56,7 @@ const verifyLink = `${baseUrl}/api/user/auth/verify-email?token=${token}`;
                 password: hashedPassword,
                 countryId,
                 cityId,
+                photo,
                 zoneId,
                 address
             }).where(eq(users.id, userId));

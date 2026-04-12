@@ -1,25 +1,25 @@
 import { mysqlTable, varchar, char, timestamp, decimal, mysqlEnum, text, int } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
-import { restaurants } from "./restaurants"; 
-import { food } from "./food"; 
-import { users } from "./Users";
+import { restaurants } from "./restaurants";
+import { food } from "./food";
+import { users } from "../user/Users";
 export const orders = mysqlTable("orders", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     orderNumber: varchar("order_number", { length: 15 }).notNull().unique(), // الرقم العشوائي
-    
+
     userId: char("user_id", { length: 36 }).references(() => users.id).notNull(),
     restaurantId: char("restaurant_id", { length: 36 }).references(() => restaurants.id).notNull(),
-    
+
     orderSource: mysqlEnum("order_source", ["online_order", "food_aggregator"]).notNull(),
     paymentMethod: mysqlEnum("payment_method", ["cash", "visa"]).default("cash"),
     orderType: mysqlEnum("order_type", ["delivery", "takeaway", "dine_in"]).default("delivery"),
 
     subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(), // سعر الأكل
-    deliveryFee: decimal("delivery_fee", { precision: 10, scale: 2 }).default("0.00"), 
+    deliveryFee: decimal("delivery_fee", { precision: 10, scale: 2 }).default("0.00"),
     serviceFee: decimal("service_fee", { precision: 10, scale: 2 }).default("0.00"), // مكسبك من اليوزر
     appCommission: decimal("app_commission", { precision: 10, scale: 2 }).default("0.00"), // مكسبك من المطعم
     totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(), // إجمالي ما يدفعه العميل
-    
+
     status: mysqlEnum("status", ["pending", "accepted", "preparing", "out_for_delivery", "delivered", "cancelled"]).default("pending"),
     createdAt: timestamp("created_at").defaultNow(),
 });
