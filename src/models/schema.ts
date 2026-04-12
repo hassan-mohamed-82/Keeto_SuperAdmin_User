@@ -24,3 +24,4 @@ export * from "./schema/user/Users";
 export * from "./schema/user/userWallets";
 export * from "./schema/user/emailverfication";
 export * from "./schema/user/favouriteliste";
+export * from "./schema/user/cart";
