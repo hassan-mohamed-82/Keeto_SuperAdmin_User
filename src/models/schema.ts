@@ -16,3 +16,8 @@ export * from "./schema/admin/Basiccampaign";
 export * from "./schema/admin/BusinessPlans";
 export * from "./schema/admin/restaurant_wallets";
 export * from "./schema/admin/restaurantsetting";
+export * from "./schema/admin/zoneDeliveryFees";
+export * from "./schema/admin/restaurantZoneDeliveryFees";
+export * from "./schema/admin/order";
+export * from "./schema/admin/order";
+export * from "./schema/admin/Users";
