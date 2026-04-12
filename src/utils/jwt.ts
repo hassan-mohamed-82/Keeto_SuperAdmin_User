@@ -20,3 +20,15 @@ export const generateAdminToken = (data: {
     };
     return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 };
+
+export const generateUserToken = (data: {
+    id: string;
+    name: string;
+    email: string;
+}): string => {
+    return jwt.sign(
+        { id: data.id, name: data.name, email: data.email, role: "user" },
+        JWT_SECRET,
+        { expiresIn: "30d" }
+    );
+};

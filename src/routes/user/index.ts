@@ -1,0 +1,11 @@
+import { Router } from "express";
+import authRouter from "./auth";
+import orderRouter from "./order";
+import homeRouter from "./home";
+// import walletRouter from "./userWallets";
+const router = Router();
+router.use("/auth", authRouter);
+router.use("/order", orderRouter);
+router.use("/home", homeRouter);
+// router.use("/wallet", walletRouter);
+export default router;

@@ -7,16 +7,14 @@ import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 import http from "http";
 import { Server } from "socket.io";
-// أضف هذا السطر في الأعلى
-import { connectDB } from './models/connection'; // استبدل المسار بالمسار الصحيح
+import { connectDB } from './models/connection'; 
 
 dotenv.config();
 
 const app = express();
-connectDB(); // استدعاء دالة الاتصال بقاعدة البيانات
+connectDB(); 
 
 const httpServer = http.createServer(app);
 
@@ -27,7 +25,7 @@ const io = new Server(httpServer, {
   }
 });
 
-
+// إعدادات CORS
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -36,54 +34,75 @@ app.use(cors({
   optionsSuccessStatus: 204,
 }));
 
+// إعدادات الحماية Helmet
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
   })
 );
 
-// const apiLimiter = rateLimit({
-//   windowMs: 15 * 60 * 1000, // 15 minutes
-//   max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
-//   message: {
-//     success: false,
-//     message: "Too many requests from this IP, please try again after an 15 minutes"
-//   },
-//   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-//   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-// });
-
-// app.use(apiLimiter);
-
 app.use(cookieParser());
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 
-
+// إعداد المسارات الثابتة (Static Files)
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 app.use(express.static(path.join(process.cwd(), "public")));
-app.use("/public", express.static(path.join(process.cwd(), "public")));
 
-app.get("/api", (req, res, next) => {
-  res.json({ message: "API is working! notify token" });
+// اختبار عمل الـ API
+app.get("/api", (req, res) => {
+  res.json({ message: "API is working!" });
 });
 
+// الصفحة الرئيسية
 app.get("/", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "public", "index.html"));
+  // إذا لم يكن الملف موجوداً، يفضل إرسال نص بسيط أو التأكد من وجود index.html
+  res.sendFile(path.join(process.cwd(), "public", "index.html"), (err) => {
+    if (err) {
+      res.status(200).send("<h1>Welcome to Keeto API</h1>");
+    }
+  });
 });
 
+// مسارات الـ API
 app.use("/api", ApiRoute);
 
+// معالج مسارات 404 - تم تعديله لتجنب خطأ ENOENT
 app.use((req, res, next) => {
+  // إذا كان الطلب صفحة (Browser) وليس API
   if (!req.path.startsWith("/api") && req.method === "GET") {
-    return res.status(404).sendFile(path.join(process.cwd(), "public", "404.html"));
+    return res.status(404).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Keeto - 404</title>
+        <style>
+          body { font-family: Arial, sans-serif; background: #f4f6f8; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+          .container { text-align: center; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+          h1 { color: #ff6b00; font-size: 50px; margin: 0; }
+          p { color: #666; font-size: 18px; }
+          a { color: #ff6b00; text-decoration: none; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>404</h1>
+          <p>عذراً، الصفحة غير موجودة</p>
+          <a href="/">العودة للرئيسية</a>
+        </div>
+      </body>
+      </html>
+    `);
   }
 
-  throw new NotFound("Route not found");
+  // إذا كان الطلب لـ API غير موجود
+  next(new NotFound("Route not found"));
 });
 
+// معالج الأخطاء العام
 app.use(errorHandler);
 
-httpServer.listen(3000, () => {
-  console.log("Server is running on http://localhost:3000");
+const PORT = process.env.PORT || 3000;
+httpServer.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
 });

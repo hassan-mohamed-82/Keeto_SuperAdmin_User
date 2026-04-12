@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, text, timestamp, char } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, text, timestamp, char, boolean } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { countries } from "./country";
 import { cities } from "./city";
@@ -12,5 +12,7 @@ export const users = mysqlTable("users", {
     cityId:char("city_id",{length:36}).notNull().references(()=>cities.id),
     zoneId:char("zone_id",{length:36}).notNull().references(()=>zones.id),
     address: text("address"), // عنوان العميل
+    password: varchar("password", { length: 255 }).notNull(),
+    isVerified: boolean("is_verified").default(false),
     createdAt: timestamp("created_at").defaultNow(),
 });

@@ -92,6 +92,27 @@
       "when": 1775986429950,
       "tag": "0012_fancy_freak",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1775991722034,
+      "tag": "0013_first_vivisector",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1775993721018,
+      "tag": "0014_lumpy_mac_gargan",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1775998855882,
+      "tag": "0015_misty_mad_thinker",
+      "breakpoints": true
     }
   ]
 }
