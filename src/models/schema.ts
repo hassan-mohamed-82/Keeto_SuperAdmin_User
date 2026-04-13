@@ -18,10 +18,11 @@ export * from "./schema/admin/payment_methodes";
 export * from "./schema/admin/restaurant_wallets";
 export * from "./schema/admin/restaurantsetting";
 export * from "./schema/admin/zoneDeliveryFees";
+
 export * from "./schema/admin/restaurantZoneDeliveryFees";
 export * from "./schema/admin/order";
-export * from "./schema/admin/order";
 export * from "./schema/user/Users";
+
 export * from "./schema/user/userWallets";
 export * from "./schema/user/emailverfication";
 export * from "./schema/user/favouriteliste";

@@ -1,0 +1,1 @@
+ALTER TABLE `restaurant_business_plans` MODIFY COLUMN `platform_type` enum('online_order','food_aggregator') NOT NULL;

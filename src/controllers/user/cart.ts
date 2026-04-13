@@ -121,21 +121,76 @@ export const addToCart = async (req: Request | any, res: Response) => {
 export const getMyCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
 
- const items = await db.select({
-    cartId: cartItems.id,
-    foodId: food.id,
-    name: food.name,
-    image: food.image,
-    price: food.price,
-    quantity: cartItems.quantity,
-    restaurantName: restaurants.name
-})
-.from(cartItems)
-.innerJoin(food, eq(cartItems.foodId, food.id))
-.innerJoin(restaurants, eq(cartItems.restaurantId, restaurants.id)) // ✅ الحل هنا
-.where(eq(cartItems.userId, userId));
+    const items = await db.select({
+        cartId: cartItems.id,
+        foodId: food.id,
+        name: food.name,
+        image: food.image,
 
-    return SuccessResponse(res, { data: items });
+        restaurantId: restaurants.id,
+        restaurantName: restaurants.name,
+
+        quantity: cartItems.quantity,
+
+        unitPrice: cartItems.unitPrice,
+        totalPrice: cartItems.totalPrice,
+
+        variations: cartItems.variations
+    })
+    .from(cartItems)
+    .innerJoin(food, eq(cartItems.foodId, food.id))
+    .innerJoin(restaurants, eq(cartItems.restaurantId, restaurants.id))
+    .where(eq(cartItems.userId, userId));
+
+    // ===============================
+    // 2. فكّ الـ variations IDs وجيب تفاصيلها
+    // ===============================
+    const formatted = await Promise.all(
+        items.map(async (item: any) => {
+
+            const variations = item.variations || [];
+
+            const detailedVariations = [];
+
+            for (const v of variations) {
+
+                const variationId = v.variationId;
+                const optionId = v.optionId;
+
+                const [variation] = await db
+                    .select()
+                    .from(foodVariations)
+                    .where(eq(foodVariations.id, variationId))
+                    .limit(1);
+
+                const [option] = await db
+                    .select()
+                    .from(variationOptions)
+                    .where(eq(variationOptions.id, optionId))
+                    .limit(1);
+
+                if (variation && option) {
+                    detailedVariations.push({
+                        variationId: variation.id,
+                        variationName: variation.name,
+
+                        optionId: option.id,
+                        optionName: option.optionName,
+                        additionalPrice: option.additionalPrice
+                    });
+                }
+            }
+
+            return {
+                ...item,
+                variations: detailedVariations
+            };
+        })
+    );
+
+    return SuccessResponse(res, {
+        data: formatted
+    });
 };
 
 export const updateCartItem = async (req: Request | any, res: Response) => {

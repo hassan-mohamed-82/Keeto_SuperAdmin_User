@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurants, cuisines, zones } from "../../models/schema";
+import { restaurants, cuisines, zones, restaurantWallets } from "../../models/schema";
 import { eq, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -41,7 +41,6 @@ const decrementCuisineCount = async (cuisineId: string) => {
             .where(eq(cuisines.id, cuisineId));
     }
 };
-
 export const createRestaurant = async (req: Request, res: Response) => {
     const {
         name, address, cuisineId, zoneId, logo, cover,
@@ -51,12 +50,10 @@ export const createRestaurant = async (req: Request, res: Response) => {
         email, password, status,
     } = req.body;
 
-    // Required fields validation
     if (!name || !address || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
-        throw new BadRequest("Missing required fields: name, address, zoneId, logo, ownerFirstName, ownerLastName, ownerPhone, email, password");
+        throw new BadRequest("Missing required fields");
     }
 
-    // Check if email already exists
     const existingRestaurant = await db
         .select()
         .from(restaurants)
@@ -67,62 +64,68 @@ export const createRestaurant = async (req: Request, res: Response) => {
         throw new BadRequest("Email already exists");
     }
 
-    // Validate zone exists
-    const existingZone = await db
-        .select()
-        .from(zones)
-        .where(eq(zones.id, zoneId))
-        .limit(1);
-
-    if (!existingZone[0]) {
-        throw new BadRequest("Zone not found");
-    }
-
-    // Validate cuisine exists if provided
-    if (cuisineId) {
-        const existingCuisine = await db
-            .select()
-            .from(cuisines)
-            .where(eq(cuisines.id, cuisineId))
-            .limit(1);
-
-        if (!existingCuisine[0]) {
-            throw new BadRequest("Cuisine not found");
-        }
-    }
-
-    const id = uuidv4();
     const hashedPassword = await bcrypt.hash(password, 10);
+    const id = uuidv4();
 
-    await db.insert(restaurants).values({
-        id,
-        name,
-        address,
-        cuisineId: cuisineId || null,
-        zoneId,
-        logo,
-        cover: cover || null,
-        minDeliveryTime: minDeliveryTime || null,
-        maxDeliveryTime: maxDeliveryTime || null,
-        deliveryTimeUnit: deliveryTimeUnit || "Minutes",
-        ownerFirstName,
-        ownerLastName,
-        ownerPhone,
-        tags: tags || [],
-        taxNumber: taxNumber || null,
-        taxExpireDate: taxExpireDate || null,
-        taxCertificate: taxCertificate || null,
-        email,
-        password: hashedPassword,
-        status: status || "pending",
+    await db.transaction(async (tx) => {
+
+        // 1️⃣ Create Restaurant
+        await tx.insert(restaurants).values({
+            id,
+            name,
+            address,
+            cuisineId: cuisineId || null,
+            zoneId,
+            logo,
+            cover: cover || null,
+            minDeliveryTime: minDeliveryTime || null,
+            maxDeliveryTime: maxDeliveryTime || null,
+            deliveryTimeUnit: deliveryTimeUnit || "Minutes",
+            ownerFirstName,
+            ownerLastName,
+            ownerPhone,
+            tags: tags || [],
+            taxNumber: taxNumber || null,
+            taxExpireDate: taxExpireDate || null,
+            taxCertificate: taxCertificate || null,
+            email,
+            password: hashedPassword,
+            status: status || "pending",
+        });
+
+        // 2️⃣ Auto Create Wallet 🔥
+        await tx.insert(restaurantWallets).values({
+            id: uuidv4(),
+            restaurantId: id,
+            balance: "0.00",
+            collectedCash: "0.00",
+            pendingWithdraw: "0.00",
+            totalWithdrawn: "0.00",
+            totalEarning: "0.00",
+        });
+
+        // 3️⃣ Increment cuisine if exists
+        if (cuisineId) {
+            const cuisine = await tx
+                .select({ total: cuisines.total_restaurants })
+                .from(cuisines)
+                .where(eq(cuisines.id, cuisineId))
+                .limit(1);
+
+            if (cuisine[0]) {
+                const current = parseInt(cuisine[0].total || "0");
+                await tx
+                    .update(cuisines)
+                    .set({ total_restaurants: String(current + 1) })
+                    .where(eq(cuisines.id, cuisineId));
+            }
+        }
     });
 
-    // Increment total_restaurants on the selected cuisine
-    if (cuisineId) {
-        await incrementCuisineCount(cuisineId);
-    }
-
-    return SuccessResponse(res, { message: "Create restaurant success", data: { id } }, 201);
+    return SuccessResponse(res, {
+        message: "Restaurant created successfully with wallet",
+        data: { id }
+    }, 201);
 };
 
 export const getAllRestaurants = async (req: Request, res: Response) => {

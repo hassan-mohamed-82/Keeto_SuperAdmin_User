@@ -141,6 +141,27 @@
       "when": 1776075817758,
       "tag": "0019_strange_talisman",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1776078024545,
+      "tag": "0020_polite_captain_universe",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1776085087088,
+      "tag": "0021_curved_pyro",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1776089087468,
+      "tag": "0022_nostalgic_reptil",
+      "breakpoints": true
     }
   ]
 }
