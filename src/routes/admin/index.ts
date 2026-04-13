@@ -16,6 +16,8 @@ import BasiccampaignRouter from "./Basiccampaign";
 import walletsRouter from "./restaurant_wallets"
 import BussinessplanRouter from "./BusinessPlans";
 import restaurantsettingRouter from "./restaurantsetting";
+import payment_methodsRouter from "./payment_methods";
+import user_walletsRouter from "./userWallets";
 import zoneDeliveryFeesRouter from "./zoneDeliveryFees";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
@@ -40,6 +42,8 @@ router.use("/businessplans", BussinessplanRouter);
 router.use("/basiccampaign", BasiccampaignRouter);
 router.use("/wallets", walletsRouter);
 router.use("/restaurantsetting", restaurantsettingRouter);
+router.use("/payment-methods", payment_methodsRouter);
+router.use("/user-wallets", user_walletsRouter);
 router.use("/zone-delivery-fees", zoneDeliveryFeesRouter);
 
 export default router;

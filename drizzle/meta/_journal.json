@@ -134,6 +134,13 @@
       "when": 1776072110228,
       "tag": "0018_lyrical_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1776075817758,
+      "tag": "0019_strange_talisman",
+      "breakpoints": true
     }
   ]
 }

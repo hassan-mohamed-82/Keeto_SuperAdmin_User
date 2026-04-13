@@ -14,6 +14,7 @@ export * from "./schema/admin/variation";
 export * from "./schema/admin/food";
 export * from "./schema/admin/Basiccampaign";
 export * from "./schema/admin/BusinessPlans";
+export * from "./schema/admin/payment_methodes";
 export * from "./schema/admin/restaurant_wallets";
 export * from "./schema/admin/restaurantsetting";
 export * from "./schema/admin/zoneDeliveryFees";
@@ -25,3 +26,4 @@ export * from "./schema/user/userWallets";
 export * from "./schema/user/emailverfication";
 export * from "./schema/user/favouriteliste";
 export * from "./schema/user/cart";
+
