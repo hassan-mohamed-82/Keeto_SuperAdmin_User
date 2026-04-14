@@ -47,7 +47,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         minDeliveryTime, maxDeliveryTime, deliveryTimeUnit,
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
-        email, password, status,lat,lng
+        email, password, status
     } = req.body;
 
     if (!name || !address || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
@@ -78,8 +78,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             zoneId,
             logo,
             cover: cover || null,
-            lat,
-            lng,
+           
             minDeliveryTime: minDeliveryTime || null,
             maxDeliveryTime: maxDeliveryTime || null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",
@@ -131,27 +130,44 @@ export const createRestaurant = async (req: Request, res: Response) => {
 };
 
 export const getAllRestaurants = async (req: Request, res: Response) => {
-    // 1. جلب البيانات ككائنات منفصلة لمنع تضارب الـ id
-    const rawRestaurants = await db
-        .select({
-            restaurantObj: restaurants,
-            cuisineObj: cuisines,
-            zoneObj: zones,
-        })
-        .from(restaurants)
-        .leftJoin(cuisines, eq(restaurants.cuisineId, cuisines.id))
-        .leftJoin(zones, eq(restaurants.zoneId, zones.id));
+    const raw = await db.select({
+        id: restaurants.id,
+        name: restaurants.name,
+        address: restaurants.address,
+        logo: restaurants.logo,
+        cover: restaurants.cover,
+        status: restaurants.status,
 
-    // 2. تجميع البيانات بالشكل المتداخل الذي يتوقعه الـ Frontend
-    const formattedRestaurants = rawRestaurants.map((row) => ({
-        ...row.restaurantObj,
-        cuisine: row.cuisineObj ? { id: row.cuisineObj.id, name: row.cuisineObj.name } : null,
-        zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
+        cuisine_id: cuisines.id,
+        cuisine_name: cuisines.name,
+
+        zone_id: zones.id,
+        zone_name: zones.name,
+    })
+    .from(restaurants)
+    .leftJoin(cuisines, eq(restaurants.cuisineId, cuisines.id))
+    .leftJoin(zones, eq(restaurants.zoneId, zones.id));
+
+    const formatted = raw.map(r => ({
+        id: r.id,
+        name: r.name,
+        address: r.address,
+        logo: r.logo,
+        cover: r.cover,
+        status: r.status,
+
+        cuisine: r.cuisine_id
+            ? { id: r.cuisine_id, name: r.cuisine_name }
+            : null,
+
+        zone: r.zone_id
+            ? { id: r.zone_id, name: r.zone_name }
+            : null,
     }));
 
-    return SuccessResponse(res, { 
-        message: "Get all restaurants success", 
-        data: formattedRestaurants 
+    return SuccessResponse(res, {
+        message: "Get all restaurants success",
+        data: formatted
     });
 };
 

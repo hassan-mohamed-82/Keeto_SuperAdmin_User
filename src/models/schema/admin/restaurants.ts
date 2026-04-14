@@ -58,9 +58,6 @@ export const restaurants = mysqlTable("restaurants", {
     password: varchar("password", { length: 255 }).notNull(),
     // 💡 ملاحظة: حقل Confirm Password مش بيتسجل في الداتابيز، ده بيكون Validation في الـ Controller بس
      
-    lat: varchar("lat", { length: 255 }).notNull(),
-    lng: varchar("lng", { length: 255 }).notNull(),
-    // ==========================================
     // Status & Timestamps
     // ==========================================
     status: mysqlEnum("status", ["active", "inactive", "pending"]).default("pending"),
