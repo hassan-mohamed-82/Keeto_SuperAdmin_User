@@ -196,18 +196,20 @@ export const getAllRestaurantsandaddonscategory = async (req: Request, res: Resp
         .from(restaurants)
         .where(eq(restaurants.status, "active"));
 
-    // 2. جلب الإضافات (بشرط الإضافة نفسها تكون نشطة)
+    // 2. جلب الإضافات
     const allAddons = await db
         .select({
             id: adonescategory.id,
             name: adonescategory.name
-           
         })
         .from(adonescategory)
-        .where(eq(adonescategory.status, "active")); // فلتر فقط بحالة الإضافة مؤقتاً للتأكد من الداتا
+        .where(eq(adonescategory.status, "active"));
 
-   return SuccessResponse(res, { 
-    allRestaurants, 
-    allAddons 
-}, 200); 
+    return SuccessResponse(res, {
+        message: "Get restaurants and addons success",
+        data: {
+            allRestaurants,
+            allAddons
+        }
+    }, 200);
 };
