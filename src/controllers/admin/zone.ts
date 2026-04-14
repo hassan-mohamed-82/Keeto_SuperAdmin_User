@@ -107,43 +107,44 @@ export const getZoneById = async (req: Request, res: Response) => {
 
 export const updateZone = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, displayName, status, cityId } = req.body;
+    const { name, displayName, status, cityId, lat, lng } = req.body;
 
-    const existingZone = await db
-        .select()
-        .from(zones)
-        .where(eq(zones.id, id))
-        .limit(1);
+    // 1. التحقق المبكر: هل يوجد بيانات للتحديث أصلاً؟
+    if (!name && !displayName && !status && !cityId) {
+        throw new BadRequest("No data to update");
+    }
+
+    // 2. تجهيز الاستعلامات للعمل في نفس الوقت (Concurrent Queries)
+    const zonePromise = db.select().from(zones).where(eq(zones.id, id)).limit(1);
+    // إذا تم تمرير cityId نبحث عنه، وإلا نُرجع null مباشرة
+    const cityPromise = cityId 
+        ? db.select().from(cities).where(eq(cities.id, cityId)).limit(1) 
+        : Promise.resolve(null);
+
+    // تنفيذ الاستعلامات معاً
+    const [existingZone, existingCity] = await Promise.all([zonePromise, cityPromise]);
 
     if (!existingZone[0]) {
         throw new NotFound("Zone not found");
     }
 
-    if (cityId) {
-        const existingCity = await db
-            .select()
-            .from(cities)
-            .where(eq(cities.id, cityId))
-            .limit(1);
-
-        if (!existingCity[0]) {
-            throw new BadRequest("City not found");
-        }
+    if (cityId && (!existingCity || !existingCity[0])) {
+        throw new BadRequest("City not found");
     }
 
+    // 3. بناء كائن التحديث
     const updateData: any = {
         updatedAt: new Date(),
     };
 
-    if (name) updateData.name = name;
-    if (displayName) updateData.displayName = displayName;
-    if (status) updateData.status = status;
-    if (cityId) updateData.cityId = cityId;
+    if (name !== undefined) updateData.name = name;
+    if (displayName !== undefined) updateData.displayName = displayName;
+    if (status !== undefined) updateData.status = status;
+    if (cityId !== undefined) updateData.cityId = cityId;
+    if (lat !== undefined) updateData.lat = lat;
+    if (lng !== undefined) updateData.lng = lng;
 
-    if (Object.keys(updateData).length === 1) {
-        throw new BadRequest("No data to update");
-    }
-
+    // 4. تنفيذ التحديث
     await db.update(zones).set(updateData).where(eq(zones.id, id));
 
     return SuccessResponse(res, { message: "Update zone success" });

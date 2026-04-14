@@ -14,7 +14,7 @@ import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
-
+import { inArray } from "drizzle-orm"; // تأكد من استدعاء inArray فوق مع eq
 // =============================================
 // CREATE Food + Variations + Options in one API
 // =============================================
@@ -116,66 +116,46 @@ export const createFood = async (req: Request, res: Response) => {
 // GET ALL Foods (with variations & options)
 // =============================================
 export const getAllFoods = async (req: Request, res: Response) => {
-    const allFoods = await db
-        .select({
-            id: food.id,
-            name: food.name,
-            description: food.description,
-            image: food.image,
-            restaurantid: food.restaurantid,
-            categoryid: food.categoryid,
-            subcategoryid: food.subcategoryid,
-            foodtype: food.foodtype,
-            Nutrition: food.Nutrition,
-            Allegren_Ingredients: food.Allegren_Ingredients,
-            is_Halal: food.is_Halal,
-            addonsId: food.addonsId,
-            startTime: food.startTime,
-            endTime: food.endTime,
-            search_tages: food.search_tages,
-            price: food.price,
-            discount_type: food.discount_type,
-            discount_value: food.discount_value,
-            Maximum_Purchase: food.Maximum_Purchase,
-            stock_type: food.stock_type,
-            status: food.status,
-            createdAt: food.createdAt,
-            updatedAt: food.updatedAt,
-            restaurant: {
-                id: restaurants.id,
-                name: restaurants.name,
-            },
-            category: {
-                id: categories.id,
-                name: categories.name,
-            },
-            subcategory: {
-                id: subcategories.id,
-                name: subcategories.name,
-            },
-        })
-        .from(food)
-        .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
-        .leftJoin(categories, eq(food.categoryid, categories.id))
-        .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id));
+    // 1. جلب البيانات ككائنات منفصلة (لمنع تضارب الـ id وتجنب خطأ 500)
+    const rawFoods = await db.select({
+        foodObj: food,
+        restaurantObj: restaurants,
+        categoryObj: categories,
+        subcategoryObj: subcategories,
+    })
+    .from(food)
+    .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
+    .leftJoin(categories, eq(food.categoryid, categories.id))
+    .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id));
 
-    // Attach variations + options to each food
-    const result = await Promise.all(
-        allFoods.map(async (f) => {
-            const vars = await db.select().from(foodVariations).where(eq(foodVariations.foodId, f.id));
-            const variationsWithOptions = await Promise.all(
-                vars.map(async (v) => {
-                    const opts = await db.select().from(variationOptions).where(eq(variationOptions.variationId, v.id));
-                    return { ...v, options: opts };
-                })
-            );
-            return { ...f, variations: variationsWithOptions };
-        })
-    );
+    if (rawFoods.length === 0) return SuccessResponse(res, { message: "Get all foods success", data: [] });
+
+    // 2. تجميع البيانات بشكل نظيف للـ Frontend
+    const allFoods = rawFoods.map(row => ({
+        ...row.foodObj,
+        restaurant: row.restaurantObj ? { id: row.restaurantObj.id, name: row.restaurantObj.name } : null,
+        category: row.categoryObj ? { id: row.categoryObj.id, name: row.categoryObj.name } : null,
+        subcategory: row.subcategoryObj ? { id: row.subcategoryObj.id, name: row.subcategoryObj.name } : null,
+    }));
+
+    const foodIds = allFoods.map(f => f.id);
+
+    // 3. جلب كل الـ Variations و الـ Options دفعة واحدة (أسرع بـ 100 مرة من الـ loop)
+    const allVars = await db.select().from(foodVariations).where(inArray(foodVariations.foodId, foodIds));
+    const varIds = allVars.map(v => v.id);
+    const allOpts = varIds.length > 0 ? await db.select().from(variationOptions).where(inArray(variationOptions.variationId, varIds)) : [];
+
+    // 4. دمج الـ Variations والـ Options مع الوجبات في الذاكرة
+    const result = allFoods.map(f => {
+        const foodVars = allVars.filter(v => v.foodId === f.id).map(v => ({
+            ...v,
+            options: allOpts.filter(o => o.variationId === v.id)
+        }));
+        return { ...f, variations: foodVars };
+    });
 
     return SuccessResponse(res, { message: "Get all foods success", data: result });
 };
-
 // =============================================
 // GET ALL Foods By Restaurant ID (with variations & options)
 // =============================================

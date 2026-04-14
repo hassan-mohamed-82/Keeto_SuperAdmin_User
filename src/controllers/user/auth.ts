@@ -10,7 +10,7 @@ import { NotFound } from "../../Errors/NotFound";
 import { generateUserToken } from "../../utils/jwt";
 import { sendEmail } from "../../utils/sendEmails";
 import { getVerifyEmailPage } from "../../utils/verifyEmailPages";
-
+import { countries, cities, zones } from "../../models/schema";
 const generateOTP = (length: number = 6): string => {
     let otp = "";
     for (let i = 0; i < length; i++) {
@@ -321,4 +321,46 @@ export const resetPassword = async (req: Request, res: Response) => {
     });
 
     return SuccessResponse(res, { message: "Password has been reset successfully. You can now login." });
+};
+
+
+
+
+
+export const getActiveLocations = async (req: Request, res: Response) => {
+    // جلب جميع الدول والمدن والمناطق النشطة في نفس الوقت (Concurrent Fetching)
+    const [activeCountries, activeCities, activeZones] = await Promise.all([
+        db.select({
+            id: countries.id,
+            name: countries.name,
+        })
+        .from(countries)
+        .where(eq(countries.status, "active")),
+
+        db.select({
+            id: cities.id,
+            name: cities.name,
+            countryId: cities.countryId, // مهم عشان الـ Frontend يربط المدينة بالدولة
+        })
+        .from(cities)
+        .where(eq(cities.status, "active")),
+
+        db.select({
+            id: zones.id,
+            name: zones.name,
+            displayName: zones.displayName,
+            cityId: zones.cityId, // مهم عشان الـ Frontend يربط المنطقة بالمدينة
+        })
+        .from(zones)
+        .where(eq(zones.status, "active"))
+    ]);
+
+    return SuccessResponse(res, {
+        message: "Get active locations success",
+        data: {
+            countries: activeCountries,
+            cities: activeCities,
+            zones: activeZones
+        }
+    });
 };

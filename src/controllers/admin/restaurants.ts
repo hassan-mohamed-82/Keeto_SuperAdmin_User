@@ -47,7 +47,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         minDeliveryTime, maxDeliveryTime, deliveryTimeUnit,
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
-        email, password, status,
+        email, password, status,lat,lng
     } = req.body;
 
     if (!name || !address || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
@@ -78,6 +78,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
             zoneId,
             logo,
             cover: cover || null,
+            lat,
+            lng,
             minDeliveryTime: minDeliveryTime || null,
             maxDeliveryTime: maxDeliveryTime || null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",
@@ -136,7 +138,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             address: restaurants.address,
             cuisineId: restaurants.cuisineId,
             zoneId: restaurants.zoneId,
-            
+            lat: restaurants.lat,
+            lng: restaurants.lng,
             logo: restaurants.logo,
             cover: restaurants.cover,
             minDeliveryTime: restaurants.minDeliveryTime,
@@ -195,6 +198,8 @@ export const getRestaurantById = async (req: Request, res: Response) => {
             status: restaurants.status,
             createdAt: restaurants.createdAt,
             updatedAt: restaurants.updatedAt,
+            lat: restaurants.lat,
+            lng: restaurants.lng,
             cuisine: {
                 id: cuisines.id,
                 name: cuisines.name,
@@ -224,7 +229,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         minDeliveryTime, maxDeliveryTime, deliveryTimeUnit,
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
-        email, password, confirmPassword, status,
+        email, password, confirmPassword, status
     } = req.body;
 
     const existingRestaurant = await db
