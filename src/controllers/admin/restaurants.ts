@@ -42,6 +42,9 @@ const decrementCuisineCount = async (cuisineId: string) => {
     }
 };
 export const createRestaurant = async (req: Request, res: Response) => {
+    const clean = (v: any) =>
+        typeof v === "string" ? v.trim() : v;
+
     const {
         name,
         address,
@@ -68,53 +71,57 @@ export const createRestaurant = async (req: Request, res: Response) => {
         throw new BadRequest("Missing required fields");
     }
 
-    const existingRestaurant = await db
+    const existing = await db
         .select()
         .from(restaurants)
         .where(eq(restaurants.email, email))
         .limit(1);
 
-    if (existingRestaurant[0]) {
+    if (existing[0]) {
         throw new BadRequest("Email already exists");
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const id = uuidv4();
 
-    // ✅ حل مشكلة tags (string أو array)
     let parsedTags: string[] = [];
     if (tags) {
         parsedTags = typeof tags === "string" ? JSON.parse(tags) : tags;
     }
 
     await db.transaction(async (tx) => {
-        // 1️⃣ Create Restaurant
         await tx.insert(restaurants).values({
             id,
-            name,
-            address,
+
+            name: clean(name),
+            address: clean(address),
+
             cuisineId: cuisineId || null,
-            zoneId,
-            logo,
-            cover: cover || null,
-            minDeliveryTime: minDeliveryTime || null,
-            maxDeliveryTime: maxDeliveryTime || null,
+            zoneId: clean(zoneId),
+
+            logo: clean(logo),
+            cover: cover ? clean(cover) : null,
+
+            minDeliveryTime: minDeliveryTime ? clean(minDeliveryTime) : null,
+            maxDeliveryTime: maxDeliveryTime ? clean(maxDeliveryTime) : null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",
-            ownerFirstName,
-            ownerLastName,
-            ownerPhone,
+
+            ownerFirstName: clean(ownerFirstName),
+            ownerLastName: clean(ownerLastName),
+            ownerPhone: clean(ownerPhone),
+
             tags: parsedTags,
-            taxNumber: taxNumber || null,
+
+            taxNumber: taxNumber ? clean(taxNumber) : null,
             taxExpireDate: taxExpireDate || null,
-            taxCertificate: taxCertificate || null,
-            email,
+            taxCertificate: taxCertificate ? clean(taxCertificate) : null,
+
+            email: clean(email),
             password: hashedPassword,
 
-            // ✅ مهم جدًا: مفيش pending خالص
-            status: status || "active",
+            status: "active",
         });
 
-        // 2️⃣ Wallet
         await tx.insert(restaurantWallets).values({
             id: uuidv4(),
             restaurantId: id,
@@ -124,26 +131,6 @@ export const createRestaurant = async (req: Request, res: Response) => {
             totalWithdrawn: "0.00",
             totalEarning: "0.00",
         });
-
-        // 3️⃣ Cuisine counter
-        if (cuisineId) {
-            const cuisine = await tx
-                .select({ total: cuisines.total_restaurants })
-                .from(cuisines)
-                .where(eq(cuisines.id, cuisineId))
-                .limit(1);
-
-            if (cuisine[0]) {
-                const current = parseInt(cuisine[0].total || "0", 10);
-
-                await tx
-                    .update(cuisines)
-                    .set({
-                        total_restaurants: String(current + 1),
-                    })
-                    .where(eq(cuisines.id, cuisineId));
-            }
-        }
     });
 
     return SuccessResponse(res, {
