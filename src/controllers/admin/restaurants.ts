@@ -146,7 +146,6 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         logo: restaurants.logo,
         cover: restaurants.cover,
         status: restaurants.status,
-
         cuisine_id: cuisines.id,
         cuisine_name: cuisines.name,
 
