@@ -15,4 +15,5 @@ router.get("/:id", getBusinessPlanById);
 router.put("/:id", updateBusinessPlan);
 router.delete("/:id", deleteBusinessPlan);
 
+
 export default router;

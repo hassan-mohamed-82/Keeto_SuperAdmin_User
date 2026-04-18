@@ -4,7 +4,7 @@ import { restaurants } from "./restaurants";
 import { food } from "./food";
 import { users } from "../user/Users";
 import { paymentMethods } from "./payment_methodes";
-import { branches } from "./branches";
+import { branches } from "../../schema";
 
 export const orders = mysqlTable("orders", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -46,12 +46,13 @@ export const orders = mysqlTable("orders", {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "rejected"
+        "rejected",
+        "refund" // 👈 ضيف الكلمة دي هنا
     ]).default("pending"),
 
     // 👇 وده حقل سبب الإلغاء عشان المطعم يكتبه
     cancelReason: text("cancel_reason"), 
-
+updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),
 });
 // ==========================================
