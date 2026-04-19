@@ -1,1 +1,0 @@
-ALTER TABLE `email_verifications` MODIFY COLUMN `code` varchar(255) NOT NULL;

@@ -8,10 +8,10 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
 export const createSubcategory = async (req: Request, res: Response) => {
-    const { name, categoryId, priority, status } = req.body;
+    const { name, nameAr, nameFr, categoryId, priority, status } = req.body;
 
-    if (!name || !categoryId) {
-        throw new BadRequest("Subcategory name and category ID are required");
+    if (!name || !nameAr || !nameFr || !categoryId) {
+        throw new BadRequest("Subcategory name, nameAr, nameFr, and category ID are required");
     }
 
     // Check if category exists
@@ -41,6 +41,8 @@ export const createSubcategory = async (req: Request, res: Response) => {
     await db.insert(subcategories).values({
         id,
         name,
+        nameAr,
+        nameFr,
         categoryId,
         priority: priority || "low",
         status: status || "active",
@@ -54,6 +56,8 @@ export const getAllSubcategories = async (req: Request, res: Response) => {
         .select({
             id: subcategories.id,
             name: subcategories.name,
+            nameAr: subcategories.nameAr,
+            nameFr: subcategories.nameFr,
             categoryId: subcategories.categoryId,
             priority: subcategories.priority,
             status: subcategories.status,
@@ -62,6 +66,8 @@ export const getAllSubcategories = async (req: Request, res: Response) => {
             category: {
                 id: categories.id,
                 name: categories.name,
+                nameAr: categories.nameAr,
+                nameFr: categories.nameFr,
                 status: categories.status,
             },
         })
@@ -78,6 +84,8 @@ export const getSubcategoryById = async (req: Request, res: Response) => {
         .select({
             id: subcategories.id,
             name: subcategories.name,
+            nameAr: subcategories.nameAr,
+            nameFr: subcategories.nameFr,
             categoryId: subcategories.categoryId,
             priority: subcategories.priority,
             status: subcategories.status,
@@ -86,6 +94,8 @@ export const getSubcategoryById = async (req: Request, res: Response) => {
             category: {
                 id: categories.id,
                 name: categories.name,
+                nameAr: categories.nameAr,
+                nameFr: categories.nameFr,
                 status: categories.status,
             },
         })
@@ -103,7 +113,7 @@ export const getSubcategoryById = async (req: Request, res: Response) => {
 
 export const updateSubcategory = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, categoryId, priority, status } = req.body;
+    const { name, nameAr, nameFr, categoryId, priority, status } = req.body;
 
     const existingSubcategory = await db
         .select()
@@ -133,6 +143,8 @@ export const updateSubcategory = async (req: Request, res: Response) => {
     };
 
     if (name) updateData.name = name;
+    if (nameAr) updateData.nameAr = nameAr;
+    if (nameFr) updateData.nameFr = nameFr;
     if (categoryId) updateData.categoryId = categoryId;
     if (priority) updateData.priority = priority;
     if (status) updateData.status = status;

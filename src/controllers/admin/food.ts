@@ -20,7 +20,7 @@ import { v4 as uuidv4 } from "uuid";
 // =============================================
 export const createFood = async (req: Request, res: Response) => {
     const {
-        name, description, image,
+        name, nameAr, nameFr, description, descriptionAr, descriptionFr, image,
         restaurantid, categoryid, subcategoryid,
         foodtype, Nutrition, allergen_ingredients, is_Halal,
         addonsId, startTime, endTime, search_tags,
@@ -29,7 +29,7 @@ export const createFood = async (req: Request, res: Response) => {
         variations,
     } = req.body;
 
-    if (!name || !description || !image || !categoryid || !subcategoryid || !startTime || !endTime || !price) {
+    if (!name || !nameAr || !nameFr || !description || !descriptionAr || !descriptionFr || !image || !categoryid || !subcategoryid || !startTime || !endTime || !price) {
         throw new BadRequest("Missing required fields");
     }
 
@@ -52,7 +52,11 @@ export const createFood = async (req: Request, res: Response) => {
     await db.insert(food).values({
         id: foodId,
         name,
+        nameAr,
+        nameFr,
         description,
+        descriptionAr,
+        descriptionFr,
         image,
         restaurantid,
         categoryid,
@@ -78,10 +82,14 @@ export const createFood = async (req: Request, res: Response) => {
         for (const variation of variations) {
             const variationId = uuidv4();
 
+            if(!variation.nameAr || !variation.nameFr) throw new BadRequest("Variation nameAr, nameFr are required");
+
             await db.insert(foodVariations).values({
                 id: variationId,
                 foodId,
                 name: variation.name,
+                nameAr: variation.nameAr,
+                nameFr: variation.nameFr,
                 isRequired: variation.isRequired || false,
                 selectionType: variation.selectionType || "single",
                 min: variation.min || null,
@@ -90,9 +98,12 @@ export const createFood = async (req: Request, res: Response) => {
 
             if (variation.options && Array.isArray(variation.options)) {
                 for (const option of variation.options) {
+                    if(!option.optionNameAr || !option.optionNameFr) throw new BadRequest("Option optionNameAr, optionNameFr are required");
                     await db.insert(variationOptions).values({
                         variationId,
                         optionName: option.optionName,
+                        optionNameAr: option.optionNameAr,
+                        optionNameFr: option.optionNameFr,
                         // ✅ FIX: decimal لازم string
                         additionalPrice: option.additionalPrice?.toString() || "0",
                     });
@@ -112,7 +123,11 @@ export const getAllFoods = async (req: Request, res: Response) => {
         // ✅ Food fields
         id: food.id,
         name: food.name,
+        nameAr: food.nameAr,
+        nameFr: food.nameFr,
         description: food.description,
+        descriptionAr: food.descriptionAr,
+        descriptionFr: food.descriptionFr,
         image: food.image,
         restaurantid: food.restaurantid,
         categoryid: food.categoryid,
@@ -137,12 +152,18 @@ export const getAllFoods = async (req: Request, res: Response) => {
         // ✅ Restaurant (alias مهم)
         restaurant_id: restaurants.id,
         restaurant_name: restaurants.name,
+        restaurant_nameAr: restaurants.nameAr,
+        restaurant_nameFr: restaurants.nameFr,
 
         // ✅ Category
         category_name: categories.name,
+        category_nameAr: categories.nameAr,
+        category_nameFr: categories.nameFr,
 
         // ✅ Subcategory
         subcategory_name: subcategories.name,
+        subcategory_nameAr: subcategories.nameAr,
+        subcategory_nameFr: subcategories.nameFr,
     })
         .from(food)
         .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
@@ -157,20 +178,24 @@ export const getAllFoods = async (req: Request, res: Response) => {
     const allFoods = rawFoods.map(f => ({
         id: f.id,
         name: f.name,
+        nameAr: f.nameAr,
+        nameFr: f.nameFr,
         description: f.description,
+        descriptionAr: f.descriptionAr,
+        descriptionFr: f.descriptionFr,
         image: f.image,
         price: f.price,
 
         restaurant: f.restaurant_id
-            ? { id: f.restaurant_id, name: f.restaurant_name }
+            ? { id: f.restaurant_id, name: f.restaurant_name, nameAr: f.restaurant_nameAr, nameFr: f.restaurant_nameFr }
             : null,
 
         category: f.category_name
-            ? { name: f.category_name }
+            ? { name: f.category_name, nameAr: f.category_nameAr, nameFr: f.category_nameFr }
             : null,
 
         subcategory: f.subcategory_name
-            ? { name: f.subcategory_name }
+            ? { name: f.subcategory_name, nameAr: f.subcategory_nameAr, nameFr: f.subcategory_nameFr }
             : null,
     }));
 
@@ -189,7 +214,11 @@ export const getFoodById = async (req: Request, res: Response) => {
     const foodItem = await db.select({
         id: food.id,
         name: food.name,
+        nameAr: food.nameAr,
+        nameFr: food.nameFr,
         description: food.description,
+        descriptionAr: food.descriptionAr,
+        descriptionFr: food.descriptionFr,
         image: food.image,
         restaurantid: food.restaurantid,
         categoryid: food.categoryid,
@@ -213,14 +242,20 @@ export const getFoodById = async (req: Request, res: Response) => {
         restaurant: {
             id: restaurants.id,
             name: restaurants.name,
+            nameAr: restaurants.nameAr,
+            nameFr: restaurants.nameFr,
         },
         category: {
             id: categories.id,
             name: categories.name,
+            nameAr: categories.nameAr,
+            nameFr: categories.nameFr,
         },
         subcategory: {
             id: subcategories.id,
             name: subcategories.name,
+            nameAr: subcategories.nameAr,
+            nameFr: subcategories.nameFr,
         },
     })
         .from(food)
@@ -263,7 +298,9 @@ export const updateFood = async (req: Request, res: Response) => {
     const updateData: any = { updatedAt: new Date() };
 
     Object.keys(data).forEach(key => {
-        updateData[key] = data[key];
+        if (key !== 'variations') {
+            updateData[key] = data[key];
+        }
     });
 
     await db.update(food).set(updateData).where(eq(food.id, id));
@@ -279,11 +316,14 @@ export const updateFood = async (req: Request, res: Response) => {
 
         for (const variation of data.variations) {
             const variationId = uuidv4();
+            if(!variation.nameAr || !variation.nameFr) throw new BadRequest("Variation nameAr, nameFr are required");
 
             await db.insert(foodVariations).values({
                 id: variationId,
                 foodId: id,
                 name: variation.name,
+                nameAr: variation.nameAr,
+                nameFr: variation.nameFr,
                 isRequired: variation.isRequired || false,
                 selectionType: variation.selectionType || "single",
                 min: variation.min || null,
@@ -292,9 +332,12 @@ export const updateFood = async (req: Request, res: Response) => {
 
             if (variation.options) {
                 for (const option of variation.options) {
+                    if(!option.optionNameAr || !option.optionNameFr) throw new BadRequest("Option optionNameAr, optionNameFr are required");
                     await db.insert(variationOptions).values({
                         variationId,
                         optionName: option.optionName,
+                        optionNameAr: option.optionNameAr,
+                        optionNameFr: option.optionNameFr,
                         additionalPrice: option.additionalPrice?.toString() || "0",
                     });
                 }

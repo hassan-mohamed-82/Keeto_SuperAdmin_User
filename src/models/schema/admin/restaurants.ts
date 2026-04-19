@@ -21,7 +21,11 @@ export const restaurants = mysqlTable("restaurants", {
     // 1. Restaurant Info & Location (الصورة الأولى)
     // ==========================================
     name: varchar("name", { length: 255 }).notNull(),
+    nameAr: varchar("name_ar", { length: 255 }).notNull().default(''),
+    nameFr: varchar("name_fr", { length: 255 }).notNull().default(''),
     address: text("address").notNull(),
+    addressAr: text("address_ar").notNull().default(''),
+    addressFr: text("address_fr").notNull().default(''),
     
     // العلاقات (Relations)
     cuisineId: char("cuisine_id", { length: 36 }).references(() => cuisines.id),

@@ -8,10 +8,10 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
 export const createCountry = async (req: Request, res: Response) => {
-    const { name } = req.body;
+    const { name, nameAr, nameFr } = req.body;
 
-    if (!name) {
-        throw new BadRequest("Country name is required");
+    if (!name || !nameAr || !nameFr) {
+        throw new BadRequest("Country name, nameAr, and nameFr are required");
     }
 
     const existingCountry = await db
@@ -29,6 +29,8 @@ export const createCountry = async (req: Request, res: Response) => {
     await db.insert(countries).values({
         id,
         name,
+        nameAr,
+        nameFr,
     });
 
     return SuccessResponse(res, { message: "Create country success", data: { id } }, 201);
@@ -57,7 +59,7 @@ export const getCountryById = async (req: Request, res: Response) => {
 
 export const updateCountry = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, status } = req.body;
+    const { name, nameAr, nameFr, status } = req.body;
 
     const existingCountry = await db
         .select()
@@ -74,6 +76,8 @@ export const updateCountry = async (req: Request, res: Response) => {
     };
 
     if (name) updateData.name = name;
+    if (nameAr) updateData.nameAr = nameAr;
+    if (nameFr) updateData.nameFr = nameFr;
     if (status) updateData.status = status;
 
     if (Object.keys(updateData).length === 1) {

@@ -14,6 +14,8 @@ import { restaurants } from "./restaurants";
 export const addons = mysqlTable("addons", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     name: varchar("name", { length: 255 }).notNull(),
+    nameAr: varchar("name_ar", { length: 255 }).notNull().default(''),
+    nameFr: varchar("name_fr", { length: 255 }).notNull().default(''),
     price: varchar("price", { length: 255 }).notNull(),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     stock_type: mysqlEnum("stock_type", ["unlimited", "limited","daily"]).default("unlimited"),

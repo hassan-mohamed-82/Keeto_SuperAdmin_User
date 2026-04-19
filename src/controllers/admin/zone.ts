@@ -8,10 +8,10 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
 export const createZone = async (req: Request, res: Response) => {
-    const { name, displayName, cityId,lat,lng } = req.body;
+    const { name, nameAr, nameFr, displayName, displayNameAr, displayNameFr, cityId,lat,lng } = req.body;
 
-    if (!name || !displayName || !cityId || !lat || !lng) {
-        throw new BadRequest("Name, displayName, cityId, lat, and lng are required");
+    if (!name || !nameAr || !nameFr || !displayName || !displayNameAr || !displayNameFr || !cityId || !lat || !lng) {
+        throw new BadRequest("Name, nameAr, nameFr, displayName, displayNameAr, displayNameFr, cityId, lat, and lng are required");
     }
 
     const existingCity = await db
@@ -39,7 +39,11 @@ export const createZone = async (req: Request, res: Response) => {
     await db.insert(zones).values({
         id,
         name,
+        nameAr,
+        nameFr,
         displayName,
+        displayNameAr,
+        displayNameFr,
         lat,
         lng,
         status: "active",
@@ -54,7 +58,11 @@ export const getAllZones = async (req: Request, res: Response) => {
         .select({
             id: zones.id,
             name: zones.name,
+            nameAr: zones.nameAr,
+            nameFr: zones.nameFr,
             displayName: zones.displayName,
+            displayNameAr: zones.displayNameAr,
+            displayNameFr: zones.displayNameFr,
             status: zones.status,
             lat: zones.lat,
             lng: zones.lng,
@@ -64,6 +72,8 @@ export const getAllZones = async (req: Request, res: Response) => {
             city: {
                 id: cities.id,
                 name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
                 status: cities.status,
             },
         })
@@ -80,7 +90,11 @@ export const getZoneById = async (req: Request, res: Response) => {
         .select({
             id: zones.id,
             name: zones.name,
+            nameAr: zones.nameAr,
+            nameFr: zones.nameFr,
             displayName: zones.displayName,
+            displayNameAr: zones.displayNameAr,
+            displayNameFr: zones.displayNameFr,
             status: zones.status,
             lat: zones.lat,
             lng: zones.lng,
@@ -90,6 +104,8 @@ export const getZoneById = async (req: Request, res: Response) => {
             city: {
                 id: cities.id,
                 name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
                 status: cities.status,
             },
         })
@@ -107,10 +123,10 @@ export const getZoneById = async (req: Request, res: Response) => {
 
 export const updateZone = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, displayName, status, cityId, lat, lng } = req.body;
+    const { name, nameAr, nameFr, displayName, displayNameAr, displayNameFr, status, cityId, lat, lng } = req.body;
 
     // 1. التحقق المبكر: هل يوجد بيانات للتحديث أصلاً؟
-    if (!name && !displayName && !status && !cityId) {
+    if (!name && !nameAr && !nameFr && !displayName && !displayNameAr && !displayNameFr && !status && !cityId) {
         throw new BadRequest("No data to update");
     }
 
@@ -138,7 +154,11 @@ export const updateZone = async (req: Request, res: Response) => {
     };
 
     if (name !== undefined) updateData.name = name;
+    if (nameAr !== undefined) updateData.nameAr = nameAr;
+    if (nameFr !== undefined) updateData.nameFr = nameFr;
     if (displayName !== undefined) updateData.displayName = displayName;
+    if (displayNameAr !== undefined) updateData.displayNameAr = displayNameAr;
+    if (displayNameFr !== undefined) updateData.displayNameFr = displayNameFr;
     if (status !== undefined) updateData.status = status;
     if (cityId !== undefined) updateData.cityId = cityId;
     if (lat !== undefined) updateData.lat = lat;

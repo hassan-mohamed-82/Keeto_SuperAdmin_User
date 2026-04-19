@@ -1,6 +1,6 @@
 // Admin schema
-export * from "./schema/admin/admin";
-export * from "./schema/admin/roles";
+export * from "./schema/admin/restrauntadmin";
+export * from "./schema/admin/rolesadmin";
 export * from "./schema/admin/country";
 export * from "./schema/admin/city";
 export * from "./schema/admin/zone";

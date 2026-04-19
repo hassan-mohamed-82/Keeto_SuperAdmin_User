@@ -8,10 +8,10 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
 export const createCategory = async (req: Request, res: Response) => {
-    const { name, Image, priority, meta_image, title, meta_title, status } = req.body;
+    const { name, nameAr, nameFr, Image, priority, meta_image, title, titleAr, titleFr, meta_title, meta_titleAr, meta_titleFr, status } = req.body;
 
-    if (!name || !Image) {
-        throw new BadRequest("Category name and image are required");
+    if (!name || !nameAr || !nameFr || !Image || !titleAr || !titleFr || !meta_titleAr || !meta_titleFr) {
+        throw new BadRequest("Missing required fields (name, nameAr, nameFr, Image, titleAr, titleFr, meta_titleAr, meta_titleFr)");
     }
 
     // Check if category already exists
@@ -30,10 +30,16 @@ export const createCategory = async (req: Request, res: Response) => {
     await db.insert(categories).values({
         id,
         name,
+        nameAr,
+        nameFr,
         Image,
         meta_image: meta_image || null,
         title: title || null,
+        titleAr,
+        titleFr,
         meta_title: meta_title || null,
+        meta_titleAr,
+        meta_titleFr,
         status: status || "active",
         priority: priority || "medium",
     });
@@ -46,11 +52,17 @@ export const getAllCategories = async (req: Request, res: Response) => {
         .select({
             id: categories.id,
             name: categories.name,
+            nameAr: categories.nameAr,
+            nameFr: categories.nameFr,
             Image: categories.Image,
             meta_image: categories.meta_image,
             title: categories.title,
+            titleAr: categories.titleAr,
+            titleFr: categories.titleFr,
             priority: categories.priority,
             meta_title: categories.meta_title,
+            meta_titleAr: categories.meta_titleAr,
+            meta_titleFr: categories.meta_titleFr,
             status: categories.status,
             createdAt: categories.createdAt,
             updatedAt: categories.updatedAt,
@@ -67,11 +79,17 @@ export const getCategoryById = async (req: Request, res: Response) => {
         .select({
             id: categories.id,
             name: categories.name,
+            nameAr: categories.nameAr,
+            nameFr: categories.nameFr,
             Image: categories.Image,
             priority: categories.priority,
             meta_image: categories.meta_image,
             title: categories.title,
+            titleAr: categories.titleAr,
+            titleFr: categories.titleFr,
             meta_title: categories.meta_title,
+            meta_titleAr: categories.meta_titleAr,
+            meta_titleFr: categories.meta_titleFr,
             status: categories.status,
             createdAt: categories.createdAt,
             updatedAt: categories.updatedAt,
@@ -89,7 +107,7 @@ export const getCategoryById = async (req: Request, res: Response) => {
 
 export const updateCategory = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, Image, meta_image, title, meta_title, priority, status } = req.body;
+    const { name, nameAr, nameFr, Image, meta_image, title, titleAr, titleFr, meta_title, meta_titleAr, meta_titleFr, priority, status } = req.body;
 
     const existingCategory = await db
         .select()
@@ -106,11 +124,17 @@ export const updateCategory = async (req: Request, res: Response) => {
     };
 
     if (name) updateData.name = name;
+    if (nameAr) updateData.nameAr = nameAr;
+    if (nameFr) updateData.nameFr = nameFr;
     if (Image) updateData.Image = Image;
     if (priority) updateData.priority = priority;
     if (meta_image !== undefined) updateData.meta_image = meta_image;
     if (title !== undefined) updateData.title = title;
+    if (titleAr) updateData.titleAr = titleAr;
+    if (titleFr) updateData.titleFr = titleFr;
     if (meta_title !== undefined) updateData.meta_title = meta_title;
+    if (meta_titleAr) updateData.meta_titleAr = meta_titleAr;
+    if (meta_titleFr) updateData.meta_titleFr = meta_titleFr;
     if (status) updateData.status = status;
 
     if (Object.keys(updateData).length === 1) {

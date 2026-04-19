@@ -6,25 +6,33 @@ import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors";
 
 export const createPaymentMethod = async (req: Request, res: Response) => {
-    const { name, image, description, type, isActive } = req.body;
-    if(!name  || !description || !type ){
+    const { name, nameAr, nameFr, image, description, descriptionAr, descriptionFr, type, isActive } = req.body;
+    if(!name || !nameAr || !nameFr || !description || !descriptionAr || !descriptionFr || !type ){
         throw new BadRequest("Missing required fields");
     }
     const [paymentMethod] = await db.insert(paymentMethods).values({
         name,
+        nameAr,
+        nameFr,
         image,
         description,
+        descriptionAr,
+        descriptionFr,
         type,
         isActive:isActive || true,
     })
     return SuccessResponse(res, { data: paymentMethod });
 };
 export const updatePaymentMethod = async (req: Request, res: Response) => {
-    const { id, name, image, description, type, isActive } = req.body;
+    const { id, name, nameAr, nameFr, image, description, descriptionAr, descriptionFr, type, isActive } = req.body;
     const [paymentMethod] = await db.update(paymentMethods).set({
         name,
+        nameAr,
+        nameFr,
         image,
         description,
+        descriptionAr,
+        descriptionFr,
         type,
         isActive,
     }).where(eq(paymentMethods.id, id));

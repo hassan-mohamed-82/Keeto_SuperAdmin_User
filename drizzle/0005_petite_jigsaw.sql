@@ -1,1 +1,0 @@
-ALTER TABLE `subcategories` MODIFY COLUMN `category_id` char(36) NOT NULL;

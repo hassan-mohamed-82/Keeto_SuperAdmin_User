@@ -11,10 +11,10 @@ import { v4 as uuidv4 } from "uuid";
 
 
 export const createAdone = async (req: Request, res: Response) => {
-    const { name, status } = req.body;
+    const { name, nameAr, nameFr, status } = req.body;
 
-    if (!name) {
-        throw new BadRequest("Adone name is required");
+    if (!name || !nameAr || !nameFr) {
+        throw new BadRequest("Adone name, nameAr, and nameFr are required");
     }
 
     const existingAdone = await db
@@ -31,6 +31,8 @@ export const createAdone = async (req: Request, res: Response) => {
     await db.insert(adonescategory).values({
         id,
         name,
+        nameAr,
+        nameFr,
         status: status || "active",
     });
 
@@ -42,6 +44,8 @@ export const getAllAdones = async (req: Request, res: Response) => {
         .select({
             id: adonescategory.id,
             name: adonescategory.name,
+            nameAr: adonescategory.nameAr,
+            nameFr: adonescategory.nameFr,
             status: adonescategory.status,
             createdAt: adonescategory.createdAt,
             updatedAt: adonescategory.updatedAt,
@@ -58,6 +62,8 @@ export const getAdoneById = async (req: Request, res: Response) => {
         .select({
             id: adonescategory.id,
             name: adonescategory.name,
+            nameAr: adonescategory.nameAr,
+            nameFr: adonescategory.nameFr,
             status: adonescategory.status,
             createdAt: adonescategory.createdAt,
             updatedAt: adonescategory.updatedAt,
@@ -74,7 +80,7 @@ export const getAdoneById = async (req: Request, res: Response) => {
 
 export const updateAdone = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, status } = req.body;
+    const { name, nameAr, nameFr, status } = req.body;
 
     const existingAdone = await db
         .select()
@@ -90,6 +96,8 @@ export const updateAdone = async (req: Request, res: Response) => {
     };
 
     if (name) updateData.name = name;
+    if (nameAr) updateData.nameAr = nameAr;
+    if (nameFr) updateData.nameFr = nameFr;
     if (status) updateData.status = status;
 
     if (Object.keys(updateData).length === 1) {

@@ -8,11 +8,11 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
 export const createAddon = async (req: Request, res: Response) => {
-    const { name, price, stock_type, adonescategoryid, restaurantid } = req.body;
+    const { name, nameAr, nameFr, price, stock_type, adonescategoryid, restaurantid } = req.body;
 
     // Required fields validation
-    if (!name || !price || !stock_type || !adonescategoryid || !restaurantid) {
-        throw new BadRequest("Missing required fields: name, price, stock_type, adonescategoryid, restaurantid");
+    if (!name || !nameAr || !nameFr || !price || !stock_type || !adonescategoryid || !restaurantid) {
+        throw new BadRequest("Missing required fields: name, nameAr, nameFr, price, stock_type, adonescategoryid, restaurantid");
     }
 
     // Validate adonescategory exists
@@ -42,6 +42,8 @@ export const createAddon = async (req: Request, res: Response) => {
     await db.insert(addons).values({
         id,
         name,
+        nameAr,
+        nameFr,
         price,
         stock_type,
         adonescategoryid,
@@ -56,6 +58,8 @@ export const getAllAddons = async (req: Request, res: Response) => {
         .select({
             id: addons.id,
             name: addons.name,
+            nameAr: addons.nameAr,
+            nameFr: addons.nameFr,
             price: addons.price,
             stock_type: addons.stock_type,
             adonescategoryid: addons.adonescategoryid,
@@ -65,10 +69,14 @@ export const getAllAddons = async (req: Request, res: Response) => {
             adonescategory: {
                 id: adonescategory.id,
                 name: adonescategory.name,
+                nameAr: adonescategory.nameAr,
+                nameFr: adonescategory.nameFr,
             },
             restaurant: {
                 id: restaurants.id,
                 name: restaurants.name,
+                nameAr: restaurants.nameAr,
+                nameFr: restaurants.nameFr,
             },
         })
         .from(addons)
@@ -85,19 +93,25 @@ export const getAddonById = async (req: Request, res: Response) => {
         .select({
             id: addons.id,
             name: addons.name,
+            nameAr: addons.nameAr,
+            nameFr: addons.nameFr,
             price: addons.price,
             stock_type: addons.stock_type,
-                adonescategoryid: addons.adonescategoryid,
+            adonescategoryid: addons.adonescategoryid,
             restaurantid: addons.restaurantid,
             createdAt: addons.createdAt,
             updatedAt: addons.updatedAt,
             adonescategory: {
                 id: adonescategory.id,
                 name: adonescategory.name,
+                nameAr: adonescategory.nameAr,
+                nameFr: adonescategory.nameFr,
             },
             restaurant: {
                 id: restaurants.id,
                 name: restaurants.name,
+                nameAr: restaurants.nameAr,
+                nameFr: restaurants.nameFr,
             },
         })
         .from(addons)
@@ -115,7 +129,7 @@ export const getAddonById = async (req: Request, res: Response) => {
 
 export const updateAddon = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, price, stock_type, stock, adonescategoryid, restaurantid } = req.body;
+    const { name, nameAr, nameFr, price, stock_type, stock, adonescategoryid, restaurantid } = req.body;
 
     // Validate addon exists
     const existingAddon = await db
@@ -158,6 +172,8 @@ export const updateAddon = async (req: Request, res: Response) => {
         .update(addons)
         .set({
             name: name || existingAddon[0].name,
+            nameAr: nameAr || existingAddon[0].nameAr,
+            nameFr: nameFr || existingAddon[0].nameFr,
             price: price || existingAddon[0].price,
             stock_type: stock_type || existingAddon[0].stock_type,
             adonescategoryid: adonescategoryid || existingAddon[0].adonescategoryid,

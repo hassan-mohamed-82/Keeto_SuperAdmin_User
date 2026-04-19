@@ -8,10 +8,10 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
 export const createCity = async (req: Request, res: Response) => {
-    const { name, countryId } = req.body;
+    const { name, nameAr, nameFr, countryId } = req.body;
 
-    if (!name || !countryId) {
-        throw new BadRequest("City name and country ID are required");
+    if (!name || !nameAr || !nameFr || !countryId) {
+        throw new BadRequest("City name, nameAr, nameFr, and country ID are required");
     }
 
     // Check if country exists
@@ -41,6 +41,8 @@ export const createCity = async (req: Request, res: Response) => {
     await db.insert(cities).values({
         id,
         name,
+        nameAr,
+        nameFr,
         countryId,
     });
 
@@ -52,6 +54,8 @@ export const getAllCities = async (req: Request, res: Response) => {
         .select({
             id: cities.id,
             name: cities.name,
+            nameAr: cities.nameAr,
+            nameFr: cities.nameFr,
             status: cities.status,
             countryId: cities.countryId,
             createdAt: cities.createdAt,
@@ -59,6 +63,8 @@ export const getAllCities = async (req: Request, res: Response) => {
             country: {
                 id: countries.id,
                 name: countries.name,
+                nameAr: countries.nameAr,
+                nameFr: countries.nameFr,
                 status: countries.status,
             },
         })
@@ -75,6 +81,8 @@ export const getCityById = async (req: Request, res: Response) => {
         .select({
             id: cities.id,
             name: cities.name,
+            nameAr: cities.nameAr,
+            nameFr: cities.nameFr,
             status: cities.status,
             countryId: cities.countryId,
             createdAt: cities.createdAt,
@@ -82,6 +90,8 @@ export const getCityById = async (req: Request, res: Response) => {
             country: {
                 id: countries.id,
                 name: countries.name,
+                nameAr: countries.nameAr,
+                nameFr: countries.nameFr,
                 status: countries.status,
             },
         })
@@ -99,7 +109,7 @@ export const getCityById = async (req: Request, res: Response) => {
 
 export const updateCity = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, status, countryId } = req.body;
+    const { name, nameAr, nameFr, status, countryId } = req.body;
 
     const existingCity = await db
         .select()
@@ -129,6 +139,8 @@ export const updateCity = async (req: Request, res: Response) => {
     };
 
     if (name) updateData.name = name;
+    if (nameAr) updateData.nameAr = nameAr;
+    if (nameFr) updateData.nameFr = nameFr;
     if (status) updateData.status = status;
     if (countryId) updateData.countryId = countryId;
 

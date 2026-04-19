@@ -15,7 +15,11 @@ import { addons, categories, restaurants, subcategories } from "../../schema";
 export const food = mysqlTable("food", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     name: varchar("name", { length: 255 }).notNull(),
+    nameAr: varchar("name_ar", { length: 255 }).notNull().default(''),
+    nameFr: varchar("name_fr", { length: 255 }).notNull().default(''),
     description: text("description").notNull(),
+    descriptionAr: text("description_ar").notNull().default(''),
+    descriptionFr: text("description_fr").notNull().default(''),
     image: varchar("image", { length: 255 }).notNull(),
     restaurantid: char("restaurantid", { length: 36 }).references(() => restaurants.id).notNull(),
     categoryid: char("categoryid", { length: 36 }).references(() => categories.id).notNull(),

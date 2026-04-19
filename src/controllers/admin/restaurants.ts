@@ -47,7 +47,11 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
     const {
         name,
+        nameAr,
+        nameFr,
         address,
+        addressAr,
+        addressFr,
         cuisineId,
         zoneId,
         logo,
@@ -67,7 +71,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         status
     } = req.body;
 
-    if (!name || !address || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
+    if (!name || !nameAr || !nameFr || !address || !addressAr || !addressFr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest("Missing required fields");
     }
 
@@ -94,7 +98,11 @@ export const createRestaurant = async (req: Request, res: Response) => {
             id,
 
             name: clean(name),
+            nameAr: clean(nameAr),
+            nameFr: clean(nameFr),
             address: clean(address),
+            addressAr: clean(addressAr),
+            addressFr: clean(addressFr),
 
             cuisineId: cuisineId || null,
             zoneId: clean(zoneId),
@@ -142,7 +150,11 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
     const raw = await db.select({
         id: restaurants.id,
         name: restaurants.name,
+        nameAr: restaurants.nameAr,
+        nameFr: restaurants.nameFr,
         address: restaurants.address,
+        addressAr: restaurants.addressAr,
+        addressFr: restaurants.addressFr,
         logo: restaurants.logo,
         cover: restaurants.cover,
         status: restaurants.status,
@@ -159,7 +171,11 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
     const formatted = raw.map(r => ({
         id: r.id,
         name: r.name,
+        nameAr: r.nameAr,
+        nameFr: r.nameFr,
         address: r.address,
+        addressAr: r.addressAr,
+        addressFr: r.addressFr,
         logo: r.logo,
         cover: r.cover,
         status: r.status,
@@ -218,7 +234,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
 export const updateRestaurant = async (req: Request, res: Response) => {
     const { id } = req.params;
     const {
-        name, address, cuisineId, zoneId, lat, lng, logo, cover,
+        name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, lat, lng, logo, cover,
         minDeliveryTime, maxDeliveryTime, deliveryTimeUnit,
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
@@ -286,7 +302,11 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     };
 
     if (name) updateData.name = name;
+    if (nameAr) updateData.nameAr = nameAr;
+    if (nameFr) updateData.nameFr = nameFr;
     if (address) updateData.address = address;
+    if (addressAr) updateData.addressAr = addressAr;
+    if (addressFr) updateData.addressFr = addressFr;
     if (cuisineId !== undefined) updateData.cuisineId = cuisineId || null;
     if (zoneId) updateData.zoneId = zoneId;
     if (lat !== undefined) updateData.lat = lat;

@@ -11,8 +11,8 @@ import { v4 as uuidv4 } from "uuid";
 // 1. شحن المحفظة (Add Fund to Wallet)
 // =====================================================
 export const addFundToWallet = async (req: Request, res: Response) => {
-   const userId = req.user?.id;
-     const {
+    const userId = req.user?.id;
+    const {
         amount,
         paymentMethodId,
         receiptImage
@@ -28,20 +28,20 @@ export const addFundToWallet = async (req: Request, res: Response) => {
 
     if (!method) throw new BadRequest("Invalid payment method");
 
-    const isManual = method.type === "manual";
+    const isManual = !!receiptImage;
 
     await db.transaction(async (tx) => {
 
         let [wallet] = await tx
             .select()
             .from(userWallets)
-            .where(eq(userWallets.userId, userId))
+            .where(eq(userWallets.userId, userId as string))
             .limit(1);
 
         if (!wallet) {
             await tx.insert(userWallets).values({
                 id: uuidv4(),
-                userId,
+                userId: userId as string,
                 balance: "0.00",
                 loyaltyPoints: 0,
             });
@@ -49,7 +49,7 @@ export const addFundToWallet = async (req: Request, res: Response) => {
             [wallet] = await tx
                 .select()
                 .from(userWallets)
-                .where(eq(userWallets.userId, userId))
+                .where(eq(userWallets.userId, userId as string))
                 .limit(1);
         }
 
@@ -59,7 +59,7 @@ export const addFundToWallet = async (req: Request, res: Response) => {
         if (isManual) {
             await tx.insert(userWalletTransactions).values({
                 id: uuidv4(),
-                userId,
+                userId: userId as string,
                 paymentMethodId,
                 type: "credit",
                 transactionType: "manual_deposit",
@@ -76,7 +76,7 @@ export const addFundToWallet = async (req: Request, res: Response) => {
         // 🟢 AUTOMATIC
         await tx.insert(userWalletTransactions).values({
             id: uuidv4(),
-            userId,
+            userId: userId as string,
             paymentMethodId,
             type: "credit",
             transactionType: "add_fund",
@@ -98,48 +98,52 @@ export const addFundToWallet = async (req: Request, res: Response) => {
     });
 };
 
-// // =====================================================
-// // 2. تحويل النقاط لفلوس (Convert Loyalty Points)
-// // =====================================================
-// export const convertLoyaltyPoints = async (req: Request, res: Response) => {
-//     const { userId, pointsToConvert } = req.body;
-//     const points = parseInt(pointsToConvert);
+// =====================================================
+// 2. تحويل النقاط لفلوس (Convert Loyalty Points)
+// =====================================================
+export const convertLoyaltyPoints = async (req: Request, res: Response) => {
+    const userId = req.user?.id;
+    const { pointsToConvert } = req.body;
+    const points = parseInt(pointsToConvert);
 
-//     // افتراض: كل 100 نقطة = 10 جنيه
-//     const conversionRate = 0.1; 
-//     const amountToAdd = points * conversionRate;
+    // افتراض: كل 100 نقطة = 10 جنيه
+    const conversionRate = 0.1; 
+    const amountToAdd = points * conversionRate;
 
-//     await db.transaction(async (tx) => {
-//         const [wallet] = await tx.select().from(userWallets).where(eq(userWallets.userId, userId)).limit(1);
-//         if (!wallet || wallet.loyaltyPoints! < points) {
-//             throw new BadRequest("نقاطك لا تكفي لإتمام التحويل");
-//         }
+    await db.transaction(async (tx) => {
+        const [wallet] = await tx.select().from(userWallets).where(eq(userWallets.userId, userId as string)).limit(1);
+        
+        const currentLoyaltyPoints = wallet?.loyaltyPoints || 0;
+        
+        if (!wallet || currentLoyaltyPoints < points) {
+            throw new BadRequest("نقاطك لا تكفي لإتمام التحويل");
+        }
 
-//         const currentBalance = parseFloat(wallet.balance || "0");
+        const currentBalance = parseFloat(wallet.balance || "0");
 
-//         // تسجيل الحركة
-//         await tx.insert(userWalletTransactions).values({
-//             id: uuidv4(),
-//             userId,
-//             type: "credit",
-//             transactionType: "converted_loyalty",
-//             amount: amountToAdd.toString(),
-//             balanceBefore: currentBalance.toString(),
-//             paymentMethod: "Loyalty System",
-//             reference: `Converted ${points} points`
-//         });
+        // تسجيل الحركة
+        await tx.insert(userWalletTransactions).values({
+            id: uuidv4(),
+            userId: userId as string,
+            type: "credit",
+            transactionType: "converted_loyalty",
+            amount: amountToAdd.toString(),
+            balanceBefore: currentBalance.toString(),
+            reference: `Converted ${points} points`
+            // Note: paymentMethodId is omitted as this is an internal conversion
+        });
 
-//         // تحديث المحفظة (خصم النقط وإضافة الفلوس)
-//         await tx.update(userWallets)
-//             .set({ 
-//                 loyaltyPoints: wallet.loyaltyPoints! - points,
-//                 balance: (currentBalance + amountToAdd).toString() 
-//             })
-//             .where(eq(userWallets.id, wallet.id));
-//     });
+        // تحديث المحفظة (خصم النقط وإضافة الفلوس)
+        await tx.update(userWallets)
+            .set({ 
+                loyaltyPoints: currentLoyaltyPoints - points,
+                balance: (currentBalance + amountToAdd).toString() 
+            })
+            .where(eq(userWallets.id, wallet.id));
+    });
 
-//     return SuccessResponse(res, { message: "تم تحويل النقاط لرصيد بنجاح" });
-// };
+    return SuccessResponse(res, { message: "تم تحويل النقاط لرصيد بنجاح" });
+};
 
 // =====================================================
 // 3. عرض سجل المحفظة مع الفلتر (Wallet History Filter)
@@ -148,39 +152,39 @@ export const getWalletHistory = async (req: Request, res: Response) => {
     const userId = req.user?.id;
     const { filter } = req.query;
 
-    let conditions = eq(userWalletTransactions.userId, userId);
+    let conditions = eq(userWalletTransactions.userId, userId as string);
 
     if (filter === "orders") {
         conditions = and(
-            eq(userWalletTransactions.userId, userId),
+            eq(userWalletTransactions.userId, userId as string),
             eq(userWalletTransactions.transactionType, "order_payment")
         ) as any;
     }
 
     else if (filter === "deposit") {
         conditions = and(
-            eq(userWalletTransactions.userId, userId),
+            eq(userWalletTransactions.userId, userId as string),
             eq(userWalletTransactions.transactionType, "add_fund")
         ) as any;
     }
 
     else if (filter === "manual_pending") {
         conditions = and(
-            eq(userWalletTransactions.userId, userId),
+            eq(userWalletTransactions.userId, userId as string),
             eq(userWalletTransactions.status, "pending")
         ) as any;
     }
 
     else if (filter === "manual_approved") {
         conditions = and(
-            eq(userWalletTransactions.userId, userId),
+            eq(userWalletTransactions.userId, userId as string),
             eq(userWalletTransactions.status, "approved")
         ) as any;
     }
 
     else if (filter === "manual_rejected") {
         conditions = and(
-            eq(userWalletTransactions.userId, userId),
+            eq(userWalletTransactions.userId, userId as string),
             eq(userWalletTransactions.status, "rejected")
         ) as any;
     }
@@ -194,8 +198,8 @@ export const getWalletHistory = async (req: Request, res: Response) => {
             status: userWalletTransactions.status,
             balanceBefore: userWalletTransactions.balanceBefore,
             reference: userWalletTransactions.reference,
+            receiptImage: userWalletTransactions.receiptImage,
             createdAt: userWalletTransactions.createdAt,
-
             paymentMethodId: userWalletTransactions.paymentMethodId,
         })
         .from(userWalletTransactions)
