@@ -3,7 +3,7 @@ import { db } from "../../models/connection";
 import { cuisines, categories, restaurants, food, favorites } from "../../models/schema";
 import { eq, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { BadRequest } from "../../Errors";
+import { BadRequest, UnauthorizedError } from "../../Errors";
 
 // ==========================================
 // 1. API شاشة الهوم (Home Screen)
@@ -139,7 +139,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
 // 5. إضافة/إزالة المطعم من المفضلة (زرار القلب)
 // ==========================================
 export const toggleFavorite = async (req: Request, res: Response) => {
-    // الفرونت هيبعت: نوع المفضلة، والأيدي بتاع اليوزر، والأيدي بتاع الحاجة اللي فضلها
+   if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id; 
     const { restaurantId, foodId } = req.body;
 
@@ -176,7 +176,9 @@ if (restaurantId && foodId) {
 // 6. جلب قائمة المفضلة ليوزر معين (Wishlist)
 // ==========================================
 export const getUserFavorites = async (req: Request, res: Response) => {
-     const userId = req.user?.id || req.user?._id; 
+     
+     if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const favorite = await db.select().from(favorites).where(eq(favorites.userId, userId));
 
     return SuccessResponse(res, { data: favorite });

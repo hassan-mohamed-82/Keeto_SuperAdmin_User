@@ -4,8 +4,10 @@ import { db } from "../../models/connection";
 import { cities, countries, users, userWallets, zones, } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
+import { UnauthorizedError } from "../../Errors";
 
 export const getProfile = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id; 
 
     const [userInfo] = await db
@@ -50,6 +52,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
     });
 };
 export const updateProfile = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id; 
     const { name, phone, photo } = req.body;
 

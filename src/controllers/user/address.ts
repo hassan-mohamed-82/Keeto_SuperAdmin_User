@@ -3,11 +3,12 @@ import { db } from "../../models/connection";
 import { users , addresses} from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { NotFound } from "../../Errors/NotFound";
+import { NotFound, UnauthorizedError } from "../../Errors";
 import { v4 as uuidv4 } from "uuid";
 
 export const getUserAddresses = async (req: Request, res: Response) => {
-    const userId = req.user.id;
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
 
     const userAddresses = await db.select({}).from(addresses).where(eq(addresses.userId, userId));
 
@@ -15,7 +16,8 @@ export const getUserAddresses = async (req: Request, res: Response) => {
 };
 
 export const addUserAddress = async (req: Request, res: Response) => {
-    const userId = req.user.id;
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const { type, title, street, number, floor } = req.body;
 
     const newAddress = await db.insert(addresses).values({
@@ -33,7 +35,8 @@ export const addUserAddress = async (req: Request, res: Response) => {
 };
 
 export const deleteUserAddress = async (req: Request, res: Response) => {
-    const userId = req.user?.id;
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const { addressId } = req.params;
 
     const existingAddress = await db.select().from(addresses).where(eq(addresses.id, addressId)).limit(1);
@@ -47,7 +50,8 @@ export const deleteUserAddress = async (req: Request, res: Response) => {
 };
 
 export const updateUserAddress = async (req: Request, res: Response) => {
-    const userId = req.user.id;
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const { addressId } = req.params;
     const { type, title, street, number, floor } = req.body;
 

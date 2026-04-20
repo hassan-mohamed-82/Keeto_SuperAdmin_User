@@ -121,7 +121,8 @@ exports.getRestaurantDetails = getRestaurantDetails;
 // 5. إضافة/إزالة المطعم من المفضلة (زرار القلب)
 // ==========================================
 const toggleFavorite = async (req, res) => {
-    // الفرونت هيبعت: نوع المفضلة، والأيدي بتاع اليوزر، والأيدي بتاع الحاجة اللي فضلها
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
     const { restaurantId, foodId } = req.body;
     if (!restaurantId && !foodId) {
@@ -155,6 +156,8 @@ exports.toggleFavorite = toggleFavorite;
 // 6. جلب قائمة المفضلة ليوزر معين (Wishlist)
 // ==========================================
 const getUserFavorites = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
     const favorite = await connection_1.db.select().from(schema_1.favorites).where((0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId));
     return (0, response_1.SuccessResponse)(res, { data: favorite });

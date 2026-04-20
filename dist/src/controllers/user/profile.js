@@ -5,7 +5,10 @@ const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
+const Errors_1 = require("../../Errors");
 const getProfile = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
     const [userInfo] = await connection_1.db
         .select({
@@ -44,6 +47,8 @@ const getProfile = async (req, res) => {
 };
 exports.getProfile = getProfile;
 const updateProfile = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
     const { name, phone, photo } = req.body;
     await connection_1.db.update(schema_1.users)

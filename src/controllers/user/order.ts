@@ -8,12 +8,14 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { v4 as uuidv4 } from "uuid";
 import { userWallets, userWalletTransactions } from "../../models/schema";
+import { UnauthorizedError } from "../../Errors";
 
 // ==========================================
 // 1. إنشاء الطلب (Checkout)
 // ==========================================
 export const checkout = async (req: Request | any, res: Response) => {
-    const userId = req.user?.id;
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const { orderSource, paymentMethodId, orderType, idempotencyKey, userZoneId, branchId } = req.body;
 
     // 1. Idempotency Check
@@ -174,7 +176,8 @@ export const checkout = async (req: Request | any, res: Response) => {
 // 2. جلب الطلبات النشطة (الحالية)
 // ==========================================
 export const getActiveOrders = async (req: Request, res: Response) => {
-const userId = req.user?.id;
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const activeOrders = await db
         .select({
             orderId: orders.id,
@@ -204,7 +207,9 @@ const userId = req.user?.id;
 // 3. جلب سجل الطلبات (History) - المكتملة والملغية
 // ==========================================
 export const getOrderHistory = async (req: Request, res: Response) => {
-const userId = req.user?.id;
+     
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const historyOrders = await db
         .select({
             orderId: orders.id,
@@ -234,6 +239,8 @@ const userId = req.user?.id;
 // 4. تفاصيل الطلب (Order Details)
 // ==========================================
 export const getOrderDetails = async (req: Request, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const { orderId } = req.params;
 
     const orderInfo = await db

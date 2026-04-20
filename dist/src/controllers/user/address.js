@@ -5,16 +5,20 @@ const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
-const NotFound_1 = require("../../Errors/NotFound");
+const Errors_1 = require("../../Errors");
 const uuid_1 = require("uuid");
 const getUserAddresses = async (req, res) => {
-    const userId = req.user.id;
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
     const userAddresses = await connection_1.db.select({}).from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId));
     return (0, response_1.SuccessResponse)(res, { data: userAddresses });
 };
 exports.getUserAddresses = getUserAddresses;
 const addUserAddress = async (req, res) => {
-    const userId = req.user.id;
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
     const { type, title, street, number, floor } = req.body;
     const newAddress = await connection_1.db.insert(schema_1.addresses).values({
         id: (0, uuid_1.v4)(),
@@ -30,23 +34,27 @@ const addUserAddress = async (req, res) => {
 };
 exports.addUserAddress = addUserAddress;
 const deleteUserAddress = async (req, res) => {
-    const userId = req.user?.id;
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
     const { addressId } = req.params;
     const existingAddress = await connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId)).limit(1);
     if (!existingAddress[0]) {
-        throw new NotFound_1.NotFound("Address not found");
+        throw new Errors_1.NotFound("Address not found");
     }
     await connection_1.db.delete(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId));
     return (0, response_1.SuccessResponse)(res, { message: "Address deleted successfully" });
 };
 exports.deleteUserAddress = deleteUserAddress;
 const updateUserAddress = async (req, res) => {
-    const userId = req.user.id;
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
     const { addressId } = req.params;
     const { type, title, street, number, floor } = req.body;
     const existingAddress = await connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId)).limit(1);
     if (!existingAddress[0]) {
-        throw new NotFound_1.NotFound("Address not found");
+        throw new Errors_1.NotFound("Address not found");
     }
     await connection_1.db
         .update(schema_1.addresses)

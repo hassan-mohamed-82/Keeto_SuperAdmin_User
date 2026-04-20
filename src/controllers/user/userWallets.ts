@@ -6,12 +6,14 @@ import { eq, and, desc } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
+import { UnauthorizedError } from "../../Errors";
 
 // =====================================================
 // 1. شحن المحفظة (Add Fund to Wallet)
 // =====================================================
 export const addFundToWallet = async (req: Request, res: Response) => {
-    const userId = req.user?.id;
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const {
         amount,
         paymentMethodId,
@@ -102,7 +104,8 @@ export const addFundToWallet = async (req: Request, res: Response) => {
 // 2. تحويل النقاط لفلوس (Convert Loyalty Points)
 // =====================================================
 export const convertLoyaltyPoints = async (req: Request, res: Response) => {
-    const userId = req.user?.id;
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
     const { pointsToConvert } = req.body;
     const points = parseInt(pointsToConvert);
 
@@ -149,9 +152,9 @@ export const convertLoyaltyPoints = async (req: Request, res: Response) => {
 // 3. عرض سجل المحفظة مع الفلتر (Wallet History Filter)
 // =====================================================
 export const getWalletHistory = async (req: Request, res: Response) => {
-    const userId = req.user?.id;
-    const { filter } = req.query;
-
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
+     const { filter } = req.query;
     let conditions = eq(userWalletTransactions.userId, userId as string);
 
     if (filter === "orders") {

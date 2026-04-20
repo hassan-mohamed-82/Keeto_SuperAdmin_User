@@ -7,11 +7,14 @@ const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
+const Errors_1 = require("../../Errors");
 // =====================================================
 // 1. شحن المحفظة (Add Fund to Wallet)
 // =====================================================
 const addFundToWallet = async (req, res) => {
-    const userId = req.user?.id;
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
     const { amount, paymentMethodId, receiptImage } = req.body;
     const depositAmount = Number(amount);
     const [method] = await connection_1.db
@@ -85,7 +88,9 @@ exports.addFundToWallet = addFundToWallet;
 // 2. تحويل النقاط لفلوس (Convert Loyalty Points)
 // =====================================================
 const convertLoyaltyPoints = async (req, res) => {
-    const userId = req.user?.id;
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
     const { pointsToConvert } = req.body;
     const points = parseInt(pointsToConvert);
     // افتراض: كل 100 نقطة = 10 جنيه
@@ -124,7 +129,9 @@ exports.convertLoyaltyPoints = convertLoyaltyPoints;
 // 3. عرض سجل المحفظة مع الفلتر (Wallet History Filter)
 // =====================================================
 const getWalletHistory = async (req, res) => {
-    const userId = req.user?.id;
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
     const { filter } = req.query;
     let conditions = (0, drizzle_orm_1.eq)(schema_1.userWalletTransactions.userId, userId);
     if (filter === "orders") {
