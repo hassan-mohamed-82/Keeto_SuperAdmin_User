@@ -139,36 +139,42 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
 // 5. إضافة/إزالة المطعم من المفضلة (زرار القلب)
 // ==========================================
 export const toggleFavorite = async (req: Request, res: Response) => {
-   if (!req.user) throw new UnauthorizedError("Unauthenticated");
-    const userId = req.user.id; 
-    const { restaurantId, foodId } = req.body;
+    try {
+        if (!req.user) throw new UnauthorizedError("Unauthenticated");
+        const userId = req.user.id; 
+        const { restaurantId, foodId } = req.body;
 
-   if (!restaurantId && !foodId) {
-    throw new BadRequest("Restaurant ID or Food ID is required");
-}
+        if (!restaurantId && !foodId) {
+            throw new BadRequest("Restaurant ID or Food ID is required");
+        }
 
-if (restaurantId && foodId) {
-    throw new BadRequest("Send only one of restaurantId or foodId");
-}
-    // بناء الشرط بناءً على النوع
-    const condition = restaurantId 
-        ? and(eq(favorites.userId, userId), eq(favorites.restaurantId, restaurantId))
-        : and(eq(favorites.userId, userId), eq(favorites.foodId, foodId));
+        if (restaurantId && foodId) {
+            throw new BadRequest("Send only one of restaurantId or foodId");
+        }
 
-    const existingFav = await db.select().from(favorites).where(condition).limit(1);
+        // بناء الشرط بناءً على النوع
+        const condition = restaurantId 
+            ? and(eq(favorites.userId, userId), eq(favorites.restaurantId, restaurantId))
+            : and(eq(favorites.userId, userId), eq(favorites.foodId, foodId));
 
-    if (existingFav[0]) {
-        // لو موجودة نمسحها (Un-favorite)
-        await db.delete(favorites).where(eq(favorites.id, existingFav[0].id));
-        return SuccessResponse(res, { message: "تمت الإزالة من المفضلة", isFavorite: false });
-    } else {
-        // لو مش موجودة نضيفها (Favorite)
-        await db.insert(favorites).values({ 
-            userId, 
-            restaurantId: restaurantId ? restaurantId : null,
-            foodId: foodId ? foodId : null 
-        });
-        return SuccessResponse(res, { message: "تمت الإضافة للمفضلة", isFavorite: true });
+        // الخطأ بيحصل في السطر ده 👇
+        const existingFav = await db.select().from(favorites).where(condition).limit(1);
+
+        if (existingFav[0]) {
+            await db.delete(favorites).where(eq(favorites.id, existingFav[0].id));
+            return SuccessResponse(res, { message: "تمت الإزالة من المفضلة", isFavorite: false });
+        } else {
+            await db.insert(favorites).values({ 
+                userId, 
+                restaurantId: restaurantId ? restaurantId : null,
+                foodId: foodId ? foodId : null 
+            });
+            return SuccessResponse(res, { message: "تمت الإضافة للمفضلة", isFavorite: true });
+        }
+    } catch (error) {
+        // السطر ده هيقولنا مين العمود أو الجدول اللي مش موجود
+        console.error("🔥🔥 MYSQL SELECT ERROR: ", error);
+        throw error;
     }
 };
 

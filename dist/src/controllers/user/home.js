@@ -121,34 +121,40 @@ exports.getRestaurantDetails = getRestaurantDetails;
 // 5. إضافة/إزالة المطعم من المفضلة (زرار القلب)
 // ==========================================
 const toggleFavorite = async (req, res) => {
-    if (!req.user)
-        throw new Errors_1.UnauthorizedError("Unauthenticated");
-    const userId = req.user.id;
-    const { restaurantId, foodId } = req.body;
-    if (!restaurantId && !foodId) {
-        throw new Errors_1.BadRequest("Restaurant ID or Food ID is required");
+    try {
+        if (!req.user)
+            throw new Errors_1.UnauthorizedError("Unauthenticated");
+        const userId = req.user.id;
+        const { restaurantId, foodId } = req.body;
+        if (!restaurantId && !foodId) {
+            throw new Errors_1.BadRequest("Restaurant ID or Food ID is required");
+        }
+        if (restaurantId && foodId) {
+            throw new Errors_1.BadRequest("Send only one of restaurantId or foodId");
+        }
+        // بناء الشرط بناءً على النوع
+        const condition = restaurantId
+            ? (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId), (0, drizzle_orm_1.eq)(schema_1.favorites.restaurantId, restaurantId))
+            : (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId), (0, drizzle_orm_1.eq)(schema_1.favorites.foodId, foodId));
+        // الخطأ بيحصل في السطر ده 👇
+        const existingFav = await connection_1.db.select().from(schema_1.favorites).where(condition).limit(1);
+        if (existingFav[0]) {
+            await connection_1.db.delete(schema_1.favorites).where((0, drizzle_orm_1.eq)(schema_1.favorites.id, existingFav[0].id));
+            return (0, response_1.SuccessResponse)(res, { message: "تمت الإزالة من المفضلة", isFavorite: false });
+        }
+        else {
+            await connection_1.db.insert(schema_1.favorites).values({
+                userId,
+                restaurantId: restaurantId ? restaurantId : null,
+                foodId: foodId ? foodId : null
+            });
+            return (0, response_1.SuccessResponse)(res, { message: "تمت الإضافة للمفضلة", isFavorite: true });
+        }
     }
-    if (restaurantId && foodId) {
-        throw new Errors_1.BadRequest("Send only one of restaurantId or foodId");
-    }
-    // بناء الشرط بناءً على النوع
-    const condition = restaurantId
-        ? (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId), (0, drizzle_orm_1.eq)(schema_1.favorites.restaurantId, restaurantId))
-        : (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId), (0, drizzle_orm_1.eq)(schema_1.favorites.foodId, foodId));
-    const existingFav = await connection_1.db.select().from(schema_1.favorites).where(condition).limit(1);
-    if (existingFav[0]) {
-        // لو موجودة نمسحها (Un-favorite)
-        await connection_1.db.delete(schema_1.favorites).where((0, drizzle_orm_1.eq)(schema_1.favorites.id, existingFav[0].id));
-        return (0, response_1.SuccessResponse)(res, { message: "تمت الإزالة من المفضلة", isFavorite: false });
-    }
-    else {
-        // لو مش موجودة نضيفها (Favorite)
-        await connection_1.db.insert(schema_1.favorites).values({
-            userId,
-            restaurantId: restaurantId ? restaurantId : null,
-            foodId: foodId ? foodId : null
-        });
-        return (0, response_1.SuccessResponse)(res, { message: "تمت الإضافة للمفضلة", isFavorite: true });
+    catch (error) {
+        // السطر ده هيقولنا مين العمود أو الجدول اللي مش موجود
+        console.error("🔥🔥 MYSQL SELECT ERROR: ", error);
+        throw error;
     }
 };
 exports.toggleFavorite = toggleFavorite;

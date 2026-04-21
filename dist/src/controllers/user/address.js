@@ -11,7 +11,7 @@ const getUserAddresses = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
-    const userAddresses = await connection_1.db.select({}).from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId));
+    const userAddresses = await connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId));
     return (0, response_1.SuccessResponse)(res, { data: userAddresses });
 };
 exports.getUserAddresses = getUserAddresses;

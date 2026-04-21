@@ -10,7 +10,7 @@ export const getUserAddresses = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id; 
 
-    const userAddresses = await db.select({}).from(addresses).where(eq(addresses.userId, userId));
+    const userAddresses = await db.select().from(addresses).where(eq(addresses.userId, userId));
 
     return SuccessResponse(res, { data: userAddresses });
 };
