@@ -156,10 +156,39 @@ exports.toggleFavorite = toggleFavorite;
 // 6. جلب قائمة المفضلة ليوزر معين (Wishlist)
 // ==========================================
 const getUserFavorites = async (req, res) => {
+    // 1. التحقق من تسجيل الدخول
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
-    const favorite = await connection_1.db.select().from(schema_1.favorites).where((0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId));
-    return (0, response_1.SuccessResponse)(res, { data: favorite });
+    // 2. جلب البيانات مع عمل Join لجدول المطاعم وجدول الأكلات
+    // ملاحظة: تأكد من استيراد جداول (restaurants) و (foods) في ملفك
+    const favs = await connection_1.db.select({
+        favoriteId: schema_1.favorites.id,
+        // بيانات المطعم (ستكون null لو كان السجل يخص أكلة)
+        restaurant: {
+            id: schema_1.restaurants.id,
+            name: schema_1.restaurants.name,
+            cover: schema_1.restaurants.cover,
+            logo: schema_1.restaurants.logo,
+            address: schema_1.restaurants.address,
+        },
+        // بيانات الأكلة (ستكون null لو كان السجل يخص مطعم)
+        food: {
+            id: schema_1.food.id,
+            name: schema_1.food.name,
+            price: schema_1.food.price,
+            image: schema_1.food.image,
+        }
+    })
+        .from(schema_1.favorites)
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.favorites.restaurantId, schema_1.restaurants.id))
+        .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.favorites.foodId, schema_1.food.id))
+        .where((0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId));
+    // 3. تنسيق البيانات (اختياري): لفصل المطاعم عن الأكلات في الـ Response
+    const result = {
+        restaurants: favs.filter(f => f.restaurant?.id !== null).map(f => f.restaurant),
+        foods: favs.filter(f => f.food?.id !== null).map(f => f.food)
+    };
+    return (0, response_1.SuccessResponse)(res, { data: result });
 };
 exports.getUserFavorites = getUserFavorites;
