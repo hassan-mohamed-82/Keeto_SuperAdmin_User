@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getzone = exports.updateUserAddress = exports.deleteUserAddress = exports.addUserAddress = exports.getUserAddresses = void 0;
+exports.getZones = exports.updateUserAddress = exports.deleteUserAddress = exports.addUserAddress = exports.getUserAddresses = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -63,10 +63,10 @@ const updateUserAddress = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Address updated successfully" });
 };
 exports.updateUserAddress = updateUserAddress;
-const getzone = async (req, res) => {
+const getZones = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
-    const zones = await connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, req.user.id));
-    return (0, response_1.SuccessResponse)(res, { data: zones });
+    const zone = await connection_1.db.select().from(schema_1.zones);
+    return (0, response_1.SuccessResponse)(res, { data: zone });
 };
-exports.getzone = getzone;
+exports.getZones = getZones;

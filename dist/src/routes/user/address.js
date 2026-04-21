@@ -4,7 +4,7 @@ const express_1 = require("express");
 const address_1 = require("../../controllers/user/address");
 const catchAsync_1 = require("../../utils/catchAsync");
 const router = (0, express_1.Router)();
-router.get("/zone", (0, catchAsync_1.catchAsync)(address_1.getzone));
+router.get("/zone", (0, catchAsync_1.catchAsync)(address_1.getZones));
 router.post("/", (0, catchAsync_1.catchAsync)(address_1.addUserAddress));
 router.get("/", (0, catchAsync_1.catchAsync)(address_1.getUserAddresses));
 router.delete("/:addressId", (0, catchAsync_1.catchAsync)(address_1.deleteUserAddress));

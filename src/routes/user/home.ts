@@ -38,13 +38,5 @@ router.get("/restaurants/:restaurantId", getRestaurantDetails);
 
 
 
-// 5. إضافة أو إزالة مطعم/أكلة من المفضلة (زرار القلب)
-// 🟡 POST: /api/user/explore/favorites/toggle
-// Body: { "userId": "...", "type": "restaurant" | "food", "restaurantId": "...", "foodId": "..." }
-router.post("/favorites/toggle", toggleFavorite);
-
-// 6. جلب قائمة الرغبات الخاصة بيوزر معين (Wishlist)
-// 🟢 GET: /api/user/explore/favorites/:userId
-router.get("/favorites", getUserFavorites);
 
 export default router;
