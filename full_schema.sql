@@ -463,17 +463,7 @@ CREATE TABLE `users` (
 	CONSTRAINT `users_email_unique` UNIQUE(`email`)
 );
 
-CREATE TABLE `addresses` (
-	`id` char(36) NOT NULL DEFAULT (UUID()),
-	`user_id` char(36) NOT NULL,
-	`zone_id` char(36) NOT NULL,
-	`type` enum('home','work','other') DEFAULT 'home',
-	`title` varchar(255) NOT NULL,
-	`street` varchar(255) NOT NULL,
-	`number` varchar(20) NOT NULL,
-	`floor` varchar(20),
-	CONSTRAINT `addresses_id` PRIMARY KEY(`id`)
-);
+ 
 
 CREATE TABLE `user_wallet_transactions` (
 	`id` char(36) NOT NULL DEFAULT (UUID()),
