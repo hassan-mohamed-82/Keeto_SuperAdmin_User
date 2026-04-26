@@ -8,10 +8,16 @@ const response_1 = require("../../utils/response");
 const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
+const handleImages_1 = require("../../utils/handleImages");
 const createBasiccampaign = async (req, res) => {
     const { Title, description, image, status, startDate, endDate, dailystarttime, dailyendtime } = req.body;
     if (!Title || !startDate || !endDate || !dailystarttime || !dailyendtime) {
         throw new BadRequest_1.BadRequest("Title, startDate, endDate, dailystarttime, and dailyendtime are required");
+    }
+    let imageUrl = undefined;
+    if (image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, image, "basiccampaign");
+        imageUrl = result.url;
     }
     const id = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.basiccampaign).values({

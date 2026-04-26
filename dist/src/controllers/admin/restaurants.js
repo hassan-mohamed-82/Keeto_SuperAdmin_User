@@ -12,6 +12,7 @@ const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const uuid_1 = require("uuid");
+const handleImages_1 = require("../../utils/handleImages");
 // Helper: increment total_restaurants on a cuisine
 const incrementCuisineCount = async (cuisineId) => {
     const cuisine = await connection_1.db
@@ -48,6 +49,17 @@ const createRestaurant = async (req, res) => {
     if (!name || !nameAr || !nameFr || !address || !addressAr || !addressFr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
     }
+    let logoUrl = undefined;
+    if (logo) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, logo, "restaurants");
+        logoUrl = result.url;
+    }
+    // handle cover image
+    let coverUrl = undefined;
+    if (cover) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, cover, "restaurants_cover");
+        coverUrl = result.url;
+    }
     const existing = await connection_1.db
         .select()
         .from(schema_1.restaurants)
@@ -73,8 +85,8 @@ const createRestaurant = async (req, res) => {
             addressFr: clean(addressFr),
             cuisineId: cuisineId || null,
             zoneId: clean(zoneId),
-            logo: clean(logo),
-            cover: cover ? clean(cover) : null,
+            logo: logoUrl || '',
+            cover: coverUrl || '',
             minDeliveryTime: minDeliveryTime ? clean(minDeliveryTime) : null,
             maxDeliveryTime: maxDeliveryTime ? clean(maxDeliveryTime) : null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",

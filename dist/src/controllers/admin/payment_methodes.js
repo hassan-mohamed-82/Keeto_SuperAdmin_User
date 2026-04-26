@@ -6,16 +6,22 @@ const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
+const handleImages_1 = require("../../utils/handleImages");
 const createPaymentMethod = async (req, res) => {
     const { name, nameAr, nameFr, image, description, descriptionAr, descriptionFr, type, isActive } = req.body;
     if (!name || !nameAr || !nameFr || !description || !descriptionAr || !descriptionFr || !type) {
         throw new Errors_1.BadRequest("Missing required fields");
     }
+    let imageUrl = undefined;
+    if (image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, image, "basiccampaign");
+        imageUrl = result.url;
+    }
     const [paymentMethod] = await connection_1.db.insert(schema_1.paymentMethods).values({
         name,
         nameAr,
         nameFr,
-        image,
+        image: imageUrl || '',
         description,
         descriptionAr,
         descriptionFr,

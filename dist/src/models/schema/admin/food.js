@@ -12,7 +12,7 @@ exports.food = (0, mysql_core_1.mysqlTable)("food", {
     description: (0, mysql_core_1.text)("description").notNull(),
     descriptionAr: (0, mysql_core_1.text)("description_ar").notNull().default(''),
     descriptionFr: (0, mysql_core_1.text)("description_fr").notNull().default(''),
-    image: (0, mysql_core_1.longtext)("image").notNull(),
+    image: (0, mysql_core_1.varchar)("image", { length: 500 }).notNull(),
     restaurantid: (0, mysql_core_1.char)("restaurantid", { length: 36 }).references(() => schema_1.restaurants.id).notNull(),
     categoryid: (0, mysql_core_1.char)("categoryid", { length: 36 }).references(() => schema_1.categories.id).notNull(),
     subcategoryid: (0, mysql_core_1.char)("subcategoryid", { length: 36 }).references(() => schema_1.subcategories.id).notNull(),

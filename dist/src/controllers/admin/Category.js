@@ -8,6 +8,8 @@ const response_1 = require("../../utils/response");
 const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
+const handleImages_1 = require("../../utils/handleImages");
+const deleteImage_1 = require("../../utils/deleteImage");
 const createCategory = async (req, res) => {
     const { name, nameAr, nameFr, Image, priority, meta_image, title, titleAr, titleFr, meta_title, meta_titleAr, meta_titleFr, status } = req.body;
     if (!name || !nameAr || !nameFr || !Image || !titleAr || !titleFr || !meta_titleAr || !meta_titleFr) {
@@ -23,17 +25,27 @@ const createCategory = async (req, res) => {
         throw new BadRequest_1.BadRequest("Category already exists");
     }
     const id = (0, uuid_1.v4)();
+    let imageUrl = undefined;
+    let metaImageUrl = undefined;
+    if (Image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, Image, "categories");
+        imageUrl = result.url;
+    }
+    if (meta_image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "categories_meta");
+        metaImageUrl = result.url;
+    }
     await connection_1.db.insert(schema_1.categories).values({
         id,
         name,
         nameAr,
         nameFr,
-        Image,
-        meta_image: meta_image || null,
-        title: title || null,
+        Image: imageUrl || '',
+        meta_image: metaImageUrl || '',
+        title: title || '',
         titleAr,
         titleFr,
-        meta_title: meta_title || null,
+        meta_title: meta_title || '',
         meta_titleAr,
         meta_titleFr,
         status: status || "active",
@@ -138,6 +150,22 @@ const updateCategory = async (req, res) => {
         updateData.status = status;
     if (Object.keys(updateData).length === 1) {
         throw new BadRequest_1.BadRequest("No data to update");
+    }
+    if (Image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, Image, "categories");
+        updateData.Image = result.url;
+        // delete old image if exists
+        if (existingCategory[0].Image) {
+            await (0, deleteImage_1.deletePhotoFromServer)(existingCategory[0].Image);
+        }
+    }
+    if (meta_image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "categories_meta");
+        updateData.meta_image = result.url;
+        // delete old image if exists
+        if (existingCategory[0].meta_image) {
+            await (0, deleteImage_1.deletePhotoFromServer)(existingCategory[0].meta_image);
+        }
     }
     await connection_1.db.update(schema_1.categories).set(updateData).where((0, drizzle_orm_1.eq)(schema_1.categories.id, id));
     return (0, response_1.SuccessResponse)(res, { message: "Update category success" });

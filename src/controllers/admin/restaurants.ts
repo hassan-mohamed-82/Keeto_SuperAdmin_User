@@ -7,6 +7,7 @@ import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
 import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
+import { saveBase64Image } from "../../utils/handleImages";
 
 // Helper: increment total_restaurants on a cuisine
 const incrementCuisineCount = async (cuisineId: string) => {
@@ -74,7 +75,20 @@ export const createRestaurant = async (req: Request, res: Response) => {
     if (!name || !nameAr || !nameFr || !address || !addressAr || !addressFr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest("Missing required fields");
     }
+    let logoUrl: string | undefined = undefined;
 
+    if (logo) {
+        const result = await saveBase64Image(req, logo, "restaurants");
+        logoUrl = result.url;
+    }
+
+    // handle cover image
+    let coverUrl: string | undefined = undefined;
+
+    if (cover) {
+        const result = await saveBase64Image(req, cover, "restaurants_cover");
+        coverUrl = result.url;
+    }
     const existing = await db
         .select()
         .from(restaurants)
@@ -107,8 +121,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
             cuisineId: cuisineId || null,
             zoneId: clean(zoneId),
 
-            logo: clean(logo),
-            cover: cover ? clean(cover) : null,
+            logo: logoUrl|| '',
+            cover: coverUrl|| '',
 
             minDeliveryTime: minDeliveryTime ? clean(minDeliveryTime) : null,
             maxDeliveryTime: maxDeliveryTime ? clean(maxDeliveryTime) : null,

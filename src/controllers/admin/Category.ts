@@ -6,6 +6,8 @@ import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
+import { saveBase64Image } from "../../utils/handleImages";
+import { deletePhotoFromServer } from "../../utils/deleteImage";
 
 export const createCategory = async (req: Request, res: Response) => {
     const { name, nameAr, nameFr, Image, priority, meta_image, title, titleAr, titleFr, meta_title, meta_titleAr, meta_titleFr, status } = req.body;
@@ -27,17 +29,30 @@ export const createCategory = async (req: Request, res: Response) => {
 
     const id = uuidv4();
 
+    let imageUrl: string | undefined = undefined;
+    let metaImageUrl: string | undefined = undefined;
+
+    if (Image) {
+        const result = await saveBase64Image(req, Image, "categories");
+        imageUrl = result.url;
+    }
+
+    if (meta_image) {
+        const result = await saveBase64Image(req, meta_image, "categories_meta");
+        metaImageUrl = result.url;
+    }
+
     await db.insert(categories).values({
         id,
         name,
         nameAr,
         nameFr,
-        Image,
-        meta_image: meta_image || null,
-        title: title || null,
+        Image:imageUrl || '',
+        meta_image: metaImageUrl || '',
+        title: title || '',
         titleAr,
         titleFr,
-        meta_title: meta_title || null,
+        meta_title: meta_title || '',
         meta_titleAr,
         meta_titleFr,
         status: status || "active",
@@ -139,6 +154,26 @@ export const updateCategory = async (req: Request, res: Response) => {
 
     if (Object.keys(updateData).length === 1) {
         throw new BadRequest("No data to update");
+    }
+
+    if (Image) {
+        const result = await saveBase64Image(req, Image, "categories");
+        updateData.Image = result.url;
+
+        // delete old image if exists
+        if (existingCategory[0].Image) {
+            await deletePhotoFromServer(existingCategory[0].Image);
+        }
+    }
+
+    if (meta_image) {
+        const result = await saveBase64Image(req, meta_image, "categories_meta");
+        updateData.meta_image = result.url;
+
+        // delete old image if exists
+        if (existingCategory[0].meta_image) {
+            await deletePhotoFromServer(existingCategory[0].meta_image);
+        }
     }
 
     await db.update(categories).set(updateData).where(eq(categories.id, id));

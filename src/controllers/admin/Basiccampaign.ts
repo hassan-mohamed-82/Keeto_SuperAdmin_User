@@ -6,12 +6,20 @@ import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
+import { saveBase64Image } from "../../utils/handleImages";
 
 export const createBasiccampaign = async (req: Request, res: Response) => {
     const { Title, description, image, status, startDate, endDate, dailystarttime, dailyendtime } = req.body;
 
     if (!Title || !startDate || !endDate || !dailystarttime || !dailyendtime) {
         throw new BadRequest("Title, startDate, endDate, dailystarttime, and dailyendtime are required");
+    }
+
+    let imageUrl: string | undefined = undefined;
+
+    if (image) {
+        const result = await saveBase64Image(req, image, "basiccampaign");
+        imageUrl = result.url;
     }
 
     const id = uuidv4();

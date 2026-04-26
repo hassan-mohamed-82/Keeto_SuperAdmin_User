@@ -6,7 +6,7 @@ import { zones } from "../admin/zone";
 export const users = mysqlTable("users", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     name: varchar("name", { length: 255 }).notNull(),
-    photo: longtext("photo"),
+    photo: varchar("photo", { length: 500 }),
     email: varchar("email", { length: 255 }).notNull().unique(),
     phone: varchar("phone", { length: 20 }).notNull(),
     fcmToken: text("fcm_token"),

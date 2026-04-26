@@ -8,6 +8,7 @@ const response_1 = require("../../utils/response");
 const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
+const handleImages_1 = require("../../utils/handleImages");
 const createCuisine = async (req, res) => {
     const { name, nameAr, nameFr, Image, meta_image, description, descriptionAr, descriptionFr, meta_description, meta_descriptionAr, meta_descriptionFr, status } = req.body;
     if (!name || !nameAr || !nameFr || !Image || !descriptionAr || !descriptionFr || !meta_descriptionAr || !meta_descriptionFr) {
@@ -21,6 +22,16 @@ const createCuisine = async (req, res) => {
         .limit(1);
     if (existingCuisine[0]) {
         throw new BadRequest_1.BadRequest("Cuisine already exists");
+    }
+    let imageUrl = undefined;
+    let metaImageUrl = undefined;
+    if (Image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, Image, "cuisines");
+        imageUrl = result.url;
+    }
+    if (meta_image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "cuisines_meta");
+        metaImageUrl = result.url;
     }
     const id = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.cuisines).values({
@@ -109,6 +120,16 @@ const updateCuisine = async (req, res) => {
     const updateData = {
         updatedAt: new Date(),
     };
+    let imageUrl = undefined;
+    let metaImageUrl = undefined;
+    if (Image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, Image, "cuisines");
+        imageUrl = result.url;
+    }
+    if (meta_image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "cuisines_meta");
+        metaImageUrl = result.url;
+    }
     if (name)
         updateData.name = name;
     if (nameAr)

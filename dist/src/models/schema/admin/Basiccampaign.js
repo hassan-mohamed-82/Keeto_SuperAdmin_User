@@ -7,7 +7,7 @@ exports.basiccampaign = (0, mysql_core_1.mysqlTable)("basiccampaign", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     Title: (0, mysql_core_1.varchar)("title", { length: 255 }).notNull(),
     description: (0, mysql_core_1.text)("description"),
-    image: (0, mysql_core_1.longtext)("image"),
+    image: (0, mysql_core_1.varchar)("image", { length: 500 }),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     startDate: (0, mysql_core_1.timestamp)("start_date").notNull(),
     endDate: (0, mysql_core_1.timestamp)("end_date").notNull(),

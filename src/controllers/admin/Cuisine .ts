@@ -6,6 +6,7 @@ import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
+import { saveBase64Image } from "../../utils/handleImages";
 
 export const createCuisine = async (req: Request, res: Response) => {
     const { name, nameAr, nameFr, Image, meta_image, description, descriptionAr, descriptionFr, meta_description, meta_descriptionAr, meta_descriptionFr, status } = req.body;
@@ -23,6 +24,19 @@ export const createCuisine = async (req: Request, res: Response) => {
 
     if (existingCuisine[0]) {
         throw new BadRequest("Cuisine already exists");
+    }
+
+    let imageUrl: string | undefined = undefined;
+    let metaImageUrl: string | undefined = undefined;
+
+    if (Image) {
+        const result = await saveBase64Image(req, Image, "cuisines");
+        imageUrl = result.url;
+    }
+
+    if (meta_image) {
+        const result = await saveBase64Image(req, meta_image, "cuisines_meta");
+        metaImageUrl = result.url;
     }
 
     const id = uuidv4();
@@ -121,6 +135,19 @@ export const updateCuisine = async (req: Request, res: Response) => {
     const updateData: any = {
         updatedAt: new Date(),
     };
+
+    let imageUrl: string | undefined = undefined;
+    let metaImageUrl: string | undefined = undefined;
+
+    if (Image) {
+        const result = await saveBase64Image(req, Image, "cuisines");
+        imageUrl = result.url;
+    }
+
+    if (meta_image) {
+        const result = await saveBase64Image(req, meta_image, "cuisines_meta");
+        metaImageUrl = result.url;
+    }
 
     if (name) updateData.name = name;
     if (nameAr) updateData.nameAr = nameAr;

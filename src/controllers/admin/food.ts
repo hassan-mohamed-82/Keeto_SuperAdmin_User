@@ -14,6 +14,7 @@ import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
+import { saveBase64Image } from "../../utils/handleImages";
 
 // =============================================
 // CREATE Food
@@ -45,6 +46,12 @@ export const createFood = async (req: Request, res: Response) => {
     if (addonsId) {
         const existingAddon = await db.select().from(addons).where(eq(addons.id, addonsId)).limit(1);
         if (!existingAddon[0]) throw new BadRequest("Addon not found");
+    }
+    let imageUrl: string | undefined = undefined;
+
+    if (image) {
+        const result = await saveBase64Image(req, image, "basiccampaign");
+        imageUrl = result.url;
     }
 
     const foodId = uuidv4();

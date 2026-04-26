@@ -8,6 +8,7 @@ const response_1 = require("../../utils/response");
 const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
+const handleImages_1 = require("../../utils/handleImages");
 // =============================================
 // CREATE Food
 // =============================================
@@ -29,6 +30,11 @@ const createFood = async (req, res) => {
         const existingAddon = await connection_1.db.select().from(schema_1.addons).where((0, drizzle_orm_1.eq)(schema_1.addons.id, addonsId)).limit(1);
         if (!existingAddon[0])
             throw new BadRequest_1.BadRequest("Addon not found");
+    }
+    let imageUrl = undefined;
+    if (image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, image, "basiccampaign");
+        imageUrl = result.url;
     }
     const foodId = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.food).values({

@@ -39,7 +39,7 @@ exports.userWalletTransactions = (0, mysql_core_1.mysqlTable)("user_wallet_trans
     amount: (0, mysql_core_1.decimal)("amount", { precision: 10, scale: 2 }).notNull(),
     balanceBefore: (0, mysql_core_1.decimal)("balance_before", { precision: 10, scale: 2 }).notNull(),
     reference: (0, mysql_core_1.varchar)("reference", { length: 255 }),
-    receiptImage: (0, mysql_core_1.longtext)("receipt_image"), // 🔥 مهم للـ manual
+    receiptImage: (0, mysql_core_1.varchar)("receipt_image", { length: 500 }), // 🔥 مهم للـ manual
     status: (0, mysql_core_1.mysqlEnum)("status", ["pending", "approved", "rejected"])
         .default("approved"), // automatic = approved
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),

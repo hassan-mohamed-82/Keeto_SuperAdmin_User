@@ -2,24 +2,28 @@ import fs from "fs/promises";
 import path from "path";
 
 export const deletePhotoFromServer = async (
-  relativePath: string
+  imageUrlOrPath: string
 ): Promise<boolean> => {
   try {
-    const filePath = path.join(__dirname, "..", "..", relativePath); // Adjust depth as needed
+    // استخراج المسار النسبي من الـ URL أو استخدامه مباشرة
+    let relativePath = imageUrlOrPath;
+    
+    // لو كان URL كامل، نستخرج المسار
+    if (imageUrlOrPath.startsWith("http")) {
+      const url = new URL(imageUrlOrPath);
+      relativePath = url.pathname.startsWith("/") 
+        ? url.pathname.slice(1) 
+        : url.pathname;
+    }
 
-    try {
-      await fs.access(filePath);
-    } catch {
-      return false;
-    }
-    try {
-      await fs.unlink(filePath);
-    } catch (err) {
-      throw new Error("can't remove");
-    }
+    const filePath = path.join(__dirname, "../..", relativePath);
+
+    await fs.access(filePath);
+    await fs.unlink(filePath);
+    
     return true;
   } catch (err) {
     console.error("Error deleting photo:", err);
-    throw err;
+    return false; // لا نرمي خطأ، فقط نرجع false
   }
 };

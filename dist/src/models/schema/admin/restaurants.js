@@ -21,8 +21,8 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     cuisineId: (0, mysql_core_1.char)("cuisine_id", { length: 36 }).references(() => Cuisine_1.cuisines.id),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }).references(() => zone_1.zones.id).notNull(),
     // الصور (Files/Images)
-    logo: (0, mysql_core_1.longtext)("logo").notNull(),
-    cover: (0, mysql_core_1.longtext)("cover"),
+    logo: (0, mysql_core_1.varchar)("logo", { length: 500 }).notNull(),
+    cover: (0, mysql_core_1.varchar)("cover", { length: 500 }),
     // ==========================================
     // 2. Delivery & Owner Info (الصورة الثانية)
     // ==========================================

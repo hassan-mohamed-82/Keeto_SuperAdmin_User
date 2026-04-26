@@ -4,17 +4,24 @@ import { paymentMethods } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors";
+import { saveBase64Image } from "../../utils/handleImages";
 
 export const createPaymentMethod = async (req: Request, res: Response) => {
     const { name, nameAr, nameFr, image, description, descriptionAr, descriptionFr, type, isActive } = req.body;
     if(!name || !nameAr || !nameFr || !description || !descriptionAr || !descriptionFr || !type ){
         throw new BadRequest("Missing required fields");
     }
+    let imageUrl: string | undefined = undefined;
+
+    if (image) {
+        const result = await saveBase64Image(req, image, "basiccampaign");
+        imageUrl = result.url;
+    }
     const [paymentMethod] = await db.insert(paymentMethods).values({
         name,
         nameAr,
         nameFr,
-        image,
+        image:imageUrl || '',
         description,
         descriptionAr,
         descriptionFr,

@@ -50,7 +50,7 @@ export const userWalletTransactions = mysqlTable("user_wallet_transactions", {
 
     reference: varchar("reference", { length: 255 }),
 
-    receiptImage: longtext("receipt_image"), // 🔥 مهم للـ manual
+    receiptImage: varchar("receipt_image", { length: 500 }), // 🔥 مهم للـ manual
 
     status: mysqlEnum("status", ["pending", "approved", "rejected"])
         .default("approved"), // automatic = approved

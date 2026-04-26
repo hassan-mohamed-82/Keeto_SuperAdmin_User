@@ -32,8 +32,8 @@ export const restaurants = mysqlTable("restaurants", {
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id).notNull(),
  
     // الصور (Files/Images)
-    logo: longtext("logo").notNull(),
-    cover: longtext("cover"),
+    logo: varchar("logo", { length: 500 }).notNull(),
+    cover: varchar("cover", { length: 500 }),
 
     // ==========================================
     // 2. Delivery & Owner Info (الصورة الثانية)
