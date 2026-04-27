@@ -48,6 +48,7 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     type: (0, mysql_core_1.mysqlEnum)("type", ["restaurantadmin", "superadmin"]).default("restaurantadmin"),
     // Status & Timestamps
     // ==========================================
+    addhome: (0, mysql_core_1.boolean)("addhome").default(false),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),

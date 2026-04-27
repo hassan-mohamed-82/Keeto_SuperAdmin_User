@@ -10,7 +10,10 @@ import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 // import walletRouter from "./userWallets";
 import favlistRouter from "./favlist";
+import restaurantFeaturesRouter from "./restaurantFeatures";
+
 const router = Router();
+router.use("/restaurants", restaurantFeaturesRouter);
 router.use("/home", homeRouter);
 router.use("/auth", authRouter);
 router.use(authenticated,authorizeRoles("user"));

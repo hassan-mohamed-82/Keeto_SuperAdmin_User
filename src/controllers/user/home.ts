@@ -3,7 +3,7 @@ import { db } from "../../models/connection";
 import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions } from "../../models/schema";
 import { eq, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { BadRequest, UnauthorizedError } from "../../Errors";
+import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 
 // ==========================================
 // 1. API شاشة الهوم (Home Screen)
@@ -280,3 +280,6 @@ export const getUserFavorites = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, { data: result });
 };
+
+
+

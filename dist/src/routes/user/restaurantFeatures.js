@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const restaurantFeatures_1 = require("../../controllers/user/restaurantFeatures");
+const catchAsync_1 = require("../../utils/catchAsync");
+const router = (0, express_1.Router)();
+router.get("/search", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.searchRestaurants));
+router.get("/home-list", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.getHomeRestaurants));
+router.put("/:restaurantId/addhome", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.toggleAddHome));
+exports.default = router;

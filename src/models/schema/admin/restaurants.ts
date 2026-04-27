@@ -6,7 +6,8 @@ import {
     json,
     char,
     text,
-    date
+    date,
+    boolean
 , longtext } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
@@ -65,6 +66,8 @@ export const restaurants = mysqlTable("restaurants", {
     type: mysqlEnum("type", ["restaurantadmin", "superadmin"]).default("restaurantadmin"),
     // Status & Timestamps
     // ==========================================
+
+    addhome: boolean("addhome").default(false),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
