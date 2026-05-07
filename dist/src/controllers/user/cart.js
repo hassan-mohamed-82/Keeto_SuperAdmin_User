@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clearCart = exports.removeCartItem = exports.updateCartItem = exports.getMyCart = exports.addToCart = void 0;
+exports.clearCart = exports.removeCartItem = exports.updateCartItem = exports.getCart = exports.addToCart = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -94,9 +94,11 @@ const addToCart = async (req, res) => {
     });
 };
 exports.addToCart = addToCart;
-const getMyCart = async (req, res) => {
+const getCart = async (req, res) => {
     const userId = req.user?.id;
-    const items = await connection_1.db.select({
+    // Get cart items
+    const items = await connection_1.db
+        .select({
         cartId: schema_1.cartItems.id,
         foodId: schema_1.food.id,
         name: schema_1.food.name,
@@ -109,48 +111,30 @@ const getMyCart = async (req, res) => {
         variations: schema_1.cartItems.variations
     })
         .from(schema_1.cartItems)
-        .innerJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, schema_1.food.id))
-        .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.cartItems.restaurantId, schema_1.restaurants.id))
+        .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, schema_1.food.id))
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.cartItems.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-    // ===============================
-    // 2. فكّ الـ variations IDs وجيب تفاصيلها
-    // ===============================
-    const formatted = await Promise.all(items.map(async (item) => {
-        const variations = item.variations || [];
-        const detailedVariations = [];
-        for (const v of variations) {
-            const variationId = v.variationId;
-            const optionId = v.optionId;
-            const [variation] = await connection_1.db
-                .select()
-                .from(schema_1.foodVariations)
-                .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, variationId))
-                .limit(1);
-            const [option] = await connection_1.db
-                .select()
-                .from(schema_1.variationOptions)
-                .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, optionId))
-                .limit(1);
-            if (variation && option) {
-                detailedVariations.push({
-                    variationId: variation.id,
-                    variationName: variation.name,
-                    optionId: option.id,
-                    optionName: option.optionName,
-                    additionalPrice: option.additionalPrice
-                });
-            }
-        }
-        return {
-            ...item,
-            variations: detailedVariations
-        };
+    // Format response
+    const formattedItems = items.map((item) => ({
+        cartId: item.cartId,
+        foodId: item.foodId,
+        name: item.name,
+        image: item.image,
+        restaurantId: item.restaurantId,
+        restaurantName: item.restaurantName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice,
+        // ✅ FIX variations
+        variations: typeof item.variations === "string"
+            ? JSON.parse(item.variations)
+            : item.variations || []
     }));
     return (0, response_1.SuccessResponse)(res, {
-        data: formatted
+        data: formattedItems
     });
 };
-exports.getMyCart = getMyCart;
+exports.getCart = getCart;
 const updateCartItem = async (req, res) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;

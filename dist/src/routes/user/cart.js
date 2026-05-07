@@ -5,7 +5,7 @@ const cart_1 = require("../../controllers/user/cart");
 const catchAsync_1 = require("../../utils/catchAsync");
 const router = (0, express_1.Router)();
 router.post("/", (0, catchAsync_1.catchAsync)(cart_1.addToCart));
-router.get("/", (0, catchAsync_1.catchAsync)(cart_1.getMyCart));
+router.get("/", (0, catchAsync_1.catchAsync)(cart_1.getCart));
 router.put("/:cartItemId", (0, catchAsync_1.catchAsync)(cart_1.updateCartItem));
 router.delete("/:cartItemId", (0, catchAsync_1.catchAsync)(cart_1.removeCartItem));
 router.delete("/", (0, catchAsync_1.catchAsync)(cart_1.clearCart));

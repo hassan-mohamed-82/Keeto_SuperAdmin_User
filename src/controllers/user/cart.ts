@@ -118,78 +118,74 @@ export const addToCart = async (req: Request | any, res: Response) => {
     });
 };
 
-export const getMyCart = async (req: Request | any, res: Response) => {
+export const getCart = async (req: Request | any, res: Response) => {
+
     const userId = req.user?.id;
 
-    const items = await db.select({
-        cartId: cartItems.id,
-        foodId: food.id,
-        name: food.name,
-        image: food.image,
+    // Get cart items
+    const items = await db
+        .select({
+            cartId: cartItems.id,
 
-        restaurantId: restaurants.id,
-        restaurantName: restaurants.name,
+            foodId: food.id,
 
-        quantity: cartItems.quantity,
+            name: food.name,
 
-        unitPrice: cartItems.unitPrice,
-        totalPrice: cartItems.totalPrice,
+            image: food.image,
 
-        variations: cartItems.variations
-    })
-    .from(cartItems)
-    .innerJoin(food, eq(cartItems.foodId, food.id))
-    .innerJoin(restaurants, eq(cartItems.restaurantId, restaurants.id))
-    .where(eq(cartItems.userId, userId));
+            restaurantId: restaurants.id,
 
-    // ===============================
-    // 2. فكّ الـ variations IDs وجيب تفاصيلها
-    // ===============================
-    const formatted = await Promise.all(
-        items.map(async (item: any) => {
+            restaurantName: restaurants.name,
 
-            const variations = item.variations || [];
+            quantity: cartItems.quantity,
 
-            const detailedVariations = [];
+            unitPrice: cartItems.unitPrice,
 
-            for (const v of variations) {
+            totalPrice: cartItems.totalPrice,
 
-                const variationId = v.variationId;
-                const optionId = v.optionId;
-
-                const [variation] = await db
-                    .select()
-                    .from(foodVariations)
-                    .where(eq(foodVariations.id, variationId))
-                    .limit(1);
-
-                const [option] = await db
-                    .select()
-                    .from(variationOptions)
-                    .where(eq(variationOptions.id, optionId))
-                    .limit(1);
-
-                if (variation && option) {
-                    detailedVariations.push({
-                        variationId: variation.id,
-                        variationName: variation.name,
-
-                        optionId: option.id,
-                        optionName: option.optionName,
-                        additionalPrice: option.additionalPrice
-                    });
-                }
-            }
-
-            return {
-                ...item,
-                variations: detailedVariations
-            };
+            variations: cartItems.variations
         })
-    );
+        .from(cartItems)
+
+        .leftJoin(food, eq(cartItems.foodId, food.id))
+
+        .leftJoin(
+            restaurants,
+            eq(cartItems.restaurantId, restaurants.id)
+        )
+
+        .where(eq(cartItems.userId, userId));
+
+    // Format response
+    const formattedItems = items.map((item: any) => ({
+
+        cartId: item.cartId,
+
+        foodId: item.foodId,
+
+        name: item.name,
+
+        image: item.image,
+
+        restaurantId: item.restaurantId,
+
+        restaurantName: item.restaurantName,
+
+        quantity: item.quantity,
+
+        unitPrice: item.unitPrice,
+
+        totalPrice: item.totalPrice,
+
+        // ✅ FIX variations
+        variations:
+            typeof item.variations === "string"
+                ? JSON.parse(item.variations)
+                : item.variations || []
+    }));
 
     return SuccessResponse(res, {
-        data: formatted
+        data: formattedItems
     });
 };
 
