@@ -10,12 +10,12 @@ const uuid_1 = require("uuid");
 const addToCart = async (req, res) => {
     const userId = req.user?.id;
     const { foodId, quantity = 1, variations = [] } = req.body;
-    // 1. Get food
     const [itemFood] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.id, foodId)).limit(1);
     if (!itemFood)
         throw new BadRequest_1.BadRequest("Food not found");
-    // 2. Check restaurant rule
-    const existingCart = await connection_1.db.select().from(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId)).limit(1);
+    const existingCart = await connection_1.db.select().from(schema_1.cartItems)
+        .where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId))
+        .limit(1);
     if (existingCart.length > 0 && existingCart[0].restaurantId !== itemFood.restaurantid) {
         return res.status(409).json({
             success: false,
@@ -23,53 +23,49 @@ const addToCart = async (req, res) => {
             clearCartRequired: true
         });
     }
-    // 3. Get variations from DB
-    const dbVariations = await connection_1.db.select().from(schema_1.foodVariations).where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, foodId));
+    const dbVariations = await connection_1.db
+        .select()
+        .from(schema_1.foodVariations)
+        .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, foodId));
     let totalExtraPrice = 0;
-    // 🔥 VALIDATION
     for (const v of dbVariations) {
         const selectedOptions = variations.filter((x) => x.variationId === v.id);
-        // Required
         if (v.isRequired && selectedOptions.length === 0) {
             throw new BadRequest_1.BadRequest(`${v.name} is required`);
         }
-        // Min
         if (v.min && selectedOptions.length < v.min) {
             throw new BadRequest_1.BadRequest(`Minimum ${v.min} required for ${v.name}`);
         }
-        // Max
         if (v.max && selectedOptions.length > v.max) {
             throw new BadRequest_1.BadRequest(`Maximum ${v.max} allowed for ${v.name}`);
         }
-        // Single
-        if (v.selectionType === "single" && selectedOptions.length > 1) {
-            throw new BadRequest_1.BadRequest(`${v.name} allows only one option`);
-        }
-        // Get options
-        const dbOptions = await connection_1.db.select().from(schema_1.variationOptions).where((0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, v.id));
+        const dbOptions = await connection_1.db
+            .select()
+            .from(schema_1.variationOptions)
+            .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, v.id));
         for (const selected of selectedOptions) {
             const found = dbOptions.find(o => o.id === selected.optionId);
-            if (!found) {
+            if (!found)
                 throw new BadRequest_1.BadRequest("Invalid option selected");
-            }
             totalExtraPrice += Number(found.additionalPrice || 0);
         }
     }
-    // 4. Calculate price
     const basePrice = Number(itemFood.price);
     const unitPrice = basePrice + totalExtraPrice;
-    // 5. Unique key
-    const key = JSON.stringify(variations.sort((a, b) => a.optionId.localeCompare(b.optionId)));
+    const normalized = variations.sort((a, b) => a.optionId.localeCompare(b.optionId));
+    const key = JSON.stringify(normalized);
     const existingItems = await connection_1.db.select().from(schema_1.cartItems)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId), (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, foodId)));
     const existingSame = existingItems.find((item) => JSON.stringify(item.variations) === key);
     if (existingSame) {
         const newQuantity = existingSame.quantity + quantity;
-        const newTotal = unitPrice * newQuantity;
+        const totalPrice = unitPrice * newQuantity;
         await connection_1.db.update(schema_1.cartItems)
             .set({
             quantity: newQuantity,
-            totalPrice: newTotal.toString()
+            unitPrice: unitPrice.toString(),
+            totalPrice: totalPrice.toString(),
+            variations: JSON.stringify(normalized)
         })
             .where((0, drizzle_orm_1.eq)(schema_1.cartItems.id, existingSame.id));
     }
@@ -82,7 +78,7 @@ const addToCart = async (req, res) => {
             quantity,
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * quantity).toString(),
-            variations
+            variations: JSON.stringify(normalized)
         });
     }
     return (0, response_1.SuccessResponse)(res, {
@@ -170,9 +166,8 @@ const updateCartItem = async (req, res) => {
         .from(schema_1.cartItems)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.id, cartItemId), (0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId)))
         .limit(1);
-    if (!cartItem) {
+    if (!cartItem)
         throw new BadRequest_1.BadRequest("Cart item not found");
-    }
     const [itemFood] = await connection_1.db
         .select()
         .from(schema_1.food)
@@ -180,11 +175,11 @@ const updateCartItem = async (req, res) => {
         .limit(1);
     if (!itemFood)
         throw new BadRequest_1.BadRequest("Food not found");
-    let totalExtraPrice = 0;
     const dbVariations = await connection_1.db
         .select()
         .from(schema_1.foodVariations)
         .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, itemFood.id));
+    let totalExtraPrice = 0;
     for (const v of dbVariations) {
         const selectedOptions = variations.filter((x) => x.variationId === v.id);
         if (v.isRequired && selectedOptions.length === 0) {
@@ -209,20 +204,22 @@ const updateCartItem = async (req, res) => {
     }
     const basePrice = Number(itemFood.price);
     const unitPrice = basePrice + totalExtraPrice;
-    const finalQuantity = quantity || cartItem.quantity;
+    const finalQty = quantity ?? cartItem.quantity;
+    const normalized = variations.sort((a, b) => a.optionId.localeCompare(b.optionId));
+    const totalPrice = unitPrice * finalQty;
     await connection_1.db.update(schema_1.cartItems)
         .set({
-        quantity: finalQuantity,
-        variations: JSON.stringify(variations),
+        quantity: finalQty,
         unitPrice: unitPrice.toString(),
-        totalPrice: (unitPrice * finalQuantity).toString()
+        totalPrice: totalPrice.toString(),
+        variations: JSON.stringify(normalized)
     })
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.id, cartItemId), (0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId)));
     return (0, response_1.SuccessResponse)(res, {
         message: "Cart updated successfully",
         data: {
             unitPrice,
-            totalPrice: unitPrice * finalQuantity
+            totalPrice
         }
     });
 };
