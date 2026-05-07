@@ -54,23 +54,33 @@ export const addToCart = async (req: Request | any, res: Response) => {
 
     let totalExtraPrice = 0;
 
-    for (const v of dbVariations) {
-        const selectedOptions = safeVariations.filter(x => x.variationId === v.id);
-
-        if (v.isRequired && selectedOptions.length === 0) {
-            throw new BadRequest(`${v.name} is required`);
+    // 1. Validate that EVERY variation sent by the user actually exists and is valid
+    for (const selected of safeVariations) {
+        const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
+        
+        // لو الـ variationId غلط أو مش تبع الأكلة دي
+        if (!validDbVariation) {
+            throw new BadRequest(`Invalid variation ID sent: ${selected.variationId}`);
         }
 
         const dbOptions = await db
             .select()
             .from(variationOptions)
-            .where(eq(variationOptions.variationId, v.id));
+            .where(eq(variationOptions.variationId, validDbVariation.id));
 
-        for (const selected of selectedOptions) {
-            const found = dbOptions.find(o => o.id === selected.optionId);
-            if (!found) throw new BadRequest("Invalid option selected");
+        const foundOption = dbOptions.find(o => o.id === selected.optionId);
+        if (!foundOption) {
+            throw new BadRequest(`Invalid option selected for variation: ${validDbVariation.name}`);
+        }
 
-            totalExtraPrice += Number(found.additionalPrice || 0);
+        totalExtraPrice += Number(foundOption.additionalPrice || 0);
+    }
+
+    // 2. Validate that all REQUIRED variations are provided
+    for (const v of dbVariations) {
+        if (v.isRequired) {
+            const isProvided = safeVariations.some(x => x.variationId === v.id);
+            if (!isProvided) throw new BadRequest(`${v.name} is required`);
         }
     }
 
@@ -83,9 +93,14 @@ export const addToCart = async (req: Request | any, res: Response) => {
     const existingItems = await db.select().from(cartItems)
         .where(and(eq(cartItems.userId, userId), eq(cartItems.foodId, foodId)));
 
-    const existingSame = existingItems.find(item =>
-        JSON.stringify(item.variations) === key
-    );
+    // ✅ Fix: Properly parse DB variations before comparing
+    const existingSame = existingItems.find(item => {
+        let dbVars = item.variations;
+        if (typeof dbVars === "string") {
+            try { dbVars = JSON.parse(dbVars); } catch { dbVars = []; }
+        }
+        return JSON.stringify(normalizeVariations(dbVars)) === key;
+    });
 
     if (existingSame) {
         const newQty = existingSame.quantity + quantity;
@@ -95,7 +110,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
                 quantity: newQty,
                 unitPrice: unitPrice.toString(),
                 totalPrice: (unitPrice * newQty).toString(),
-                variations: JSON.stringify(normalized)
+                variations: JSON.stringify(normalized) 
+                // 💡 ملاحظة: لو عمود variations نوعه JSONB في الداتا بيز، 
+                // شيل JSON.stringify و ابعت normalized مباشرة
             })
             .where(eq(cartItems.id, existingSame.id));
 
@@ -109,6 +126,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * quantity).toString(),
             variations: JSON.stringify(normalized)
+            // 💡 نفس الملاحظة: ابعت normalized مباشرة لو العمود JSONB
         });
     }
 
