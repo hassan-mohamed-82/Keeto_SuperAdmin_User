@@ -7,9 +7,22 @@ const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
+/* =========================================
+   Helper
+========================================= */
+const normalizeVariations = (variations) => {
+    const safe = Array.isArray(variations) ? variations : [];
+    return safe
+        .filter(v => v?.optionId)
+        .sort((a, b) => String(a.optionId).localeCompare(String(b.optionId)));
+};
+/* =========================================
+   1. ADD TO CART
+========================================= */
 const addToCart = async (req, res) => {
     const userId = req.user?.id;
     const { foodId, quantity = 1, variations = [] } = req.body;
+    const safeVariations = Array.isArray(variations) ? variations : [];
     const [itemFood] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.id, foodId)).limit(1);
     if (!itemFood)
         throw new BadRequest_1.BadRequest("Food not found");
@@ -29,15 +42,9 @@ const addToCart = async (req, res) => {
         .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, foodId));
     let totalExtraPrice = 0;
     for (const v of dbVariations) {
-        const selectedOptions = variations.filter((x) => x.variationId === v.id);
+        const selectedOptions = safeVariations.filter(x => x.variationId === v.id);
         if (v.isRequired && selectedOptions.length === 0) {
             throw new BadRequest_1.BadRequest(`${v.name} is required`);
-        }
-        if (v.min && selectedOptions.length < v.min) {
-            throw new BadRequest_1.BadRequest(`Minimum ${v.min} required for ${v.name}`);
-        }
-        if (v.max && selectedOptions.length > v.max) {
-            throw new BadRequest_1.BadRequest(`Maximum ${v.max} allowed for ${v.name}`);
         }
         const dbOptions = await connection_1.db
             .select()
@@ -52,19 +59,18 @@ const addToCart = async (req, res) => {
     }
     const basePrice = Number(itemFood.price);
     const unitPrice = basePrice + totalExtraPrice;
-    const normalized = variations.sort((a, b) => a.optionId.localeCompare(b.optionId));
+    const normalized = normalizeVariations(safeVariations);
     const key = JSON.stringify(normalized);
     const existingItems = await connection_1.db.select().from(schema_1.cartItems)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId), (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, foodId)));
-    const existingSame = existingItems.find((item) => JSON.stringify(item.variations) === key);
+    const existingSame = existingItems.find(item => JSON.stringify(item.variations) === key);
     if (existingSame) {
-        const newQuantity = existingSame.quantity + quantity;
-        const totalPrice = unitPrice * newQuantity;
+        const newQty = existingSame.quantity + quantity;
         await connection_1.db.update(schema_1.cartItems)
             .set({
-            quantity: newQuantity,
+            quantity: newQty,
             unitPrice: unitPrice.toString(),
-            totalPrice: totalPrice.toString(),
+            totalPrice: (unitPrice * newQty).toString(),
             variations: JSON.stringify(normalized)
         })
             .where((0, drizzle_orm_1.eq)(schema_1.cartItems.id, existingSame.id));
@@ -90,6 +96,9 @@ const addToCart = async (req, res) => {
     });
 };
 exports.addToCart = addToCart;
+/* =========================================
+   2. GET CART (DETAILED)
+========================================= */
 const getCart = async (req, res) => {
     const userId = req.user?.id;
     const items = await connection_1.db
@@ -109,58 +118,47 @@ const getCart = async (req, res) => {
         .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, schema_1.food.id))
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.cartItems.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-    const formattedItems = await Promise.all(items.map(async (item) => {
-        const parsedVariations = typeof item.variations === "string"
+    const formatted = await Promise.all(items.map(async (item) => {
+        const parsed = typeof item.variations === "string"
             ? JSON.parse(item.variations)
             : item.variations || [];
-        let detailedVariations = [];
-        for (const v of parsedVariations) {
-            // هات الفارييشن من الداتابيز
+        const details = [];
+        for (const v of parsed) {
             const [variation] = await connection_1.db
                 .select()
                 .from(schema_1.foodVariations)
                 .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, v.variationId))
                 .limit(1);
-            // هات الاوبشن
             const [option] = await connection_1.db
                 .select()
                 .from(schema_1.variationOptions)
                 .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, v.optionId))
                 .limit(1);
             if (variation && option) {
-                detailedVariations.push({
+                details.push({
                     variationId: variation.id,
                     variationName: variation.name,
-                    variationNameAr: variation.nameAr,
                     optionId: option.id,
                     optionName: option.optionName,
-                    optionNameAr: option.optionNameAr,
                     additionalPrice: option.additionalPrice
                 });
             }
         }
         return {
-            cartId: item.cartId,
-            foodId: item.foodId,
-            name: item.name,
-            image: item.image,
-            restaurantId: item.restaurantId,
-            restaurantName: item.restaurantName,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            totalPrice: item.totalPrice,
-            variations: detailedVariations
+            ...item,
+            variations: details
         };
     }));
-    return (0, response_1.SuccessResponse)(res, {
-        data: formattedItems
-    });
+    return (0, response_1.SuccessResponse)(res, { data: formatted });
 };
 exports.getCart = getCart;
+/* =========================================
+   3. UPDATE CART ITEM
+========================================= */
 const updateCartItem = async (req, res) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
-    const { quantity, variations = [] } = req.body;
+    const { quantity, variations } = req.body;
     const [cartItem] = await connection_1.db
         .select()
         .from(schema_1.cartItems)
@@ -173,77 +171,70 @@ const updateCartItem = async (req, res) => {
         .from(schema_1.food)
         .where((0, drizzle_orm_1.eq)(schema_1.food.id, cartItem.foodId))
         .limit(1);
-    if (!itemFood)
-        throw new BadRequest_1.BadRequest("Food not found");
+    const safeVariations = variations !== undefined
+        ? normalizeVariations(variations)
+        : normalizeVariations(typeof cartItem.variations === "string"
+            ? JSON.parse(cartItem.variations)
+            : cartItem.variations || []);
+    const qty = quantity ?? cartItem.quantity;
     const dbVariations = await connection_1.db
         .select()
         .from(schema_1.foodVariations)
         .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, itemFood.id));
     let totalExtraPrice = 0;
     for (const v of dbVariations) {
-        const selectedOptions = variations.filter((x) => x.variationId === v.id);
-        if (v.isRequired && selectedOptions.length === 0) {
-            throw new BadRequest_1.BadRequest(`${v.name} is required`);
-        }
-        if (v.min && selectedOptions.length < v.min) {
-            throw new BadRequest_1.BadRequest(`Minimum ${v.min} required for ${v.name}`);
-        }
-        if (v.max && selectedOptions.length > v.max) {
-            throw new BadRequest_1.BadRequest(`Maximum ${v.max} allowed for ${v.name}`);
-        }
+        const selected = safeVariations.filter(x => x.variationId === v.id);
         const dbOptions = await connection_1.db
             .select()
             .from(schema_1.variationOptions)
             .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, v.id));
-        for (const selected of selectedOptions) {
-            const found = dbOptions.find(o => o.id === selected.optionId);
+        for (const s of selected) {
+            const found = dbOptions.find(o => o.id === s.optionId);
             if (!found)
-                throw new BadRequest_1.BadRequest("Invalid option selected");
+                throw new BadRequest_1.BadRequest("Invalid option");
             totalExtraPrice += Number(found.additionalPrice || 0);
         }
     }
-    const basePrice = Number(itemFood.price);
-    const unitPrice = basePrice + totalExtraPrice;
-    const finalQty = quantity ?? cartItem.quantity;
-    const normalized = variations.sort((a, b) => a.optionId.localeCompare(b.optionId));
-    const totalPrice = unitPrice * finalQty;
+    const unitPrice = Number(itemFood.price) + totalExtraPrice;
     await connection_1.db.update(schema_1.cartItems)
         .set({
-        quantity: finalQty,
+        quantity: qty,
         unitPrice: unitPrice.toString(),
-        totalPrice: totalPrice.toString(),
-        variations: JSON.stringify(normalized)
+        totalPrice: (unitPrice * qty).toString(),
+        variations: JSON.stringify(safeVariations)
     })
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.id, cartItemId), (0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId)));
     return (0, response_1.SuccessResponse)(res, {
         message: "Cart updated successfully",
         data: {
             unitPrice,
-            totalPrice
+            totalPrice: unitPrice * qty
         }
     });
 };
 exports.updateCartItem = updateCartItem;
-// ==========================================
-// 4. حذف صنف معين من السلة (Delete Item)
-// ==========================================
+/* =========================================
+   4. REMOVE ITEM
+========================================= */
 const removeCartItem = async (req, res) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
-    const deleted = await connection_1.db.delete(schema_1.cartItems)
+    await connection_1.db.delete(schema_1.cartItems)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.id, cartItemId), (0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId)));
-    if (deleted[0].affectedRows === 0) {
-        throw new BadRequest_1.BadRequest("The item is not found in your cart");
-    }
-    return (0, response_1.SuccessResponse)(res, { message: "The item has been removed from the cart" });
+    return (0, response_1.SuccessResponse)(res, {
+        message: "The item has been removed from the cart"
+    });
 };
 exports.removeCartItem = removeCartItem;
-// ==========================================
-// 5. تفريغ السلة بالكامل (Clear Cart)
-// ==========================================
+/* =========================================
+   5. CLEAR CART
+========================================= */
 const clearCart = async (req, res) => {
     const userId = req.user?.id;
-    await connection_1.db.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-    return (0, response_1.SuccessResponse)(res, { message: "The cart has been cleared successfully" });
+    await connection_1.db.delete(schema_1.cartItems)
+        .where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
+    return (0, response_1.SuccessResponse)(res, {
+        message: "The cart has been cleared successfully"
+    });
 };
 exports.clearCart = clearCart;

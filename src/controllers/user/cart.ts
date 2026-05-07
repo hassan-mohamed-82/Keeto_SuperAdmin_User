@@ -1,15 +1,36 @@
-// controllers/user/CartController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { cartItems, food, restaurants, variationOptions,foodVariations } from "../../models/schema";
+import {
+    cartItems,
+    food,
+    restaurants,
+    variationOptions,
+    foodVariations
+} from "../../models/schema";
+
 import { eq, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
+/* =========================================
+   Helper
+========================================= */
+const normalizeVariations = (variations: any) => {
+    const safe = Array.isArray(variations) ? variations : [];
+    return safe
+        .filter(v => v?.optionId)
+        .sort((a, b) => String(a.optionId).localeCompare(String(b.optionId)));
+};
+
+/* =========================================
+   1. ADD TO CART
+========================================= */
 export const addToCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const { foodId, quantity = 1, variations = [] } = req.body;
+
+    const safeVariations = Array.isArray(variations) ? variations : [];
 
     const [itemFood] = await db.select().from(food).where(eq(food.id, foodId)).limit(1);
     if (!itemFood) throw new BadRequest("Food not found");
@@ -34,19 +55,10 @@ export const addToCart = async (req: Request | any, res: Response) => {
     let totalExtraPrice = 0;
 
     for (const v of dbVariations) {
-
-        const selectedOptions = variations.filter((x: any) => x.variationId === v.id);
+        const selectedOptions = safeVariations.filter(x => x.variationId === v.id);
 
         if (v.isRequired && selectedOptions.length === 0) {
             throw new BadRequest(`${v.name} is required`);
-        }
-
-        if (v.min && selectedOptions.length < v.min) {
-            throw new BadRequest(`Minimum ${v.min} required for ${v.name}`);
-        }
-
-        if (v.max && selectedOptions.length > v.max) {
-            throw new BadRequest(`Maximum ${v.max} allowed for ${v.name}`);
         }
 
         const dbOptions = await db
@@ -65,38 +77,29 @@ export const addToCart = async (req: Request | any, res: Response) => {
     const basePrice = Number(itemFood.price);
     const unitPrice = basePrice + totalExtraPrice;
 
-    const normalized = variations.sort((a: any, b: any) =>
-        a.optionId.localeCompare(b.optionId)
-    );
-
+    const normalized = normalizeVariations(safeVariations);
     const key = JSON.stringify(normalized);
 
     const existingItems = await db.select().from(cartItems)
-        .where(and(
-            eq(cartItems.userId, userId),
-            eq(cartItems.foodId, foodId)
-        ));
+        .where(and(eq(cartItems.userId, userId), eq(cartItems.foodId, foodId)));
 
-    const existingSame = existingItems.find((item: any) =>
+    const existingSame = existingItems.find(item =>
         JSON.stringify(item.variations) === key
     );
 
     if (existingSame) {
-
-        const newQuantity = existingSame.quantity + quantity;
-        const totalPrice = unitPrice * newQuantity;
+        const newQty = existingSame.quantity + quantity;
 
         await db.update(cartItems)
             .set({
-                quantity: newQuantity,
+                quantity: newQty,
                 unitPrice: unitPrice.toString(),
-                totalPrice: totalPrice.toString(),
+                totalPrice: (unitPrice * newQty).toString(),
                 variations: JSON.stringify(normalized)
             })
             .where(eq(cartItems.id, existingSame.id));
 
     } else {
-
         await db.insert(cartItems).values({
             id: uuidv4(),
             userId,
@@ -117,6 +120,10 @@ export const addToCart = async (req: Request | any, res: Response) => {
         }
     });
 };
+
+/* =========================================
+   2. GET CART (DETAILED)
+========================================= */
 export const getCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
 
@@ -138,26 +145,22 @@ export const getCart = async (req: Request | any, res: Response) => {
         .leftJoin(restaurants, eq(cartItems.restaurantId, restaurants.id))
         .where(eq(cartItems.userId, userId));
 
-    const formattedItems = await Promise.all(
+    const formatted = await Promise.all(
         items.map(async (item: any) => {
 
-            const parsedVariations =
-                typeof item.variations === "string"
-                    ? JSON.parse(item.variations)
-                    : item.variations || [];
+            const parsed = typeof item.variations === "string"
+                ? JSON.parse(item.variations)
+                : item.variations || [];
 
-            let detailedVariations: any[] = [];
+            const details = [];
 
-            for (const v of parsedVariations) {
-
-                // هات الفارييشن من الداتابيز
+            for (const v of parsed) {
                 const [variation] = await db
                     .select()
                     .from(foodVariations)
                     .where(eq(foodVariations.id, v.variationId))
                     .limit(1);
 
-                // هات الاوبشن
                 const [option] = await db
                     .select()
                     .from(variationOptions)
@@ -165,42 +168,33 @@ export const getCart = async (req: Request | any, res: Response) => {
                     .limit(1);
 
                 if (variation && option) {
-                    detailedVariations.push({
+                    details.push({
                         variationId: variation.id,
                         variationName: variation.name,
-                        variationNameAr: variation.nameAr,
                         optionId: option.id,
                         optionName: option.optionName,
-                        optionNameAr: option.optionNameAr,
                         additionalPrice: option.additionalPrice
                     });
                 }
             }
 
             return {
-                cartId: item.cartId,
-                foodId: item.foodId,
-                name: item.name,
-                image: item.image,
-                restaurantId: item.restaurantId,
-                restaurantName: item.restaurantName,
-                quantity: item.quantity,
-                unitPrice: item.unitPrice,
-                totalPrice: item.totalPrice,
-                variations: detailedVariations
+                ...item,
+                variations: details
             };
         })
     );
 
-    return SuccessResponse(res, {
-        data: formattedItems
-    });
+    return SuccessResponse(res, { data: formatted });
 };
 
+/* =========================================
+   3. UPDATE CART ITEM
+========================================= */
 export const updateCartItem = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
-    const { quantity, variations = [] } = req.body;
+    const { quantity, variations } = req.body;
 
     const [cartItem] = await db
         .select()
@@ -216,7 +210,16 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         .where(eq(food.id, cartItem.foodId))
         .limit(1);
 
-    if (!itemFood) throw new BadRequest("Food not found");
+    const safeVariations =
+        variations !== undefined
+            ? normalizeVariations(variations)
+            : normalizeVariations(
+                  typeof cartItem.variations === "string" 
+                      ? JSON.parse(cartItem.variations) 
+                      : cartItem.variations || []
+              );
+
+    const qty = quantity ?? cartItem.quantity;
 
     const dbVariations = await db
         .select()
@@ -226,89 +229,66 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     let totalExtraPrice = 0;
 
     for (const v of dbVariations) {
-
-        const selectedOptions = variations.filter((x: any) => x.variationId === v.id);
-
-        if (v.isRequired && selectedOptions.length === 0) {
-            throw new BadRequest(`${v.name} is required`);
-        }
-
-        if (v.min && selectedOptions.length < v.min) {
-            throw new BadRequest(`Minimum ${v.min} required for ${v.name}`);
-        }
-
-        if (v.max && selectedOptions.length > v.max) {
-            throw new BadRequest(`Maximum ${v.max} allowed for ${v.name}`);
-        }
+        const selected = safeVariations.filter(x => x.variationId === v.id);
 
         const dbOptions = await db
             .select()
             .from(variationOptions)
             .where(eq(variationOptions.variationId, v.id));
 
-        for (const selected of selectedOptions) {
-            const found = dbOptions.find(o => o.id === selected.optionId);
-            if (!found) throw new BadRequest("Invalid option selected");
+        for (const s of selected) {
+            const found = dbOptions.find(o => o.id === s.optionId);
+            if (!found) throw new BadRequest("Invalid option");
 
             totalExtraPrice += Number(found.additionalPrice || 0);
         }
     }
 
-    const basePrice = Number(itemFood.price);
-    const unitPrice = basePrice + totalExtraPrice;
-
-    const finalQty = quantity ?? cartItem.quantity;
-
-    const normalized = variations.sort((a: any, b: any) =>
-        a.optionId.localeCompare(b.optionId)
-    );
-
-    const totalPrice = unitPrice * finalQty;
+    const unitPrice = Number(itemFood.price) + totalExtraPrice;
 
     await db.update(cartItems)
         .set({
-            quantity: finalQty,
+            quantity: qty,
             unitPrice: unitPrice.toString(),
-            totalPrice: totalPrice.toString(),
-            variations: JSON.stringify(normalized)
+            totalPrice: (unitPrice * qty).toString(),
+            variations: JSON.stringify(safeVariations)
         })
-        .where(and(
-            eq(cartItems.id, cartItemId),
-            eq(cartItems.userId, userId)
-        ));
+        .where(and(eq(cartItems.id, cartItemId), eq(cartItems.userId, userId)));
 
     return SuccessResponse(res, {
         message: "Cart updated successfully",
         data: {
             unitPrice,
-            totalPrice
+            totalPrice: unitPrice * qty
         }
     });
 };
-// ==========================================
-// 4. حذف صنف معين من السلة (Delete Item)
-// ==========================================
+
+/* =========================================
+   4. REMOVE ITEM
+========================================= */
 export const removeCartItem = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
 
-    const deleted = await db.delete(cartItems)
+    await db.delete(cartItems)
         .where(and(eq(cartItems.id, cartItemId), eq(cartItems.userId, userId)));
 
-    if (deleted[0].affectedRows === 0) {
-        throw new BadRequest("The item is not found in your cart");
-    }
-
-    return SuccessResponse(res, { message: "The item has been removed from the cart" });
+    return SuccessResponse(res, {
+        message: "The item has been removed from the cart"
+    });
 };
 
-// ==========================================
-// 5. تفريغ السلة بالكامل (Clear Cart)
-// ==========================================
+/* =========================================
+   5. CLEAR CART
+========================================= */
 export const clearCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
 
-    await db.delete(cartItems).where(eq(cartItems.userId, userId));
+    await db.delete(cartItems)
+        .where(eq(cartItems.userId, userId));
 
-    return SuccessResponse(res, { message: "The cart has been cleared successfully" });
+    return SuccessResponse(res, {
+        message: "The cart has been cleared successfully"
+    });
 };
