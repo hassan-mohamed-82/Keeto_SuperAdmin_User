@@ -1,11 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getHomeRestaurants = exports.toggleAddHome = exports.searchRestaurants = void 0;
+exports.getHomeRestaurants = exports.removeFromHome = exports.toggleAddHome = exports.searchRestaurants = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
+// Helper: حذف الباسورد وتحويل 0/1 لـ true/false
+const cleanRestaurantResult = (row) => {
+    const { password, ...safe } = row;
+    return {
+        ...safe,
+        isFavorite: !!row.isFavorite,
+        isAddHome: !!row.isAddHome,
+    };
+};
 // 1. Search for restaurants
 const searchRestaurants = async (req, res) => {
     const { query } = req.query;
@@ -26,10 +35,10 @@ const searchRestaurants = async (req, res) => {
         .leftJoin(schema_1.favorites, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.restaurantId, schema_1.restaurants.id), (0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId)))
         .leftJoin(schema_1.userAddHome, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userAddHome.restaurantId, schema_1.restaurants.id), (0, drizzle_orm_1.eq)(schema_1.userAddHome.userId, userId)))
         .where((0, drizzle_orm_1.or)((0, drizzle_orm_1.like)(schema_1.restaurants.name, searchTerm), (0, drizzle_orm_1.like)(schema_1.restaurants.nameAr, searchTerm), (0, drizzle_orm_1.like)(schema_1.restaurants.nameFr, searchTerm)));
-    return (0, response_1.SuccessResponse)(res, { message: "Search results", data: results });
+    return (0, response_1.SuccessResponse)(res, { message: "Search results", data: results.map(cleanRestaurantResult) });
 };
 exports.searchRestaurants = searchRestaurants;
-// 2. Toggle addhome status for a restaurant
+// 2. Toggle addhome status for a restaurant (add or remove)
 const toggleAddHome = async (req, res) => {
     const { restaurantId } = req.params;
     const { addhome } = req.body;
@@ -66,7 +75,19 @@ const toggleAddHome = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Restaurant home status updated successfully" });
 };
 exports.toggleAddHome = toggleAddHome;
-// 3. Get all restaurants that are added to home
+// 3. Remove restaurant from home (shortcut endpoint)
+const removeFromHome = async (req, res) => {
+    const { restaurantId } = req.params;
+    const userId = req.user?.id;
+    if (!userId)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    await connection_1.db
+        .delete(schema_1.userAddHome)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userAddHome.userId, userId), (0, drizzle_orm_1.eq)(schema_1.userAddHome.restaurantId, restaurantId)));
+    return (0, response_1.SuccessResponse)(res, { message: "Restaurant removed from home successfully" });
+};
+exports.removeFromHome = removeFromHome;
+// 4. Get all restaurants that are added to home
 const getHomeRestaurants = async (req, res) => {
     const userId = req.user?.id;
     if (!userId)
@@ -75,12 +96,12 @@ const getHomeRestaurants = async (req, res) => {
         .select({
         ...(0, drizzle_orm_1.getTableColumns)(schema_1.restaurants),
         isFavorite: (0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
-        isAddHome: (0, drizzle_orm_1.sql) `true`.as('isAddHome') // Already filtered by userAddHome inner join
+        isAddHome: (0, drizzle_orm_1.sql) `true`.as('isAddHome')
     })
         .from(schema_1.userAddHome)
         .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.userAddHome.restaurantId, schema_1.restaurants.id))
         .leftJoin(schema_1.favorites, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.restaurantId, schema_1.restaurants.id), (0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId)))
         .where((0, drizzle_orm_1.eq)(schema_1.userAddHome.userId, userId));
-    return (0, response_1.SuccessResponse)(res, { message: "Home restaurants fetched successfully", data: results });
+    return (0, response_1.SuccessResponse)(res, { message: "Home restaurants fetched successfully", data: results.map(cleanRestaurantResult) });
 };
 exports.getHomeRestaurants = getHomeRestaurants;

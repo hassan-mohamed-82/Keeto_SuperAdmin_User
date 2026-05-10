@@ -8,6 +8,8 @@ import {
     verifyResetCode,
     resetPassword,
 } from "../../controllers/user/auth";
+import { facebookLoginOrSignup } from "../../config/facebook";
+import { verifyGoogleToken } from "../../config/passport";
 
 const router = Router();
 
@@ -17,5 +19,8 @@ router.post("/login", catchAsync(login));
 router.post("/forgot-password", catchAsync(forgotPassword));
 router.post("/verify-reset-code", catchAsync(verifyResetCode));
 router.post("/reset-password", catchAsync(resetPassword));
+
+router.post("/auth/google", catchAsync(verifyGoogleToken));
+router.post("/auth/facebook", catchAsync(facebookLoginOrSignup));
 
 export default router;

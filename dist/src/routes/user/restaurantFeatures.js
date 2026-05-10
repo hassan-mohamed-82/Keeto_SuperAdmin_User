@@ -7,4 +7,5 @@ const router = (0, express_1.Router)();
 router.get("/search", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.searchRestaurants));
 router.get("/home-list", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.getHomeRestaurants));
 router.put("/:restaurantId/addhome", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.toggleAddHome));
+router.delete("/:restaurantId/addhome", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.removeFromHome));
 exports.default = router;
