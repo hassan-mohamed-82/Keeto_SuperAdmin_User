@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getFoodSelectData = exports.getFoodsByRestaurantId = exports.deleteFood = exports.updateFood = exports.getFoodById = exports.getAllFoods = exports.createFood = void 0;
+exports.toggleOptionStatus = exports.toggleVariationStatus = exports.getFoodSelectData = exports.getFoodsByRestaurantId = exports.deleteFood = exports.updateFood = exports.getFoodById = exports.getAllFoods = exports.createFood = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -109,6 +109,7 @@ const createFood = async (req, res) => {
                 selectionType: variation.selectionType || "single",
                 min: variation.min || null,
                 max: variation.max || null,
+                status: variation.status !== undefined ? variation.status : true,
             });
             if (variation.options &&
                 Array.isArray(variation.options)) {
@@ -119,6 +120,7 @@ const createFood = async (req, res) => {
                         optionNameAr: option.optionNameAr,
                         optionNameFr: option.optionNameFr,
                         additionalPrice: option.additionalPrice?.toString() || "0",
+                        status: option.status !== undefined ? option.status : true,
                     });
                 }
             }
@@ -370,6 +372,7 @@ const updateFood = async (req, res) => {
                 selectionType: variation.selectionType || "single",
                 min: variation.min ?? null,
                 max: variation.max ?? null,
+                status: variation.status !== undefined ? variation.status : true,
             });
             if (variation.options && Array.isArray(variation.options)) {
                 for (const option of variation.options) {
@@ -381,6 +384,7 @@ const updateFood = async (req, res) => {
                         additionalPrice: option.additionalPrice
                             ? option.additionalPrice.toString()
                             : "0",
+                        status: option.status !== undefined ? option.status : true,
                     });
                 }
             }
@@ -480,3 +484,39 @@ const getFoodSelectData = async (req, res) => {
     });
 };
 exports.getFoodSelectData = getFoodSelectData;
+// =============================================
+// TOGGLE Variation Status
+// =============================================
+const toggleVariationStatus = async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (typeof status !== "boolean") {
+        throw new BadRequest_1.BadRequest("Status must be a boolean");
+    }
+    const existing = await connection_1.db.select().from(schema_1.foodVariations).where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, id)).limit(1);
+    if (!existing[0])
+        throw new NotFound_1.NotFound("Variation not found");
+    await connection_1.db.update(schema_1.foodVariations)
+        .set({ status })
+        .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, id));
+    return (0, response_1.SuccessResponse)(res, { message: "Variation status updated successfully" });
+};
+exports.toggleVariationStatus = toggleVariationStatus;
+// =============================================
+// TOGGLE Option Status
+// =============================================
+const toggleOptionStatus = async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (typeof status !== "boolean") {
+        throw new BadRequest_1.BadRequest("Status must be a boolean");
+    }
+    const existing = await connection_1.db.select().from(schema_1.variationOptions).where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, id)).limit(1);
+    if (!existing[0])
+        throw new NotFound_1.NotFound("Option not found");
+    await connection_1.db.update(schema_1.variationOptions)
+        .set({ status })
+        .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, id));
+    return (0, response_1.SuccessResponse)(res, { message: "Option status updated successfully" });
+};
+exports.toggleOptionStatus = toggleOptionStatus;

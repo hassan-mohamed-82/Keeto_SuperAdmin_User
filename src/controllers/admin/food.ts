@@ -202,6 +202,8 @@ export const createFood = async (req: Request, res: Response) => {
                 min: variation.min || null,
 
                 max: variation.max || null,
+
+                status: variation.status !== undefined ? variation.status : true,
             });
 
             if (
@@ -224,6 +226,8 @@ export const createFood = async (req: Request, res: Response) => {
 
                         additionalPrice:
                             option.additionalPrice?.toString() || "0",
+
+                        status: option.status !== undefined ? option.status : true,
                     });
                 }
             }
@@ -515,6 +519,7 @@ export const updateFood = async (req: Request, res: Response) => {
                 selectionType: variation.selectionType || "single",
                 min: variation.min ?? null,
                 max: variation.max ?? null,
+                status: variation.status !== undefined ? variation.status : true,
             });
 
             if (variation.options && Array.isArray(variation.options)) {
@@ -527,6 +532,7 @@ export const updateFood = async (req: Request, res: Response) => {
                         additionalPrice: option.additionalPrice
                             ? option.additionalPrice.toString()
                             : "0",
+                        status: option.status !== undefined ? option.status : true,
                     });
                 }
             }
@@ -643,4 +649,46 @@ export const getFoodSelectData = async (req: Request, res: Response) => {
             allAddons
         }
     });
+};
+
+// =============================================
+// TOGGLE Variation Status
+// =============================================
+export const toggleVariationStatus = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (typeof status !== "boolean") {
+        throw new BadRequest("Status must be a boolean");
+    }
+
+    const existing = await db.select().from(foodVariations).where(eq(foodVariations.id, id)).limit(1);
+    if (!existing[0]) throw new NotFound("Variation not found");
+
+    await db.update(foodVariations)
+        .set({ status })
+        .where(eq(foodVariations.id, id));
+
+    return SuccessResponse(res, { message: "Variation status updated successfully" });
+};
+
+// =============================================
+// TOGGLE Option Status
+// =============================================
+export const toggleOptionStatus = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (typeof status !== "boolean") {
+        throw new BadRequest("Status must be a boolean");
+    }
+
+    const existing = await db.select().from(variationOptions).where(eq(variationOptions.id, id)).limit(1);
+    if (!existing[0]) throw new NotFound("Option not found");
+
+    await db.update(variationOptions)
+        .set({ status })
+        .where(eq(variationOptions.id, id));
+
+    return SuccessResponse(res, { message: "Option status updated successfully" });
 };

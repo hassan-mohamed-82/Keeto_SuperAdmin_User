@@ -59,6 +59,9 @@ const addToCart = async (req, res) => {
         if (!validDbVariation) {
             throw new BadRequest_1.BadRequest(`Invalid variation ID sent: ${selected.variationId}`);
         }
+        if (validDbVariation.status === false) {
+            throw new BadRequest_1.BadRequest(`Variation ${validDbVariation.name} is currently unavailable`);
+        }
         const dbOptions = await connection_1.db
             .select()
             .from(schema_1.variationOptions)
@@ -66,6 +69,9 @@ const addToCart = async (req, res) => {
         const foundOption = dbOptions.find(o => o.id === selected.optionId);
         if (!foundOption) {
             throw new BadRequest_1.BadRequest(`Invalid option selected for variation: ${validDbVariation.name}`);
+        }
+        if (foundOption.status === false) {
+            throw new BadRequest_1.BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
         }
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
     }
@@ -234,6 +240,8 @@ const updateCartItem = async (req, res) => {
         const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
         if (!validDbVariation)
             throw new BadRequest_1.BadRequest("Invalid variation ID");
+        if (validDbVariation.status === false)
+            throw new BadRequest_1.BadRequest(`Variation ${validDbVariation.name} is currently unavailable`);
         const dbOptions = await connection_1.db
             .select()
             .from(schema_1.variationOptions)
@@ -241,6 +249,8 @@ const updateCartItem = async (req, res) => {
         const foundOption = dbOptions.find(o => o.id === selected.optionId);
         if (!foundOption)
             throw new BadRequest_1.BadRequest("Invalid option selected");
+        if (foundOption.status === false)
+            throw new BadRequest_1.BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
     }
     const unitPrice = Number(itemFood.price) + totalExtraPrice;

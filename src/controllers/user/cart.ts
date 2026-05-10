@@ -73,6 +73,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
         if (!validDbVariation) {
             throw new BadRequest(`Invalid variation ID sent: ${selected.variationId}`);
         }
+        if (validDbVariation.status === false) {
+            throw new BadRequest(`Variation ${validDbVariation.name} is currently unavailable`);
+        }
 
         const dbOptions = await db
             .select()
@@ -82,6 +85,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
         const foundOption = dbOptions.find(o => o.id === selected.optionId);
         if (!foundOption) {
             throw new BadRequest(`Invalid option selected for variation: ${validDbVariation.name}`);
+        }
+        if (foundOption.status === false) {
+            throw new BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
         }
 
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
@@ -273,6 +279,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     for (const selected of safeVariations) {
         const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
         if (!validDbVariation) throw new BadRequest("Invalid variation ID");
+        if (validDbVariation.status === false) throw new BadRequest(`Variation ${validDbVariation.name} is currently unavailable`);
 
         const dbOptions = await db
             .select()
@@ -281,6 +288,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
 
         const foundOption = dbOptions.find(o => o.id === selected.optionId);
         if (!foundOption) throw new BadRequest("Invalid option selected");
+        if (foundOption.status === false) throw new BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
 
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
     }

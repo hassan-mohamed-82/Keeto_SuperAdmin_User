@@ -17,6 +17,7 @@ exports.foodVariations = (0, mysql_core_2.mysqlTable)("food_variations", {
     selectionType: (0, mysql_core_2.mysqlEnum)("selection_type", ["single", "multiple"]).default("single"), // Single vs Multiple
     min: (0, mysql_core_1.int)("min"), // Min
     max: (0, mysql_core_1.int)("max"), // Max
+    status: (0, mysql_core_2.boolean)("status").default(true), // حالة الفارييشن (شغال / مقفول)
 });
 // 2. جدول يمثل الخيارات داخل كل Variation (مثل: صغير، وسط، كبير)
 exports.variationOptions = (0, mysql_core_2.mysqlTable)("variation_options", {
@@ -26,6 +27,7 @@ exports.variationOptions = (0, mysql_core_2.mysqlTable)("variation_options", {
     optionNameAr: (0, mysql_core_2.varchar)("option_name_ar", { length: 255 }).notNull().default(''),
     optionNameFr: (0, mysql_core_2.varchar)("option_name_fr", { length: 255 }).notNull().default(''),
     additionalPrice: (0, mysql_core_2.varchar)("additional_price", { length: 255 }).notNull().default("0"), // Additional price
+    status: (0, mysql_core_2.boolean)("status").default(true), // حالة الاوبشن (متاح / غير متاح)
 });
 const drizzle_orm_2 = require("drizzle-orm");
 exports.variationRelations = (0, drizzle_orm_2.relations)(exports.foodVariations, ({ one, many }) => ({
