@@ -1,8 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurants } from "../../models/schema"; 
-import { favorites } from "../../models/schema"; // 👈 تأكد من مسار جدول المفضلة
-import { eq, like, or, and, sql, getTableColumns } from "drizzle-orm"; // 👈 ضفنا getTableColumns, sql, and
+import { restaurants, favorites, userAddHome } from "../../models/schema"; 
+import { eq, like, or, and, sql, getTableColumns } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, BadRequest, UnauthorizedError } from "../../Errors";
 
@@ -10,8 +9,7 @@ import { NotFound, BadRequest, UnauthorizedError } from "../../Errors";
 export const searchRestaurants = async (req: Request, res: Response) => {
     const { query } = req.query;
     
-    // 👈 هتحتاج تجيب الـ ID بتاع اليوزر الحالي (مثال من الـ middleware)
-    const userId = req.user?.id; // عدلها حسب ما بتخزن اليوزر في الـ Request عندك
+    const userId = req.user?.id;
     if (!userId) throw new UnauthorizedError("Unauthenticated");
 
     if (!query || typeof query !== "string") {
@@ -22,15 +20,23 @@ export const searchRestaurants = async (req: Request, res: Response) => {
 
     const results = await db
         .select({
-            ...getTableColumns(restaurants), // بيرجع كل بيانات المطعم في مستوى واحد
-            isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite')
+            ...getTableColumns(restaurants),
+            isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
+            isAddHome: sql<boolean>`CASE WHEN ${userAddHome.id} IS NOT NULL THEN true ELSE false END`.as('isAddHome')
         })
         .from(restaurants)
         .leftJoin(
             favorites,
             and(
                 eq(favorites.restaurantId, restaurants.id),
-                eq(favorites.userId, userId) // بنربط برقم اليوزر عشان نتأكد إن ده مفضلة اليوزر الحالي بس
+                eq(favorites.userId, userId)
+            )
+        )
+        .leftJoin(
+            userAddHome,
+            and(
+                eq(userAddHome.restaurantId, restaurants.id),
+                eq(userAddHome.userId, userId)
             )
         )
         .where(
@@ -49,6 +55,9 @@ export const toggleAddHome = async (req: Request, res: Response) => {
     const { restaurantId } = req.params;
     const { addhome } = req.body;
 
+    const userId = req.user?.id;
+    if (!userId) throw new UnauthorizedError("Unauthenticated");
+
     if (typeof addhome !== "boolean") {
         throw new BadRequest("addhome status must be a boolean (true or false)");
     }
@@ -63,25 +72,39 @@ export const toggleAddHome = async (req: Request, res: Response) => {
         throw new NotFound("Restaurant not found");
     }
 
-    await db.update(restaurants)
-        .set({ addhome, updatedAt: new Date() })
-        .where(eq(restaurants.id, restaurantId));
+    if (addhome) {
+        // Insert into userAddHome if not exists
+        const existing = await db
+            .select()
+            .from(userAddHome)
+            .where(and(eq(userAddHome.userId, userId), eq(userAddHome.restaurantId, restaurantId)));
+            
+        if(existing.length === 0) {
+            await db.insert(userAddHome).values({ userId, restaurantId });
+        }
+    } else {
+        // Delete from userAddHome
+        await db
+            .delete(userAddHome)
+            .where(and(eq(userAddHome.userId, userId), eq(userAddHome.restaurantId, restaurantId)));
+    }
 
     return SuccessResponse(res, { message: "Restaurant home status updated successfully" });
 };
 
 // 3. Get all restaurants that are added to home
 export const getHomeRestaurants = async (req: Request, res: Response) => {
-    // 👈 هتحتاج تجيب الـ ID بتاع اليوزر الحالي برضه
     const userId = req.user?.id; 
     if(!userId) throw new UnauthorizedError("Unauthenticated");
 
     const results = await db
         .select({
             ...getTableColumns(restaurants),
-            isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite')
+            isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
+            isAddHome: sql<boolean>`true`.as('isAddHome') // Already filtered by userAddHome inner join
         })
-        .from(restaurants)
+        .from(userAddHome)
+        .innerJoin(restaurants, eq(userAddHome.restaurantId, restaurants.id))
         .leftJoin(
             favorites,
             and(
@@ -89,7 +112,7 @@ export const getHomeRestaurants = async (req: Request, res: Response) => {
                 eq(favorites.userId, userId)
             )
         )
-        .where(eq(restaurants.addhome, true));
+        .where(eq(userAddHome.userId, userId));
 
     return SuccessResponse(res, { message: "Home restaurants fetched successfully", data: results });
 };

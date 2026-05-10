@@ -87,8 +87,7 @@ export const getRestaurantsByCuisine = async (req: Request, res: Response) => {
         minDeliveryTime: restaurants.minDeliveryTime,
     }).from(restaurants)
     .where(and(
-        eq(restaurants.cuisineId, cuisineId),
-        eq(restaurants.status, "active")
+        eq(restaurants.cuisineId, cuisineId)
     ));
 
     const result = data.map(r => ({
