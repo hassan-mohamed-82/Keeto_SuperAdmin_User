@@ -38,6 +38,7 @@ __exportStar(require("./schema/admin/branches"), exports);
 __exportStar(require("./schema/admin/restaurantsetting"), exports);
 __exportStar(require("./schema/admin/selectReasons"), exports);
 __exportStar(require("./schema/admin/zoneDeliveryFees"), exports);
+__exportStar(require("./schema/admin/popup"), exports);
 __exportStar(require("./schema/admin/restaurantZoneDeliveryFees"), exports);
 __exportStar(require("./schema/admin/order"), exports);
 __exportStar(require("./schema/user/Users"), exports);

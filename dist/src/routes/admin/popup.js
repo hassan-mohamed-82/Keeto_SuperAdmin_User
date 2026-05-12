@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const popup_1 = require("../../controllers/admin/popup");
+const catchAsync_1 = require("../../utils/catchAsync");
+const router = (0, express_1.Router)();
+router.post("/", (0, catchAsync_1.catchAsync)(popup_1.createPopup));
+router.get("/", (0, catchAsync_1.catchAsync)(popup_1.getAllPopups));
+router.get("/:id", (0, catchAsync_1.catchAsync)(popup_1.getPopupById));
+router.put("/:id", (0, catchAsync_1.catchAsync)(popup_1.updatePopup));
+router.delete("/:id", (0, catchAsync_1.catchAsync)(popup_1.deletePopup));
+router.put("/:id/status", (0, catchAsync_1.catchAsync)(popup_1.updatePopupStatus));
+exports.default = router;

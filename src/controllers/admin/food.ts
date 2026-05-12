@@ -438,7 +438,7 @@ export const updateFood = async (req: Request, res: Response) => {
         throw new NotFound("Food not found or you don't have permission to edit it");
     }
 
-    // ✅ الحقول المسموح بتحديثها فقط (Clean Code + Security)
+    // ✅ الحقول المسموح بتحديثها فقط
     const allowedFields = [
         "name",
         "nameAr",
@@ -452,13 +452,12 @@ export const updateFood = async (req: Request, res: Response) => {
         "image"
     ];
 
-    const updateData: any = {
-        updatedAt: new Date(), // ✅ دايمًا Date object
+    const updateData: Record<string, any> = {
+        updatedAt: new Date(), 
     };
 
     for (const key of allowedFields) {
         if (data[key] !== undefined) {
-
             // 🖼️ معالجة الصورة
             if (
                 key === "image" &&
@@ -479,8 +478,10 @@ export const updateFood = async (req: Request, res: Response) => {
         }
     }
 
-    // ✅ تنفيذ التحديث
-    await db.update(food).set(updateData).where(eq(food.id, id));
+    // ✅ تنفيذ التحديث (بدون returning لأن MySQL لا يدعمها)
+    await db.update(food)
+        .set(updateData)
+        .where(and(eq(food.id, id), eq(food.restaurantid, restaurantId)));
 
     // ===========================
     // ✅ Variations Update
@@ -539,11 +540,18 @@ export const updateFood = async (req: Request, res: Response) => {
         }
     }
 
+    // 🔄 جلب البيانات الجديدة بعد التحديث لإرسالها للفرونت إند (اختياري بس مفيد)
+    const updatedFood = await db
+        .select()
+        .from(food)
+        .where(eq(food.id, id))
+        .limit(1);
+
     return SuccessResponse(res, {
         message: "Update food success",
+        data: updatedFood[0] || null
     });
 };
-
 // =============================================
 // DELETE Food
 // =============================================

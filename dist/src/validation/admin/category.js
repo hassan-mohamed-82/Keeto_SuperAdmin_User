@@ -1,40 +1,26 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateCategorySchema = exports.createCategorySchema = void 0;
-// src/modules/category/category.validation.ts
 const zod_1 = require("zod");
-// Regex للتحقق من Base64 image
-const base64ImageRegex = /^data:image\/(jpeg|jpg|png|gif|webp|svg\+xml);base64,/;
+// ==========================================
+// Categories Validation
+// ==========================================
 exports.createCategorySchema = zod_1.z.object({
-    name: zod_1.z
-        .string({ required_error: 'Name is required' })
-        .min(2, 'Name must be at least 2 characters')
-        .max(255, 'Name must not exceed 255 characters')
-        .trim(),
-    description: zod_1.z
-        .string({ required_error: 'Description is required' })
-        .min(10, 'Description must be at least 10 characters')
-        .max(255, 'Description must not exceed 255 characters')
-        .trim(),
-    image: zod_1.z
-        .string({ required_error: 'Image is required' })
-        .regex(base64ImageRegex, 'Invalid image format. Must be base64 encoded image'),
+    // الحقول الأساسية (Required)
+    name: zod_1.z.string().min(1, "Name is required").max(255, "Name cannot exceed 255 characters"),
+    Image: zod_1.z.string().min(1, "Image is required").max(500, "Image URL/Path cannot exceed 500 characters"),
+    // الحقول الاختيارية (ليها Default أو Nullable)
+    nameAr: zod_1.z.string().max(255).optional(),
+    nameFr: zod_1.z.string().max(255).optional(),
+    meta_image: zod_1.z.string().max(500).optional(),
+    title: zod_1.z.string().optional(),
+    titleAr: zod_1.z.string().optional(),
+    titleFr: zod_1.z.string().optional(),
+    meta_title: zod_1.z.string().optional(),
+    meta_titleAr: zod_1.z.string().optional(),
+    meta_titleFr: zod_1.z.string().optional(),
+    priority: zod_1.z.enum(["low", "medium", "high"]).optional(),
+    status: zod_1.z.enum(["active", "inactive"]).optional(),
 });
-exports.updateCategorySchema = zod_1.z.object({
-    name: zod_1.z
-        .string()
-        .min(2, 'Name must be at least 2 characters')
-        .max(255, 'Name must not exceed 255 characters')
-        .trim()
-        .optional(),
-    description: zod_1.z
-        .string()
-        .min(10, 'Description must be at least 10 characters')
-        .max(255, 'Description must not exceed 255 characters')
-        .trim()
-        .optional(),
-    image: zod_1.z
-        .string()
-        .regex(base64ImageRegex, 'Invalid image format. Must be base64 encoded image')
-        .optional(),
-});
+// فاليديشن التحديث (Update) - كل الحقول اختيارية
+exports.updateCategorySchema = exports.createCategorySchema.partial();

@@ -22,6 +22,7 @@ export * from "./schema/admin/branches";
 export * from "./schema/admin/restaurantsetting";
 export * from "./schema/admin/selectReasons";
 export * from "./schema/admin/zoneDeliveryFees";
+export * from "./schema/admin/popup";
 
 export * from "./schema/admin/restaurantZoneDeliveryFees";
 export * from "./schema/admin/order";

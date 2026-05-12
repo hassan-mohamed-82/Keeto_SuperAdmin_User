@@ -309,7 +309,7 @@ const updateFood = async (req, res) => {
     if (!existingFood[0]) {
         throw new NotFound_1.NotFound("Food not found or you don't have permission to edit it");
     }
-    // ✅ الحقول المسموح بتحديثها فقط (Clean Code + Security)
+    // ✅ الحقول المسموح بتحديثها فقط
     const allowedFields = [
         "name",
         "nameAr",
@@ -323,7 +323,7 @@ const updateFood = async (req, res) => {
         "image"
     ];
     const updateData = {
-        updatedAt: new Date(), // ✅ دايمًا Date object
+        updatedAt: new Date(),
     };
     for (const key of allowedFields) {
         if (data[key] !== undefined) {
@@ -339,8 +339,10 @@ const updateFood = async (req, res) => {
             }
         }
     }
-    // ✅ تنفيذ التحديث
-    await connection_1.db.update(schema_1.food).set(updateData).where((0, drizzle_orm_1.eq)(schema_1.food.id, id));
+    // ✅ تنفيذ التحديث (بدون returning لأن MySQL لا يدعمها)
+    await connection_1.db.update(schema_1.food)
+        .set(updateData)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.id, id), (0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId)));
     // ===========================
     // ✅ Variations Update
     // ===========================
@@ -390,8 +392,15 @@ const updateFood = async (req, res) => {
             }
         }
     }
+    // 🔄 جلب البيانات الجديدة بعد التحديث لإرسالها للفرونت إند (اختياري بس مفيد)
+    const updatedFood = await connection_1.db
+        .select()
+        .from(schema_1.food)
+        .where((0, drizzle_orm_1.eq)(schema_1.food.id, id))
+        .limit(1);
     return (0, response_1.SuccessResponse)(res, {
         message: "Update food success",
+        data: updatedFood[0] || null
     });
 };
 exports.updateFood = updateFood;
