@@ -9,12 +9,13 @@ import {
 } from "../../controllers/admin/country";
 import { validate } from "../../middlewares/validation";
 import { createCountrySchema, updateCountrySchema } from "../../validation/admin/country";
+import { hasPermission } from "../../middlewares/";
 const router = Router();
 
-router.post("/", validate(createCountrySchema), catchAsync(createCountry));
-router.get("/", catchAsync(getAllCountries));
-router.get("/:id", catchAsync(getCountryById));
-router.put("/:id", validate(updateCountrySchema), catchAsync(updateCountry));
-router.delete("/:id", catchAsync(deleteCountry));
+router.post("/", validate(createCountrySchema), hasPermission("Countries", "Add"), catchAsync(createCountry));
+router.get("/", hasPermission("Countries", "View"), catchAsync(getAllCountries));
+router.get("/:id", hasPermission("Countries", "View"), catchAsync(getCountryById));
+router.put("/:id", validate(updateCountrySchema), hasPermission("Countries", "Edit"), catchAsync(updateCountry));
+router.delete("/:id", hasPermission("Countries", "Delete"), catchAsync(deleteCountry));
 
 export default router;

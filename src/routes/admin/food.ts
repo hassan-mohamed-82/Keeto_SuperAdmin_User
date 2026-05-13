@@ -13,18 +13,19 @@ import {
 } from "../../controllers/admin/food";
 import { validate } from "../../middlewares/validation";
 import { createFoodSchema, updateFoodSchema } from "../../validation/admin/food";
+import { hasPermission } from "../../middlewares/";
 const router = Router();
 
 router.get("/select", catchAsync(getFoodSelectData));
 router.get("/restaurant/:id", catchAsync(getFoodsByRestaurantId));
-router.post("/", validate(createFoodSchema), catchAsync(createFood));
-router.get("/", catchAsync(getAllFoods));
-router.get("/:id", catchAsync(getFoodById));
-router.put("/:id", validate(updateFoodSchema), catchAsync(updateFood));
-router.delete("/:id", catchAsync(deleteFood));
+router.post("/", validate(createFoodSchema), hasPermission("Food", "Add"), catchAsync(createFood));
+router.get("/", hasPermission("Food", "View"), catchAsync(getAllFoods));
+router.get("/:id", hasPermission("Food", "View"), catchAsync(getFoodById));
+router.put("/:id", validate(updateFoodSchema), hasPermission("Food", "Edit"), catchAsync(updateFood));
+router.delete("/:id", hasPermission("Food", "Delete"), catchAsync(deleteFood));
 
 // Toggle Endpoints
-router.put("/variation/:id/status", catchAsync(toggleVariationStatus));
-router.put("/option/:id/status", catchAsync(toggleOptionStatus));
+router.put("/variation/:id/status", hasPermission("Food", "Edit"), catchAsync(toggleVariationStatus));
+router.put("/option/:id/status", hasPermission("Food", "Edit"), catchAsync(toggleOptionStatus));
 
 export default router;

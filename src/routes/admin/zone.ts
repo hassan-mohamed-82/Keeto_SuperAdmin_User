@@ -8,16 +8,16 @@ import {
   deleteZone,
   getallcities
 } from "../../controllers/admin/zone";
-
+import { hasPermission } from "../../middlewares/";
 import { validate } from "../../middlewares/validation";
 import { createZoneSchema, updateZoneSchema } from "../../validation/admin/zone";
 const router = Router();
 
-router.post("/", validate(createZoneSchema), catchAsync(createZone));
-router.get("/", catchAsync(getAllZones));
-router.get("/:id", catchAsync(getZoneById));
-router.put("/:id", validate(updateZoneSchema), catchAsync(updateZone));
-router.delete("/:id", catchAsync(deleteZone));
+router.post("/", hasPermission("Zones", "Add"), validate(createZoneSchema), catchAsync(createZone));
+router.get("/", hasPermission("Zones", "View"), catchAsync(getAllZones));
+router.get("/:id", hasPermission("Zones", "View"), catchAsync(getZoneById));
+router.put("/:id", hasPermission("Zones", "Edit"), validate(updateZoneSchema), catchAsync(updateZone));
+router.delete("/:id", hasPermission("Zones", "Delete"), catchAsync(deleteZone));
 router.get("/cities/active", catchAsync(getallcities));
 
 export default router;

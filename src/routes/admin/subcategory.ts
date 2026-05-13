@@ -11,13 +11,14 @@ import {
 
 import { validate } from "../../middlewares/validation";
 import { createSubcategorySchema, updateSubcategorySchema } from "../../validation/admin/subcategory";
+import { hasPermission } from "../../middlewares/";
 const router = Router();
 
 router.get("/select", catchAsync(getallcategory));
-router.post("/", validate(createSubcategorySchema), catchAsync(createSubcategory));
-router.get("/", catchAsync(getAllSubcategories));
-router.get("/:id", catchAsync(getSubcategoryById));
-router.put("/:id", validate(updateSubcategorySchema), catchAsync(updateSubcategory));
-router.delete("/:id", catchAsync(deleteSubcategory));
+router.post("/", hasPermission("Subcategories", "Add"), validate(createSubcategorySchema), catchAsync(createSubcategory));
+router.get("/", hasPermission("Subcategories", "View"), catchAsync(getAllSubcategories));
+router.get("/:id", hasPermission("Subcategories", "View"), catchAsync(getSubcategoryById));
+router.put("/:id", hasPermission("Subcategories", "Edit"), validate(updateSubcategorySchema), catchAsync(updateSubcategory));
+router.delete("/:id", hasPermission("Subcategories", "Delete"), catchAsync(deleteSubcategory));
 
 export default router;

@@ -3,11 +3,12 @@ import { getAllWallets,getRestaurantWallet,approveWithdrawal,collectCashFromRest
 import { catchAsync } from "../../utils/catchAsync";
 import { validate } from "../../middlewares/validation";
 import { createRestaurantWalletSchema,updateRestaurantWalletSchema,updateWalletTransactionSchema } from "../../validation/admin/restaurant_wallets"; 
+import { hasPermission } from "../../middlewares/";
 const router = Router();
 
-router.get("/", catchAsync(getAllWallets));
-router.get("/restaurant/:id", catchAsync(getRestaurantWallet));
-router.get("/transactions/:restaurantId", catchAsync(getWalletTransactions));
-router.put("/approve/:id", validate(updateWalletTransactionSchema), catchAsync(approveWithdrawal));
-router.put("/collect/:id", catchAsync(collectCashFromRestaurant));
+router.get("/", hasPermission("RestaurantWallets", "View"), catchAsync(getAllWallets));
+router.get("/restaurant/:id", hasPermission("RestaurantWallets", "View"), catchAsync(getRestaurantWallet));
+router.get("/transactions/:restaurantId", hasPermission("RestaurantWallets", "View"), catchAsync(getWalletTransactions));
+router.put("/approve/:id", hasPermission("RestaurantWallets", "Edit"), validate(updateWalletTransactionSchema), catchAsync(approveWithdrawal));
+router.put("/collect/:id", hasPermission("RestaurantWallets", "Edit"), catchAsync(collectCashFromRestaurant));
 export default router;
