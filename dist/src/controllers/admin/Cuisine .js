@@ -17,22 +17,20 @@ const normalizeImagePayload = (img) => {
             return undefined;
         return img;
     }
-    if (Array.isArray(img)) {
-        if (img.length === 0)
-            return undefined;
-        const first = img[0];
-        if (first.thumbUrl)
-            return first.thumbUrl;
-        if (first.url)
-            return first.url;
+    // Attempt to stringify and find a base64 data URI or an http URL
+    try {
+        const str = JSON.stringify(img);
+        // 1. Try to find a base64 string
+        const base64Match = str.match(/(data:image\/[a-zA-Z0-9+.-]+;base64,[^"'\\]+)/);
+        if (base64Match)
+            return base64Match[1];
+        // 2. Try to find an http URL if it's an existing image
+        const urlMatch = str.match(/(https?:\/\/[^"'\\]+)/);
+        if (urlMatch)
+            return urlMatch[1];
     }
-    if (typeof img === 'object') {
-        if (Object.keys(img).length === 0)
-            return undefined;
-        if (img.thumbUrl)
-            return img.thumbUrl;
-        if (img.url)
-            return img.url;
+    catch (e) {
+        // Ignore stringify errors
     }
     return undefined;
 };
