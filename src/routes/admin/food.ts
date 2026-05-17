@@ -18,10 +18,14 @@ const router = Router();
 
 router.get("/select", catchAsync(getFoodSelectData));
 router.get("/restaurant/:id", catchAsync(getFoodsByRestaurantId));
-router.post("/", validate(createFoodSchema), hasPermission("Food", "Add"), catchAsync(createFood));
+router.post("/",
+    //  validate(createFoodSchema),
+    hasPermission("Food", "Add"), catchAsync(createFood));
 router.get("/", hasPermission("Food", "View"), catchAsync(getAllFoods));
 router.get("/:id", hasPermission("Food", "View"), catchAsync(getFoodById));
-router.put("/:id", validate(updateFoodSchema), hasPermission("Food", "Edit"), catchAsync(updateFood));
+router.put("/:id",
+    //  validate(updateFoodSchema), 
+    hasPermission("Food", "Edit"), catchAsync(updateFood));
 router.delete("/:id", hasPermission("Food", "Delete"), catchAsync(deleteFood));
 
 // Toggle Endpoints
