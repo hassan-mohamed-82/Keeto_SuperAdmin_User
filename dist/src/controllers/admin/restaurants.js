@@ -266,10 +266,17 @@ const updateRestaurant = async (req, res) => {
         updateData.lat = lat;
     if (lng !== undefined)
         updateData.lng = lng;
-    if (logo)
-        updateData.logo = logo;
-    if (cover !== undefined)
-        updateData.cover = cover;
+    if (logo) {
+        updateData.logo = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant[0].logo, logo, "restaurants");
+    }
+    if (cover !== undefined) {
+        if (cover === "" || cover === null) {
+            updateData.cover = "";
+        }
+        else {
+            updateData.cover = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant[0].cover, cover, "restaurants_cover");
+        }
+    }
     if (minDeliveryTime !== undefined)
         updateData.minDeliveryTime = minDeliveryTime;
     if (maxDeliveryTime !== undefined)

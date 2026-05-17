@@ -7,7 +7,7 @@ import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
 import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
-import { saveBase64Image } from "../../utils/handleImages";
+import { saveBase64Image, handleImageUpdate } from "../../utils/handleImages";
 
 // Helper: increment total_restaurants on a cuisine
 const incrementCuisineCount = async (cuisineId: string) => {
@@ -325,8 +325,16 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (zoneId) updateData.zoneId = zoneId;
     if (lat !== undefined) updateData.lat = lat;
     if (lng !== undefined) updateData.lng = lng;
-    if (logo) updateData.logo = logo;
-    if (cover !== undefined) updateData.cover = cover;
+    if (logo) {
+        updateData.logo = await handleImageUpdate(req, existingRestaurant[0].logo, logo, "restaurants");
+    }
+    if (cover !== undefined) {
+        if (cover === "" || cover === null) {
+            updateData.cover = "";
+        } else {
+            updateData.cover = await handleImageUpdate(req, existingRestaurant[0].cover, cover, "restaurants_cover");
+        }
+    }
     if (minDeliveryTime !== undefined) updateData.minDeliveryTime = minDeliveryTime;
     if (maxDeliveryTime !== undefined) updateData.maxDeliveryTime = maxDeliveryTime;
     if (deliveryTimeUnit) updateData.deliveryTimeUnit = deliveryTimeUnit;
