@@ -13,10 +13,14 @@ import { createRestaurantSchema, updateRestaurantSchema } from "../../validation
 import { hasPermission } from "../../middlewares/";
 const router = Router();
 router.get("/select", catchAsync(getallcousinesandzones));
-router.post("/", hasPermission("Restaurants", "Add"), validate(createRestaurantSchema), catchAsync(createRestaurant));
+router.post("/", hasPermission("Restaurants", "Add"), 
+// validate(createRestaurantSchema),
+ catchAsync(createRestaurant));
 router.get("/", hasPermission("Restaurants", "View"), catchAsync(getAllRestaurants));
 router.get("/:id", hasPermission("Restaurants", "View"), catchAsync(getRestaurantById));
-router.put("/:id", hasPermission("Restaurants", "Edit"), validate(updateRestaurantSchema), catchAsync(updateRestaurant));
+router.put("/:id", hasPermission("Restaurants", "Edit"),
+//  validate(updateRestaurantSchema), 
+ catchAsync(updateRestaurant));
 router.delete("/:id", hasPermission("Restaurants", "Delete"), catchAsync(deleteRestaurant));
 
 export default router;
