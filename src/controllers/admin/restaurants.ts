@@ -72,7 +72,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         status
     } = req.body;
 
-    if (!name || !nameAr || !nameFr || !address || !addressAr || !addressFr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
+    if (!name || !nameAr || !nameFr || !address || !addressAr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest("Missing required fields");
     }
     let logoUrl: string | undefined = undefined;

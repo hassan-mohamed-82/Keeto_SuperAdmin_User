@@ -46,7 +46,7 @@ const decrementCuisineCount = async (cuisineId) => {
 const createRestaurant = async (req, res) => {
     const clean = (v) => typeof v === "string" ? v.trim() : v;
     const { name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status } = req.body;
-    if (!name || !nameAr || !nameFr || !address || !addressAr || !addressFr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
+    if (!name || !nameAr || !nameFr || !address || !addressAr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
     }
     let logoUrl = undefined;
