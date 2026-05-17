@@ -9,6 +9,33 @@ const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
 const handleImages_1 = require("../../utils/handleImages");
+const normalizeImagePayload = (img) => {
+    if (!img)
+        return undefined;
+    if (typeof img === 'string') {
+        if (img.trim() === '')
+            return undefined;
+        return img;
+    }
+    if (Array.isArray(img)) {
+        if (img.length === 0)
+            return undefined;
+        const first = img[0];
+        if (first.thumbUrl)
+            return first.thumbUrl;
+        if (first.url)
+            return first.url;
+    }
+    if (typeof img === 'object') {
+        if (Object.keys(img).length === 0)
+            return undefined;
+        if (img.thumbUrl)
+            return img.thumbUrl;
+        if (img.url)
+            return img.url;
+    }
+    return undefined;
+};
 const createCuisine = async (req, res) => {
     const { name, nameAr, nameFr, Image, meta_image, description, descriptionAr, descriptionFr, meta_description, meta_descriptionAr, meta_descriptionFr, status } = req.body;
     if (!name || !nameAr || !nameFr || !Image || !descriptionAr || !descriptionFr || !meta_descriptionAr || !meta_descriptionFr) {
@@ -24,26 +51,28 @@ const createCuisine = async (req, res) => {
         throw new BadRequest_1.BadRequest("Cuisine already exists");
     }
     let imageUrl = '';
-    if (Image) {
-        if (typeof Image === 'string' && Image.trim() !== '') {
-            const result = await (0, handleImages_1.saveBase64Image)(req, Image, "cuisines");
-            imageUrl = result.url;
-        }
-        else if (typeof Image === 'object' && Object.keys(Image).length === 0) {
-            throw new BadRequest_1.BadRequest("Image is required.");
+    const normImage = normalizeImagePayload(Image);
+    if (normImage) {
+        if (normImage.startsWith("http")) {
+            imageUrl = normImage;
         }
         else {
-            throw new BadRequest_1.BadRequest("Invalid Image format. Expected a base64 string, received an object.");
+            const result = await (0, handleImages_1.saveBase64Image)(req, normImage, "cuisines");
+            imageUrl = result.url;
         }
     }
+    else {
+        throw new BadRequest_1.BadRequest("Image is required.");
+    }
     let metaImageUrl = null;
-    if (meta_image) {
-        if (typeof meta_image === 'string' && meta_image.trim() !== '') {
-            const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "cuisines_meta");
-            metaImageUrl = result.url;
+    const normMetaImage = normalizeImagePayload(meta_image);
+    if (normMetaImage) {
+        if (normMetaImage.startsWith("http")) {
+            metaImageUrl = normMetaImage;
         }
-        else if (typeof meta_image === 'object' && Object.keys(meta_image).length > 0) {
-            throw new BadRequest_1.BadRequest("Invalid meta_image format. Expected a base64 string, received an object.");
+        else {
+            const result = await (0, handleImages_1.saveBase64Image)(req, normMetaImage, "cuisines_meta");
+            metaImageUrl = result.url;
         }
     }
     const id = (0, uuid_1.v4)();
@@ -133,25 +162,18 @@ const updateCuisine = async (req, res) => {
     const updateData = {
         updatedAt: new Date(),
     };
-    let imageUrl = undefined;
-    if (Image) {
-        if (typeof Image === 'string' && Image.trim() !== '') {
-            const result = await (0, handleImages_1.saveBase64Image)(req, Image, "cuisines");
-            imageUrl = result.url;
-        }
-        else if (typeof Image === 'object' && Object.keys(Image).length > 0) {
-            throw new BadRequest_1.BadRequest("Invalid Image format. Expected a base64 string, received an object.");
-        }
+    const normImage = normalizeImagePayload(Image);
+    if (normImage) {
+        updateData.Image = await (0, handleImages_1.handleImageUpdate)(req, existingCuisine[0].Image, normImage, "cuisines");
     }
-    let metaImageUrl = undefined;
-    if (meta_image) {
-        if (typeof meta_image === 'string' && meta_image.trim() !== '') {
-            const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "cuisines_meta");
-            metaImageUrl = result.url;
-        }
-        else if (typeof meta_image === 'object' && Object.keys(meta_image).length > 0) {
-            throw new BadRequest_1.BadRequest("Invalid meta_image format. Expected a base64 string, received an object.");
-        }
+    const normMetaImage = normalizeImagePayload(meta_image);
+    if (normMetaImage) {
+        updateData.meta_image = await (0, handleImages_1.handleImageUpdate)(req, existingCuisine[0].meta_image, normMetaImage, "cuisines_meta");
+    }
+    else if (meta_image === "" || (typeof meta_image === 'object' && Object.keys(meta_image).length === 0 && !Array.isArray(meta_image))) {
+        // Only clear it if they explicitly send empty string or empty object
+        // Actually, if it's undefined it means no change. If it's passed as empty, maybe clear it.
+        // Let's stick to existing logic for clearing
     }
     if (name)
         updateData.name = name;
@@ -159,12 +181,11 @@ const updateCuisine = async (req, res) => {
         updateData.nameAr = nameAr;
     if (nameFr)
         updateData.nameFr = nameFr;
-    if (imageUrl)
-        updateData.Image = imageUrl;
-    if (metaImageUrl)
-        updateData.meta_image = metaImageUrl;
-    else if (meta_image === "" || meta_image === null)
+    // We already added Image and meta_image to updateData above
+    // Let's keep the explicitly clear logic for meta_image:
+    if (meta_image === "" || meta_image === null) {
         updateData.meta_image = null;
+    }
     if (description !== undefined)
         updateData.description = description;
     if (descriptionAr)
