@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions } from "../../models/schema";
-import { eq, and, like, or } from "drizzle-orm";
+import { eq, and, like, or, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
 
@@ -87,7 +87,7 @@ export const getRestaurantsByCuisine = async (req: Request, res: Response) => {
         minDeliveryTime: restaurants.minDeliveryTime,
     }).from(restaurants)
     .where(and(
-        eq(restaurants.cuisineId, cuisineId)
+        sql`JSON_CONTAINS(${restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`
     ));
 
     const result = data.map(r => ({

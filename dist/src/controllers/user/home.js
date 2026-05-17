@@ -78,7 +78,7 @@ const getRestaurantsByCuisine = async (req, res) => {
         address: schema_1.restaurants.address,
         minDeliveryTime: schema_1.restaurants.minDeliveryTime,
     }).from(schema_1.restaurants)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.cuisineId, cuisineId)));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.sql) `JSON_CONTAINS(${schema_1.restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`));
     const result = data.map(r => ({
         ...r,
         isFavorite: userId ? favoriteRestaurantIds.has(r.id) : false
