@@ -60,7 +60,7 @@ const createCuisine = async (req, res) => {
         }
     }
     else {
-        throw new BadRequest_1.BadRequest("Image is required.");
+        throw new BadRequest_1.BadRequest(`Image is required. Received: ${JSON.stringify(Image).substring(0, 500)}`);
     }
     let metaImageUrl = null;
     const normMetaImage = normalizeImagePayload(meta_image);

@@ -61,7 +61,7 @@ export const createCuisine = async (req: Request, res: Response) => {
             imageUrl = result.url;
         }
     } else {
-        throw new BadRequest("Image is required.");
+        throw new BadRequest(`Image is required. Received: ${JSON.stringify(Image).substring(0, 500)}`);
     }
 
     let metaImageUrl: string | null = null;
