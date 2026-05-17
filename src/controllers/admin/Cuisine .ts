@@ -28,20 +28,24 @@ export const createCuisine = async (req: Request, res: Response) => {
 
     let imageUrl: string = '';
     if (Image) {
-        if (typeof Image !== 'string') {
+        if (typeof Image === 'string' && Image.trim() !== '') {
+            const result = await saveBase64Image(req, Image, "cuisines");
+            imageUrl = result.url;
+        } else if (typeof Image === 'object' && Object.keys(Image).length === 0) {
+            throw new BadRequest("Image is required.");
+        } else {
             throw new BadRequest("Invalid Image format. Expected a base64 string, received an object.");
         }
-        const result = await saveBase64Image(req, Image, "cuisines");
-        imageUrl = result.url;
     }
 
     let metaImageUrl: string | null = null;
-    if (meta_image && Object.keys(meta_image).length > 0) {
-        if (typeof meta_image !== 'string') {
+    if (meta_image) {
+        if (typeof meta_image === 'string' && meta_image.trim() !== '') {
+            const result = await saveBase64Image(req, meta_image, "cuisines_meta");
+            metaImageUrl = result.url;
+        } else if (typeof meta_image === 'object' && Object.keys(meta_image).length > 0) {
             throw new BadRequest("Invalid meta_image format. Expected a base64 string, received an object.");
         }
-        const result = await saveBase64Image(req, meta_image, "cuisines_meta");
-        metaImageUrl = result.url;
     }
 
     const id = uuidv4();
@@ -142,21 +146,23 @@ export const updateCuisine = async (req: Request, res: Response) => {
     };
 
     let imageUrl: string | undefined = undefined;
-    if (Image && Object.keys(Image).length > 0) {
-        if (typeof Image !== 'string') {
+    if (Image) {
+        if (typeof Image === 'string' && Image.trim() !== '') {
+            const result = await saveBase64Image(req, Image, "cuisines");
+            imageUrl = result.url;
+        } else if (typeof Image === 'object' && Object.keys(Image).length > 0) {
             throw new BadRequest("Invalid Image format. Expected a base64 string, received an object.");
         }
-        const result = await saveBase64Image(req, Image, "cuisines");
-        imageUrl = result.url;
     }
 
     let metaImageUrl: string | undefined = undefined;
-    if (meta_image && Object.keys(meta_image).length > 0) {
-        if (typeof meta_image !== 'string') {
+    if (meta_image) {
+        if (typeof meta_image === 'string' && meta_image.trim() !== '') {
+            const result = await saveBase64Image(req, meta_image, "cuisines_meta");
+            metaImageUrl = result.url;
+        } else if (typeof meta_image === 'object' && Object.keys(meta_image).length > 0) {
             throw new BadRequest("Invalid meta_image format. Expected a base64 string, received an object.");
         }
-        const result = await saveBase64Image(req, meta_image, "cuisines_meta");
-        metaImageUrl = result.url;
     }
 
     if (name) updateData.name = name;

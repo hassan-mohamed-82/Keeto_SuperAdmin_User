@@ -25,19 +25,26 @@ const createCuisine = async (req, res) => {
     }
     let imageUrl = '';
     if (Image) {
-        if (typeof Image !== 'string') {
+        if (typeof Image === 'string' && Image.trim() !== '') {
+            const result = await (0, handleImages_1.saveBase64Image)(req, Image, "cuisines");
+            imageUrl = result.url;
+        }
+        else if (typeof Image === 'object' && Object.keys(Image).length === 0) {
+            throw new BadRequest_1.BadRequest("Image is required.");
+        }
+        else {
             throw new BadRequest_1.BadRequest("Invalid Image format. Expected a base64 string, received an object.");
         }
-        const result = await (0, handleImages_1.saveBase64Image)(req, Image, "cuisines");
-        imageUrl = result.url;
     }
     let metaImageUrl = null;
-    if (meta_image && Object.keys(meta_image).length > 0) {
-        if (typeof meta_image !== 'string') {
+    if (meta_image) {
+        if (typeof meta_image === 'string' && meta_image.trim() !== '') {
+            const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "cuisines_meta");
+            metaImageUrl = result.url;
+        }
+        else if (typeof meta_image === 'object' && Object.keys(meta_image).length > 0) {
             throw new BadRequest_1.BadRequest("Invalid meta_image format. Expected a base64 string, received an object.");
         }
-        const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "cuisines_meta");
-        metaImageUrl = result.url;
     }
     const id = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.cuisines).values({
@@ -127,20 +134,24 @@ const updateCuisine = async (req, res) => {
         updatedAt: new Date(),
     };
     let imageUrl = undefined;
-    if (Image && Object.keys(Image).length > 0) {
-        if (typeof Image !== 'string') {
+    if (Image) {
+        if (typeof Image === 'string' && Image.trim() !== '') {
+            const result = await (0, handleImages_1.saveBase64Image)(req, Image, "cuisines");
+            imageUrl = result.url;
+        }
+        else if (typeof Image === 'object' && Object.keys(Image).length > 0) {
             throw new BadRequest_1.BadRequest("Invalid Image format. Expected a base64 string, received an object.");
         }
-        const result = await (0, handleImages_1.saveBase64Image)(req, Image, "cuisines");
-        imageUrl = result.url;
     }
     let metaImageUrl = undefined;
-    if (meta_image && Object.keys(meta_image).length > 0) {
-        if (typeof meta_image !== 'string') {
+    if (meta_image) {
+        if (typeof meta_image === 'string' && meta_image.trim() !== '') {
+            const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "cuisines_meta");
+            metaImageUrl = result.url;
+        }
+        else if (typeof meta_image === 'object' && Object.keys(meta_image).length > 0) {
             throw new BadRequest_1.BadRequest("Invalid meta_image format. Expected a base64 string, received an object.");
         }
-        const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "cuisines_meta");
-        metaImageUrl = result.url;
     }
     if (name)
         updateData.name = name;
