@@ -4,21 +4,46 @@ import { Request } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { BadRequest } from "../Errors";
 
+const normalizeImagePayload = (img: any): string | undefined => {
+  if (!img) return undefined;
+  if (typeof img === 'string') {
+      if (img.trim() === '') return undefined;
+      return img;
+  }
+  
+  try {
+      const str = JSON.stringify(img);
+      const base64Match = str.match(/(data:image\/[a-zA-Z0-9+.-]+;base64,[^"'\\]+)/);
+      if (base64Match) return base64Match[1];
+      
+      const urlMatch = str.match(/(https?:\/\/[^"'\\]+)/);
+      if (urlMatch) return urlMatch[1];
+  } catch (e) {}
+  
+  return undefined;
+};
+
 export async function saveBase64Image(
   req: Request,
   base64: any,
   folder: string
 ): Promise<{ url: string; relativePath: string }> {
   
-  if (typeof base64 !== "string") {
-    throw new BadRequest("Invalid image data. Expected a base64 string, received an object.");
+  const normalizedBase64 = normalizeImagePayload(base64);
+
+  if (!normalizedBase64) {
+    return { url: "", relativePath: "" };
+  }
+
+  if (normalizedBase64.startsWith("http")) {
+    return { url: normalizedBase64, relativePath: normalizedBase64 };
   }
 
   let ext = "png"; // الصيغة الافتراضية
-  let base64Data = base64;
+  let base64Data = normalizedBase64;
 
   // 1. فحص هل النص بيحتوي على المقدمة (data:image...)؟
-  const matches = base64.match(/^data:(.+);base64,(.+)$/);
+  const matches = normalizedBase64.match(/^data:(.+);base64,(.+)$/);
 
   if (matches && matches.length === 3) {
     // لو مبعوتة بالمقدمة، نفصلها وناخد الكود الصافي
@@ -28,10 +53,10 @@ export async function saveBase64Image(
   } else {
     // 2. لو مبعوتة كود صافي (زي الداتا بتاعتك دلوقتي)
     // هنستنتج نوع الصورة من أول حروف الكود
-    if (base64.startsWith("/9j/")) ext = "jpeg";
-    else if (base64.startsWith("iVBORw0K")) ext = "png";
-    else if (base64.startsWith("R0lGOD")) ext = "gif";
-    else if (base64.startsWith("UklGR")) ext = "webp";
+    if (normalizedBase64.startsWith("/9j/")) ext = "jpeg";
+    else if (normalizedBase64.startsWith("iVBORw0K")) ext = "png";
+    else if (normalizedBase64.startsWith("R0lGOD")) ext = "gif";
+    else if (normalizedBase64.startsWith("UklGR")) ext = "webp";
   }
 
   try {
@@ -58,8 +83,9 @@ export async function saveBase64Image(
 }
 
 export const validateAndSaveLogo = async (req: Request, logo: any, folder: string): Promise<string> => {
-  if (typeof logo !== "string") {
-    throw new BadRequest("Invalid logo data. Expected a base64 string.");
+  const normalizedLogo = normalizeImagePayload(logo);
+  if (!normalizedLogo) {
+    return "";
   }
 
   // شلنا فحص الـ Regex المعقد من هنا عشان دالة saveBase64Image بقت بتعالج كل الحالات
@@ -96,11 +122,13 @@ export const deleteImage = async (image: string) => {
 };
 
 export const handleImageUpdate = async (req: Request, oldImage: string | null | undefined, newImage: any, folder: string) => {
-  if (!newImage || (typeof newImage === 'string' && newImage.startsWith("http"))) {
-    return newImage || oldImage;
+  const normalizedNewImage = normalizeImagePayload(newImage);
+
+  if (!normalizedNewImage || normalizedNewImage.startsWith("http")) {
+    return (normalizedNewImage && normalizedNewImage.startsWith("http")) ? normalizedNewImage : (oldImage || "");
   }
 
-  const savedUrl = await validateAndSaveLogo(req, newImage, folder);
+  const savedUrl = await validateAndSaveLogo(req, normalizedNewImage, folder);
 
   if (oldImage) {
     await deleteImage(oldImage);

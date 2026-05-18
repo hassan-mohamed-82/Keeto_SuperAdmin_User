@@ -20,6 +20,7 @@ import restaurantsettingRouter from "./restaurantsetting";
 import payment_methodsRouter from "./payment_methods";
 import OrderRouter from "./order"
 import imageRouter from "./image";
+import popupRouter from "./popup";
 import user_walletsRouter from "./userWallets";
 import SelectReasonsRouter from "./selectReasons";
 import ReportRouter from "./Report"
@@ -35,6 +36,7 @@ router.use ("/report",ReportRouter)
 router.use("/admin", AdmiRouter);
 router.use("/roles", RolesRouter);
 router.use("/countries", CountryRouter);
+router.use("/popup", popupRouter);
 router.use("/select-reasons", SelectReasonsRouter);
 router.use("/cities", CityRouter);
 router.use("/zones", ZoneRouter);

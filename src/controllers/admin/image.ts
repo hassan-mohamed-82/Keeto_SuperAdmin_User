@@ -13,12 +13,22 @@ export const createImage = async (req: Request, res: Response) => {
     const { img } = req.body;
     
     const result = await saveBase64Image(req, img, "images");
+    if (!result.url) {
+        throw new BadRequest("Image is required.");
+    }
+
+    const id = uuidv4();
     await db.insert(images).values({
-        id: uuidv4(),
+        id,
         img: result.url,
-    })
+    });
+
     return SuccessResponse(res, {
         message: "Image created successfully",
+        data: {
+            id,
+            img: result.url
+        }
     }, 201);
 };
 
@@ -55,13 +65,19 @@ export const updateImage = async (req: Request, res: Response) => {
     if (!image[0]) {
         throw new NotFound("Image not found");
     }
-    const result = await handleImageUpdate(req, img, "images", image[0].img);
+    
+    const updatedUrl = await handleImageUpdate(req, image[0].img, img, "images");
+    if (!updatedUrl) {
+        throw new BadRequest("Image is required.");
+    }
+
     await db.update(images).set({
-        img: result.url,
+        img: updatedUrl,
     }).where(eq(images.id, id));
+
     return SuccessResponse(res, {
         message: "Image updated successfully",
-        data: result.url,
+        data: updatedUrl,
     }, 200);
 };
 

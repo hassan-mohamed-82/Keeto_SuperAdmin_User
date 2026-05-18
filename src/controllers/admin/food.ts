@@ -113,17 +113,15 @@ export const createFood = async (req: Request, res: Response) => {
         }
     }
 
-    let imageUrl = image;
+    let imageUrl: string = "";
 
-    if (image && image.startsWith("data:image")) {
-
-        const result = await saveBase64Image(
-            req,
-            image,
-            "foods"
-        );
-
+    if (image) {
+        const result = await saveBase64Image(req, image, "foods");
         imageUrl = result.url;
+    }
+
+    if (!imageUrl) {
+        throw new BadRequest("Image is required.");
     }
 
     const foodId = uuidv4();
@@ -475,12 +473,7 @@ export const updateFood = async (req: Request, res: Response) => {
     for (const key of allowedFields) {
         if (data[key] !== undefined) {
             // 🖼️ معالجة الصورة
-            if (
-                key === "image" &&
-                data[key] &&
-                typeof data[key] === "string" &&
-                data[key].startsWith("data:image")
-            ) {
+            if (key === "image") {
                 updateData[key] = await handleImageUpdate(
                     req,
                     existingFood[0].image,

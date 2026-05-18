@@ -59,19 +59,13 @@ export const createRestaurant = async (req: Request, res: Response) => {
     // 🚀 حماية الـ Logo من الـ Objects الفارغة
     let logoUrl: string | undefined = undefined;
     if (logo) {
-        if (typeof logo !== 'string') {
-            throw new BadRequest("Invalid logo format. Expected a base64 string, received an object.");
-        }
         const result = await saveBase64Image(req, logo, "restaurants");
         logoUrl = result.url;
     }
 
     // 🚀 حماية الـ Cover من الـ Objects الفارغة
     let coverUrl: string | undefined = undefined;
-    if (cover && Object.keys(cover).length > 0) { // لو مبعوت أوبجكت فاضي هنتجاهله
-        if (typeof cover !== 'string') {
-            throw new BadRequest("Invalid cover format. Expected a base64 string, received an object.");
-        }
+    if (cover) {
         const result = await saveBase64Image(req, cover, "restaurants_cover");
         coverUrl = result.url;
     }

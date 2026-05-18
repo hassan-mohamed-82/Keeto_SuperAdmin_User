@@ -311,7 +311,7 @@ exports.getUserFavorites = getUserFavorites;
 const searchRestaurantWithMenu = async (req, res) => {
     const { query } = req.query;
     if (!query || typeof query !== "string") {
-        throw new Errors_1.BadRequest("من فضلك أدخل كلمة البحث");
+        throw new Errors_1.BadRequest("please enter your search term");
     }
     const searchTerm = `%${query}%`;
     // 1. Fetch flat data

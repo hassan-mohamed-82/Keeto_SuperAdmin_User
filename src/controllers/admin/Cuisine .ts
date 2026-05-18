@@ -8,30 +8,7 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 import { saveBase64Image, handleImageUpdate } from "../../utils/handleImages";
 
-const normalizeImagePayload = (img: any): string | undefined => {
-    if (!img) return undefined;
-    if (typeof img === 'string') {
-        if (img.trim() === '') return undefined;
-        return img;
-    }
-    
-    // Attempt to stringify and find a base64 data URI or an http URL
-    try {
-        const str = JSON.stringify(img);
-        
-        // 1. Try to find a base64 string
-        const base64Match = str.match(/(data:image\/[a-zA-Z0-9+.-]+;base64,[^"'\\]+)/);
-        if (base64Match) return base64Match[1];
-        
-        // 2. Try to find an http URL if it's an existing image
-        const urlMatch = str.match(/(https?:\/\/[^"'\\]+)/);
-        if (urlMatch) return urlMatch[1];
-    } catch (e) {
-        // Ignore stringify errors
-    }
-    
-    return undefined;
-};
+
 
 export const createCuisine = async (req: Request, res: Response) => {
     const { name, nameAr, nameFr, Image, meta_image, description, descriptionAr, descriptionFr, meta_description, meta_descriptionAr, meta_descriptionFr, status } = req.body;
@@ -52,27 +29,19 @@ export const createCuisine = async (req: Request, res: Response) => {
     }
 
     let imageUrl: string = '';
-    const normImage = normalizeImagePayload(Image);
-    if (normImage) {
-        if (normImage.startsWith("http")) {
-            imageUrl = normImage;
-        } else {
-            const result = await saveBase64Image(req, normImage, "cuisines");
-            imageUrl = result.url;
-        }
-    } else {
-        throw new BadRequest(`Image is required. Received: ${JSON.stringify(Image).substring(0, 500)}`);
+    if (Image) {
+        const result = await saveBase64Image(req, Image, "cuisines");
+        imageUrl = result.url;
+    }
+
+    if (!imageUrl) {
+        throw new BadRequest(`Image is required.`);
     }
 
     let metaImageUrl: string | null = null;
-    const normMetaImage = normalizeImagePayload(meta_image);
-    if (normMetaImage) {
-        if (normMetaImage.startsWith("http")) {
-            metaImageUrl = normMetaImage;
-        } else {
-            const result = await saveBase64Image(req, normMetaImage, "cuisines_meta");
-            metaImageUrl = result.url;
-        }
+    if (meta_image) {
+        const result = await saveBase64Image(req, meta_image, "cuisines_meta");
+        metaImageUrl = result.url || null;
     }
 
     const id = uuidv4();
@@ -172,17 +141,14 @@ export const updateCuisine = async (req: Request, res: Response) => {
         updatedAt: new Date(),
     };
 
-    const normImage = normalizeImagePayload(Image);
-    if (normImage) {
-        updateData.Image = await handleImageUpdate(req, existingCuisine[0].Image, normImage, "cuisines");
+    if (Image) {
+        updateData.Image = await handleImageUpdate(req, existingCuisine[0].Image, Image, "cuisines");
     }
 
-    const normMetaImage = normalizeImagePayload(meta_image);
-    if (normMetaImage) {
-        updateData.meta_image = await handleImageUpdate(req, existingCuisine[0].meta_image, normMetaImage, "cuisines_meta");
+    if (meta_image) {
+        updateData.meta_image = await handleImageUpdate(req, existingCuisine[0].meta_image, meta_image, "cuisines_meta");
     } else if (meta_image === "" || (typeof meta_image === 'object' && Object.keys(meta_image).length === 0 && !Array.isArray(meta_image))) {
         // Only clear it if they explicitly send empty string or empty object
-        // Actually, if it's undefined it means no change. If it's passed as empty, maybe clear it.
         // Let's stick to existing logic for clearing
     }
 

@@ -1,5 +1,6 @@
 import { mysqlTable, varchar, text, timestamp, mysqlEnum, json, char, time ,longtext } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
+import { restaurants } from "../../schema";
 
 export const popup = mysqlTable("popup", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -12,6 +13,8 @@ export const popup = mysqlTable("popup", {
     image: varchar("image", { length: 500 }),
     imageAr: varchar("image_ar", { length: 500 }),
     imageFr: varchar("image_fr", { length: 500 }),
+    restaurantId: char("restaurant_id", { length: 36 }).references(() => restaurants.id),
+   
     type: mysqlEnum("type", ["web","home_web","home_app","mykeeto_app"]).default("mykeeto_app"),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     startDate: timestamp("start_date").notNull(),

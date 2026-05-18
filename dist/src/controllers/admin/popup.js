@@ -11,7 +11,7 @@ const uuid_1 = require("uuid");
 const IMAGE_FOLDER = "popup";
 // ─── Create Popup ───
 const createPopup = async (req, res) => {
-    const { Title, TitleAr, TitleFr, description, descriptionAr, descriptionFr, image, imageAr, imageFr, type, status, startDate, endDate, } = req.body;
+    const { Title, TitleAr, TitleFr, description, descriptionAr, descriptionFr, image, imageAr, imageFr, type, status, startDate, endDate, restaurantId, } = req.body;
     if (!Title || !startDate || !endDate) {
         throw new Errors_1.BadRequest("Title, startDate, and endDate are required");
     }
@@ -44,6 +44,7 @@ const createPopup = async (req, res) => {
         imageFr: imageFrUrl || null,
         type: type || "mykeeto_app",
         status: status || "active",
+        restaurantId: restaurantId || null,
         startDate: new Date(startDate),
         endDate: new Date(endDate),
     });

@@ -62,10 +62,13 @@ const createFood = async (req, res) => {
             throw new BadRequest_1.BadRequest("Addon not found");
         }
     }
-    let imageUrl = image;
-    if (image && image.startsWith("data:image")) {
+    let imageUrl = "";
+    if (image) {
         const result = await (0, handleImages_1.saveBase64Image)(req, image, "foods");
         imageUrl = result.url;
+    }
+    if (!imageUrl) {
+        throw new BadRequest_1.BadRequest("Image is required.");
     }
     const foodId = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.food).values({
@@ -337,10 +340,7 @@ const updateFood = async (req, res) => {
     for (const key of allowedFields) {
         if (data[key] !== undefined) {
             // 🖼️ معالجة الصورة
-            if (key === "image" &&
-                data[key] &&
-                typeof data[key] === "string" &&
-                data[key].startsWith("data:image")) {
+            if (key === "image") {
                 updateData[key] = await (0, handleImages_1.handleImageUpdate)(req, existingFood[0].image, data[key], "foods");
             }
             else {

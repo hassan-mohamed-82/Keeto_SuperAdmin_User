@@ -9,31 +9,6 @@ const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
 const handleImages_1 = require("../../utils/handleImages");
-const normalizeImagePayload = (img) => {
-    if (!img)
-        return undefined;
-    if (typeof img === 'string') {
-        if (img.trim() === '')
-            return undefined;
-        return img;
-    }
-    // Attempt to stringify and find a base64 data URI or an http URL
-    try {
-        const str = JSON.stringify(img);
-        // 1. Try to find a base64 string
-        const base64Match = str.match(/(data:image\/[a-zA-Z0-9+.-]+;base64,[^"'\\]+)/);
-        if (base64Match)
-            return base64Match[1];
-        // 2. Try to find an http URL if it's an existing image
-        const urlMatch = str.match(/(https?:\/\/[^"'\\]+)/);
-        if (urlMatch)
-            return urlMatch[1];
-    }
-    catch (e) {
-        // Ignore stringify errors
-    }
-    return undefined;
-};
 const createCuisine = async (req, res) => {
     const { name, nameAr, nameFr, Image, meta_image, description, descriptionAr, descriptionFr, meta_description, meta_descriptionAr, meta_descriptionFr, status } = req.body;
     if (!name || !nameAr || !nameFr || !Image || !descriptionAr || !descriptionFr || !meta_descriptionAr || !meta_descriptionFr) {
@@ -49,29 +24,17 @@ const createCuisine = async (req, res) => {
         throw new BadRequest_1.BadRequest("Cuisine already exists");
     }
     let imageUrl = '';
-    const normImage = normalizeImagePayload(Image);
-    if (normImage) {
-        if (normImage.startsWith("http")) {
-            imageUrl = normImage;
-        }
-        else {
-            const result = await (0, handleImages_1.saveBase64Image)(req, normImage, "cuisines");
-            imageUrl = result.url;
-        }
+    if (Image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, Image, "cuisines");
+        imageUrl = result.url;
     }
-    else {
-        throw new BadRequest_1.BadRequest(`Image is required. Received: ${JSON.stringify(Image).substring(0, 500)}`);
+    if (!imageUrl) {
+        throw new BadRequest_1.BadRequest(`Image is required.`);
     }
     let metaImageUrl = null;
-    const normMetaImage = normalizeImagePayload(meta_image);
-    if (normMetaImage) {
-        if (normMetaImage.startsWith("http")) {
-            metaImageUrl = normMetaImage;
-        }
-        else {
-            const result = await (0, handleImages_1.saveBase64Image)(req, normMetaImage, "cuisines_meta");
-            metaImageUrl = result.url;
-        }
+    if (meta_image) {
+        const result = await (0, handleImages_1.saveBase64Image)(req, meta_image, "cuisines_meta");
+        metaImageUrl = result.url || null;
     }
     const id = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.cuisines).values({
@@ -160,17 +123,14 @@ const updateCuisine = async (req, res) => {
     const updateData = {
         updatedAt: new Date(),
     };
-    const normImage = normalizeImagePayload(Image);
-    if (normImage) {
-        updateData.Image = await (0, handleImages_1.handleImageUpdate)(req, existingCuisine[0].Image, normImage, "cuisines");
+    if (Image) {
+        updateData.Image = await (0, handleImages_1.handleImageUpdate)(req, existingCuisine[0].Image, Image, "cuisines");
     }
-    const normMetaImage = normalizeImagePayload(meta_image);
-    if (normMetaImage) {
-        updateData.meta_image = await (0, handleImages_1.handleImageUpdate)(req, existingCuisine[0].meta_image, normMetaImage, "cuisines_meta");
+    if (meta_image) {
+        updateData.meta_image = await (0, handleImages_1.handleImageUpdate)(req, existingCuisine[0].meta_image, meta_image, "cuisines_meta");
     }
     else if (meta_image === "" || (typeof meta_image === 'object' && Object.keys(meta_image).length === 0 && !Array.isArray(meta_image))) {
         // Only clear it if they explicitly send empty string or empty object
-        // Actually, if it's undefined it means no change. If it's passed as empty, maybe clear it.
         // Let's stick to existing logic for clearing
     }
     if (name)

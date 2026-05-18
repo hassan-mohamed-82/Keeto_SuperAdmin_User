@@ -358,7 +358,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
     const { query } = req.query;
 
     if (!query || typeof query !== "string") {
-        throw new BadRequest("من فضلك أدخل كلمة البحث");
+        throw new BadRequest("please enter your search term");
     }
 
     const searchTerm = `%${query}%`;
