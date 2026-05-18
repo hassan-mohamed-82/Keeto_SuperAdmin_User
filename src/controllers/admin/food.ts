@@ -425,17 +425,29 @@ export const getFoodById = async (req: Request, res: Response) => {
 export const updateFood = async (req: Request, res: Response) => {
     const { id } = req.params;
     const data = req.body;
-    const restaurantId = req.user?.id;
+    
+    // سحب بيانات المستخدم من الـ التوكن (التي وضعها الـ middleware)
+    const userId = req.user?.id;
+    const userType = req.user?.type; 
 
-    if (!restaurantId) {
-        throw new BadRequest("Restaurant ID missing or unauthorized");
+    if (!userId) {
+        throw new BadRequest("User ID missing or unauthorized");
     }
 
-    // ✅ تأكد إن الأكلة تخص نفس الريستورانت
+    // ✅ تحديد الصلاحيات: 
+    // لو سوبر آدمن، هيبحث بـ ID الأكلة بس عشان من حقه يعدل أي أكلة
+    // لو صاحب مطعم، لازم ID الأكلة و ID المطعم يتطابقوا (Data Ownership)
+    const isSuperAdmin = userType === "super_admin";
+    
+    const queryCondition = isSuperAdmin
+        ? eq(food.id, id)
+        : and(eq(food.id, id), eq(food.restaurantid, userId));
+
+    // ✅ تأكد إن الأكلة موجودة وتخص نفس الريستورانت (في حالة الفيندور)
     const existingFood = await db
         .select()
         .from(food)
-        .where(and(eq(food.id, id), eq(food.restaurantid, restaurantId)))
+        .where(queryCondition)
         .limit(1);
 
     if (!existingFood[0]) {
@@ -482,10 +494,10 @@ export const updateFood = async (req: Request, res: Response) => {
         }
     }
 
-    // ✅ تنفيذ التحديث (بدون returning لأن MySQL لا يدعمها)
+    // ✅ تنفيذ التحديث (استخدمنا نفس الـ queryCondition هنا عشان السوبر آدمن يقدر يحدث بنجاح)
     await db.update(food)
         .set(updateData)
-        .where(and(eq(food.id, id), eq(food.restaurantid, restaurantId)));
+        .where(queryCondition);
 
     // ===========================
     // ✅ Variations Update
@@ -544,7 +556,7 @@ export const updateFood = async (req: Request, res: Response) => {
         }
     }
 
-    // 🔄 جلب البيانات الجديدة بعد التحديث لإرسالها للفرونت إند (اختياري بس مفيد)
+    // 🔄 جلب البيانات الجديدة بعد التحديث لإرسالها للفرونت إند
     const updatedFood = await db
         .select()
         .from(food)

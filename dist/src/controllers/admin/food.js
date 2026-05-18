@@ -296,15 +296,24 @@ exports.getFoodById = getFoodById;
 const updateFood = async (req, res) => {
     const { id } = req.params;
     const data = req.body;
-    const restaurantId = req.user?.id;
-    if (!restaurantId) {
-        throw new BadRequest_1.BadRequest("Restaurant ID missing or unauthorized");
+    // سحب بيانات المستخدم من الـ التوكن (التي وضعها الـ middleware)
+    const userId = req.user?.id;
+    const userType = req.user?.type;
+    if (!userId) {
+        throw new BadRequest_1.BadRequest("User ID missing or unauthorized");
     }
-    // ✅ تأكد إن الأكلة تخص نفس الريستورانت
+    // ✅ تحديد الصلاحيات: 
+    // لو سوبر آدمن، هيبحث بـ ID الأكلة بس عشان من حقه يعدل أي أكلة
+    // لو صاحب مطعم، لازم ID الأكلة و ID المطعم يتطابقوا (Data Ownership)
+    const isSuperAdmin = userType === "super_admin";
+    const queryCondition = isSuperAdmin
+        ? (0, drizzle_orm_1.eq)(schema_1.food.id, id)
+        : (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.id, id), (0, drizzle_orm_1.eq)(schema_1.food.restaurantid, userId));
+    // ✅ تأكد إن الأكلة موجودة وتخص نفس الريستورانت (في حالة الفيندور)
     const existingFood = await connection_1.db
         .select()
         .from(schema_1.food)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.id, id), (0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId)))
+        .where(queryCondition)
         .limit(1);
     if (!existingFood[0]) {
         throw new NotFound_1.NotFound("Food not found or you don't have permission to edit it");
@@ -339,10 +348,10 @@ const updateFood = async (req, res) => {
             }
         }
     }
-    // ✅ تنفيذ التحديث (بدون returning لأن MySQL لا يدعمها)
+    // ✅ تنفيذ التحديث (استخدمنا نفس الـ queryCondition هنا عشان السوبر آدمن يقدر يحدث بنجاح)
     await connection_1.db.update(schema_1.food)
         .set(updateData)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.id, id), (0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId)));
+        .where(queryCondition);
     // ===========================
     // ✅ Variations Update
     // ===========================
@@ -392,7 +401,7 @@ const updateFood = async (req, res) => {
             }
         }
     }
-    // 🔄 جلب البيانات الجديدة بعد التحديث لإرسالها للفرونت إند (اختياري بس مفيد)
+    // 🔄 جلب البيانات الجديدة بعد التحديث لإرسالها للفرونت إند
     const updatedFood = await connection_1.db
         .select()
         .from(schema_1.food)
