@@ -154,7 +154,11 @@ const getRestaurantDetails = async (req, res) => {
         descriptionFr: schema_1.food.descriptionFr,
         price: schema_1.food.price,
         image: schema_1.food.image,
+        // 👇 تم إضافة الـ ID واللغات الثلاثة للكاتيجوري
+        categoryId: schema_1.categories.id,
         categoryName: schema_1.categories.name,
+        categoryNameAr: schema_1.categories.nameAr,
+        categoryNameFr: schema_1.categories.nameFr,
         variationId: schema_1.foodVariations.id,
         variationName: schema_1.foodVariations.name,
         variationNameAr: schema_1.foodVariations.nameAr,
@@ -174,58 +178,78 @@ const getRestaurantDetails = async (req, res) => {
         .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.food.id, schema_1.foodVariations.foodId))
         .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId))
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active")));
+    // 👇 تجميع الداتا بناءً على الـ Category ID بدلاً من الاسم
     const groupedMenuObj = rawMenu.reduce((acc, row) => {
-        const catName = row.categoryName || "Other";
-        if (!acc[catName])
-            acc[catName] = {};
-        if (!acc[catName][row.foodId]) {
-            acc[catName][row.foodId] = {
-                id: row.foodId,
-                name: row.foodName,
-                nameAr: row.foodNameAr,
-                nameFr: row.foodNameFr,
-                description: row.description,
-                descriptionAr: row.descriptionAr,
-                descriptionFr: row.descriptionFr,
-                price: row.price,
-                image: row.image,
-                isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
-                variations: {}
+        const catId = row.categoryId || "uncategorized";
+        // 1. تجميع الكاتيجوري
+        if (!acc[catId]) {
+            acc[catId] = {
+                id: catId === "uncategorized" ? null : catId,
+                name: row.categoryName || "Other",
+                nameAr: row.categoryNameAr || "أخرى",
+                nameFr: row.categoryNameFr || "Autre",
+                foods: {} // هنجمع الأكل هنا كـ Object مؤقتاً
             };
         }
-        if (row.variationId) {
-            if (!acc[catName][row.foodId].variations[row.variationId]) {
-                acc[catName][row.foodId].variations[row.variationId] = {
-                    id: row.variationId,
-                    name: row.variationName,
-                    nameAr: row.variationNameAr,
-                    nameFr: row.variationNameFr,
-                    isRequired: row.isRequired,
-                    selectionType: row.selectionType,
-                    min: row.min,
-                    max: row.max,
-                    options: []
+        // 2. تجميع الأكل داخل الكاتيجوري
+        if (row.foodId) {
+            if (!acc[catId].foods[row.foodId]) {
+                acc[catId].foods[row.foodId] = {
+                    id: row.foodId,
+                    name: row.foodName,
+                    nameAr: row.foodNameAr,
+                    nameFr: row.foodNameFr,
+                    description: row.description,
+                    descriptionAr: row.descriptionAr,
+                    descriptionFr: row.descriptionFr,
+                    price: row.price,
+                    image: row.image,
+                    isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
+                    variations: {}
                 };
             }
-            if (row.optionId) {
-                acc[catName][row.foodId].variations[row.variationId].options.push({
-                    id: row.optionId,
-                    name: row.optionName,
-                    nameAr: row.optionNameAr,
-                    nameFr: row.optionNameFr,
-                    additionalPrice: row.additionalPrice
-                });
+            // 3. تجميع الـ Variations داخل الأكل
+            if (row.variationId) {
+                if (!acc[catId].foods[row.foodId].variations[row.variationId]) {
+                    acc[catId].foods[row.foodId].variations[row.variationId] = {
+                        id: row.variationId,
+                        name: row.variationName,
+                        nameAr: row.variationNameAr,
+                        nameFr: row.variationNameFr,
+                        isRequired: row.isRequired,
+                        selectionType: row.selectionType,
+                        min: row.min,
+                        max: row.max,
+                        options: []
+                    };
+                }
+                // 4. تجميع الـ Options داخل الـ Variations
+                if (row.optionId) {
+                    acc[catId].foods[row.foodId].variations[row.variationId].options.push({
+                        id: row.optionId,
+                        name: row.optionName,
+                        nameAr: row.optionNameAr,
+                        nameFr: row.optionNameFr,
+                        additionalPrice: row.additionalPrice
+                    });
+                }
             }
         }
         return acc;
     }, {});
-    const finalMenu = {};
-    for (const [category, foodsObj] of Object.entries(groupedMenuObj)) {
-        finalMenu[category] = Object.values(foodsObj).map((f) => {
-            f.variations = Object.values(f.variations);
-            return f;
-        });
-    }
+    // 👇 تحويل الكاتيجوريز والأكلات من Objects إلى Arrays عشان الـ Response يكون مظبوط
+    const finalMenu = Object.values(groupedMenuObj).map((category) => {
+        return {
+            id: category.id,
+            name: category.name,
+            nameAr: category.nameAr,
+            nameFr: category.nameFr,
+            foods: Object.values(category.foods).map((f) => {
+                f.variations = Object.values(f.variations);
+                return f;
+            })
+        };
+    });
     return (0, response_1.SuccessResponse)(res, {
         data: {
             restaurant: restaurantWithFav,

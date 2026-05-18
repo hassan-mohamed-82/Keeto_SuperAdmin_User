@@ -178,7 +178,13 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         descriptionFr: food.descriptionFr,
         price: food.price,
         image: food.image,
+        
+        // 👇 تم إضافة الـ ID واللغات الثلاثة للكاتيجوري
+        categoryId: categories.id,
         categoryName: categories.name,
+        categoryNameAr: categories.nameAr,
+        categoryNameFr: categories.nameFr,
+        
         variationId: foodVariations.id,
         variationName: foodVariations.name,
         variationNameAr: foodVariations.nameAr,
@@ -202,63 +208,84 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         eq(food.status, "active")
     ));
 
+    // 👇 تجميع الداتا بناءً على الـ Category ID بدلاً من الاسم
     const groupedMenuObj = rawMenu.reduce((acc: any, row) => {
-        const catName = row.categoryName || "Other";
+        const catId = row.categoryId || "uncategorized";
 
-        if (!acc[catName]) acc[catName] = {};
-
-        if (!acc[catName][row.foodId]) {
-            acc[catName][row.foodId] = {
-                id: row.foodId,
-                name: row.foodName,
-                nameAr: row.foodNameAr,
-                nameFr: row.foodNameFr,
-                description: row.description,
-                descriptionAr: row.descriptionAr,
-                descriptionFr: row.descriptionFr,
-                price: row.price,
-                image: row.image,
-                isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
-                variations: {}
+        // 1. تجميع الكاتيجوري
+        if (!acc[catId]) {
+            acc[catId] = {
+                id: catId === "uncategorized" ? null : catId,
+                name: row.categoryName || "Other",
+                nameAr: row.categoryNameAr || "أخرى",
+                nameFr: row.categoryNameFr || "Autre",
+                foods: {} // هنجمع الأكل هنا كـ Object مؤقتاً
             };
         }
 
-        if (row.variationId) {
-            if (!acc[catName][row.foodId].variations[row.variationId]) {
-                acc[catName][row.foodId].variations[row.variationId] = {
-                    id: row.variationId,
-                    name: row.variationName,
-                    nameAr: row.variationNameAr,
-                    nameFr: row.variationNameFr,
-                    isRequired: row.isRequired,
-                    selectionType: row.selectionType,
-                    min: row.min,
-                    max: row.max,
-                    options: []
+        // 2. تجميع الأكل داخل الكاتيجوري
+        if (row.foodId) {
+            if (!acc[catId].foods[row.foodId]) {
+                acc[catId].foods[row.foodId] = {
+                    id: row.foodId,
+                    name: row.foodName,
+                    nameAr: row.foodNameAr,
+                    nameFr: row.foodNameFr,
+                    description: row.description,
+                    descriptionAr: row.descriptionAr,
+                    descriptionFr: row.descriptionFr,
+                    price: row.price,
+                    image: row.image,
+                    isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
+                    variations: {}
                 };
             }
 
-            if (row.optionId) {
-                acc[catName][row.foodId].variations[row.variationId].options.push({
-                    id: row.optionId,
-                    name: row.optionName,
-                    nameAr: row.optionNameAr,
-                    nameFr: row.optionNameFr,
-                    additionalPrice: row.additionalPrice
-                });
+            // 3. تجميع الـ Variations داخل الأكل
+            if (row.variationId) {
+                if (!acc[catId].foods[row.foodId].variations[row.variationId]) {
+                    acc[catId].foods[row.foodId].variations[row.variationId] = {
+                        id: row.variationId,
+                        name: row.variationName,
+                        nameAr: row.variationNameAr,
+                        nameFr: row.variationNameFr,
+                        isRequired: row.isRequired,
+                        selectionType: row.selectionType,
+                        min: row.min,
+                        max: row.max,
+                        options: []
+                    };
+                }
+
+                // 4. تجميع الـ Options داخل الـ Variations
+                if (row.optionId) {
+                    acc[catId].foods[row.foodId].variations[row.variationId].options.push({
+                        id: row.optionId,
+                        name: row.optionName,
+                        nameAr: row.optionNameAr,
+                        nameFr: row.optionNameFr,
+                        additionalPrice: row.additionalPrice
+                    });
+                }
             }
         }
 
         return acc;
     }, {});
 
-    const finalMenu: any = {};
-    for (const [category, foodsObj] of Object.entries(groupedMenuObj)) {
-        finalMenu[category] = Object.values(foodsObj as object).map((f: any) => {
-            f.variations = Object.values(f.variations);
-            return f;
-        });
-    }
+    // 👇 تحويل الكاتيجوريز والأكلات من Objects إلى Arrays عشان الـ Response يكون مظبوط
+    const finalMenu = Object.values(groupedMenuObj).map((category: any) => {
+        return {
+            id: category.id,
+            name: category.name,
+            nameAr: category.nameAr,
+            nameFr: category.nameFr,
+            foods: Object.values(category.foods).map((f: any) => {
+                f.variations = Object.values(f.variations);
+                return f;
+            })
+        };
+    });
 
     return SuccessResponse(res, {
         data: {
