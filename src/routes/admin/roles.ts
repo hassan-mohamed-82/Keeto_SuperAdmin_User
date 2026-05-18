@@ -1,10 +1,12 @@
 import { Router } from "express";
-import { createRole, deleteRole, getAllRoles, getRoleById, updateRole } from "../../controllers/admin/roles";
+import { createRole, deleteRole, getAllRoles, getRoleById, updateRole ,getAdminPermissions} from "../../controllers/admin/roles";
 import { catchAsync } from "../../utils/catchAsync";
 import { validate } from "../../middlewares/validation";
 import { createRoleSchema, updateRoleSchema } from "../../validation/admin/roles";
 import { hasPermission } from "../../middlewares/";
 const router = Router();
+
+router.get("/permissions", hasPermission("Roles", "View"), catchAsync(getAdminPermissions));
 
 router.post("/", hasPermission("Roles", "Add"), validate(createRoleSchema), catchAsync(createRole));
 router.get("/", hasPermission("Roles", "View"), catchAsync(getAllRoles));

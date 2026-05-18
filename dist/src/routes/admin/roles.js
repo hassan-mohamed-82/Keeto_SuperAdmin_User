@@ -7,6 +7,7 @@ const validation_1 = require("../../middlewares/validation");
 const roles_2 = require("../../validation/admin/roles");
 const middlewares_1 = require("../../middlewares/");
 const router = (0, express_1.Router)();
+router.get("/permissions", (0, middlewares_1.hasPermission)("Roles", "View"), (0, catchAsync_1.catchAsync)(roles_1.getAdminPermissions));
 router.post("/", (0, middlewares_1.hasPermission)("Roles", "Add"), (0, validation_1.validate)(roles_2.createRoleSchema), (0, catchAsync_1.catchAsync)(roles_1.createRole));
 router.get("/", (0, middlewares_1.hasPermission)("Roles", "View"), (0, catchAsync_1.catchAsync)(roles_1.getAllRoles));
 router.get("/:id", (0, middlewares_1.hasPermission)("Roles", "View"), (0, catchAsync_1.catchAsync)(roles_1.getRoleById));

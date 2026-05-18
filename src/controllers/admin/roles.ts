@@ -276,3 +276,4 @@ export const getAvailablePermissions = async (req: Request, res: Response) => {
         permissions,
     }, 200);
 };
+
