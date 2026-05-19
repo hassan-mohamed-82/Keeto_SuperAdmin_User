@@ -16,25 +16,36 @@ const checkout = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
-    // 👇 استبدلنا paymentMethodId بـ paymentMethod
     const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId } = req.body;
-    // 1. Idempotency Check
+    // ==========================================
+    // 🛡️ 1. Validation (التحقق من المدخلات)
+    // ==========================================
+    const validOrderSources = ["online_order", "food_aggregator", "mykeeto"];
+    if (!validOrderSources.includes(orderSource)) {
+        throw new BadRequest_1.BadRequest("Invalid order source");
+    }
+    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet"];
+    if (!validPaymentMethods.includes(paymentMethod)) {
+        throw new BadRequest_1.BadRequest("Invalid payment method");
+    }
+    // ==========================================
+    // 2. Idempotency Check
+    // ==========================================
     if (idempotencyKey) {
         const [existing] = await connection_1.db.select().from(schema_1.orders).where((0, drizzle_orm_1.eq)(schema_1.orders.idempotencyKey, idempotencyKey)).limit(1);
         if (existing)
             return (0, response_1.SuccessResponse)(res, { message: "Order already processed", data: existing });
     }
-    // 2. التحقق من وسيلة الدفع (بدل البحث في الداتا بيز)
-    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet"];
-    if (!validPaymentMethods.includes(paymentMethod)) {
-        throw new BadRequest_1.BadRequest("Invalid payment method");
-    }
+    // ==========================================
     // 3. Get Cart Items
+    // ==========================================
     const userCart = await connection_1.db.select().from(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
     if (!userCart.length)
         throw new BadRequest_1.BadRequest("Your cart is empty");
     const restaurantId = userCart[0].restaurantId;
+    // ==========================================
     // 4. Get Restaurant & Business Plan
+    // ==========================================
     const [restaurant] = await connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId)).limit(1);
     if (!restaurant)
         throw new BadRequest_1.BadRequest("Restaurant not found");
@@ -42,7 +53,9 @@ const checkout = async (req, res) => {
     if (orderSource === "food_aggregator" && (!plan || !plan.commissionRate)) {
         throw new BadRequest_1.BadRequest("Order failed. This restaurant has no active business plan.");
     }
+    // ==========================================
     // 5. Calculate Subtotal from Cart Snapshots
+    // ==========================================
     let subtotal = 0;
     const itemsToInsert = [];
     for (const item of userCart) {
@@ -65,7 +78,9 @@ const checkout = async (req, res) => {
     }
     const serviceFee = plan ? parseFloat(plan.serviceFee || "0") : 0;
     let appCommission = orderSource === "food_aggregator" ? subtotal * (parseFloat(plan?.commissionRate || "0") / 100) : 0;
+    // ==========================================
     // 6. Smart Delivery Logic
+    // ==========================================
     let deliveryFee = 0;
     if (orderType === "delivery") {
         if (!addressId)
@@ -84,11 +99,13 @@ const checkout = async (req, res) => {
     const totalAmount = subtotal + deliveryFee + serviceFee;
     const orderId = (0, uuid_1.v4)();
     const orderNumber = `ORD-${Date.now()}`;
+    // ==========================================
     // 7. Get Customer Info
+    // ==========================================
     const [userInfo] = await connection_1.db.select({ id: schema_1.users.id, name: schema_1.users.name, phone: schema_1.users.phone, email: schema_1.users.email })
         .from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, userId)).limit(1);
     // ==========================================
-    // 🛡️ 8. فحص محفظة العميل (لو الدفع محفظة)
+    // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
     if (paymentMethod === "wallet") {
@@ -103,11 +120,11 @@ const checkout = async (req, res) => {
     // 🛡️ 9. جلب محفظة المطعم 
     // ==========================================
     let [restaurantWallet] = await connection_1.db.select().from(schema_1.restaurantWallets).where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId)).limit(1);
+    // ==========================================
     // 10. Execute Order (Transaction)
+    // ==========================================
     await connection_1.db.transaction(async (tx) => {
-        // ==========================================
         // أ. خصم محفظة العميل (لو الدفع محفظة)
-        // ==========================================
         if (paymentMethod === "wallet" && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance);
             const newBalance = balanceBefore - totalAmount;
@@ -117,7 +134,6 @@ const checkout = async (req, res) => {
             await tx.insert(schema_1.userWalletTransactions).values({
                 id: (0, uuid_1.v4)(),
                 userId,
-                // استغنينا عن paymentMethodId وبقينا بنسجل النوع كـ String لو جدولك بيدعم ده، أو تسيب الـ transaction يوضح إنها محفظة
                 type: "debit",
                 transactionType: "order_payment",
                 amount: totalAmount.toString(),
@@ -126,9 +142,7 @@ const checkout = async (req, res) => {
                 status: "approved"
             });
         }
-        // ==========================================
         // ب. تسجيل بيانات الأوردر نفسه
-        // ==========================================
         await tx.insert(schema_1.orders).values({
             id: orderId,
             orderNumber,
@@ -138,7 +152,7 @@ const checkout = async (req, res) => {
             branchId,
             addressId: addressId || null,
             orderSource,
-            paymentMethod, // 👈 استخدمنا الـ Enum الجديد هنا
+            paymentMethod,
             orderType: orderType || "delivery",
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
@@ -147,15 +161,10 @@ const checkout = async (req, res) => {
             totalAmount: totalAmount.toString(),
             status: "pending"
         });
-        // ==========================================
         // ج. تفريغ الكارت وتسجيل الأصناف
-        // ==========================================
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-        // ==========================================
-        // د. تسويات محفظة المطعم بناءً على طريقة الدفع
-        // ==========================================
-        // 1. لو المطعم ملوش محفظة هنكريتله واحدة بصفر مؤقتاً عشان نقدر نحدثها
+        // د. تسويات محفظة المطعم
         if (!restaurantWallet) {
             await tx.insert(schema_1.restaurantWallets).values({
                 id: (0, uuid_1.v4)(),
@@ -169,22 +178,17 @@ const checkout = async (req, res) => {
         const currentRestBalance = parseFloat(restaurantWallet.balance);
         const currentCollectedCash = parseFloat(restaurantWallet.collectedCash);
         const currentTotalEarning = parseFloat(restaurantWallet.totalEarning);
-        // حسبة أرباح المطعم الفعلية (الطلبات + التوصيل - عمولة التطبيق) 
-        // افترضنا إن الـ Service Fee بتروح للتطبيق
         const restaurantEarning = subtotal + deliveryFee - appCommission;
-        const appDues = appCommission + serviceFee; // اللي لينا عند المطعم
+        const appDues = appCommission + serviceFee;
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
         if (paymentMethod === "cash_on_delivery") {
-            // المطعم خد الكاش كله، يبقى إحنا لينا عنده العمولة، فهنخصمها من رصيده (ممكن الرصيد يقلب بالسالب وده طبيعي لحد ما يسدد)
             newRestBalance -= appDues;
-            newCollectedCash += totalAmount; // زودنا الكاش اللي مسكه في إيده
+            newCollectedCash += totalAmount;
         }
         else {
-            // الدفع فيزا أو محفظة: التطبيق هو اللي استلم الفلوس، يبقى المطعم ليه عندنا "أرباحه"
             newRestBalance += restaurantEarning;
         }
-        // تحديث محفظة المطعم
         await tx.update(schema_1.restaurantWallets)
             .set({
             balance: newRestBalance.toString(),
@@ -192,7 +196,6 @@ const checkout = async (req, res) => {
             totalEarning: (currentTotalEarning + restaurantEarning).toString()
         })
             .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId));
-        // تسجيل حركة في دفتر المطعم (Ledger)
         await tx.insert(schema_1.restaurantWalletTransactions).values({
             id: (0, uuid_1.v4)(),
             restaurantId,

@@ -22,28 +22,40 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id; 
     
-    // 👇 استبدلنا paymentMethodId بـ paymentMethod
     const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId } = req.body;
 
-    // 1. Idempotency Check
-    if (idempotencyKey) {
-        const [existing] = await db.select().from(orders).where(eq(orders.idempotencyKey, idempotencyKey)).limit(1);
-        if (existing) return SuccessResponse(res, { message: "Order already processed", data: existing });
+    // ==========================================
+    // 🛡️ 1. Validation (التحقق من المدخلات)
+    // ==========================================
+    const validOrderSources = ["online_order", "food_aggregator", "mykeeto"];
+    if (!validOrderSources.includes(orderSource)) {
+        throw new BadRequest("Invalid order source");
     }
 
-    // 2. التحقق من وسيلة الدفع (بدل البحث في الداتا بيز)
     const validPaymentMethods = ["cash_on_delivery", "visa", "wallet"];
     if (!validPaymentMethods.includes(paymentMethod)) {
         throw new BadRequest("Invalid payment method");
     }
 
+    // ==========================================
+    // 2. Idempotency Check
+    // ==========================================
+    if (idempotencyKey) {
+        const [existing] = await db.select().from(orders).where(eq(orders.idempotencyKey, idempotencyKey)).limit(1);
+        if (existing) return SuccessResponse(res, { message: "Order already processed", data: existing });
+    }
+
+    // ==========================================
     // 3. Get Cart Items
+    // ==========================================
     const userCart = await db.select().from(cartItems).where(eq(cartItems.userId, userId));
     if (!userCart.length) throw new BadRequest("Your cart is empty");
 
     const restaurantId = userCart[0].restaurantId;
 
+    // ==========================================
     // 4. Get Restaurant & Business Plan
+    // ==========================================
     const [restaurant] = await db.select().from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
     if (!restaurant) throw new BadRequest("Restaurant not found");
 
@@ -53,7 +65,9 @@ export const checkout = async (req: Request | any, res: Response) => {
         throw new BadRequest("Order failed. This restaurant has no active business plan.");
     }
 
+    // ==========================================
     // 5. Calculate Subtotal from Cart Snapshots
+    // ==========================================
     let subtotal = 0;
     const itemsToInsert: any[] = [];
 
@@ -82,7 +96,9 @@ export const checkout = async (req: Request | any, res: Response) => {
     const serviceFee = plan ? parseFloat(plan.serviceFee as string || "0") : 0;
     let appCommission = orderSource === "food_aggregator" ? subtotal * (parseFloat(plan?.commissionRate as string || "0") / 100) : 0;
 
+    // ==========================================
     // 6. Smart Delivery Logic
+    // ==========================================
     let deliveryFee = 0;
     if (orderType === "delivery") {
         if (!addressId) throw new BadRequest("Delivery address is required");
@@ -112,12 +128,14 @@ export const checkout = async (req: Request | any, res: Response) => {
     const orderId = uuidv4();
     const orderNumber = `ORD-${Date.now()}`;
 
+    // ==========================================
     // 7. Get Customer Info
+    // ==========================================
     const [userInfo] = await db.select({ id: users.id, name: users.name, phone: users.phone, email: users.email })
         .from(users).where(eq(users.id, userId)).limit(1);
 
     // ==========================================
-    // 🛡️ 8. فحص محفظة العميل (لو الدفع محفظة)
+    // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
     if (paymentMethod === "wallet") {
@@ -135,12 +153,12 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     let [restaurantWallet] = await db.select().from(restaurantWallets).where(eq(restaurantWallets.restaurantId, restaurantId)).limit(1);
     
+    // ==========================================
     // 10. Execute Order (Transaction)
+    // ==========================================
     await db.transaction(async (tx) => {
         
-        // ==========================================
         // أ. خصم محفظة العميل (لو الدفع محفظة)
-        // ==========================================
         if (paymentMethod === "wallet" && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance as string);
             const newBalance = balanceBefore - totalAmount;
@@ -152,7 +170,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             await tx.insert(userWalletTransactions).values({
                 id: uuidv4(),
                 userId,
-                // استغنينا عن paymentMethodId وبقينا بنسجل النوع كـ String لو جدولك بيدعم ده، أو تسيب الـ transaction يوضح إنها محفظة
                 type: "debit", 
                 transactionType: "order_payment", 
                 amount: totalAmount.toString(),
@@ -162,9 +179,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             });
         }
 
-        // ==========================================
         // ب. تسجيل بيانات الأوردر نفسه
-        // ==========================================
         await tx.insert(orders).values({
             id: orderId,
             orderNumber,
@@ -174,7 +189,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             branchId, 
             addressId: addressId || null,
             orderSource,
-            paymentMethod, // 👈 استخدمنا الـ Enum الجديد هنا
+            paymentMethod,
             orderType: orderType || "delivery",
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
@@ -184,16 +199,11 @@ export const checkout = async (req: Request | any, res: Response) => {
             status: "pending"
         });
 
-        // ==========================================
         // ج. تفريغ الكارت وتسجيل الأصناف
-        // ==========================================
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(cartItems).where(eq(cartItems.userId, userId)); 
 
-        // ==========================================
-        // د. تسويات محفظة المطعم بناءً على طريقة الدفع
-        // ==========================================
-        // 1. لو المطعم ملوش محفظة هنكريتله واحدة بصفر مؤقتاً عشان نقدر نحدثها
+        // د. تسويات محفظة المطعم
         if (!restaurantWallet) {
             await tx.insert(restaurantWallets).values({
                 id: uuidv4(),
@@ -209,24 +219,19 @@ export const checkout = async (req: Request | any, res: Response) => {
         const currentCollectedCash = parseFloat(restaurantWallet.collectedCash as string);
         const currentTotalEarning = parseFloat(restaurantWallet.totalEarning as string);
 
-        // حسبة أرباح المطعم الفعلية (الطلبات + التوصيل - عمولة التطبيق) 
-        // افترضنا إن الـ Service Fee بتروح للتطبيق
         const restaurantEarning = subtotal + deliveryFee - appCommission;
-        const appDues = appCommission + serviceFee; // اللي لينا عند المطعم
+        const appDues = appCommission + serviceFee; 
 
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
 
         if (paymentMethod === "cash_on_delivery") {
-            // المطعم خد الكاش كله، يبقى إحنا لينا عنده العمولة، فهنخصمها من رصيده (ممكن الرصيد يقلب بالسالب وده طبيعي لحد ما يسدد)
             newRestBalance -= appDues;
-            newCollectedCash += totalAmount; // زودنا الكاش اللي مسكه في إيده
+            newCollectedCash += totalAmount; 
         } else {
-            // الدفع فيزا أو محفظة: التطبيق هو اللي استلم الفلوس، يبقى المطعم ليه عندنا "أرباحه"
             newRestBalance += restaurantEarning;
         }
 
-        // تحديث محفظة المطعم
         await tx.update(restaurantWallets)
             .set({ 
                 balance: newRestBalance.toString(),
@@ -235,7 +240,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             })
             .where(eq(restaurantWallets.restaurantId, restaurantId));
 
-        // تسجيل حركة في دفتر المطعم (Ledger)
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
             restaurantId,
@@ -247,7 +251,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             reference: orderNumber,
             note: paymentMethod === "cash_on_delivery" ? "Commission deducted from cash order" : "Earnings added from digital payment"
         });
-
     });
 
     return SuccessResponse(res, {

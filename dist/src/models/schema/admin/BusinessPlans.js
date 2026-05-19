@@ -8,7 +8,7 @@ exports.restaurantBusinessPlans = (0, mysql_core_1.mysqlTable)("restaurant_busin
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 }).references(() => restaurants_1.restaurants.id).notNull(),
     // نوع المنصة
-    platformType: (0, mysql_core_1.mysqlEnum)("platform_type", ["online_order", "food_aggregator"]).notNull(),
+    platformType: (0, mysql_core_1.mysqlEnum)("platform_type", ["online_order", "food_aggregator", "mykeeto"]).notNull(),
     // الاشتراكات
     isMonthlyActive: (0, mysql_core_1.boolean)("is_monthly_active").default(false),
     monthlyAmount: (0, mysql_core_1.decimal)("monthly_amount", { precision: 10, scale: 2 }).default("0.00"),
