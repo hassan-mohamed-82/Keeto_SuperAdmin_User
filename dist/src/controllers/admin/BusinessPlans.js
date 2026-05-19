@@ -137,7 +137,21 @@ exports.deleteBusinessPlan = deleteBusinessPlan;
 const getallresstrauntplans = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
-    const allPlans = await connection_1.db.select().from(schema_1.restaurantBusinessPlans);
-    return (0, response_1.SuccessResponse)(res, { message: "fetched all business plans successfully", data: allPlans });
+    // 1. استخدام innerJoin لربط الجدولين ببعض
+    const allPlansData = await connection_1.db.select({
+        plan: schema_1.restaurantBusinessPlans, // الداتا بتاعة الباقة
+        restaurant: schema_1.restaurants // الداتا بتاعة المطعم
+    })
+        .from(schema_1.restaurantBusinessPlans)
+        .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, schema_1.restaurants.id));
+    // 2. إعادة تشكيل الداتا (Formatting) عشان ترجع بشكل أنظف للفرونت إند
+    const formattedPlans = allPlansData.map((item) => ({
+        ...item.plan, // هنفرد كل بيانات الباقة
+        restaurantDetails: item.restaurant // هنحط بيانات المطعم كلها جوه Object اسمه restaurantDetails
+    }));
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Fetched all business plans successfully",
+        data: formattedPlans
+    });
 };
 exports.getallresstrauntplans = getallresstrauntplans;
