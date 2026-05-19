@@ -8,9 +8,9 @@ export const createBusinessPlanSchema = z.object({
     // الحقول الأساسية والعلاقات (Required)
     restaurantId: z.string().uuid("Invalid Restaurant ID"),
     
-    platformType: z.enum(["online_order", "food_aggregator"], {
+    platformType: z.enum(["online_order", "food_aggregator", "mykeeto"], {
         required_error: "Platform type is required",
-        invalid_type_error: "Platform type must be either 'online_order' or 'food_aggregator'",
+        invalid_type_error: "Platform type must be either 'online_order' or 'food_aggregator' or 'mykeeto'",
     }),
 
     // الاشتراكات الشهرية

@@ -29,7 +29,9 @@ export const orders = mysqlTable("orders", {
     addressId: char("address_id", { length: 36 })
         .references(() => addresses.id),
 
-    orderSource: mysqlEnum("order_source", ["online_order", "food_aggregator"]).notNull(),
+    orderSource: mysqlEnum("order_source", ["online_order", "food_aggregator","mykeeto"]).notNull(),
+
+    // onlineOrderType:mysqlEnum("online_order_type", ["app"]).default(),
 
     // 👇 التعديل هنا: شلنا الربط وخليناها Enum بتلات قيم بس
     paymentMethod: mysqlEnum("payment_method", ["cash_on_delivery", "visa", "wallet"]).notNull(),
