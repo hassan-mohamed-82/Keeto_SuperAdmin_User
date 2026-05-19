@@ -8,7 +8,7 @@ const zod_1 = require("zod");
 exports.createCategorySchema = zod_1.z.object({
     // الحقول الأساسية (Required)
     name: zod_1.z.string().min(1, "Name is required").max(255, "Name cannot exceed 255 characters"),
-    Image: zod_1.z.string().min(1, "Image is required").max(500, "Image URL/Path cannot exceed 500 characters"),
+    // Image: z.string().min(1, "Image is required").max(500, "Image URL/Path cannot exceed 500 characters"),
     // الحقول الاختيارية (ليها Default أو Nullable)
     nameAr: zod_1.z.string().max(255).optional(),
     nameFr: zod_1.z.string().max(255).optional(),
