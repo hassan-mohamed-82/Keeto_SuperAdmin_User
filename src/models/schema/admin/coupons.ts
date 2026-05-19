@@ -7,6 +7,7 @@ import {
     mysqlEnum,
     int,
     boolean,
+    json,
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
@@ -14,9 +15,8 @@ import { restaurants } from "./restaurants";
 export const coupons = mysqlTable("coupons", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
-    restaurantId: char("restaurant_id", { length: 36 })
-        .references(() => restaurants.id),
-    
+    restaurantId: json("restaurant_id").$type<string[]>().default([]),
+
     // The promo code users type in (unique per restaurant)
     code: varchar("code", { length: 50 }).notNull().unique(),
 

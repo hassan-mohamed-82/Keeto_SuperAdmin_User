@@ -17,7 +17,7 @@ export const createCoupon = async (req: Request, res: Response) => {
         discountType, discountValue,
         maxDiscount, minOrderAmount,
         usageLimit, perUserLimit,
-        startDate, endDate, isActive 
+        startDate, endDate, isActive, restaurantId
     } = req.body;
 
 
@@ -40,6 +40,7 @@ export const createCoupon = async (req: Request, res: Response) => {
 
     await db.insert(coupons).values({
         id,
+        restaurantId: Array.isArray(restaurantId) ? restaurantId : restaurantId ? [restaurantId] : [],
         code: code.toUpperCase().trim(),
         name,
         nameAr: nameAr || null,
@@ -68,7 +69,7 @@ export const getAllCoupons = async (req: Request, res: Response) => {
     const allCoupons = await db
         .select()
         .from(coupons)
-        .where(eq(coupons.restaurantId, restaurantId));
+        .where(sql`JSON_CONTAINS(${coupons.restaurantId}, ${JSON.stringify(restaurantId)})`);
 
     return SuccessResponse(res, { message: "Get all coupons success", data: allCoupons });
 };
@@ -84,7 +85,7 @@ export const getCouponById = async (req: Request, res: Response) => {
     const [coupon] = await db
         .select()
         .from(coupons)
-        .where(and(eq(coupons.id, id), eq(coupons.restaurantId, restaurantId)))
+        .where(and(eq(coupons.id, id), sql`JSON_CONTAINS(${coupons.restaurantId}, ${JSON.stringify(restaurantId)})`))
         .limit(1);
 
     if (!coupon) throw new NotFound("Coupon not found");
@@ -103,7 +104,7 @@ export const updateCoupon = async (req: Request, res: Response) => {
     const [existing] = await db
         .select()
         .from(coupons)
-        .where(and(eq(coupons.id, id), eq(coupons.restaurantId, restaurantId)))
+        .where(and(eq(coupons.id, id), sql`JSON_CONTAINS(${coupons.restaurantId}, ${JSON.stringify(restaurantId)})`))
         .limit(1);
 
     if (!existing) throw new NotFound("Coupon not found");
@@ -113,7 +114,7 @@ export const updateCoupon = async (req: Request, res: Response) => {
         discountType, discountValue,
         maxDiscount, minOrderAmount,
         usageLimit, perUserLimit,
-        startDate, endDate, isActive
+        startDate, endDate, isActive, restaurantId: updatedRestaurantId
     } = req.body;
 
     // If changing code, check uniqueness
@@ -141,6 +142,7 @@ export const updateCoupon = async (req: Request, res: Response) => {
     if (startDate !== undefined) updateData.startDate = startDate ? new Date(startDate) : null;
     if (endDate !== undefined) updateData.endDate = endDate ? new Date(endDate) : null;
     if (isActive !== undefined) updateData.isActive = isActive;
+    if (updatedRestaurantId !== undefined) updateData.restaurantId = Array.isArray(updatedRestaurantId) ? updatedRestaurantId : [updatedRestaurantId];
 
     await db.update(coupons).set(updateData).where(eq(coupons.id, id));
 
@@ -158,7 +160,7 @@ export const deleteCoupon = async (req: Request, res: Response) => {
     const [existing] = await db
         .select()
         .from(coupons)
-        .where(and(eq(coupons.id, id), eq(coupons.restaurantId, restaurantId)))
+        .where(and(eq(coupons.id, id), sql`JSON_CONTAINS(${coupons.restaurantId}, ${JSON.stringify(restaurantId)})`))
         .limit(1);
 
     if (!existing) throw new NotFound("Coupon not found");
@@ -181,7 +183,7 @@ export const toggleCouponStatus = async (req: Request, res: Response) => {
     const [existing] = await db
         .select()
         .from(coupons)
-        .where(and(eq(coupons.id, id), eq(coupons.restaurantId, restaurantId)))
+        .where(and(eq(coupons.id, id), sql`JSON_CONTAINS(${coupons.restaurantId}, ${JSON.stringify(restaurantId)})`))
         .limit(1);
 
     if (!existing) throw new NotFound("Coupon not found");
@@ -216,7 +218,7 @@ export const validateCoupon = async (
         .from(coupons)
         .where(and(
             eq(coupons.code, couponCode.toUpperCase()),
-            eq(coupons.restaurantId, restaurantId)
+            sql`JSON_CONTAINS(${coupons.restaurantId}, ${JSON.stringify(restaurantId)})`
         ))
         .limit(1);
 
@@ -316,7 +318,7 @@ export const getCouponUsages = async (req: Request, res: Response) => {
     const [coupon] = await db
         .select({ id: coupons.id })
         .from(coupons)
-        .where(and(eq(coupons.id, id), eq(coupons.restaurantId, restaurantId)))
+        .where(and(eq(coupons.id, id), sql`JSON_CONTAINS(${coupons.restaurantId}, ${JSON.stringify(restaurantId)})`))
         .limit(1);
 
     if (!coupon) throw new NotFound("Coupon not found");
