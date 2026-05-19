@@ -10,13 +10,15 @@ import {
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
+import { users } from "../user/Users";
+import { orders } from "./order";
 
 export const coupons = mysqlTable("coupons", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
 
     // The promo code users type in (unique per restaurant)
-    code: varchar("code", { length: 50 }).notNull().unique(),
+    code: varchar("code", { length: 50 }).notNull(),
 
     name: varchar("name", { length: 255 }).notNull(),
     nameAr: varchar("name_ar", { length: 255 }),
@@ -59,12 +61,16 @@ export const couponUsages = mysqlTable("coupon_usages", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
     couponId: char("coupon_id", { length: 36 })
-        .references(() => coupons.id)
+        .references(() => coupons.id, { onDelete: "cascade" })
         .notNull(),
 
-    userId: char("user_id", { length: 36 }).notNull(),
+    userId: char("user_id", { length: 36 })
+        .references(() => users.id)
+        .notNull(),
 
-    orderId: char("order_id", { length: 36 }).notNull(),
+    orderId: char("order_id", { length: 36 })
+        .references(() => orders.id)
+        .notNull(),
 
     discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }).notNull(),
 
