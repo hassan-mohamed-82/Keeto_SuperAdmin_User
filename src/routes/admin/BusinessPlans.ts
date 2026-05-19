@@ -3,7 +3,8 @@ import { createBusinessPlan,
       updateBusinessPlan,
        deleteBusinessPlan,
        getBusinessPlanById,
-       getBusinessPlansByRestaurant
+       getBusinessPlansByRestaurant,
+       getallresstrauntplans
      } from "../../controllers/admin/BusinessPlans";
      import { catchAsync } from "../../utils/catchAsync";
      import { validate } from "../../middlewares/validation";
@@ -11,6 +12,8 @@ import { createBusinessPlan,
      import { hasPermission } from "../../middlewares/";
 const router = Router();
 
+
+router.get("/", hasPermission("BusninessPlan", "View"), catchAsync(getallresstrauntplans));
 router.post("/", validate(createBusinessPlanSchema), hasPermission("BusninessPlan", "Add"), catchAsync(createBusinessPlan));
 router.get("/restaurant/:restaurantId", hasPermission("BusninessPlan", "View"), catchAsync(getBusinessPlansByRestaurant));
 router.get("/:id", hasPermission("BusninessPlan", "View"), catchAsync(getBusinessPlanById));
