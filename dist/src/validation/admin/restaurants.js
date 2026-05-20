@@ -25,9 +25,6 @@ exports.createRestaurantSchema = zod_1.z.object({
     taxNumber: zod_1.z.string().max(255).optional(),
     taxExpireDate: zod_1.z.coerce.date().optional(),
     taxCertificate: fileOrString.optional(),
-    email: zod_1.z.string().email("Invalid email address").max(255),
-    password: zod_1.z.string().min(6, "Password must be at least 6 characters").max(255),
-    type: zod_1.z.enum(["restaurantadmin", "superadmin"]).optional(),
     addhome: zod_1.z.boolean().optional(),
     status: zod_1.z.enum(["active", "inactive"]).optional(),
 });

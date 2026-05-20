@@ -49,28 +49,32 @@ const createRestaurant = async (req, res) => {
     if (!name || !nameAr || !nameFr || !address || !addressAr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
     }
-    // 🚀 حماية الـ Logo من الـ Objects الفارغة
+    // 🚀 التحقق من تكرار الإيميل في جدول حسابات مديري المطاعم (المصدر الموحد للحسابات)
+    const existingUser = await connection_1.db
+        .select()
+        .from(schema_1.restrauntadmin)
+        .where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.email, clean(email)))
+        .limit(1);
+    if (existingUser[0]) {
+        throw new BadRequest_1.BadRequest("Email already exists for a restaurant user");
+    }
+    // 🚀 حماية الـ Logo من الـ Objects الفارغة وحفظ الصورة
     let logoUrl = undefined;
     if (logo) {
         const result = await (0, handleImages_1.saveBase64Image)(req, logo, "restaurants");
         logoUrl = result.url;
     }
-    // 🚀 حماية الـ Cover من الـ Objects الفارغة
+    // 🚀 حماية الـ Cover من الـ Objects الفارغة وحفظ الصورة
     let coverUrl = undefined;
     if (cover) {
         const result = await (0, handleImages_1.saveBase64Image)(req, cover, "restaurants_cover");
         coverUrl = result.url;
     }
-    const existing = await connection_1.db
-        .select()
-        .from(schema_1.restaurants)
-        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.email, email))
-        .limit(1);
-    if (existing[0]) {
-        throw new BadRequest_1.BadRequest("Email already exists");
-    }
+    // تشفير الباسورد الخاص بمالك المطعم
     const hashedPassword = await bcrypt_1.default.hash(password, 10);
-    const id = (0, uuid_1.v4)();
+    const restaurantId = (0, uuid_1.v4)(); // الـ ID الموحد للمطعم
+    const ownerUserId = (0, uuid_1.v4)(); // الـ ID الخاص بحساب المالك نفسه
+    // تجهيز الـ Tags والـ Cuisines
     let parsedTags = [];
     if (tags) {
         parsedTags = typeof tags === "string" ? JSON.parse(tags) : tags;
@@ -79,16 +83,18 @@ const createRestaurant = async (req, res) => {
     if (cuisineId) {
         parsedCuisines = typeof cuisineId === "string" ? JSON.parse(cuisineId) : cuisineId;
     }
+    // 🛡️ بدء الـ Transaction لحفظ البيانات في الجداول الثلاثة معاً
     await connection_1.db.transaction(async (tx) => {
+        // 1. حفظ بيانات البزنس والمطعم في جدول الـ restaurants (بدون الإيميل والباسورد)
         await tx.insert(schema_1.restaurants).values({
-            id,
+            id: restaurantId,
             name: clean(name),
             nameAr: clean(nameAr),
             nameFr: clean(nameFr),
             address: clean(address),
             addressAr: clean(addressAr),
             addressFr: clean(addressFr),
-            cuisineId: parsedCuisines,
+            cuisineId: parsedCuisines, // بيتحفظ كـ JSON array لو الداتابيز تدعمه أو نصوص بناءً على تصميمك
             zoneId: clean(zoneId),
             logo: logoUrl || '',
             cover: coverUrl || '',
@@ -102,13 +108,24 @@ const createRestaurant = async (req, res) => {
             taxNumber: taxNumber ? clean(taxNumber) : null,
             taxExpireDate: taxExpireDate || null,
             taxCertificate: typeof taxCertificate === 'string' ? clean(taxCertificate) : null,
-            email: clean(email),
-            password: hashedPassword,
             status: status || "active",
         });
+        // 2. إنشاء حساب المالك (Owner Account) في جدول المستخدمين وتثبيت الـ Type والـ RestaurantId
+        await tx.insert(schema_1.restrauntadmin).values({
+            id: ownerUserId,
+            restaurantId: restaurantId, // ربط المالك بالمطعم بتاعه
+            branchId: null, // الـ Owner يشوف كل الفروع دائماً
+            name: `${clean(ownerFirstName)} ${clean(ownerLastName)}`,
+            email: clean(email),
+            password: hashedPassword,
+            phoneNumber: clean(ownerPhone),
+            type: "owner", // الرتبة الأعلى لإدارة المطعم كاملاً
+            status: "active",
+        });
+        // 3. إنشاء محفظة المطعم الافتراضية صفرية الرصيد
         await tx.insert(schema_1.restaurantWallets).values({
             id: (0, uuid_1.v4)(),
-            restaurantId: id,
+            restaurantId: restaurantId,
             balance: "0.00",
             collectedCash: "0.00",
             pendingWithdraw: "0.00",
@@ -116,12 +133,16 @@ const createRestaurant = async (req, res) => {
             totalEarning: "0.00",
         });
     });
+    // زيادة عداد المطبخ للمطابخ المختارة خارج الـ Transaction لعدم تعطيله
     for (const cid of parsedCuisines) {
         await incrementCuisineCount(cid);
     }
     return (0, response_1.SuccessResponse)(res, {
-        message: "Restaurant created successfully",
-        data: { id }
+        message: "Restaurant and Owner account created successfully",
+        data: {
+            restaurantId,
+            ownerUserId
+        }
     }, 201);
 };
 exports.createRestaurant = createRestaurant;
@@ -138,11 +159,15 @@ const getAllRestaurants = async (req, res) => {
         cover: schema_1.restaurants.cover,
         status: schema_1.restaurants.status,
         cuisineIds: schema_1.restaurants.cuisineId,
+        // جلب الإيميل الخاص بحساب المالك الرئيسي للمطعم
+        email: schema_1.restrauntadmin.email,
         zone_id: schema_1.zones.id,
         zone_name: schema_1.zones.name,
     })
         .from(schema_1.restaurants)
-        .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurants.zoneId, schema_1.zones.id));
+        .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurants.zoneId, schema_1.zones.id))
+        // عمل Join لجلب حساب المالك فقط المرتبط بالمطعم
+        .leftJoin(schema_1.restrauntadmin, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restrauntadmin.restaurantId), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")));
     const allCuisinesList = await connection_1.db.select({ id: schema_1.cuisines.id, name: schema_1.cuisines.name }).from(schema_1.cuisines);
     const cuisineMap = new Map(allCuisinesList.map(c => [c.id, c]));
     const formatted = raw.map(r => {
@@ -166,6 +191,7 @@ const getAllRestaurants = async (req, res) => {
             logo: r.logo,
             cover: r.cover,
             status: r.status,
+            email: r.email || null, // إرجاع الإيميل في الـ Response
             cuisines: parsedCuisines.map((id) => cuisineMap.get(id)).filter(Boolean),
             zone: r.zone_id
                 ? { id: r.zone_id, name: r.zone_name }
@@ -178,18 +204,18 @@ const getAllRestaurants = async (req, res) => {
     });
 };
 exports.getAllRestaurants = getAllRestaurants;
-// =============================================
-// GET Restaurant By ID (مُصلح: فصل الكائنات لتجنب خطأ 500)
-// =============================================
 const getRestaurantById = async (req, res) => {
     const { id } = req.params;
     const rawRestaurants = await connection_1.db
         .select({
         restaurantObj: schema_1.restaurants,
         zoneObj: schema_1.zones,
+        // جلب الإيميل من جدول الحسابات الخاص بالمالك
+        ownerEmail: schema_1.restrauntadmin.email,
     })
         .from(schema_1.restaurants)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurants.zoneId, schema_1.zones.id))
+        .leftJoin(schema_1.restrauntadmin, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restrauntadmin.restaurantId), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")))
         .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id))
         .limit(1);
     if (!rawRestaurants[0]) {
@@ -216,6 +242,7 @@ const getRestaurantById = async (req, res) => {
     }
     const formattedRestaurant = {
         ...row.restaurantObj,
+        email: row.ownerEmail || null, // دمج الإيميل مع الكائن المرجع لتطابق الـ Frontend المتوقع
         cuisines: restaurantCuisines,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
     };
@@ -227,28 +254,30 @@ const getRestaurantById = async (req, res) => {
 };
 exports.getRestaurantById = getRestaurantById;
 const updateRestaurant = async (req, res) => {
-    const { id } = req.params;
+    const { id } = req.params; // restaurant_id
     const { name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status } = req.body;
-    const existingRestaurant = await connection_1.db
+    // 1. التأكد من وجود المطعم
+    const [existingRestaurant] = await connection_1.db
         .select()
         .from(schema_1.restaurants)
         .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id))
         .limit(1);
-    if (!existingRestaurant[0]) {
+    if (!existingRestaurant) {
         throw new NotFound_1.NotFound("Restaurant not found");
     }
-    // Validate zone if provided
+    // 2. جلب حساب المالك (Owner) المرتبط بهذا المطعم لتحديث بيانات الدخول الخاصة به
+    const [existingOwner] = await connection_1.db
+        .select()
+        .from(schema_1.restrauntadmin)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.restaurantId, id), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")))
+        .limit(1);
+    // التحقق من المناطق (Zones) إذا تم إرسالها
     if (zoneId) {
-        const existingZone = await connection_1.db
-            .select()
-            .from(schema_1.zones)
-            .where((0, drizzle_orm_1.eq)(schema_1.zones.id, zoneId))
-            .limit(1);
-        if (!existingZone[0]) {
+        const [existingZone] = await connection_1.db.select().from(schema_1.zones).where((0, drizzle_orm_1.eq)(schema_1.zones.id, zoneId)).limit(1);
+        if (!existingZone)
             throw new BadRequest_1.BadRequest("Zone not found");
-        }
     }
-    // Validate cuisine if provided
+    // التحقق من المطابخ (Cuisines) إذا تم إرسالها
     let parsedCuisines = undefined;
     if (cuisineId !== undefined) {
         parsedCuisines = typeof cuisineId === "string" ? JSON.parse(cuisineId) : cuisineId;
@@ -262,105 +291,126 @@ const updateRestaurant = async (req, res) => {
             }
         }
     }
-    // Validate email uniqueness if changed
-    if (email && email !== existingRestaurant[0].email) {
-        const emailExists = await connection_1.db
+    // التحقق من فريدية الإيميل في جدول الحسابات الموحد (restrauntadmins)
+    if (email && existingOwner && email !== existingOwner.email) {
+        const [emailExists] = await connection_1.db
             .select()
-            .from(schema_1.restaurants)
-            .where((0, drizzle_orm_1.eq)(schema_1.restaurants.email, email))
+            .from(schema_1.restrauntadmin)
+            .where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.email, email.trim()))
             .limit(1);
-        if (emailExists[0]) {
-            throw new BadRequest_1.BadRequest("Email already exists");
+        if (emailExists) {
+            throw new BadRequest_1.BadRequest("Email already exists for another user");
         }
     }
-    // Password validation
+    // التحقق من تطابق كلمة المرور الجديدة
     if (password) {
         if (password !== confirmPassword) {
             throw new BadRequest_1.BadRequest("Password and confirm password do not match");
         }
     }
-    const updateData = {
-        updatedAt: new Date(),
-    };
+    // تحضير مصفوفات التعديل لكل جدول منفصلاً
+    const restaurantUpdateData = { updatedAt: new Date() };
+    const ownerUpdateData = { updatedAt: new Date() };
+    // ملء بيانات جدول المطعم الرئيسي
     if (name)
-        updateData.name = name;
+        restaurantUpdateData.name = name;
     if (nameAr)
-        updateData.nameAr = nameAr;
+        restaurantUpdateData.nameAr = nameAr;
     if (nameFr)
-        updateData.nameFr = nameFr;
+        restaurantUpdateData.nameFr = nameFr;
     if (address)
-        updateData.address = address;
+        restaurantUpdateData.address = address;
     if (addressAr)
-        updateData.addressAr = addressAr;
+        restaurantUpdateData.addressAr = addressAr;
     if (addressFr)
-        updateData.addressFr = addressFr;
+        restaurantUpdateData.addressFr = addressFr;
     if (parsedCuisines !== undefined)
-        updateData.cuisineId = parsedCuisines;
+        restaurantUpdateData.cuisineId = parsedCuisines;
     if (zoneId)
-        updateData.zoneId = zoneId;
+        restaurantUpdateData.zoneId = zoneId;
     if (lat !== undefined)
-        updateData.lat = lat;
+        restaurantUpdateData.lat = lat;
     if (lng !== undefined)
-        updateData.lng = lng;
+        restaurantUpdateData.lng = lng;
     if (logo) {
-        updateData.logo = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant[0].logo, logo, "restaurants");
+        restaurantUpdateData.logo = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant.logo, logo, "restaurants");
     }
     if (cover !== undefined) {
         if (cover === "" || cover === null) {
-            updateData.cover = "";
+            restaurantUpdateData.cover = "";
         }
         else {
-            updateData.cover = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant[0].cover, cover, "restaurants_cover");
+            restaurantUpdateData.cover = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant.cover, cover, "restaurants_cover");
         }
     }
     if (minDeliveryTime !== undefined)
-        updateData.minDeliveryTime = minDeliveryTime;
+        restaurantUpdateData.minDeliveryTime = minDeliveryTime;
     if (maxDeliveryTime !== undefined)
-        updateData.maxDeliveryTime = maxDeliveryTime;
+        restaurantUpdateData.maxDeliveryTime = maxDeliveryTime;
     if (deliveryTimeUnit)
-        updateData.deliveryTimeUnit = deliveryTimeUnit;
+        restaurantUpdateData.deliveryTimeUnit = deliveryTimeUnit;
     if (ownerFirstName)
-        updateData.ownerFirstName = ownerFirstName;
+        restaurantUpdateData.ownerFirstName = ownerFirstName;
     if (ownerLastName)
-        updateData.ownerLastName = ownerLastName;
+        restaurantUpdateData.ownerLastName = ownerLastName;
     if (ownerPhone)
-        updateData.ownerPhone = ownerPhone;
+        restaurantUpdateData.ownerPhone = ownerPhone;
     if (tags !== undefined)
-        updateData.tags = tags;
+        restaurantUpdateData.tags = tags;
     if (taxNumber !== undefined)
-        updateData.taxNumber = taxNumber;
+        restaurantUpdateData.taxNumber = taxNumber;
     if (taxExpireDate !== undefined)
-        updateData.taxExpireDate = taxExpireDate;
+        restaurantUpdateData.taxExpireDate = taxExpireDate;
     if (taxCertificate !== undefined)
-        updateData.taxCertificate = taxCertificate;
-    if (email)
-        updateData.email = email;
-    if (password)
-        updateData.password = await bcrypt_1.default.hash(password, 10);
+        restaurantUpdateData.taxCertificate = taxCertificate;
     if (status)
-        updateData.status = status;
-    if (Object.keys(updateData).length === 1) {
-        throw new BadRequest_1.BadRequest("No data to update");
+        restaurantUpdateData.status = status;
+    // ملء بيانات تحديث حساب المالك (إن وُجدت تعديلات تخصه)
+    if (email)
+        ownerUpdateData.email = email.trim();
+    if (password)
+        ownerUpdateData.password = await bcrypt_1.default.hash(password, 10);
+    if (status)
+        ownerUpdateData.status = status; // تجميد الحساب إذا تجمّد المطعم
+    // مزامنة الاسم المجمع ورقم الهاتف للحساب إذا تغيرت حقول المالك
+    if (ownerFirstName || ownerLastName) {
+        const fName = ownerFirstName || existingRestaurant.ownerFirstName;
+        const lName = ownerLastName || existingRestaurant.ownerLastName;
+        ownerUpdateData.name = `${fName} ${lName}`;
     }
-    await connection_1.db.update(schema_1.restaurants).set(updateData).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id));
-    // Handle cuisine count if cuisineId changed
+    if (ownerPhone)
+        ownerUpdateData.phoneNumber = ownerPhone;
+    // البدء في عملية التعديل المشتركة داخل Transaction
+    await connection_1.db.transaction(async (tx) => {
+        // 1. تحديث جدول المطاعم ببيانات البزنس
+        if (Object.keys(restaurantUpdateData).length > 1) {
+            await tx.update(schema_1.restaurants).set(restaurantUpdateData).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id));
+        }
+        // 2. تحديث جدول حسابات الموظفين لمالك المطعم (Owner)
+        if (existingOwner && Object.keys(ownerUpdateData).length > 1) {
+            await tx.update(schema_1.restrauntadmin)
+                .set(ownerUpdateData)
+                .where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.id, existingOwner.id));
+        }
+    });
+    // التحكم في عداد المطبخ (Cuisine Count) إذا تغيرت المطابخ
     if (parsedCuisines !== undefined) {
-        const oldCuisines = existingRestaurant[0].cuisineId || [];
+        const oldCuisines = existingRestaurant.cuisineId || [];
         const newCuisines = parsedCuisines || [];
-        // Decrement old cuisines that are not in new cuisines
+        // تقليل العداد للمطابخ المحذوفة
         for (const cid of oldCuisines) {
             if (!newCuisines.includes(cid)) {
                 await decrementCuisineCount(cid);
             }
         }
-        // Increment new cuisines that are not in old cuisines
+        // زيادة العداد للمطابخ الجديدة المضافة
         for (const cid of newCuisines) {
             if (!oldCuisines.includes(cid)) {
                 await incrementCuisineCount(cid);
             }
         }
     }
-    return (0, response_1.SuccessResponse)(res, { message: "Update restaurant success" });
+    return (0, response_1.SuccessResponse)(res, { message: "Update restaurant and owner account success" });
 };
 exports.updateRestaurant = updateRestaurant;
 const deleteRestaurant = async (req, res) => {
@@ -373,24 +423,24 @@ const deleteRestaurant = async (req, res) => {
     if (!existingRestaurant[0]) {
         throw new NotFound_1.NotFound("Restaurant not found");
     }
-    // 1. Decrement cuisine count before deleting
+    // 1. تقليل عداد المطابخ قبل المسح
     if (existingRestaurant[0].cuisineId) {
         for (const cid of existingRestaurant[0].cuisineId) {
             await decrementCuisineCount(cid);
         }
     }
-    // ==========================================
-    // 2. التعديل الجديد: حذف السجلات المرتبطة (Child Records) أولاً
-    // ==========================================
-    // حذف جميع الأكلات المرتبطة بهذا المطعم لتجنب خطأ 500
-    await connection_1.db.delete(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, id));
-    // 💡 ملاحظة: إذا كان لديك جداول أخرى مرتبطة برقم المطعم (مثل الطلبات orders، أو الموظفين staff، أو التقييمات reviews)
-    // يجب إضافة كود حذفها هنا أيضاً بنفس الطريقة قبل حذف المطعم.
-    // ==========================================
-    // 3. أخيرًا، حذف المطعم نفسه
-    // ==========================================
-    await connection_1.db.delete(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id));
-    return (0, response_1.SuccessResponse)(res, { message: "Delete restaurant success" });
+    // 2. استخدام الـ Transaction لمسح السجلات المرتبطة بشكل آمن ومترابط
+    await connection_1.db.transaction(async (tx) => {
+        // أ) حذف الأكلات التابعة للمطعم
+        await tx.delete(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, id));
+        // ب) حذف المحفظة الخاصة بالمطعم لتجنب الـ Foreign Key Constraint Error
+        await tx.delete(schema_1.restaurantWallets).where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, id));
+        // ج) الحذف الجديد: مسح كل حسابات الموظفين والمديرين المرتبطين بهذا المطعم
+        await tx.delete(schema_1.restrauntadmin).where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.restaurantId, id));
+        // د) أخيرًا حذف السجل الرئيسي للمطعم
+        await tx.delete(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id));
+    });
+    return (0, response_1.SuccessResponse)(res, { message: "Delete restaurant and all related users/wallets success" });
 };
 exports.deleteRestaurant = deleteRestaurant;
 const getallcousinesandzones = async (req, res) => {
