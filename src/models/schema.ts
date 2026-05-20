@@ -29,7 +29,7 @@ export * from "./schema/admin/order";
 export * from "./schema/admin/policy";
 export * from "./schema/admin/coupons";
 export * from "./schema/admin/discount";
-
+export * from "./schema/admin/notifications"
 export * from "./schema/user/Users";
 export * from "./schema/user/address";
 export * from "./schema/user/userWallets";

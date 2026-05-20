@@ -6,9 +6,7 @@ import {
     json,
     char,
     text,
-    date,
-    boolean
-    , longtext
+    date
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
@@ -23,19 +21,19 @@ export const restaurants = mysqlTable("restaurants", {
     // 1. Restaurant Info & Location (الصورة الأولى)
     // ==========================================
     name: varchar("name", { length: 255 }).notNull(),
-    nameAr: varchar("name_ar", { length: 255 }).notNull().default(''),
-    nameFr: varchar("name_fr", { length: 255 }).notNull().default(''),
+    nameAr: varchar("name_ar", { length: 255 }),
+    nameFr: varchar("name_fr", { length: 255 }),
     address: text("address").notNull(),
-    addressAr: text("address_ar").notNull().default(''),
-    addressFr: text("address_fr").notNull().default(''),
-
+    addressAr: text("address_ar"),
+    addressFr: text("address_fr"),
+    
     // العلاقات (Relations)
     cuisineId: json("cuisine_id").$type<string[]>().default([]),
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id).notNull(),
-
+ 
     // الصور (Files/Images)
-    logo: varchar("logo", { length: 500 }).notNull(),
-    cover: varchar("cover", { length: 500 }),
+    logo: varchar("logo", { length: 255 }).notNull(),
+    cover: varchar("cover", { length: 255 }),
 
     // ==========================================
     // 2. Delivery & Owner Info (الصورة الثانية)
@@ -62,22 +60,13 @@ export const restaurants = mysqlTable("restaurants", {
     // بيانات الدخول (Account Information)
     email: varchar("email", { length: 255 }).notNull().unique(),
     password: varchar("password", { length: 255 }).notNull(),
+    fcmToken: text("fcm_token"),
     // 💡 ملاحظة: حقل Confirm Password مش بيتسجل في الداتابيز، ده بيكون Validation في الـ Controller بس
-
-    type: mysqlEnum("type", ["restaurantadmin", "superadmin"]).default("restaurantadmin"),
+     
+    type: mysqlEnum("type", ["restaurantadmin", "subadmin"]).default("restaurantadmin"),
     // Status & Timestamps
     // ==========================================
-
-    addhome: boolean("addhome").default(false),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
-
-
-import { relations } from "drizzle-orm";
-import { food, foodVariations, variationOptions } from "../../schema";
-
-export const restaurantRelations = relations(restaurants, ({ many }) => ({
-    food: many(food),
-}));

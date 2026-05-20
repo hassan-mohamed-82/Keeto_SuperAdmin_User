@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, char, timestamp, mysqlEnum, json } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, char, timestamp, mysqlEnum, json, text } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { rolesadmin } from "./rolesadmin";
 import { Permission } from "../../../types/custom";
@@ -16,6 +16,7 @@ export const restrauntadmin = mysqlTable("restrauntadmins", {
     email: varchar("email", { length: 255 }).notNull().unique(),
     password: varchar("password", { length: 255 }).notNull(),
     phoneNumber: varchar("phone_number", { length: 255 }).notNull(),
+    fcmToken: text("fcm_token"),
 
     type: mysqlEnum("type", ["subadmin", "branch_manager"]).notNull().default("branch_manager"),
 

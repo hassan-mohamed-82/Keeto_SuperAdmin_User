@@ -41,7 +41,8 @@ export const userWalletTransactions = mysqlTable("user_wallet_transactions", {
         "add_fund",
         "cashback",
         "converted_loyalty",
-        "manual_deposit"
+        "manual_deposit",
+        "refund"
     ]).notNull(),
 
     amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),

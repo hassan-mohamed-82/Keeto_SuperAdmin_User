@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.restaurantRelations = exports.restaurants = void 0;
+exports.restaurants = void 0;
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 // ⚠️ تأكد من استيراد الجداول دي من مساراتها الصحيحة عندك
@@ -11,17 +11,17 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     // 1. Restaurant Info & Location (الصورة الأولى)
     // ==========================================
     name: (0, mysql_core_1.varchar)("name", { length: 255 }).notNull(),
-    nameAr: (0, mysql_core_1.varchar)("name_ar", { length: 255 }).notNull().default(''),
-    nameFr: (0, mysql_core_1.varchar)("name_fr", { length: 255 }).notNull().default(''),
+    nameAr: (0, mysql_core_1.varchar)("name_ar", { length: 255 }),
+    nameFr: (0, mysql_core_1.varchar)("name_fr", { length: 255 }),
     address: (0, mysql_core_1.text)("address").notNull(),
-    addressAr: (0, mysql_core_1.text)("address_ar").notNull().default(''),
-    addressFr: (0, mysql_core_1.text)("address_fr").notNull().default(''),
+    addressAr: (0, mysql_core_1.text)("address_ar"),
+    addressFr: (0, mysql_core_1.text)("address_fr"),
     // العلاقات (Relations)
     cuisineId: (0, mysql_core_1.json)("cuisine_id").$type().default([]),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }).references(() => zone_1.zones.id).notNull(),
     // الصور (Files/Images)
-    logo: (0, mysql_core_1.varchar)("logo", { length: 500 }).notNull(),
-    cover: (0, mysql_core_1.varchar)("cover", { length: 500 }),
+    logo: (0, mysql_core_1.varchar)("logo", { length: 255 }).notNull(),
+    cover: (0, mysql_core_1.varchar)("cover", { length: 255 }),
     // ==========================================
     // 2. Delivery & Owner Info (الصورة الثانية)
     // ==========================================
@@ -43,17 +43,12 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     // بيانات الدخول (Account Information)
     email: (0, mysql_core_1.varchar)("email", { length: 255 }).notNull().unique(),
     password: (0, mysql_core_1.varchar)("password", { length: 255 }).notNull(),
+    fcmToken: (0, mysql_core_1.text)("fcm_token"),
     // 💡 ملاحظة: حقل Confirm Password مش بيتسجل في الداتابيز، ده بيكون Validation في الـ Controller بس
-    type: (0, mysql_core_1.mysqlEnum)("type", ["restaurantadmin", "superadmin"]).default("restaurantadmin"),
+    type: (0, mysql_core_1.mysqlEnum)("type", ["restaurantadmin", "subadmin"]).default("restaurantadmin"),
     // Status & Timestamps
     // ==========================================
-    addhome: (0, mysql_core_1.boolean)("addhome").default(false),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });
-const drizzle_orm_2 = require("drizzle-orm");
-const schema_1 = require("../../schema");
-exports.restaurantRelations = (0, drizzle_orm_2.relations)(exports.restaurants, ({ many }) => ({
-    food: many(schema_1.food),
-}));
