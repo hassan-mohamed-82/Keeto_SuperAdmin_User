@@ -8,7 +8,7 @@ const google_auth_library_1 = require("google-auth-library");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const connection_1 = require("../models/connection");
-const schema_1 = require("../models/schema"); // تأكد من مسار الـ schema
+const schema_1 = require("../models/schema"); // تأكد من مسار الـ schema الصحيح عندك
 const drizzle_orm_1 = require("drizzle-orm");
 const uuid_1 = require("uuid");
 dotenv_1.default.config();
@@ -30,7 +30,7 @@ const verifyGoogleToken = async (req, res) => {
                 .status(400)
                 .json({ success: false, message: "Invalid Google payload" });
         }
-        // جوجل بتبعت الـ ID الفريد بتاع اليوزر في حقل اسمه 'sub'
+        // استخراج بيانات المستخدم من جوجل
         const googleId = payload.sub;
         const email = payload.email || null;
         const name = payload.name || "Unknown User";
@@ -56,9 +56,8 @@ const verifyGoogleToken = async (req, res) => {
                 email,
                 name,
                 photo,
-                googleId, // حفظ الـ ID الخاص بجوجل
-                isVerified: true, // حسابات جوجل موثقة تلقائياً
-                // مش محتاجين نبعت password أو phone لأنهم مسموح يكونوا null في الموديل
+                googleId,
+                isVerified: true,
             });
         }
         else {
@@ -66,7 +65,7 @@ const verifyGoogleToken = async (req, res) => {
             userId = existingUser.id;
             userName = existingUser.name;
             userEmail = existingUser.email;
-            // 🔄 لو اليوزر مسجل بالإيميل قبل كده بس ملوش googleId، بنعمل ربط للحسابين
+            // 🔄 ربط حساب جوجل بالحساب القديم لو مسجل بالإيميل قبل كده
             if (!existingUser.googleId) {
                 await connection_1.db
                     .update(schema_1.users)
@@ -74,8 +73,13 @@ const verifyGoogleToken = async (req, res) => {
                     .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
             }
         }
-        // 🔑 إنشاء الـ JWT
-        const authToken = jsonwebtoken_1.default.sign({ id: userId }, process.env.JWT_SECRET, {
+        // 🔑 إنشاء الـ JWT وإضافة كل البيانات اللي الميدلوير بيحتاجها (id, role, name, type)
+        const authToken = jsonwebtoken_1.default.sign({
+            id: userId,
+            role: "user",
+            name: userName,
+            type: "user"
+        }, process.env.JWT_SECRET, {
             expiresIn: "7d",
         });
         return res.json({
@@ -86,6 +90,8 @@ const verifyGoogleToken = async (req, res) => {
                 name: userName,
                 email: userEmail,
                 photo,
+                role: "user",
+                type: "user"
             },
         });
     }

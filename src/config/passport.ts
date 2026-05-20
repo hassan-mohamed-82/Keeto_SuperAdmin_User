@@ -3,7 +3,7 @@ import { OAuth2Client } from "google-auth-library";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import { db } from "../models/connection";
-import { users } from "../models/schema"; // تأكد من مسار الـ schema
+import { users } from "../models/schema"; // تأكد من مسار الـ schema الصحيح عندك
 import { eq, or } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
@@ -34,7 +34,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         .json({ success: false, message: "Invalid Google payload" });
     }
 
-    // جوجل بتبعت الـ ID الفريد بتاع اليوزر في حقل اسمه 'sub'
+    // استخراج بيانات المستخدم من جوجل
     const googleId = payload.sub; 
     const email = payload.email || null;
     const name = payload.name || "Unknown User";
@@ -65,9 +65,8 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         email,
         name,
         photo,
-        googleId, // حفظ الـ ID الخاص بجوجل
-        isVerified: true, // حسابات جوجل موثقة تلقائياً
-        // مش محتاجين نبعت password أو phone لأنهم مسموح يكونوا null في الموديل
+        googleId, 
+        isVerified: true, 
       });
     } else {
       // 👤 تسجيل دخول لمستخدم حالي (Login)
@@ -75,7 +74,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
       userName = existingUser.name;
       userEmail = existingUser.email;
 
-      // 🔄 لو اليوزر مسجل بالإيميل قبل كده بس ملوش googleId، بنعمل ربط للحسابين
+      // 🔄 ربط حساب جوجل بالحساب القديم لو مسجل بالإيميل قبل كده
       if (!existingUser.googleId) {
         await db
           .update(users)
@@ -84,10 +83,19 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
       }
     }
 
-    // 🔑 إنشاء الـ JWT
-    const authToken = jwt.sign({ id: userId }, process.env.JWT_SECRET!, {
-      expiresIn: "7d",
-    });
+    // 🔑 إنشاء الـ JWT وإضافة كل البيانات اللي الميدلوير بيحتاجها (id, role, name, type)
+    const authToken = jwt.sign(
+      { 
+        id: userId,
+        role: "user",
+        name: userName,
+        type: "user"
+      }, 
+      process.env.JWT_SECRET!, 
+      {
+        expiresIn: "7d",
+      }
+    );
 
     return res.json({
       success: true,
@@ -97,6 +105,8 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         name: userName,
         email: userEmail,
         photo,
+        role: "user",
+        type: "user"
       },
     });
   } catch (error) {
