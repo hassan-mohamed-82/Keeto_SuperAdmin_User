@@ -31,10 +31,7 @@ export const createRestaurantSchema = z.object({
     taxExpireDate: z.coerce.date().optional(),  
     taxCertificate: fileOrString.optional(),
     
-    email: z.string().email("Invalid email address").max(255),
-    password: z.string().min(6, "Password must be at least 6 characters").max(255),
     
-    type: z.enum(["restaurantadmin", "superadmin"]).optional(),
     addhome: z.boolean().optional(),
     status: z.enum(["active", "inactive"]).optional(),
 });
