@@ -24,7 +24,6 @@ export const restrauntadmin = mysqlTable("restrauntadmins", {
     email: varchar("email", { length: 255 }).notNull().unique(),
     password: varchar("password", { length: 255 }).notNull(),
     phoneNumber: varchar("phone_number", { length: 255 }).notNull(),
-    fcmToken: text("fcm_token"),
 
     // هيكل الأدوار واضح ومحدد
     type: mysqlEnum("type", ["owner", "subadmin", "branch_manager", "staff"])
