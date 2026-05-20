@@ -20,7 +20,7 @@ router.post("/forgot-password", catchAsync(forgotPassword));
 router.post("/verify-reset-code", catchAsync(verifyResetCode));
 router.post("/reset-password", catchAsync(resetPassword));
 
-router.post("/auth/google", catchAsync(verifyGoogleToken));
-router.post("/auth/facebook", catchAsync(facebookLoginOrSignup));
+router.post("/google", catchAsync(verifyGoogleToken));
+router.post("/facebook", catchAsync(facebookLoginOrSignup));
 
 export default router;

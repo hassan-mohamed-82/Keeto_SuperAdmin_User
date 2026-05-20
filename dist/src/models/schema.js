@@ -45,6 +45,7 @@ __exportStar(require("./schema/admin/order"), exports);
 __exportStar(require("./schema/admin/policy"), exports);
 __exportStar(require("./schema/admin/coupons"), exports);
 __exportStar(require("./schema/admin/discount"), exports);
+__exportStar(require("./schema/admin/notifications"), exports);
 __exportStar(require("./schema/user/Users"), exports);
 __exportStar(require("./schema/user/address"), exports);
 __exportStar(require("./schema/user/userWallets"), exports);

@@ -5,8 +5,8 @@ import { zones } from "./zone";
 export const restaurants = mysqlTable("restaurants", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     name: varchar("name", { length: 255 }).notNull(),
-    nameAr: varchar("name_ar", { length: 255 }).notNull().default(''),
-    nameFr: varchar("name_fr", { length: 255 }).notNull().default(''),
+    nameAr: varchar("name_ar", { length: 255 }),
+    nameFr: varchar("name_fr", { length: 255 }),
     address: text("address").notNull(),
     addressAr: text("address_ar").notNull().default(''),
     addressFr: text("address_fr").notNull().default(''),
@@ -36,11 +36,3 @@ export const restaurants = mysqlTable("restaurants", {
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
-
-
-import { relations } from "drizzle-orm";
-import { food, foodVariations, variationOptions } from "../../schema";
-
-export const restaurantRelations = relations(restaurants, ({ many }) => ({
-    food: many(food),
-}));

@@ -12,6 +12,6 @@ router.post("/login", (0, catchAsync_1.catchAsync)(auth_1.login));
 router.post("/forgot-password", (0, catchAsync_1.catchAsync)(auth_1.forgotPassword));
 router.post("/verify-reset-code", (0, catchAsync_1.catchAsync)(auth_1.verifyResetCode));
 router.post("/reset-password", (0, catchAsync_1.catchAsync)(auth_1.resetPassword));
-router.post("/auth/google", (0, catchAsync_1.catchAsync)(passport_1.verifyGoogleToken));
-router.post("/auth/facebook", (0, catchAsync_1.catchAsync)(facebook_1.facebookLoginOrSignup));
+router.post("/google", (0, catchAsync_1.catchAsync)(passport_1.verifyGoogleToken));
+router.post("/facebook", (0, catchAsync_1.catchAsync)(facebook_1.facebookLoginOrSignup));
 exports.default = router;

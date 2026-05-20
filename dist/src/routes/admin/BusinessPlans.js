@@ -7,6 +7,7 @@ const validation_1 = require("../../middlewares/validation");
 const BusinessPlans_2 = require("../../validation/admin/BusinessPlans");
 const middlewares_1 = require("../../middlewares/");
 const router = (0, express_1.Router)();
+router.get("/", (0, middlewares_1.hasPermission)("BusninessPlan", "View"), (0, catchAsync_1.catchAsync)(BusinessPlans_1.getallresstrauntplans));
 router.post("/", (0, validation_1.validate)(BusinessPlans_2.createBusinessPlanSchema), (0, middlewares_1.hasPermission)("BusninessPlan", "Add"), (0, catchAsync_1.catchAsync)(BusinessPlans_1.createBusinessPlan));
 router.get("/restaurant/:restaurantId", (0, middlewares_1.hasPermission)("BusninessPlan", "View"), (0, catchAsync_1.catchAsync)(BusinessPlans_1.getBusinessPlansByRestaurant));
 router.get("/:id", (0, middlewares_1.hasPermission)("BusninessPlan", "View"), (0, catchAsync_1.catchAsync)(BusinessPlans_1.getBusinessPlanById));

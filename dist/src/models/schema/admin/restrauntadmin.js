@@ -15,6 +15,7 @@ exports.restrauntadmin = (0, mysql_core_1.mysqlTable)("restrauntadmins", {
     email: (0, mysql_core_1.varchar)("email", { length: 255 }).notNull().unique(),
     password: (0, mysql_core_1.varchar)("password", { length: 255 }).notNull(),
     phoneNumber: (0, mysql_core_1.varchar)("phone_number", { length: 255 }).notNull(),
+    fcmToken: (0, mysql_core_1.text)("fcm_token"),
     type: (0, mysql_core_1.mysqlEnum)("type", ["subadmin", "branch_manager"]).notNull().default("branch_manager"),
     roleId: (0, mysql_core_1.char)("role_id", { length: 36 }).references(() => rolesadmin_1.rolesadmin.id),
     permissions: (0, mysql_core_1.json)("permissions").$type().default([]),

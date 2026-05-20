@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import {  restaurantBusinessPlans } from "../../models/schema";
+import {  restaurantBusinessPlans, restaurants } from "../../models/schema";
 import { eq, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -168,8 +168,23 @@ export const deleteBusinessPlan = async (req: Request, res: Response) => {
 
 export const getallresstrauntplans = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
-    const allPlans = await db.select().from(restaurantBusinessPlans);
 
-    return SuccessResponse(res, { message: "fetched all business plans successfully", data: allPlans });
+    // 1. استخدام innerJoin لربط الجدولين ببعض
+    const allPlansData = await db.select({
+        plan: restaurantBusinessPlans,     // الداتا بتاعة الباقة
+        restaurant: restaurants            // الداتا بتاعة المطعم
+    })
+    .from(restaurantBusinessPlans)
+    .innerJoin(restaurants, eq(restaurantBusinessPlans.restaurantId, restaurants.id));
+
+    // 2. إعادة تشكيل الداتا (Formatting) عشان ترجع بشكل أنظف للفرونت إند
+    const formattedPlans = allPlansData.map((item) => ({
+        ...item.plan, // هنفرد كل بيانات الباقة
+        restaurantDetails: item.restaurant // هنحط بيانات المطعم كلها جوه Object اسمه restaurantDetails
+    }));
+
+    return SuccessResponse(res, { 
+        message: "Fetched all business plans successfully", 
+        data: formattedPlans 
+    });
 };
-

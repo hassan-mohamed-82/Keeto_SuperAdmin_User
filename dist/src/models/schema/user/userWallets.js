@@ -34,7 +34,8 @@ exports.userWalletTransactions = (0, mysql_core_1.mysqlTable)("user_wallet_trans
         "add_fund",
         "cashback",
         "converted_loyalty",
-        "manual_deposit"
+        "manual_deposit",
+        "refund"
     ]).notNull(),
     amount: (0, mysql_core_1.decimal)("amount", { precision: 10, scale: 2 }).notNull(),
     balanceBefore: (0, mysql_core_1.decimal)("balance_before", { precision: 10, scale: 2 }).notNull(),
