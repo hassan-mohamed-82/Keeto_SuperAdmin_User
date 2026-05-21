@@ -25,16 +25,7 @@ export const createSubcategory = async (req: Request, res: Response) => {
         throw new BadRequest("Category not found");
     }
 
-    // Check if subcategory already exists
-    const existingSubcategory = await db
-        .select()
-        .from(subcategories)
-        .where(eq(subcategories.name, name))
-        .limit(1);
-
-    if (existingSubcategory[0]) {
-        throw new BadRequest("Subcategory already exists");
-    }
+   
 
     const id = uuidv4();
 

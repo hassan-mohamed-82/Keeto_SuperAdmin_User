@@ -22,15 +22,6 @@ const createSubcategory = async (req, res) => {
     if (!existingCategory[0]) {
         throw new BadRequest_1.BadRequest("Category not found");
     }
-    // Check if subcategory already exists
-    const existingSubcategory = await connection_1.db
-        .select()
-        .from(schema_1.subcategories)
-        .where((0, drizzle_orm_1.eq)(schema_1.subcategories.name, name))
-        .limit(1);
-    if (existingSubcategory[0]) {
-        throw new BadRequest_1.BadRequest("Subcategory already exists");
-    }
     const id = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.subcategories).values({
         id,
