@@ -436,7 +436,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     }
 
     // ==========================================
-    // 1. التحقق من وجود المطعم
+    // 1. Check if restaurant exists
     // ==========================================
     const restaurant = await db
         .select()
@@ -450,7 +450,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     }
 
     // ==========================================
-    // 2. بناء شروط الفلترة
+    // 2. Build filtering conditions
     // ==========================================
     const conditions = [
         eq(orders.restaurantId, restaurantId),
@@ -467,7 +467,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     }
 
     // ==========================================
-    // 3. جلب كل الأوردرات المسلمة
+    // 3. Fetch all delivered orders
     // ==========================================
     const deliveredOrders = await db
         .select({
@@ -484,7 +484,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         .where(and(...conditions));
 
     // ==========================================
-    // 4. جلب خطة العمل للمطعم
+    // 4. Fetch restaurant business plans
     // ==========================================
     const businessPlans = await db
         .select()
@@ -492,7 +492,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         .where(eq(restaurantBusinessPlans.restaurantId, restaurantId));
 
     // ==========================================
-    // 5. تجميع البيانات حسب نوع الطلب (orderSource)
+    // 5. Group data by order source
     // ==========================================
     interface SourceStats {
         totalOrders: number;
@@ -542,7 +542,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         },
     };
 
-    // متغيرات الإجمالي
+    // Grand total variables
     let grandTotal = {
         orders: 0,
         revenue: 0,
@@ -556,7 +556,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     };
 
     // ==========================================
-    // 6. معالجة كل أوردر
+    // 6. Process each order
     // ==========================================
     for (const order of deliveredOrders) {
         const source = order.orderSource as string;
@@ -577,7 +577,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         stats.serviceFee += serviceFee;
         stats.deliveryFee += deliveryFee;
 
-        // تقسيم حسب طريقة الدفع
+        // Breakdown by payment method
         if (order.paymentMethod === "cash_on_delivery") {
             stats.cashAmount += amount;
             grandTotal.cash += amount;
@@ -589,7 +589,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             grandTotal.wallet += amount;
         }
 
-        // الإجماليات
+        // Totals
         grandTotal.orders += 1;
         grandTotal.revenue += amount;
         grandTotal.subtotal += subtotal;
@@ -599,20 +599,20 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     }
 
     // ==========================================
-    // 7. حساب المستحقات لكل نوع طلب
+    // 7. Calculate dues for each order source
     // ==========================================
     const calculateCashDue = (stats: SourceStats, commissionRate: number) => {
-        // المطعم يدين للمنصة (من الطلبات النقدية)
+        // Restaurant owes platform (from cash orders)
         const restaurantOwes = (stats.cashAmount * commissionRate) / 100 + 
                                (stats.serviceFee * (stats.cashAmount / stats.totalRevenue || 0));
 
-        // المنصة تدين للمطعم (من الطلبات الرقمية)
+        // Platform owes restaurant (from digital orders)
         const digitalTotal = stats.visaAmount + stats.walletAmount;
         const platformOwes = digitalTotal - 
                             (digitalTotal * commissionRate) / 100 - 
                             (stats.serviceFee * (digitalTotal / stats.totalRevenue || 0));
 
-        // الرصيد النهائي
+        // Net balance
         const netBalance = platformOwes - restaurantOwes;
 
         return {
@@ -623,7 +623,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         };
     };
 
-    // الحصول على نسبة العمولة
+    // Get commission rate
     let commissionRate = 0;
     if (businessPlans.length > 0) {
         const onlinePlan = businessPlans.find(p => p.platformType === "online_order");
@@ -632,7 +632,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     }
 
     // ==========================================
-    // 8. بناء الـ Response
+    // 8. Build Response
     // ==========================================
     const reportBySource = Object.entries(sourceMap).map(([source, stats]) => {
         const cashDue = calculateCashDue(stats, commissionRate);
@@ -640,9 +640,9 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         return {
             orderSource: source,
             orderSourceName: 
-                source === "online_order" ? "طلبات أونلاين" :
-                source === "food_aggregator" ? "طلبات من تطبيقات أخرى" :
-                "طلبات Mykeeto",
+                source === "online_order" ? "Online Orders" :
+                source === "food_aggregator" ? "Aggregator Orders" :
+                "Mykeeto Orders",
             
             statistics: {
                 totalOrders: stats.totalOrders,
@@ -669,16 +669,16 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
                 platformOwesToRestaurant: cashDue.platformOwesToRestaurant.toFixed(2),
                 netBalance: cashDue.netBalance.toFixed(2),
                 balanceStatus: cashDue.netBalance > 0 
-                    ? `المنصة تدين للمطعم ${Math.abs(cashDue.netBalance).toFixed(2)} جنيه`
+                    ? `Platform owes restaurant ${Math.abs(cashDue.netBalance).toFixed(2)} EGP`
                     : cashDue.netBalance < 0 
-                    ? `المطعم يدين للمنصة ${Math.abs(cashDue.netBalance).toFixed(2)} جنيه`
-                    : "لا توجد مستحقات",
+                    ? `Restaurant owes platform ${Math.abs(cashDue.netBalance).toFixed(2)} EGP`
+                    : "No pending dues",
             },
         };
     });
 
     // ==========================================
-    // 9. حساب الإجماليات النهائية
+    // 9. Calculate final totals
     // ==========================================
     const totalCashDue = calculateCashDue({
         totalOrders: grandTotal.orders,
@@ -702,10 +702,10 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
                 nameFr: restaurant[0].nameFr,
             },
 
-            // التقرير حسب نوع الطلب
+            // Report by order source
             reportBySource: reportBySource,
 
-            // الإجماليات
+            // Totals
             totals: {
                 totalOrders: grandTotal.orders,
                 totalRevenue: grandTotal.revenue.toFixed(2),
@@ -730,10 +730,10 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
                     platformOwesToRestaurant: totalCashDue.platformOwesToRestaurant.toFixed(2),
                     netBalance: totalCashDue.netBalance.toFixed(2),
                     balanceStatus: totalCashDue.netBalance > 0 
-                        ? `المنصة تدين للمطعم ${Math.abs(totalCashDue.netBalance).toFixed(2)} جنيه`
+                        ? `Platform owes restaurant ${Math.abs(totalCashDue.netBalance).toFixed(2)} EGP`
                         : totalCashDue.netBalance < 0 
-                        ? `المطعم يدين للمنصة ${Math.abs(totalCashDue.netBalance).toFixed(2)} جنيه`
-                        : "لا توجد مستحقات",
+                        ? `Restaurant owes platform ${Math.abs(totalCashDue.netBalance).toFixed(2)} EGP`
+                        : "No pending dues",
                 },
             },
 
