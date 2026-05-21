@@ -11,7 +11,7 @@ type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "
 type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
 
 // ==========================================
-// API 1: التقرير المالي العام (القديم)
+// API 1: التقرير المالي العام 
 // ==========================================
 export const getFinancialReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -115,7 +115,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
 };
 
 // ==========================================
-// API 2: تقرير تفصيلي حسب كل مطعم (الجديد)
+// API 2: تقرير تفصيلي حسب كل مطعم 
 // ==========================================
 export const getDetailedRestaurantReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -123,11 +123,11 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
     const { startDate, endDate } = req.query;
 
     // ==========================================
-    // 1. بناء شروط الفلترة بالتاريخ
+    // 1. Build date filtering conditions
     // ==========================================
     const conditions = [];
 
-    // بنجيب بس الأوردرات المسلمة (delivered) عشان الحسابات المالية
+    // Only fetch delivered orders for financial calculations
     conditions.push(eq(orders.status, "delivered" as OrderStatus));
 
     if (startDate) {
@@ -140,7 +140,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
     }
 
     // ==========================================
-    // 2. جلب كل الأوردرات المسلمة مع بيانات المطعم
+    // 2. Fetch all delivered orders with restaurant data
     // ==========================================
     const deliveredOrders = await db
         .select({
@@ -160,13 +160,13 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         .where(and(...conditions));
 
     // ==========================================
-    // 3. جلب خطط العمل لكل المطاعم
+    // 3. Fetch business plans for all restaurants
     // ==========================================
     const allBusinessPlans = await db
         .select()
         .from(restaurantBusinessPlans);
 
-    // عمل Map عشان نوصل لخطة كل مطعم بسرعة
+    // Create a Map to quickly access each restaurant's plan
     const businessPlansMap: Record<string, typeof allBusinessPlans> = {};
     for (const plan of allBusinessPlans) {
         if (!businessPlansMap[plan.restaurantId]) {
@@ -176,23 +176,28 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
     }
 
     // ==========================================
-    // 4. تجميع البيانات حسب كل مطعم
+    // 4. Group data by restaurant
     // ==========================================
     interface RestaurantEntry {
         restaurantId: string;
         restaurantName: string;
         totalOrders: number;
         onlineOrders: number;
+        aggregatorOrders: number;
         totalOrdersAmount: number;
         totalCashAmount: number;
         totalDigitalAmount: number;
         totalAppCommission: number;
         totalServiceFee: number;
         totalDeliveryFee: number;
+        totalSubtotal: number;
     }
 
     const restaurantMap: Record<string, RestaurantEntry> = {};
     let grandTotalAmount = 0;
+    let grandTotalCommission = 0;
+    let grandTotalCash = 0;
+    let grandTotalDigital = 0;
 
     for (const order of deliveredOrders) {
         const rId = order.restaurantId || "unknown";
@@ -204,96 +209,539 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
                 restaurantName: rName,
                 totalOrders: 0,
                 onlineOrders: 0,
+                aggregatorOrders: 0,
                 totalOrdersAmount: 0,
                 totalCashAmount: 0,
                 totalDigitalAmount: 0,
                 totalAppCommission: 0,
                 totalServiceFee: 0,
                 totalDeliveryFee: 0,
+                totalSubtotal: 0,
             };
         }
 
         const entry = restaurantMap[rId];
         const amount = parseFloat(order.totalAmount as string || "0");
+        const subtotal = parseFloat(order.subtotal as string || "0");
         const commission = parseFloat(order.appCommission as string || "0");
         const svcFee = parseFloat(order.serviceFee as string || "0");
         const dlvFee = parseFloat(order.deliveryFee as string || "0");
 
         entry.totalOrders += 1;
         entry.totalOrdersAmount += amount;
+        entry.totalSubtotal += subtotal;
         entry.totalAppCommission += commission;
         entry.totalServiceFee += svcFee;
         entry.totalDeliveryFee += dlvFee;
+        
         grandTotalAmount += amount;
+        grandTotalCommission += commission;
 
         if (order.orderSource === "online_order") {
             entry.onlineOrders += 1;
+        } else if (order.orderSource === "food_aggregator") {
+            entry.aggregatorOrders += 1;
         }
 
         if (order.paymentMethod === "cash_on_delivery") {
             entry.totalCashAmount += amount;
+            grandTotalCash += amount;
         } else {
             entry.totalDigitalAmount += amount;
+            grandTotalDigital += amount;
         }
     }
 
     // ==========================================
-    // 5. بناء الـ Response لكل مطعم مع خطة العمل والعمولة
+    // 5. Build response for each restaurant with business plan and commission
     // ==========================================
     const restaurantReports = Object.values(restaurantMap).map(entry => {
         const plans = businessPlansMap[entry.restaurantId] || [];
 
-        // حساب العمولة بناءً على نسبة الخطة
+        // Calculate commission based on plan rate
         let commissionRate = "0.00";
         let calculatedCommission = 0;
 
         if (plans.length > 0) {
-            // لو عنده خطة online_order نستخدمها
+            // If they have an online_order plan, use it
             const onlinePlan = plans.find(p => p.platformType === "online_order");
             const activePlan = onlinePlan || plans[0];
             commissionRate = activePlan.commissionRate || "0.00";
             const rate = parseFloat(commissionRate);
-            calculatedCommission = (entry.totalOrdersAmount * rate) / 100;
+            calculatedCommission = (entry.totalSubtotal * rate) / 100;
         }
+
+        // ==========================================
+        // 💰 Detailed Financial Calculations
+        // ==========================================
+        
+        // 1️⃣ Total Sales
+        const totalSales = entry.totalOrdersAmount;
+        
+        // 2️⃣ Platform Commission
+        const platformCommission = entry.totalAppCommission;
+        
+        // 3️⃣ Service Fee (For Platform)
+        const platformServiceFee = entry.totalServiceFee;
+        
+        // 4️⃣ Delivery Fee (For Restaurant)
+        const restaurantDeliveryFee = entry.totalDeliveryFee;
+        
+        // 5️⃣ Restaurant Net Sales
+        // = Total Sales - Commission - Service Fee
+        const restaurantNetSales = totalSales - platformCommission - platformServiceFee;
+        
+        // 6️⃣ Cash Collected
+        const cashCollected = entry.totalCashAmount;
+        
+        // 7️⃣ Digital Payments (Transferred to Restaurant)
+        const digitalPayments = entry.totalDigitalAmount;
+        
+        // 8️⃣ Cash Due Analysis
+        // If the restaurant collected more cash than its due
+        // Cash Due = Cash Collected - Restaurant Net Sales from Cash Orders
+        const cashOrdersNet = cashCollected - (cashCollected * parseFloat(commissionRate)) / 100 - 
+                              (entry.totalServiceFee * (cashCollected / totalSales));
+        
+        // Restaurant owes platform = Commission + Service Fee from cash orders
+        const restaurantOwesToPlatform = (cashCollected * parseFloat(commissionRate)) / 100 + 
+                                         (entry.totalServiceFee * (cashCollected / totalSales));
+        
+        // Platform owes restaurant = Net Digital Sales
+        const platformOwesToRestaurant = digitalPayments - 
+                                         (digitalPayments * parseFloat(commissionRate)) / 100 - 
+                                         (entry.totalServiceFee * (digitalPayments / totalSales));
+        
+        // Net Balance
+        // Positive = Platform owes restaurant
+        // Negative = Restaurant owes platform
+        const netBalance = platformOwesToRestaurant - restaurantOwesToPlatform;
 
         return {
             restaurantId: entry.restaurantId,
             restaurantName: entry.restaurantName,
 
-            // عدد الأوردرات
-            totalOrders: entry.totalOrders,
-            onlineOrders: entry.onlineOrders,
+            // 📊 Order Statistics
+            orders: {
+                total: entry.totalOrders,
+                online: entry.onlineOrders,
+                aggregator: entry.aggregatorOrders,
+            },
 
-            // الماليات
-            totalOrdersAmount: entry.totalOrdersAmount.toFixed(2),
-            totalCashAmount: entry.totalCashAmount.toFixed(2),
-            totalDigitalAmount: entry.totalDigitalAmount.toFixed(2),
-            totalServiceFee: entry.totalServiceFee.toFixed(2),
-            totalDeliveryFee: entry.totalDeliveryFee.toFixed(2),
+            // 💰 Detailed Financials
+            financials: {
+                // Total Sales
+                totalSales: totalSales.toFixed(2),
+                subtotal: entry.totalSubtotal.toFixed(2),
+                
+                // Breakdown by payment method
+                cashOrders: cashCollected.toFixed(2),
+                digitalOrders: digitalPayments.toFixed(2),
+                
+                // Fees
+                deliveryFee: restaurantDeliveryFee.toFixed(2),
+                serviceFee: platformServiceFee.toFixed(2),
+                
+                // Commission
+                commissionRate: commissionRate + "%",
+                platformCommission: platformCommission.toFixed(2),
+                calculatedCommission: calculatedCommission.toFixed(2),
+                
+                // Net Sales
+                restaurantNetSales: restaurantNetSales.toFixed(2),
+            },
 
-            // خطة العمل
+            // 💵 Cash Due Analysis
+            cashDue: {
+                // Cash collected by restaurant
+                cashCollectedByRestaurant: cashCollected.toFixed(2),
+                
+                // Restaurant owes platform (from cash orders)
+                restaurantOwesToPlatform: restaurantOwesToPlatform.toFixed(2),
+                
+                // Platform owes restaurant (from digital orders)
+                platformOwesToRestaurant: platformOwesToRestaurant.toFixed(2),
+                
+                // Net Balance
+                netBalance: netBalance.toFixed(2),
+                balanceStatus: netBalance > 0 
+                    ? `Platform owes restaurant ${Math.abs(netBalance).toFixed(2)} EGP`
+                    : netBalance < 0 
+                    ? `Restaurant owes platform ${Math.abs(netBalance).toFixed(2)} EGP`
+                    : "No pending dues",
+            },
+
+            // Business Plan
             businessPlan: plans.map(p => ({
                 platformType: p.platformType,
                 commissionRate: p.commissionRate || "0.00",
                 serviceFee: p.serviceFee || "0.00",
             })),
-
-            // العمولة
-            commissionRate: commissionRate + "%",
-            calculatedCommission: calculatedCommission.toFixed(2),
-            recordedAppCommission: entry.totalAppCommission.toFixed(2),
         };
     });
 
     // ==========================================
-    // 6. الـ Response النهائي
+    // 6. Final Response with General Summary
     // ==========================================
+    
+    // Calculate general summary for all restaurants
+    let totalPlatformCommission = 0;
+    let totalPlatformOwes = 0;
+    let totalRestaurantOwes = 0;
+    
+    restaurantReports.forEach(report => {
+        totalPlatformCommission += parseFloat(report.financials.platformCommission);
+        const netBalance = parseFloat(report.cashDue.netBalance);
+        if (netBalance > 0) {
+            totalPlatformOwes += netBalance;
+        } else {
+            totalRestaurantOwes += Math.abs(netBalance);
+        }
+    });
+
     return SuccessResponse(res, {
         message: "Detailed restaurant report generated successfully",
         data: {
-            grandTotalOrdersAmount: grandTotalAmount.toFixed(2),
-            totalRestaurants: restaurantReports.length,
+            // General Summary
+            summary: {
+                totalRestaurants: restaurantReports.length,
+                grandTotalSales: grandTotalAmount.toFixed(2),
+                grandTotalCash: grandTotalCash.toFixed(2),
+                grandTotalDigital: grandTotalDigital.toFixed(2),
+                totalPlatformCommission: totalPlatformCommission.toFixed(2),
+                totalPlatformOwesToRestaurants: totalPlatformOwes.toFixed(2),
+                totalRestaurantsOweToPlatform: totalRestaurantOwes.toFixed(2),
+                netPlatformBalance: (totalRestaurantOwes - totalPlatformOwes).toFixed(2),
+            },
+            
+            // Details per restaurant
             restaurants: restaurantReports,
+        }
+    });
+};
+
+
+// ==========================================
+// API 3: تقرير مالي تفصيلي لمطعم واحد (Single Restaurant Report)
+// ==========================================
+export const getSingleRestaurantReport = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+
+    const { restaurantId } = req.params;
+    const { startDate, endDate } = req.query;
+
+    if (!restaurantId) {
+        const { BadRequest } = await import("../../Errors/BadRequest");
+        throw new BadRequest("Restaurant ID is required");
+    }
+
+    // ==========================================
+    // 1. التحقق من وجود المطعم
+    // ==========================================
+    const restaurant = await db
+        .select()
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+
+    if (!restaurant[0]) {
+        const { NotFound } = await import("../../Errors/NotFound");
+        throw new NotFound("Restaurant not found");
+    }
+
+    // ==========================================
+    // 2. بناء شروط الفلترة
+    // ==========================================
+    const conditions = [
+        eq(orders.restaurantId, restaurantId),
+        eq(orders.status, "delivered" as OrderStatus)
+    ];
+
+    if (startDate) {
+        conditions.push(gte(orders.createdAt, new Date(startDate as string)));
+    }
+    if (endDate) {
+        const end = new Date(endDate as string);
+        end.setHours(23, 59, 59, 999);
+        conditions.push(lte(orders.createdAt, end));
+    }
+
+    // ==========================================
+    // 3. جلب كل الأوردرات المسلمة
+    // ==========================================
+    const deliveredOrders = await db
+        .select({
+            orderId: orders.id,
+            orderSource: orders.orderSource,
+            paymentMethod: orders.paymentMethod,
+            subtotal: orders.subtotal,
+            deliveryFee: orders.deliveryFee,
+            serviceFee: orders.serviceFee,
+            appCommission: orders.appCommission,
+            totalAmount: orders.totalAmount,
+        })
+        .from(orders)
+        .where(and(...conditions));
+
+    // ==========================================
+    // 4. جلب خطة العمل للمطعم
+    // ==========================================
+    const businessPlans = await db
+        .select()
+        .from(restaurantBusinessPlans)
+        .where(eq(restaurantBusinessPlans.restaurantId, restaurantId));
+
+    // ==========================================
+    // 5. تجميع البيانات حسب نوع الطلب (orderSource)
+    // ==========================================
+    interface SourceStats {
+        totalOrders: number;
+        totalRevenue: number;
+        cashAmount: number;
+        visaAmount: number;
+        walletAmount: number;
+        commission: number;
+        serviceFee: number;
+        deliveryFee: number;
+        subtotal: number;
+    }
+
+    const sourceMap: Record<string, SourceStats> = {
+        online_order: {
+            totalOrders: 0,
+            totalRevenue: 0,
+            cashAmount: 0,
+            visaAmount: 0,
+            walletAmount: 0,
+            commission: 0,
+            serviceFee: 0,
+            deliveryFee: 0,
+            subtotal: 0,
+        },
+        food_aggregator: {
+            totalOrders: 0,
+            totalRevenue: 0,
+            cashAmount: 0,
+            visaAmount: 0,
+            walletAmount: 0,
+            commission: 0,
+            serviceFee: 0,
+            deliveryFee: 0,
+            subtotal: 0,
+        },
+        mykeeto: {
+            totalOrders: 0,
+            totalRevenue: 0,
+            cashAmount: 0,
+            visaAmount: 0,
+            walletAmount: 0,
+            commission: 0,
+            serviceFee: 0,
+            deliveryFee: 0,
+            subtotal: 0,
+        },
+    };
+
+    // متغيرات الإجمالي
+    let grandTotal = {
+        orders: 0,
+        revenue: 0,
+        cash: 0,
+        visa: 0,
+        wallet: 0,
+        commission: 0,
+        serviceFee: 0,
+        deliveryFee: 0,
+        subtotal: 0,
+    };
+
+    // ==========================================
+    // 6. معالجة كل أوردر
+    // ==========================================
+    for (const order of deliveredOrders) {
+        const source = order.orderSource as string;
+        const stats = sourceMap[source];
+
+        if (!stats) continue;
+
+        const amount = parseFloat(order.totalAmount as string || "0");
+        const subtotal = parseFloat(order.subtotal as string || "0");
+        const commission = parseFloat(order.appCommission as string || "0");
+        const serviceFee = parseFloat(order.serviceFee as string || "0");
+        const deliveryFee = parseFloat(order.deliveryFee as string || "0");
+
+        stats.totalOrders += 1;
+        stats.totalRevenue += amount;
+        stats.subtotal += subtotal;
+        stats.commission += commission;
+        stats.serviceFee += serviceFee;
+        stats.deliveryFee += deliveryFee;
+
+        // تقسيم حسب طريقة الدفع
+        if (order.paymentMethod === "cash_on_delivery") {
+            stats.cashAmount += amount;
+            grandTotal.cash += amount;
+        } else if (order.paymentMethod === "visa") {
+            stats.visaAmount += amount;
+            grandTotal.visa += amount;
+        } else if (order.paymentMethod === "wallet") {
+            stats.walletAmount += amount;
+            grandTotal.wallet += amount;
+        }
+
+        // الإجماليات
+        grandTotal.orders += 1;
+        grandTotal.revenue += amount;
+        grandTotal.subtotal += subtotal;
+        grandTotal.commission += commission;
+        grandTotal.serviceFee += serviceFee;
+        grandTotal.deliveryFee += deliveryFee;
+    }
+
+    // ==========================================
+    // 7. حساب المستحقات لكل نوع طلب
+    // ==========================================
+    const calculateCashDue = (stats: SourceStats, commissionRate: number) => {
+        // المطعم يدين للمنصة (من الطلبات النقدية)
+        const restaurantOwes = (stats.cashAmount * commissionRate) / 100 + 
+                               (stats.serviceFee * (stats.cashAmount / stats.totalRevenue || 0));
+
+        // المنصة تدين للمطعم (من الطلبات الرقمية)
+        const digitalTotal = stats.visaAmount + stats.walletAmount;
+        const platformOwes = digitalTotal - 
+                            (digitalTotal * commissionRate) / 100 - 
+                            (stats.serviceFee * (digitalTotal / stats.totalRevenue || 0));
+
+        // الرصيد النهائي
+        const netBalance = platformOwes - restaurantOwes;
+
+        return {
+            cashCollected: stats.cashAmount,
+            restaurantOwesToPlatform: restaurantOwes,
+            platformOwesToRestaurant: platformOwes,
+            netBalance: netBalance,
+        };
+    };
+
+    // الحصول على نسبة العمولة
+    let commissionRate = 0;
+    if (businessPlans.length > 0) {
+        const onlinePlan = businessPlans.find(p => p.platformType === "online_order");
+        const activePlan = onlinePlan || businessPlans[0];
+        commissionRate = parseFloat(activePlan.commissionRate || "0");
+    }
+
+    // ==========================================
+    // 8. بناء الـ Response
+    // ==========================================
+    const reportBySource = Object.entries(sourceMap).map(([source, stats]) => {
+        const cashDue = calculateCashDue(stats, commissionRate);
+        
+        return {
+            orderSource: source,
+            orderSourceName: 
+                source === "online_order" ? "طلبات أونلاين" :
+                source === "food_aggregator" ? "طلبات من تطبيقات أخرى" :
+                "طلبات Mykeeto",
+            
+            statistics: {
+                totalOrders: stats.totalOrders,
+                totalRevenue: stats.totalRevenue.toFixed(2),
+                subtotal: stats.subtotal.toFixed(2),
+            },
+
+            paymentBreakdown: {
+                cash: stats.cashAmount.toFixed(2),
+                visa: stats.visaAmount.toFixed(2),
+                wallet: stats.walletAmount.toFixed(2),
+            },
+
+            fees: {
+                deliveryFee: stats.deliveryFee.toFixed(2),
+                serviceFee: stats.serviceFee.toFixed(2),
+                commission: stats.commission.toFixed(2),
+                commissionRate: commissionRate + "%",
+            },
+
+            cashDue: {
+                cashCollected: cashDue.cashCollected.toFixed(2),
+                restaurantOwesToPlatform: cashDue.restaurantOwesToPlatform.toFixed(2),
+                platformOwesToRestaurant: cashDue.platformOwesToRestaurant.toFixed(2),
+                netBalance: cashDue.netBalance.toFixed(2),
+                balanceStatus: cashDue.netBalance > 0 
+                    ? `المنصة تدين للمطعم ${Math.abs(cashDue.netBalance).toFixed(2)} جنيه`
+                    : cashDue.netBalance < 0 
+                    ? `المطعم يدين للمنصة ${Math.abs(cashDue.netBalance).toFixed(2)} جنيه`
+                    : "لا توجد مستحقات",
+            },
+        };
+    });
+
+    // ==========================================
+    // 9. حساب الإجماليات النهائية
+    // ==========================================
+    const totalCashDue = calculateCashDue({
+        totalOrders: grandTotal.orders,
+        totalRevenue: grandTotal.revenue,
+        cashAmount: grandTotal.cash,
+        visaAmount: grandTotal.visa,
+        walletAmount: grandTotal.wallet,
+        commission: grandTotal.commission,
+        serviceFee: grandTotal.serviceFee,
+        deliveryFee: grandTotal.deliveryFee,
+        subtotal: grandTotal.subtotal,
+    }, commissionRate);
+
+    return SuccessResponse(res, {
+        message: "Single restaurant report generated successfully",
+        data: {
+            restaurant: {
+                id: restaurant[0].id,
+                name: restaurant[0].name,
+                nameAr: restaurant[0].nameAr,
+                nameFr: restaurant[0].nameFr,
+            },
+
+            // التقرير حسب نوع الطلب
+            reportBySource: reportBySource,
+
+            // الإجماليات
+            totals: {
+                totalOrders: grandTotal.orders,
+                totalRevenue: grandTotal.revenue.toFixed(2),
+                totalSubtotal: grandTotal.subtotal.toFixed(2),
+
+                paymentBreakdown: {
+                    cash: grandTotal.cash.toFixed(2),
+                    visa: grandTotal.visa.toFixed(2),
+                    wallet: grandTotal.wallet.toFixed(2),
+                },
+
+                fees: {
+                    totalDeliveryFee: grandTotal.deliveryFee.toFixed(2),
+                    totalServiceFee: grandTotal.serviceFee.toFixed(2),
+                    totalCommission: grandTotal.commission.toFixed(2),
+                    commissionRate: commissionRate + "%",
+                },
+
+                cashDue: {
+                    cashCollected: totalCashDue.cashCollected.toFixed(2),
+                    restaurantOwesToPlatform: totalCashDue.restaurantOwesToPlatform.toFixed(2),
+                    platformOwesToRestaurant: totalCashDue.platformOwesToRestaurant.toFixed(2),
+                    netBalance: totalCashDue.netBalance.toFixed(2),
+                    balanceStatus: totalCashDue.netBalance > 0 
+                        ? `المنصة تدين للمطعم ${Math.abs(totalCashDue.netBalance).toFixed(2)} جنيه`
+                        : totalCashDue.netBalance < 0 
+                        ? `المطعم يدين للمنصة ${Math.abs(totalCashDue.netBalance).toFixed(2)} جنيه`
+                        : "لا توجد مستحقات",
+                },
+            },
+
+            businessPlan: businessPlans.map(p => ({
+                platformType: p.platformType,
+                commissionRate: p.commissionRate || "0.00",
+                serviceFee: p.serviceFee || "0.00",
+            })),
         }
     });
 };

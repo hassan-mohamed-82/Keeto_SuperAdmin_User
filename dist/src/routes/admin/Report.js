@@ -7,4 +7,5 @@ const middlewares_1 = require("../../middlewares/");
 const router = (0, express_1.Router)();
 router.get("/", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getFinancialReport));
 router.get("/detailed", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getDetailedRestaurantReport));
+router.get("/restaurant/:restaurantId", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getSingleRestaurantReport));
 exports.default = router;
