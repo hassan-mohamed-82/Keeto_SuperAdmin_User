@@ -22,8 +22,7 @@ export const orders = mysqlTable("orders", {
 
     // 👇 ده الحقل اللي كان ناقص وعامل المشكلة
     branchId: char("branch_id", { length: 36 })
-        .references(() => branches.id)
-        .notNull(), 
+        .references(() => branches.id),
 
     // 👇 عنوان التوصيل المختار من اليوزر
     addressId: char("address_id", { length: 36 })
