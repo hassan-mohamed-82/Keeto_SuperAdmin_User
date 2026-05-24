@@ -26,6 +26,7 @@ import SelectReasonsRouter from "./selectReasons";
 import ReportRouter from "./Report"
 import zoneDeliveryFeesRouter from "./zoneDeliveryFees";
 import RatingRouter from "./rating";
+import discountRouter from "./discount";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -58,5 +59,6 @@ router.use("/payment-methods", payment_methodsRouter);
 router.use("/user-wallets", user_walletsRouter);
 router.use("/zone-delivery-fees", zoneDeliveryFeesRouter);
 router.use("/ratings", RatingRouter);
+router.use("/discounts", discountRouter);
 
 export default router;

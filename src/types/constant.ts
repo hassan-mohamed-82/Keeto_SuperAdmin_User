@@ -31,6 +31,7 @@ export const MODULES = [
     "BranchMenuItems",
     "zone",
     "Reasons",
+    "Discounts",
 
 ] as const;
 
