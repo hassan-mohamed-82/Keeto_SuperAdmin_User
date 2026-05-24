@@ -516,6 +516,9 @@ export const getUserFavorites = async (req: Request, res: Response) => {
 //     });
 // };
 
+// ==========================================
+// 2. Search Restaurant With Menu (البحث الذكي المرن عن الأسماء والروابط)
+// ==========================================
 export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
     const { query } = req.query;
 
@@ -523,44 +526,31 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         throw new BadRequest("please enter your search term");
     }
 
-    const cleanQuery = query.trim();
+    // 1. تنظيف نص البحث: تحويله لحروف صغيرة، وإزالة الشرط والمسافات تماماً للمقارنة المرنة
+    const cleanQuery = query.trim().toLowerCase();
+    const normalizedQuery = cleanQuery.replace(/[-\s]/g, ""); // يحول "mac-donalds" أو "mac donalds" إلى "macdonalds"
     const searchTerm = `%${cleanQuery}%`;
+    const normalizedSearchTerm = `%${normalizedQuery}%`;
 
-    // 1. بناء شروط البحث الذكي (للمطعم وللأكلات أيضاً)
-    const searchConditions = [
-        // أ) البحث العادي في أسماء المطاعم
+    // 2. بناء شروط بحث ذكية تطهر البيانات داخل قاعدة البيانات أثناء المقارنة
+    const restaurantConditions = [
+        // أ) البحث العادي بالـ Like
         like(restaurants.name, searchTerm),
         like(restaurants.nameAr, searchTerm),
         like(restaurants.nameFr, searchTerm),
-        
-        // ب) البحث العكسي في أسماء المطاعم (هل الاسم جزء من الجملة الطويلة؟)
-        sql`POSITION(LOWER(${restaurants.name}) IN LOWER(${cleanQuery})) > 0`,
-        sql`POSITION(${restaurants.nameAr} IN ${cleanQuery}) > 0`,
-        sql`POSITION(LOWER(${restaurants.nameFr}) IN LOWER(${cleanQuery})) > 0`,
 
-        // ج) البحث في أسماء الأكلات والمنيو لزيادة ذكاء محرك البحث
-        like(food.name, searchTerm),
-        like(food.nameAr, searchTerm),
-        like(food.nameFr, searchTerm)
+        // ب) البحث الذكي الصارم: إزالة المسافات والشرطات من اسم المطعم في الداتا بيز ومقارنته بنص البحث المنظف
+        sql`REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', '') LIKE ${normalizedSearchTerm}`,
+        sql`REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', '') LIKE ${normalizedSearchTerm}`,
+        sql`REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', '') LIKE ${normalizedSearchTerm}`,
+        
+        // ج) البحث العكسي الذكي (الاسم المنظف موجود داخل جملة البحث المنظفة)
+        sql`POSITION(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', '') IN ${normalizedQuery}) > 0`,
+        sql`POSITION(REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', '') IN ${normalizedQuery}) > 0`,
+        sql`POSITION(REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', '') IN ${normalizedQuery}) > 0`
     ];
 
-    // د) تفكيك الكلمات في حال كانت الجملة مركبة (مثال: "برجر ماك حار")
-    const words = cleanQuery.split(/\s+/).filter(word => word.length > 2);
-    if (words.length > 1) {
-        words.forEach(word => {
-            const wordTerm = `%${word}%`;
-            searchConditions.push(
-                like(restaurants.name, wordTerm),
-                like(restaurants.nameAr, wordTerm),
-                like(restaurants.nameFr, wordTerm),
-                like(food.name, wordTerm),
-                like(food.nameAr, wordTerm),
-                like(food.nameFr, wordTerm)
-            );
-        });
-    }
-
-    // 2. Fetch flat data
+    // 3. جلب البيانات بناءً على شروط التطابق المرن لاسم المطعم
     const flatResults = await db
         .select({
             restaurant: restaurants,
@@ -576,22 +566,16 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
                 eq(food.status, "active")
             )
         )
-        .leftJoin(
-            foodVariations,
-            eq(food.id, foodVariations.foodId)
-        )
-        .leftJoin(
-            variationOptions,
-            eq(foodVariations.id, variationOptions.variationId)
-        )
+        .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))
+        .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
         .where(
             and(
                 eq(restaurants.status, "active"),
-                or(...searchConditions) // تطبيق المصفوفة الذكية بالكامل
+                or(...restaurantConditions) // تطبيق الفلترة الذكية
             )
         );
 
-    // 3. Grouping
+    // 4. تجميع البيانات المجلوبة (Grouping) من شكل الجداول المفلطحة إلى شجرة (Maps → Arrays)
     const restaurantsMap = new Map();
 
     for (const row of flatResults) {
@@ -602,7 +586,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
         if (!r || !r.id) continue;
 
-        // Restaurant
         if (!restaurantsMap.has(r.id)) {
             restaurantsMap.set(r.id, {
                 ...r,
@@ -612,7 +595,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
         const currentRestaurant = restaurantsMap.get(r.id);
 
-        // Food
         if (f && f.id) {
             if (!currentRestaurant.food.has(f.id)) {
                 currentRestaurant.food.set(f.id, {
@@ -623,7 +605,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
             const currentFood = currentRestaurant.food.get(f.id);
 
-            // Variation
             if (v && v.id) {
                 if (!currentFood.variations.has(v.id)) {
                     currentFood.variations.set(v.id, {
@@ -634,7 +615,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
                 const currentVariation = currentFood.variations.get(v.id);
 
-                // Option
                 if (o && o.id) {
                     const exists = currentVariation.options.some(
                         (opt: any) => opt.id === o.id
@@ -648,7 +628,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         }
     }
 
-    // 4. Convert Maps → Arrays
     const formattedData = Array.from(restaurantsMap.values()).map((restaurant: any) => ({
         ...restaurant,
         food: Array.from(restaurant.food.values()).map((foodItem: any) => ({
