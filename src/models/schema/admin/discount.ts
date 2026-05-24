@@ -41,6 +41,9 @@ export const discounts = mysqlTable("discounts", {
     endDate: timestamp("end_date"),
 
     isActive: boolean("is_active").default(true),
+    
+    // الفلاج الجديد لتحديد إذا كان الخصم عاماً لكل المطاعم في حال عدم اختيار مطعم محدد
+    isGlobal: boolean("is_global").default(false),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
