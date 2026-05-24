@@ -516,8 +516,9 @@ export const getUserFavorites = async (req: Request, res: Response) => {
 //     });
 // };
 
+
 // ==========================================
-// 2. Search Restaurant With Menu (البحث الذكي المرن عن الأسماء والروابط)
+// 2. Search Restaurant With Menu (البحث الدقيق وحل مشكلة جلب مطاعم عشوائية)
 // ==========================================
 export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
     const { query } = req.query;
@@ -526,31 +527,28 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         throw new BadRequest("please enter your search term");
     }
 
-    // 1. تنظيف نص البحث: تحويله لحروف صغيرة، وإزالة الشرط والمسافات تماماً للمقارنة المرنة
     const cleanQuery = query.trim().toLowerCase();
-    const normalizedQuery = cleanQuery.replace(/[-\s]/g, ""); // يحول "mac-donalds" أو "mac donalds" إلى "macdonalds"
+    const normalizedQuery = cleanQuery.replace(/[-\s]/g, ""); // تحويل "mataam-wast-albalad" إلى "mataamwastalbalad"
     const searchTerm = `%${cleanQuery}%`;
     const normalizedSearchTerm = `%${normalizedQuery}%`;
 
-    // 2. بناء شروط بحث ذكية تطهر البيانات داخل قاعدة البيانات أثناء المقارنة
+    // بناء شروط دقيقة ومباشرة تمنع تماماً الحقول الفارغة والـ Position العشوائي
     const restaurantConditions = [
-        // أ) البحث العادي بالـ Like
-        like(restaurants.name, searchTerm),
-        like(restaurants.nameAr, searchTerm),
-        like(restaurants.nameFr, searchTerm),
+        // 1. تطابق عبر الـ LIKE العادي (بشرط ألا يكون الحقل فارغاً)
+        and(sql`${restaurants.name} != ''`, like(restaurants.name, searchTerm)),
+        and(sql`${restaurants.nameAr} != ''`, like(restaurants.nameAr, searchTerm)),
+        and(sql`${restaurants.nameFr} != ''`, like(restaurants.nameFr, searchTerm)),
 
-        // ب) البحث الذكي الصارم: إزالة المسافات والشرطات من اسم المطعم في الداتا بيز ومقارنته بنص البحث المنظف
-        sql`REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', '') LIKE ${normalizedSearchTerm}`,
-        sql`REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', '') LIKE ${normalizedSearchTerm}`,
-        sql`REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', '') LIKE ${normalizedSearchTerm}`,
-        
-        // ج) البحث العكسي الذكي (الاسم المنظف موجود داخل جملة البحث المنظفة)
-        sql`POSITION(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', '') IN ${normalizedQuery}) > 0`,
-        sql`POSITION(REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', '') IN ${normalizedQuery}) > 0`,
-        sql`POSITION(REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', '') IN ${normalizedQuery}) > 0`
+        // 2. التطابق الذكي بعد إزالة المسافات والشرطات (الحل المثالي للـ Slugs)
+        sql`REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', '') = ${normalizedQuery}`,
+        sql`REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', '') = ${normalizedQuery}`,
+        sql`REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', '') = ${normalizedQuery}`,
+
+        // 3. احتياطياً: لو الـ Slug جزء من اسم طويل مخزن في الداتا بيز
+        sql`REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', '') LIKE ${normalizedSearchTerm}`
     ];
 
-    // 3. جلب البيانات بناءً على شروط التطابق المرن لاسم المطعم
+    // جلب البيانات بناءً على شروط اسم المطعم الصارمة فقط
     const flatResults = await db
         .select({
             restaurant: restaurants,
@@ -571,11 +569,11 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         .where(
             and(
                 eq(restaurants.status, "active"),
-                or(...restaurantConditions) // تطبيق الفلترة الذكية
+                or(...restaurantConditions) // تطبيق الفلترة الصارمة
             )
         );
 
-    // 4. تجميع البيانات المجلوبة (Grouping) من شكل الجداول المفلطحة إلى شجرة (Maps → Arrays)
+    // تجميع البيانات (Grouping Logic)
     const restaurantsMap = new Map();
 
     for (const row of flatResults) {
