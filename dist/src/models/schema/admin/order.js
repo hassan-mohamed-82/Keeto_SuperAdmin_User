@@ -21,8 +21,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
         .notNull(),
     // 👇 ده الحقل اللي كان ناقص وعامل المشكلة
     branchId: (0, mysql_core_1.char)("branch_id", { length: 36 })
-        .references(() => schema_1.branches.id)
-        .notNull(),
+        .references(() => schema_1.branches.id),
     // 👇 عنوان التوصيل المختار من اليوزر
     addressId: (0, mysql_core_1.char)("address_id", { length: 36 })
         .references(() => address_1.addresses.id),
