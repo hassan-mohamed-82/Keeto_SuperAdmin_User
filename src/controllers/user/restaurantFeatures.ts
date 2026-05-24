@@ -26,8 +26,34 @@ export const searchRestaurants = async (req: Request, res: Response) => {
         throw new BadRequest("Search query is required");
     }
 
-    const searchTerm = `%${query}%`;
+    const cleanQuery = query.trim();
+    const searchTerm = `%${cleanQuery}%`;
 
+    // 1. بناء شروط البحث عن الجملة الكاملة (تطابق عادي أو عكسي)
+    const searchConditions = [
+        like(restaurants.name, searchTerm),
+        like(restaurants.nameAr, searchTerm),
+        like(restaurants.nameFr, searchTerm),
+        // بحث عكسي: هل اسم المطعم موجود كجزء داخل الجملة التي كتبها المستخدم؟
+        sql`POSITION(LOWER(${restaurants.name}) IN LOWER(${cleanQuery})) > 0`,
+        sql`POSITION(${restaurants.nameAr} IN ${cleanQuery}) > 0`,
+        sql`POSITION(LOWER(${restaurants.nameFr}) IN LOWER(${cleanQuery})) > 0`
+    ];
+
+    // 2. البحث الذكي المفكك: تقسيم الجملة لكلمات إذا كتب المستخدم أكثر من كلمة (مثل: "برجر ماك لارج")
+    const words = cleanQuery.split(/\s+/).filter(word => word.length > 2); // نختار الكلمات التي تزيد عن حرفين
+    if (words.length > 1) {
+        words.forEach(word => {
+            const wordTerm = `%${word}%`;
+            searchConditions.push(
+                like(restaurants.name, wordTerm),
+                like(restaurants.nameAr, wordTerm),
+                like(restaurants.nameFr, wordTerm)
+            );
+        });
+    }
+
+    // 3. تنفيذ الاستعلام المطور
     const results = await db
         .select({
             ...getTableColumns(restaurants),
@@ -49,15 +75,12 @@ export const searchRestaurants = async (req: Request, res: Response) => {
                 eq(userAddHome.userId, userId)
             )
         )
-        .where(
-            or(
-                like(restaurants.name, searchTerm),
-                like(restaurants.nameAr, searchTerm),
-                like(restaurants.nameFr, searchTerm)
-            )
-        );
+        .where(or(...searchConditions)); // نمرر كل المصفوفة الذكية لشرط الـ OR
 
-    return SuccessResponse(res, { message: "Search results", data: results.map(cleanRestaurantResult) });
+    return SuccessResponse(res, { 
+        message: "Search results", 
+        data: results.map(cleanRestaurantResult) 
+    });
 };
 
 // 2. Toggle addhome status for a restaurant (add or remove)
