@@ -9,10 +9,10 @@ const BadRequest_1 = require("../../Errors/BadRequest");
 const NotFound_1 = require("../../Errors/NotFound");
 const uuid_1 = require("uuid");
 // ==========================================
-// 1. Create Discount & Link to Selected Restaurants
+// 1. Create Discount (Global or Linked to Selected)
 // ==========================================
 const createDiscountByAdmin = async (req, res) => {
-    const { name, nameAr, nameFr, discountType, discountValue, maxDiscount, minOrderAmount, usageLimit, startDate, endDate, isActive, restaurantIds // يتوقع استقبال Array من المعرفات: ["id1", "id2"]
+    const { name, nameAr, nameFr, discountType, discountValue, maxDiscount, minOrderAmount, usageLimit, startDate, endDate, isActive, restaurantIds // اختياري الآن
      } = req.body;
     // التحققات الأساسية
     if (!name)
@@ -21,11 +21,10 @@ const createDiscountByAdmin = async (req, res) => {
         throw new BadRequest_1.BadRequest("Discount type is required (percentage | fixed_amount)");
     if (discountValue === undefined || discountValue === null)
         throw new BadRequest_1.BadRequest("Discount value is required");
-    if (!restaurantIds || !Array.isArray(restaurantIds) || restaurantIds.length === 0) {
-        throw new BadRequest_1.BadRequest("Please select at least one restaurant for this discount");
-    }
+    // تحديد هل الخصم عام لكل المطاعم أم محدد
+    const isGlobal = !restaurantIds || !Array.isArray(restaurantIds) || restaurantIds.length === 0;
     const discountId = (0, uuid_1.v4)();
-    // 1. إدخال البيانات في جدول الخصومات الرئيسي
+    // 1. إدخال البيانات في جدول الخصومات الرئيسي (مع ضبط قيمة isGlobal)
     await connection_1.db.insert(schema_1.discounts).values({
         id: discountId,
         name,
@@ -39,30 +38,38 @@ const createDiscountByAdmin = async (req, res) => {
         startDate: startDate ? new Date(startDate) : null,
         endDate: endDate ? new Date(endDate) : null,
         isActive: isActive !== undefined ? isActive : true,
+        isGlobal: isGlobal, // true لو مصفوفة المطاعم فارغة أو غير موجودة
     });
-    // 2. بناء سجلات الربط لجدول الـ Many-to-Many
-    const drData = restaurantIds.map((rId) => ({
-        id: (0, uuid_1.v4)(),
-        discountId: discountId,
-        restaurantId: rId,
-    }));
-    await connection_1.db.insert(schema_1.discountRestaurants).values(drData);
-    return (0, response_1.SuccessResponse)(res, { message: "Discount created and linked to selected restaurants successfully", data: { id: discountId } }, 201);
+    // 2. بناء سجلات الربط فقط إذا لم يكن الخصم عاماً (isGlobal === false)
+    if (!isGlobal) {
+        const drData = restaurantIds.map((rId) => ({
+            id: (0, uuid_1.v4)(),
+            discountId: discountId,
+            restaurantId: rId,
+        }));
+        await connection_1.db.insert(schema_1.discountRestaurants).values(drData);
+    }
+    return (0, response_1.SuccessResponse)(res, {
+        message: isGlobal
+            ? "Global discount created successfully for all restaurants"
+            : "Discount created and linked to selected restaurants successfully",
+        data: { id: discountId, isGlobal }
+    }, 201);
 };
 exports.createDiscountByAdmin = createDiscountByAdmin;
 // ==========================================
-// 2. Get All Discounts (With optional filter by restaurantId)
+// 2. Get All Discounts (With Global Support)
 // ==========================================
 const getAllDiscountsByAdmin = async (req, res) => {
-    const { restaurantId } = req.query; // اختياري: إذا أراد الأدمن عرض عروض مطعم معين فقط
+    const { restaurantId } = req.query;
     let allDiscounts;
     if (restaurantId) {
-        // جلب الخصومات المرتبطة بمطعم محدد فقط عن طريق الـ Join
+        // جلب الخصومات العامة (isGlobal = true) أَوْ الخصومات المرتبطة بهذا المطعم تحديداً في جدول الربط
         const rawData = await connection_1.db
-            .select()
+            .selectDistinct({ discounts: schema_1.discounts }) // تجنب التكرار بـ selectDistinct
             .from(schema_1.discounts)
-            .innerJoin(schema_1.discountRestaurants, (0, drizzle_orm_1.eq)(schema_1.discounts.id, schema_1.discountRestaurants.discountId))
-            .where((0, drizzle_orm_1.eq)(schema_1.discountRestaurants.restaurantId, restaurantId));
+            .leftJoin(schema_1.discountRestaurants, (0, drizzle_orm_1.eq)(schema_1.discounts.id, schema_1.discountRestaurants.discountId))
+            .where((0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.discounts.isGlobal, true), (0, drizzle_orm_1.eq)(schema_1.discountRestaurants.restaurantId, restaurantId)));
         allDiscounts = rawData.map(row => row.discounts);
     }
     else {
@@ -77,7 +84,6 @@ exports.getAllDiscountsByAdmin = getAllDiscountsByAdmin;
 // ==========================================
 const getDiscountByIdByAdmin = async (req, res) => {
     const { id } = req.params;
-    // 1. جلب بيانات الخصم الأساسية
     const [discount] = await connection_1.db
         .select()
         .from(schema_1.discounts)
@@ -85,12 +91,15 @@ const getDiscountByIdByAdmin = async (req, res) => {
         .limit(1);
     if (!discount)
         throw new NotFound_1.NotFound("Discount not found");
-    // 2. جلب معرفات المطاعم المرتبطة بهذا الخصم لتسهيل عرضها في الـ Frontend بالأدمن
-    const linkedRestaurants = await connection_1.db
-        .select({ restaurantId: schema_1.discountRestaurants.restaurantId })
-        .from(schema_1.discountRestaurants)
-        .where((0, drizzle_orm_1.eq)(schema_1.discountRestaurants.discountId, id));
-    const restaurantIds = linkedRestaurants.map(r => r.restaurantId);
+    let restaurantIds = [];
+    // نجلب المطاعم فقط إذا لم يكن الخصم شاملاً لكل المطاعم
+    if (!discount.isGlobal) {
+        const linkedRestaurants = await connection_1.db
+            .select({ restaurantId: schema_1.discountRestaurants.restaurantId })
+            .from(schema_1.discountRestaurants)
+            .where((0, drizzle_orm_1.eq)(schema_1.discountRestaurants.discountId, id));
+        restaurantIds = linkedRestaurants.map(r => r.restaurantId);
+    }
     return (0, response_1.SuccessResponse)(res, {
         message: "Get discount success",
         data: { ...discount, restaurantIds }
@@ -109,8 +118,7 @@ const updateDiscountByAdmin = async (req, res) => {
         .limit(1);
     if (!existing)
         throw new NotFound_1.NotFound("Discount not found");
-    const { name, nameAr, nameFr, discountType, discountValue, maxDiscount, minOrderAmount, usageLimit, startDate, endDate, isActive, restaurantIds // اختياري: إذا قام بتحديث المطاعم المشغلة للعرض
-     } = req.body;
+    const { name, nameAr, nameFr, discountType, discountValue, maxDiscount, minOrderAmount, usageLimit, startDate, endDate, isActive, restaurantIds } = req.body;
     const updateData = { updatedAt: new Date() };
     if (name !== undefined)
         updateData.name = name;
@@ -134,23 +142,24 @@ const updateDiscountByAdmin = async (req, res) => {
         updateData.endDate = endDate ? new Date(endDate) : null;
     if (isActive !== undefined)
         updateData.isActive = isActive;
-    // 1. تحديث الجدول الرئيسي
-    await connection_1.db.update(schema_1.discounts).set(updateData).where((0, drizzle_orm_1.eq)(schema_1.discounts.id, id));
-    // 2. تحديث جدول الربط في حال تم إرسال مصفوفة مطاعم جديدة
+    // إذا قام الأدمن بتمرير مصفوفة المطاعم (حتى لو فارغة)، نقوم بتحديث حالة الـ isGlobal وحذف/تحديث جدول الربط
     if (restaurantIds !== undefined && Array.isArray(restaurantIds)) {
-        if (restaurantIds.length === 0) {
-            throw new BadRequest_1.BadRequest("Discount must be linked to at least one restaurant");
-        }
-        // مسح العلاقات القديمة أولاً
+        const isGlobal = restaurantIds.length === 0;
+        updateData.isGlobal = isGlobal;
+        // دائماً نمسح العلاقات القديمة لكي نحدثها بشكل صحيح
         await connection_1.db.delete(schema_1.discountRestaurants).where((0, drizzle_orm_1.eq)(schema_1.discountRestaurants.discountId, id));
-        // إدخال العلاقات الجديدة المحدثة
-        const drData = restaurantIds.map((rId) => ({
-            id: (0, uuid_1.v4)(),
-            discountId: id,
-            restaurantId: rId,
-        }));
-        await connection_1.db.insert(schema_1.discountRestaurants).values(drData);
+        // إذا لم يكن عالمياً، ننشئ العلاقات الجديدة
+        if (!isGlobal) {
+            const drData = restaurantIds.map((rId) => ({
+                id: (0, uuid_1.v4)(),
+                discountId: id,
+                restaurantId: rId,
+            }));
+            await connection_1.db.insert(schema_1.discountRestaurants).values(drData);
+        }
     }
+    // تحديث جدول الخصومات الرئيسي بجميع التغييرات بما فيها الـ isGlobal إن وُجدت
+    await connection_1.db.update(schema_1.discounts).set(updateData).where((0, drizzle_orm_1.eq)(schema_1.discounts.id, id));
     return (0, response_1.SuccessResponse)(res, { message: "Discount updated successfully" });
 };
 exports.updateDiscountByAdmin = updateDiscountByAdmin;
@@ -166,13 +175,12 @@ const deleteDiscountByAdmin = async (req, res) => {
         .limit(1);
     if (!existing)
         throw new NotFound_1.NotFound("Discount not found");
-    // سيتم حذف السجلات المرتبطة تلقائياً بجدول الـ discountRestaurants بفضل الـ Cascade في السكيما
     await connection_1.db.delete(schema_1.discounts).where((0, drizzle_orm_1.eq)(schema_1.discounts.id, id));
     return (0, response_1.SuccessResponse)(res, { message: "Discount deleted successfully from the entire system" });
 };
 exports.deleteDiscountByAdmin = deleteDiscountByAdmin;
 // ==========================================
-// 6. Toggle Discount Status Across Selected Restaurants
+// 6. Toggle Discount Status 
 // ==========================================
 const toggleDiscountStatusByAdmin = async (req, res) => {
     const { id } = req.params;

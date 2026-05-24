@@ -24,6 +24,8 @@ exports.discounts = (0, mysql_core_1.mysqlTable)("discounts", {
     startDate: (0, mysql_core_1.timestamp)("start_date"),
     endDate: (0, mysql_core_1.timestamp)("end_date"),
     isActive: (0, mysql_core_1.boolean)("is_active").default(true),
+    // الفلاج الجديد لتحديد إذا كان الخصم عاماً لكل المطاعم في حال عدم اختيار مطعم محدد
+    isGlobal: (0, mysql_core_1.boolean)("is_global").default(false),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });
