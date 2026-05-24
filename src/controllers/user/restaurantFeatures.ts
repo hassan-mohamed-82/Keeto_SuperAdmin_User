@@ -17,71 +17,47 @@ const cleanRestaurantResult = (row: any) => {
 
 // 1. Search for restaurants
 export const searchRestaurants = async (req: Request, res: Response) => {
+
     const { query } = req.query;
-    
     const userId = req.user?.id;
     if (!userId) throw new UnauthorizedError("Unauthenticated");
 
     if (!query || typeof query !== "string") {
         throw new BadRequest("Search query is required");
     }
+    const searchTerm = `%${query}%`;
 
-    const cleanQuery = query.trim();
-    const searchTerm = `%${cleanQuery}%`;
-
-    // 1. بناء شروط البحث عن الجملة الكاملة (تطابق عادي أو عكسي)
-    const searchConditions = [
-        like(restaurants.name, searchTerm),
-        like(restaurants.nameAr, searchTerm),
-        like(restaurants.nameFr, searchTerm),
-        // بحث عكسي: هل اسم المطعم موجود كجزء داخل الجملة التي كتبها المستخدم؟
-        sql`POSITION(LOWER(${restaurants.name}) IN LOWER(${cleanQuery})) > 0`,
-        sql`POSITION(${restaurants.nameAr} IN ${cleanQuery}) > 0`,
-        sql`POSITION(LOWER(${restaurants.nameFr}) IN LOWER(${cleanQuery})) > 0`
-    ];
-
-    // 2. البحث الذكي المفكك: تقسيم الجملة لكلمات إذا كتب المستخدم أكثر من كلمة (مثل: "برجر ماك لارج")
-    const words = cleanQuery.split(/\s+/).filter(word => word.length > 2); // نختار الكلمات التي تزيد عن حرفين
-    if (words.length > 1) {
-        words.forEach(word => {
-            const wordTerm = `%${word}%`;
-            searchConditions.push(
-                like(restaurants.name, wordTerm),
-                like(restaurants.nameAr, wordTerm),
-                like(restaurants.nameFr, wordTerm)
-            );
-        });
-    }
-
-    // 3. تنفيذ الاستعلام المطور
     const results = await db
-        .select({
-            ...getTableColumns(restaurants),
-            isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
-            isAddHome: sql<boolean>`CASE WHEN ${userAddHome.id} IS NOT NULL THEN true ELSE false END`.as('isAddHome')
-        })
-        .from(restaurants)
-        .leftJoin(
-            favorites,
+    .select({
+        ...getTableColumns(restaurants),
+        isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
+        isAddHome: sql<boolean>`CASE WHEN ${userAddHome.id} IS NOT NULL THEN true ELSE false END`.as('isAddHome')
+    })
+    .from(restaurants)
+    .leftJoin(
+        favorites,
             and(
                 eq(favorites.restaurantId, restaurants.id),
                 eq(favorites.userId, userId)
             )
         )
-        .leftJoin(
+    .leftJoin(
             userAddHome,
             and(
                 eq(userAddHome.restaurantId, restaurants.id),
                 eq(userAddHome.userId, userId)
             )
         )
-        .where(or(...searchConditions)); // نمرر كل المصفوفة الذكية لشرط الـ OR
+        .where(
+            or(
+                like(restaurants.name, searchTerm),
+                like(restaurants.nameAr, searchTerm),
+                like(restaurants.nameFr, searchTerm)
+            )
+        );
+    return SuccessResponse(res, { message: "Search results", data: results.map(cleanRestaurantResult) });
+}; 
 
-    return SuccessResponse(res, { 
-        message: "Search results", 
-        data: results.map(cleanRestaurantResult) 
-    });
-};
 
 // 2. Toggle addhome status for a restaurant (add or remove)
 export const toggleAddHome = async (req: Request, res: Response) => {
