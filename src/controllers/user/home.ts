@@ -381,6 +381,141 @@ export const getUserFavorites = async (req: Request, res: Response) => {
 
 
 
+// export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
+//     const { query } = req.query;
+
+//     if (!query || typeof query !== "string") {
+//         throw new BadRequest("please enter your search term");
+//     }
+
+//     const searchTerm = `%${query}%`;
+
+//     // 1. Fetch flat data
+//     const flatResults = await db
+//         .select({
+//             restaurant: restaurants,
+//             food: food,
+//             variation: foodVariations,
+//             option: variationOptions
+//         })
+//         .from(restaurants)
+//         .leftJoin(
+//             food,
+//             and(
+//                 eq(restaurants.id, food.restaurantid),
+//                 eq(food.status, "active")
+//             )
+//         )
+//         .leftJoin(
+//             foodVariations,
+//             eq(food.id, foodVariations.foodId)
+//         )
+//         .leftJoin(
+//             variationOptions,
+//             eq(foodVariations.id, variationOptions.variationId)
+//         )
+//         .where(
+//             and(
+//                 eq(restaurants.status, "active"),
+//                 or(
+//                     like(restaurants.name, searchTerm),
+//                     like(restaurants.nameAr, searchTerm),
+//                     like(restaurants.nameFr, searchTerm)
+//                 )
+//             )
+//         );
+
+//     // 2. Grouping
+//     const restaurantsMap = new Map();
+
+//     for (const row of flatResults) {
+
+//         const r = row.restaurant;
+//         const f = row.food;
+//         const v = row.variation;
+//         const o = row.option;
+
+//         if (!r || !r.id) continue;
+
+//         // Restaurant
+//         if (!restaurantsMap.has(r.id)) {
+
+//             restaurantsMap.set(r.id, {
+//                 ...r,
+//                 food: new Map()
+//             });
+//         }
+
+//         const currentRestaurant = restaurantsMap.get(r.id);
+
+//         // Food
+//         if (f && f.id) {
+
+//             if (!currentRestaurant.food.has(f.id)) {
+
+//                 currentRestaurant.food.set(f.id, {
+//                     ...f,
+//                     variations: new Map()
+//                 });
+//             }
+
+//             const currentFood = currentRestaurant.food.get(f.id);
+
+//             // Variation
+//             if (v && v.id) {
+
+//                 if (!currentFood.variations.has(v.id)) {
+
+//                     currentFood.variations.set(v.id, {
+//                         ...v,
+//                         options: []
+//                     });
+//                 }
+
+//                 const currentVariation =
+//                     currentFood.variations.get(v.id);
+
+//                 // Option
+//                 if (o && o.id) {
+
+//                     const exists =
+//                         currentVariation.options.some(
+//                             (opt: any) => opt.id === o.id
+//                         );
+
+//                     if (!exists) {
+//                         currentVariation.options.push(o);
+//                     }
+//                 }
+//             }
+//         }
+//     }
+
+//     // 3. Convert Maps → Arrays
+//     const formattedData = Array.from(
+//         restaurantsMap.values()
+//     ).map((restaurant: any) => ({
+
+//         ...restaurant,
+
+//         food: Array.from(
+//             restaurant.food.values()
+//         ).map((foodItem: any) => ({
+
+//             ...foodItem,
+
+//             variations: Array.from(
+//                 foodItem.variations.values()
+//             )
+//         }))
+//     }));
+
+//     return SuccessResponse(res, {
+//         message: "Fetched restaurant and menu data successfully",
+//         data: formattedData
+//     });
+// };
+
 export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
     const { query } = req.query;
 
@@ -388,9 +523,44 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         throw new BadRequest("please enter your search term");
     }
 
-    const searchTerm = `%${query}%`;
+    const cleanQuery = query.trim();
+    const searchTerm = `%${cleanQuery}%`;
 
-    // 1. Fetch flat data
+    // 1. بناء شروط البحث الذكي (للمطعم وللأكلات أيضاً)
+    const searchConditions = [
+        // أ) البحث العادي في أسماء المطاعم
+        like(restaurants.name, searchTerm),
+        like(restaurants.nameAr, searchTerm),
+        like(restaurants.nameFr, searchTerm),
+        
+        // ب) البحث العكسي في أسماء المطاعم (هل الاسم جزء من الجملة الطويلة؟)
+        sql`POSITION(LOWER(${restaurants.name}) IN LOWER(${cleanQuery})) > 0`,
+        sql`POSITION(${restaurants.nameAr} IN ${cleanQuery}) > 0`,
+        sql`POSITION(LOWER(${restaurants.nameFr}) IN LOWER(${cleanQuery})) > 0`,
+
+        // ج) البحث في أسماء الأكلات والمنيو لزيادة ذكاء محرك البحث
+        like(food.name, searchTerm),
+        like(food.nameAr, searchTerm),
+        like(food.nameFr, searchTerm)
+    ];
+
+    // د) تفكيك الكلمات في حال كانت الجملة مركبة (مثال: "برجر ماك حار")
+    const words = cleanQuery.split(/\s+/).filter(word => word.length > 2);
+    if (words.length > 1) {
+        words.forEach(word => {
+            const wordTerm = `%${word}%`;
+            searchConditions.push(
+                like(restaurants.name, wordTerm),
+                like(restaurants.nameAr, wordTerm),
+                like(restaurants.nameFr, wordTerm),
+                like(food.name, wordTerm),
+                like(food.nameAr, wordTerm),
+                like(food.nameFr, wordTerm)
+            );
+        });
+    }
+
+    // 2. Fetch flat data
     const flatResults = await db
         .select({
             restaurant: restaurants,
@@ -417,19 +587,14 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         .where(
             and(
                 eq(restaurants.status, "active"),
-                or(
-                    like(restaurants.name, searchTerm),
-                    like(restaurants.nameAr, searchTerm),
-                    like(restaurants.nameFr, searchTerm)
-                )
+                or(...searchConditions) // تطبيق المصفوفة الذكية بالكامل
             )
         );
 
-    // 2. Grouping
+    // 3. Grouping
     const restaurantsMap = new Map();
 
     for (const row of flatResults) {
-
         const r = row.restaurant;
         const f = row.food;
         const v = row.variation;
@@ -439,7 +604,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
         // Restaurant
         if (!restaurantsMap.has(r.id)) {
-
             restaurantsMap.set(r.id, {
                 ...r,
                 food: new Map()
@@ -450,9 +614,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
         // Food
         if (f && f.id) {
-
             if (!currentRestaurant.food.has(f.id)) {
-
                 currentRestaurant.food.set(f.id, {
                     ...f,
                     variations: new Map()
@@ -463,25 +625,20 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
             // Variation
             if (v && v.id) {
-
                 if (!currentFood.variations.has(v.id)) {
-
                     currentFood.variations.set(v.id, {
                         ...v,
                         options: []
                     });
                 }
 
-                const currentVariation =
-                    currentFood.variations.get(v.id);
+                const currentVariation = currentFood.variations.get(v.id);
 
                 // Option
                 if (o && o.id) {
-
-                    const exists =
-                        currentVariation.options.some(
-                            (opt: any) => opt.id === o.id
-                        );
+                    const exists = currentVariation.options.some(
+                        (opt: any) => opt.id === o.id
+                    );
 
                     if (!exists) {
                         currentVariation.options.push(o);
@@ -491,22 +648,12 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         }
     }
 
-    // 3. Convert Maps → Arrays
-    const formattedData = Array.from(
-        restaurantsMap.values()
-    ).map((restaurant: any) => ({
-
+    // 4. Convert Maps → Arrays
+    const formattedData = Array.from(restaurantsMap.values()).map((restaurant: any) => ({
         ...restaurant,
-
-        food: Array.from(
-            restaurant.food.values()
-        ).map((foodItem: any) => ({
-
+        food: Array.from(restaurant.food.values()).map((foodItem: any) => ({
             ...foodItem,
-
-            variations: Array.from(
-                foodItem.variations.values()
-            )
+            variations: Array.from(foodItem.variations.values())
         }))
     }));
 
