@@ -518,7 +518,7 @@ export const getUserFavorites = async (req: Request, res: Response) => {
 
 
 // ==========================================
-// 2. Search Restaurant With Menu (البحث الدقيق وحل مشكلة جلب مطاعم عشوائية)
+// 2. Search Restaurant With Menu (البحث الذكي الصارم عن المطعم والمنيو)
 // ==========================================
 export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
     const { query } = req.query;
@@ -527,28 +527,29 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         throw new BadRequest("please enter your search term");
     }
 
+    // 1. تنظيف وتوحيد نص البحث المرسل (حذف الشرطات، المسافات، وعلامة ')
     const cleanQuery = query.trim().toLowerCase();
-    const normalizedQuery = cleanQuery.replace(/[-\s]/g, ""); // تحويل "mataam-wast-albalad" إلى "mataamwastalbalad"
+    const normalizedQuery = cleanQuery.replace(/[-\s']/g, ""); // يحول "mataam-wast-albalad" إلى "mataamwastalbalad"
     const searchTerm = `%${cleanQuery}%`;
     const normalizedSearchTerm = `%${normalizedQuery}%`;
 
-    // بناء شروط دقيقة ومباشرة تمنع تماماً الحقول الفارغة والـ Position العشوائي
+    // 2. بناء شروط دقيقة تطهر بيانات قاعدة البيانات من الفواصل والعلامات أثناء المقارنة
     const restaurantConditions = [
-        // 1. تطابق عبر الـ LIKE العادي (بشرط ألا يكون الحقل فارغاً)
+        // أ) تطابق عبر الـ LIKE العادي (بشرط ألا يكون الحقل فارغاً منقوعاً)
         and(sql`${restaurants.name} != ''`, like(restaurants.name, searchTerm)),
         and(sql`${restaurants.nameAr} != ''`, like(restaurants.nameAr, searchTerm)),
         and(sql`${restaurants.nameFr} != ''`, like(restaurants.nameFr, searchTerm)),
 
-        // 2. التطابق الذكي بعد إزالة المسافات والشرطات (الحل المثالي للـ Slugs)
-        sql`REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', '') = ${normalizedQuery}`,
-        sql`REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', '') = ${normalizedQuery}`,
-        sql`REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', '') = ${normalizedQuery}`,
+        // ب) التطابق التام الذكي بعد تنظيف (المسافات، الشرطات، وعلامة ') - حل مشكلة الـ Slugs والأبوستروف
+        sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
+        sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
+        sql`REPLACE(REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
 
-        // 3. احتياطياً: لو الـ Slug جزء من اسم طويل مخزن في الداتا بيز
-        sql`REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', '') LIKE ${normalizedSearchTerm}`
+        // ج) احتياطياً: في حال كان الـ Slug جزءاً من اسم أطول مخزن في قاعدة البيانات
+        sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", '') LIKE ${normalizedSearchTerm}`
     ];
 
-    // جلب البيانات بناءً على شروط اسم المطعم الصارمة فقط
+    // 3. جلب البيانات بناءً على شروط اسم المطعم الصارمة فقط
     const flatResults = await db
         .select({
             restaurant: restaurants,
@@ -569,11 +570,11 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         .where(
             and(
                 eq(restaurants.status, "active"),
-                or(...restaurantConditions) // تطبيق الفلترة الصارمة
+                or(...restaurantConditions) // تطبيق الفلترة الصارمة والذكية هنا
             )
         );
 
-    // تجميع البيانات (Grouping Logic)
+    // 4. تجميع البيانات المجلوبة (Grouping Logic) من جداول مفلطحة إلى شجرة مرابطة
     const restaurantsMap = new Map();
 
     for (const row of flatResults) {
@@ -584,6 +585,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
         if (!r || !r.id) continue;
 
+        // تجميع المطعم
         if (!restaurantsMap.has(r.id)) {
             restaurantsMap.set(r.id, {
                 ...r,
@@ -593,6 +595,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
         const currentRestaurant = restaurantsMap.get(r.id);
 
+        // تجميع الأكلات (Food)
         if (f && f.id) {
             if (!currentRestaurant.food.has(f.id)) {
                 currentRestaurant.food.set(f.id, {
@@ -603,6 +606,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
             const currentFood = currentRestaurant.food.get(f.id);
 
+            // تجميع الأحجام/الأنواع (Variations)
             if (v && v.id) {
                 if (!currentFood.variations.has(v.id)) {
                     currentFood.variations.set(v.id, {
@@ -613,6 +617,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
                 const currentVariation = currentFood.variations.get(v.id);
 
+                // تجميع الخيارات الإضافية (Options)
                 if (o && o.id) {
                     const exists = currentVariation.options.some(
                         (opt: any) => opt.id === o.id
@@ -626,6 +631,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         }
     }
 
+    // 5. تحويل الـ Maps إلى Arrays ليكون الـ Response جاهزاً ونظيفاً للفرونت إند
     const formattedData = Array.from(restaurantsMap.values()).map((restaurant: any) => ({
         ...restaurant,
         food: Array.from(restaurant.food.values()).map((foodItem: any) => ({
