@@ -20,10 +20,6 @@ const checkout = async (req, res) => {
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
-    // التحقق من branchId
-    if (!branchId) {
-        throw new BadRequest_1.BadRequest("Branch ID is required");
-    }
     const validOrderSources = ["online_order", "food_aggregator", "mykeeto"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest_1.BadRequest("Invalid order source");
