@@ -17,32 +17,31 @@ const cleanRestaurantResult = (row: any) => {
 
 // 1. Search for restaurants
 export const searchRestaurants = async (req: Request, res: Response) => {
+
     const { query } = req.query;
-    
     const userId = req.user?.id;
     if (!userId) throw new UnauthorizedError("Unauthenticated");
 
     if (!query || typeof query !== "string") {
         throw new BadRequest("Search query is required");
     }
-
     const searchTerm = `%${query}%`;
 
     const results = await db
-        .select({
-            ...getTableColumns(restaurants),
-            isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
-            isAddHome: sql<boolean>`CASE WHEN ${userAddHome.id} IS NOT NULL THEN true ELSE false END`.as('isAddHome')
-        })
-        .from(restaurants)
-        .leftJoin(
-            favorites,
+    .select({
+        ...getTableColumns(restaurants),
+        isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
+        isAddHome: sql<boolean>`CASE WHEN ${userAddHome.id} IS NOT NULL THEN true ELSE false END`.as('isAddHome')
+    })
+    .from(restaurants)
+    .leftJoin(
+        favorites,
             and(
                 eq(favorites.restaurantId, restaurants.id),
                 eq(favorites.userId, userId)
             )
         )
-        .leftJoin(
+    .leftJoin(
             userAddHome,
             and(
                 eq(userAddHome.restaurantId, restaurants.id),
@@ -56,9 +55,9 @@ export const searchRestaurants = async (req: Request, res: Response) => {
                 like(restaurants.nameFr, searchTerm)
             )
         );
-
     return SuccessResponse(res, { message: "Search results", data: results.map(cleanRestaurantResult) });
-};
+}; 
+
 
 // 2. Toggle addhome status for a restaurant (add or remove)
 export const toggleAddHome = async (req: Request, res: Response) => {
