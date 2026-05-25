@@ -106,8 +106,11 @@ const updateBusinessPlan = async (req, res) => {
             throw new BadRequest_1.BadRequest("you can't activate the annually plan with a zero amount");
     }
     // منع تعديل الثوابت
+    delete updateData.id;
     delete updateData.restaurantId;
     delete updateData.platformType;
+    delete updateData.createdAt;
+    delete updateData.updatedAt;
     if (Object.keys(updateData).length === 0) {
         throw new BadRequest_1.BadRequest("no valid fields provided for update");
     }

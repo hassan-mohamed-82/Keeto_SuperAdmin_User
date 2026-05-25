@@ -130,8 +130,11 @@ export const updateBusinessPlan = async (req: Request, res: Response) => {
     }
 
     // منع تعديل الثوابت
+    delete updateData.id;
     delete updateData.restaurantId;
     delete updateData.platformType;
+    delete updateData.createdAt;
+    delete updateData.updatedAt;
 
     if (Object.keys(updateData).length === 0) {
         throw new BadRequest("no valid fields provided for update");
