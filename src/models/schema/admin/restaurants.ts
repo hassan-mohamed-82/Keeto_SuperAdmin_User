@@ -29,6 +29,8 @@ export const restaurants = mysqlTable("restaurants", {
     ownerPhone: varchar("owner_phone", { length: 50 }).notNull(),
 
     tags: json("tags").$type<string[]>().default([]),
+    lat: varchar("lat", { length: 255 }),
+    lng: varchar("lng", { length: 255 }),
 
     taxNumber: varchar("tax_number", { length: 255 }),
     taxExpireDate: date("tax_expire_date"), 

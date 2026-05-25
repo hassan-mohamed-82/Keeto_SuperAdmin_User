@@ -14,6 +14,7 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { v4 as uuidv4 } from "uuid";
 import { UnauthorizedError } from "../../Errors";
+import { sendPushNotification } from "../../utils/notifications";
 
 // ==========================================
 // 1. إنشاء الطلب (Checkout)
@@ -254,6 +255,21 @@ export const checkout = async (req: Request | any, res: Response) => {
             reference: orderNumber,
             note: paymentMethod === "cash_on_delivery" ? "Commission deducted from cash order" : "Earnings added from digital payment"
         });
+    });
+
+    // ==========================================
+    // 11. Send Notification to Restaurant
+    // ==========================================
+    await sendPushNotification({
+        recipientType: "restaurant",
+        recipientId: restaurantId,
+        title: "New Order Received! 🛒",
+        body: `You have received a new order #${orderNumber} for ${totalAmount}.`,
+        data: {
+            orderId,
+            orderNumber,
+            type: "new_order"
+        }
     });
 
     return SuccessResponse(res, {

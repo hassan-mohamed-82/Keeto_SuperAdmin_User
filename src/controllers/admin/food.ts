@@ -101,7 +101,6 @@ export const createFood = async (req: Request, res: Response) => {
     }
 
     if (addonsId) {
-
         const existingAddon = await db
             .select()
             .from(addons)
@@ -128,108 +127,62 @@ export const createFood = async (req: Request, res: Response) => {
 
     await db.insert(food).values({
         id: foodId,
-
         name,
         nameAr,
         nameFr,
-
         description,
         descriptionAr,
         descriptionFr,
-
         image: imageUrl,
-
         restaurantid,
         categoryid,
         subcategoryid,
-
         foodtype: foodtype || "veg",
-
         Nutrition: Nutrition || null,
-
-        allergen_ingredients:
-            allergen_ingredients || null,
-
+        allergen_ingredients: allergen_ingredients || null,
         is_Halal: is_Halal ?? false,
-
         addonsId: addonsId || null,
-
         startTime,
         endTime,
-
         search_tags: search_tags || null,
-
         price: price.toString(),
-
-        discount_type:
-            discount_type || "percentage",
-
-        discount_value:
-            discount_value?.toString() || null,
-
-        Maximum_Purchase:
-            Maximum_Purchase || null,
-
-        stock_type:
-            stock_type || "unlimited",
-
-        status:
-            status || "active",
+        discount_type: discount_type || "percentage",
+        discount_value: discount_value?.toString() || null,
+        Maximum_Purchase: Maximum_Purchase || null,
+        stock_type: stock_type || "unlimited",
+        status: status || "active",
     });
 
     // variations tables
     if (variations && Array.isArray(variations)) {
-
         for (const variation of variations) {
-
             const variationId = uuidv4();
 
             await db.insert(foodVariations).values({
                 id: variationId,
-
                 foodId,
-
                 name: variation.name,
-
                 nameAr: variation.nameAr,
-
                 nameFr: variation.nameFr,
-
-                isRequired:
-                    variation.isRequired || false,
-
-                selectionType:
-                    variation.selectionType || "single",
-
+                isRequired: variation.isRequired || false,
+                selectionType: variation.selectionType || "single",
                 min: variation.min || null,
-
                 max: variation.max || null,
-
                 status: variation.status !== undefined ? variation.status : true,
             });
 
-            if (
-                variation.options &&
-                Array.isArray(variation.options)
-            ) {
-
+            if (variation.options && Array.isArray(variation.options)) {
                 for (const option of variation.options) {
-
                     await db.insert(variationOptions).values({
                         variationId,
-
                         optionName: option.optionName,
-
-                        optionNameAr:
-                            option.optionNameAr,
-
-                        optionNameFr:
-                            option.optionNameFr,
-
-                        additionalPrice:
-                            option.additionalPrice?.toString() || "0",
-
+                        optionNameAr: option.optionNameAr,
+                        optionNameFr: option.optionNameFr,
+                        additionalPrice: option.additionalPrice?.toString() || "0",
                         status: option.status !== undefined ? option.status : true,
+                        
+                        // 👇 التعديل هنا: استقبال isDefault
+                        isDefault: option.isDefault !== undefined ? option.isDefault : false,
                     });
                 }
             }
@@ -240,19 +193,17 @@ export const createFood = async (req: Request, res: Response) => {
         res,
         {
             message: "Create food success",
-            data: {
-                id: foodId
-            }
+            data: { id: foodId }
         },
         201
     );
 };
+
 // =============================================
 // GET ALL Foods (Optimized)
 // =============================================
 export const getAllFoods = async (req: Request, res: Response) => {
     const rawFoods = await db.select({
-        // ✅ Food fields
         id: food.id,
         name: food.name,
         nameAr: food.nameAr,
@@ -281,18 +232,15 @@ export const getAllFoods = async (req: Request, res: Response) => {
         createdAt: food.createdAt,
         updatedAt: food.updatedAt,
 
-        // ✅ Restaurant (alias مهم)
         restaurant_id: restaurants.id,
         restaurant_name: restaurants.name,
         restaurant_nameAr: restaurants.nameAr,
         restaurant_nameFr: restaurants.nameFr,
 
-        // ✅ Category
         category_name: categories.name,
         category_nameAr: categories.nameAr,
         category_nameFr: categories.nameFr,
 
-        // ✅ Subcategory
         subcategory_name: subcategories.name,
         subcategory_nameAr: subcategories.nameAr,
         subcategory_nameFr: subcategories.nameFr,
@@ -306,7 +254,6 @@ export const getAllFoods = async (req: Request, res: Response) => {
         return SuccessResponse(res, { message: "Get all foods success", data: [] });
     }
 
-    // ✅ إعادة بناء الشكل
     const allFoods = rawFoods.map(f => ({
         id: f.id,
         name: f.name,
@@ -424,7 +371,6 @@ export const updateFood = async (req: Request, res: Response) => {
     const { id } = req.params;
     const data = req.body;
     
-    // سحب بيانات المستخدم من الـ التوكن (التي وضعها الـ middleware)
     const userId = req.user?.id;
     const userType = req.user?.type; 
 
@@ -432,16 +378,12 @@ export const updateFood = async (req: Request, res: Response) => {
         throw new BadRequest("User ID missing or unauthorized");
     }
 
-    // ✅ تحديد الصلاحيات: 
-    // لو سوبر آدمن، هيبحث بـ ID الأكلة بس عشان من حقه يعدل أي أكلة
-    // لو صاحب مطعم، لازم ID الأكلة و ID المطعم يتطابقوا (Data Ownership)
     const isSuperAdmin = userType === "super_admin";
     
     const queryCondition = isSuperAdmin
         ? eq(food.id, id)
         : and(eq(food.id, id), eq(food.restaurantid, userId));
 
-    // ✅ تأكد إن الأكلة موجودة وتخص نفس الريستورانت (في حالة الفيندور)
     const existingFood = await db
         .select()
         .from(food)
@@ -452,7 +394,6 @@ export const updateFood = async (req: Request, res: Response) => {
         throw new NotFound("Food not found or you don't have permission to edit it");
     }
 
-    // ✅ الحقول المسموح بتحديثها فقط
     const allowedFields = [
         "name",
         "nameAr",
@@ -461,8 +402,9 @@ export const updateFood = async (req: Request, res: Response) => {
         "descriptionAr",
         "descriptionFr",
         "price",
-        "categoryId",
-        "isAvailable",
+        "categoryid", // Fixed spelling based on previous messages
+        "subcategoryid", // Fixed spelling
+        "status",
         "image"
     ];
 
@@ -472,8 +414,7 @@ export const updateFood = async (req: Request, res: Response) => {
 
     for (const key of allowedFields) {
         if (data[key] !== undefined) {
-            // 🖼️ معالجة الصورة
-            if (key === "image") {
+            if (key === "image" && data[key] && typeof data[key] === "string" && data[key].startsWith("data:image")) {
                 updateData[key] = await handleImageUpdate(
                     req,
                     existingFood[0].image,
@@ -487,10 +428,19 @@ export const updateFood = async (req: Request, res: Response) => {
         }
     }
 
-    // ✅ تنفيذ التحديث (استخدمنا نفس الـ queryCondition هنا عشان السوبر آدمن يقدر يحدث بنجاح)
-    await db.update(food)
-        .set(updateData)
-        .where(queryCondition);
+    // categories processing logic (from previous optimization)
+    const incomingCategoryId = data.categoryid ?? data.categoryId;
+    if (incomingCategoryId !== undefined) {
+        updateData.categoryid = incomingCategoryId === "" ? null : incomingCategoryId;
+    }
+    const incomingSubcategoryId = data.subcategoryid ?? data.subcategoryId;
+    if (incomingSubcategoryId !== undefined) {
+        updateData.subcategoryid = incomingSubcategoryId === "" ? null : incomingSubcategoryId;
+    }
+
+    if (Object.keys(updateData).length > 1) {
+        await db.update(food).set(updateData).where(queryCondition);
+    }
 
     // ===========================
     // ✅ Variations Update
@@ -516,7 +466,6 @@ export const updateFood = async (req: Request, res: Response) => {
 
         // إضافة الجديدة
         for (const variation of data.variations) {
-
             const variationId = uuidv4();
 
             await db.insert(foodVariations).values({
@@ -539,17 +488,17 @@ export const updateFood = async (req: Request, res: Response) => {
                         optionName: option.optionName,
                         optionNameAr: option.optionNameAr,
                         optionNameFr: option.optionNameFr,
-                        additionalPrice: option.additionalPrice
-                            ? option.additionalPrice.toString()
-                            : "0",
+                        additionalPrice: option.additionalPrice ? option.additionalPrice.toString() : "0",
                         status: option.status !== undefined ? option.status : true,
+                        
+                        // 👇 التعديل هنا: استقبال isDefault
+                        isDefault: option.isDefault !== undefined ? option.isDefault : false,
                     });
                 }
             }
         }
     }
 
-    // 🔄 جلب البيانات الجديدة بعد التحديث لإرسالها للفرونت إند
     const updatedFood = await db
         .select()
         .from(food)
@@ -561,6 +510,7 @@ export const updateFood = async (req: Request, res: Response) => {
         data: updatedFood[0] || null
     });
 };
+
 // =============================================
 // DELETE Food
 // =============================================
@@ -592,7 +542,6 @@ export const deleteFood = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, { message: "Delete food success" });
 };
-
 
 export const getFoodsByRestaurantId = async (req: Request, res: Response) => {
     const { id: restaurantId } = req.params;
@@ -719,4 +668,39 @@ export const toggleOptionStatus = async (req: Request, res: Response) => {
         .where(eq(variationOptions.id, id));
 
     return SuccessResponse(res, { message: "Option status updated successfully" });
+};
+
+
+// =============================================
+// 🌟 NEW: TOGGLE Option Default (Smart Toggle)
+// =============================================
+export const toggleOptionDefault = async (req: Request, res: Response) => {
+    const { id } = req.params; // ده الأي دي بتاع الـ option اللي دست على السويتش بتاعه
+    const { isDefault } = req.body;
+
+    if (typeof isDefault !== "boolean") {
+        throw new BadRequest("isDefault must be a boolean");
+    }
+
+    // 1. نجيب الأوبشن عشان نعرف هو تبع أي فارييشن
+    const existing = await db.select().from(variationOptions).where(eq(variationOptions.id, id)).limit(1);
+    
+    if (!existing[0]) throw new NotFound("Option not found");
+
+    const variationId = existing[0].variationId;
+
+    // 2. لو إنت بتخلي الأوبشن ده (true)، يبقى منطقياً لازم نخلي باقي الأوبشنز لنفس الفارييشن (false)
+    // عشان ميحصلش تضارب ويبقى فيه أكتر من سعر افتراضي لنفس الفارييشن في نفس الوقت
+    if (isDefault === true) {
+        await db.update(variationOptions)
+            .set({ isDefault: false })
+            .where(eq(variationOptions.variationId, variationId));
+    }
+
+    // 3. نحدث الأوبشن نفسه بالحالة الجديدة
+    await db.update(variationOptions)
+        .set({ isDefault })
+        .where(eq(variationOptions.id, id));
+
+    return SuccessResponse(res, { message: "Option default status updated successfully" });
 };

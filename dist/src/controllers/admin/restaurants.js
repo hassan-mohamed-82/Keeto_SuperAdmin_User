@@ -45,7 +45,7 @@ const decrementCuisineCount = async (cuisineId) => {
 };
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
-    const { name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng } = req.body;
     if (!name || !nameAr || !nameFr || !address || !addressAr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
     }
@@ -98,6 +98,8 @@ const createRestaurant = async (req, res) => {
             zoneId: clean(zoneId),
             logo: logoUrl || '',
             cover: coverUrl || '',
+            lat: lat || '',
+            lng: lng || '',
             minDeliveryTime: minDeliveryTime ? clean(minDeliveryTime) : null,
             maxDeliveryTime: maxDeliveryTime ? clean(maxDeliveryTime) : null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",
@@ -156,6 +158,8 @@ const getAllRestaurants = async (req, res) => {
         addressAr: schema_1.restaurants.addressAr,
         addressFr: schema_1.restaurants.addressFr,
         logo: schema_1.restaurants.logo,
+        lat: schema_1.restaurants.lat,
+        lng: schema_1.restaurants.lng,
         cover: schema_1.restaurants.cover,
         status: schema_1.restaurants.status,
         cuisineIds: schema_1.restaurants.cuisineId,
@@ -192,6 +196,8 @@ const getAllRestaurants = async (req, res) => {
             cover: r.cover,
             status: r.status,
             email: r.email || null, // إرجاع الإيميل في الـ Response
+            lat: r.lat,
+            lng: r.lng,
             cuisines: parsedCuisines.map((id) => cuisineMap.get(id)).filter(Boolean),
             zone: r.zone_id
                 ? { id: r.zone_id, name: r.zone_name }
@@ -255,7 +261,7 @@ const getRestaurantById = async (req, res) => {
 exports.getRestaurantById = getRestaurantById;
 const updateRestaurant = async (req, res) => {
     const { id } = req.params; // restaurant_id
-    const { name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, } = req.body;
     // 1. التأكد من وجود المطعم
     const [existingRestaurant] = await connection_1.db
         .select()

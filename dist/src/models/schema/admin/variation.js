@@ -20,14 +20,17 @@ exports.foodVariations = (0, mysql_core_2.mysqlTable)("food_variations", {
     status: (0, mysql_core_2.boolean)("status").default(true), // حالة الفارييشن (شغال / مقفول)
 });
 // 2. جدول يمثل الخيارات داخل كل Variation (مثل: صغير، وسط، كبير)
+// 2. جدول يمثل الخيارات داخل كل Variation (مثل: صغير، وسط، كبير)
 exports.variationOptions = (0, mysql_core_2.mysqlTable)("variation_options", {
     id: (0, mysql_core_2.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     variationId: (0, mysql_core_2.char)("variation_id", { length: 36 }).references(() => exports.foodVariations.id, { onDelete: "cascade" }).notNull(),
-    optionName: (0, mysql_core_2.varchar)("option_name", { length: 255 }).notNull(), // Option name
+    optionName: (0, mysql_core_2.varchar)("option_name", { length: 255 }).notNull(),
     optionNameAr: (0, mysql_core_2.varchar)("option_name_ar", { length: 255 }).notNull().default(''),
     optionNameFr: (0, mysql_core_2.varchar)("option_name_fr", { length: 255 }).notNull().default(''),
-    additionalPrice: (0, mysql_core_2.varchar)("additional_price", { length: 255 }).notNull().default("0"), // Additional price
-    status: (0, mysql_core_2.boolean)("status").default(true), // حالة الاوبشن (متاح / غير متاح)
+    additionalPrice: (0, mysql_core_2.varchar)("additional_price", { length: 255 }).notNull().default("0"),
+    // 👇 الحقل الجديد للتحكم في الاختيار الافتراضي
+    isDefault: (0, mysql_core_2.boolean)("is_default").default(false),
+    status: (0, mysql_core_2.boolean)("status").default(true),
 });
 const drizzle_orm_2 = require("drizzle-orm");
 exports.variationRelations = (0, drizzle_orm_2.relations)(exports.foodVariations, ({ one, many }) => ({

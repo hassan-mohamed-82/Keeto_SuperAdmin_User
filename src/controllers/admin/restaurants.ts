@@ -50,7 +50,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
         name, nameAr, nameFr, address, addressAr, addressFr,
         cuisineId, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime,
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
-        tags, taxNumber, taxExpireDate, taxCertificate, email, password, status
+        tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
+        lat,lng
     } = req.body;
 
     if (!name || !nameAr || !nameFr || !address || !addressAr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
@@ -115,7 +116,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
             logo: logoUrl || '',
             cover: coverUrl || '',
-
+            lat:lat || '',
+            lng:lng || '',
             minDeliveryTime: minDeliveryTime ? clean(minDeliveryTime) : null,
             maxDeliveryTime: maxDeliveryTime ? clean(maxDeliveryTime) : null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",
@@ -182,6 +184,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         addressAr: restaurants.addressAr,
         addressFr: restaurants.addressFr,
         logo: restaurants.logo,
+        lat: restaurants.lat,
+        lng: restaurants.lng,
         cover: restaurants.cover,
         status: restaurants.status,
         cuisineIds: restaurants.cuisineId,
@@ -226,7 +230,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             cover: r.cover,
             status: r.status,
             email: r.email || null, // إرجاع الإيميل في الـ Response
-
+            lat: r.lat,
+            lng: r.lng,
             cuisines: parsedCuisines.map((id: string) => cuisineMap.get(id)).filter(Boolean),
 
             zone: r.zone_id
@@ -310,7 +315,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         minDeliveryTime, maxDeliveryTime, deliveryTimeUnit,
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
-        email, password, confirmPassword, status
+        email, password, confirmPassword, status,
     } = req.body;
 
     // 1. التأكد من وجود المطعم

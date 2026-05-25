@@ -9,6 +9,7 @@ const BadRequest_1 = require("../../Errors/BadRequest");
 const NotFound_1 = require("../../Errors/NotFound");
 const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
+const notifications_1 = require("../../utils/notifications");
 // ==========================================
 // 1. إنشاء الطلب (Checkout)
 // ==========================================
@@ -207,6 +208,20 @@ const checkout = async (req, res) => {
             reference: orderNumber,
             note: paymentMethod === "cash_on_delivery" ? "Commission deducted from cash order" : "Earnings added from digital payment"
         });
+    });
+    // ==========================================
+    // 11. Send Notification to Restaurant
+    // ==========================================
+    await (0, notifications_1.sendPushNotification)({
+        recipientType: "restaurant",
+        recipientId: restaurantId,
+        title: "New Order Received! 🛒",
+        body: `You have received a new order #${orderNumber} for ${totalAmount}.`,
+        data: {
+            orderId,
+            orderNumber,
+            type: "new_order"
+        }
     });
     return (0, response_1.SuccessResponse)(res, {
         message: "Order created successfully",

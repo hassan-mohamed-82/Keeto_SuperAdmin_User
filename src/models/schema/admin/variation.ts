@@ -29,15 +29,20 @@ export const foodVariations = mysqlTable("food_variations", {
 });
 
 // 2. جدول يمثل الخيارات داخل كل Variation (مثل: صغير، وسط، كبير)
+// 2. جدول يمثل الخيارات داخل كل Variation (مثل: صغير، وسط، كبير)
 export const variationOptions = mysqlTable("variation_options", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     variationId: char("variation_id", { length: 36 }).references(() => foodVariations.id, { onDelete: "cascade" }).notNull(),
     
-    optionName: varchar("option_name", { length: 255 }).notNull(), // Option name
+    optionName: varchar("option_name", { length: 255 }).notNull(),
     optionNameAr: varchar("option_name_ar", { length: 255 }).notNull().default(''),
     optionNameFr: varchar("option_name_fr", { length: 255 }).notNull().default(''),
-    additionalPrice: varchar("additional_price", { length: 255 }).notNull().default("0"), // Additional price
-    status: boolean("status").default(true), // حالة الاوبشن (متاح / غير متاح)
+    additionalPrice: varchar("additional_price", { length: 255 }).notNull().default("0"), 
+    
+    // 👇 الحقل الجديد للتحكم في الاختيار الافتراضي
+    isDefault: boolean("is_default").default(false),
+    
+    status: boolean("status").default(true),
 });
 
 import { relations } from "drizzle-orm";

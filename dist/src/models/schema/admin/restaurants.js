@@ -25,6 +25,8 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     ownerLastName: (0, mysql_core_1.varchar)("owner_last_name", { length: 255 }).notNull(),
     ownerPhone: (0, mysql_core_1.varchar)("owner_phone", { length: 50 }).notNull(),
     tags: (0, mysql_core_1.json)("tags").$type().default([]),
+    lat: (0, mysql_core_1.varchar)("lat", { length: 255 }),
+    lng: (0, mysql_core_1.varchar)("lng", { length: 255 }),
     taxNumber: (0, mysql_core_1.varchar)("tax_number", { length: 255 }),
     taxExpireDate: (0, mysql_core_1.date)("tax_expire_date"),
     taxCertificate: (0, mysql_core_1.varchar)("tax_certificate", { length: 255 }),

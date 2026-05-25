@@ -19,4 +19,5 @@ router.delete("/:id", (0, middlewares_1.hasPermission)("Food", "Delete"), (0, ca
 // Toggle Endpoints
 router.put("/variation/:id/status", (0, middlewares_1.hasPermission)("Food", "Edit"), (0, catchAsync_1.catchAsync)(food_1.toggleVariationStatus));
 router.put("/option/:id/status", (0, middlewares_1.hasPermission)("Food", "Edit"), (0, catchAsync_1.catchAsync)(food_1.toggleOptionStatus));
+router.put("/:id/default", (0, middlewares_1.hasPermission)("Food", "Edit"), (0, catchAsync_1.catchAsync)(food_1.toggleOptionDefault));
 exports.default = router;

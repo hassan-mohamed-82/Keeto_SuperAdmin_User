@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.toggleOptionStatus = exports.toggleVariationStatus = exports.getFoodSelectData = exports.getFoodsByRestaurantId = exports.deleteFood = exports.updateFood = exports.getFoodById = exports.getAllFoods = exports.createFood = void 0;
+exports.toggleOptionDefault = exports.toggleOptionStatus = exports.toggleVariationStatus = exports.getFoodSelectData = exports.getFoodsByRestaurantId = exports.deleteFood = exports.updateFood = exports.getFoodById = exports.getAllFoods = exports.createFood = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -114,8 +114,7 @@ const createFood = async (req, res) => {
                 max: variation.max || null,
                 status: variation.status !== undefined ? variation.status : true,
             });
-            if (variation.options &&
-                Array.isArray(variation.options)) {
+            if (variation.options && Array.isArray(variation.options)) {
                 for (const option of variation.options) {
                     await connection_1.db.insert(schema_1.variationOptions).values({
                         variationId,
@@ -124,6 +123,8 @@ const createFood = async (req, res) => {
                         optionNameFr: option.optionNameFr,
                         additionalPrice: option.additionalPrice?.toString() || "0",
                         status: option.status !== undefined ? option.status : true,
+                        // 👇 التعديل هنا: استقبال isDefault
+                        isDefault: option.isDefault !== undefined ? option.isDefault : false,
                     });
                 }
             }
@@ -131,9 +132,7 @@ const createFood = async (req, res) => {
     }
     return (0, response_1.SuccessResponse)(res, {
         message: "Create food success",
-        data: {
-            id: foodId
-        }
+        data: { id: foodId }
     }, 201);
 };
 exports.createFood = createFood;
@@ -142,7 +141,6 @@ exports.createFood = createFood;
 // =============================================
 const getAllFoods = async (req, res) => {
     const rawFoods = await connection_1.db.select({
-        // ✅ Food fields
         id: schema_1.food.id,
         name: schema_1.food.name,
         nameAr: schema_1.food.nameAr,
@@ -170,16 +168,13 @@ const getAllFoods = async (req, res) => {
         status: schema_1.food.status,
         createdAt: schema_1.food.createdAt,
         updatedAt: schema_1.food.updatedAt,
-        // ✅ Restaurant (alias مهم)
         restaurant_id: schema_1.restaurants.id,
         restaurant_name: schema_1.restaurants.name,
         restaurant_nameAr: schema_1.restaurants.nameAr,
         restaurant_nameFr: schema_1.restaurants.nameFr,
-        // ✅ Category
         category_name: schema_1.categories.name,
         category_nameAr: schema_1.categories.nameAr,
         category_nameFr: schema_1.categories.nameFr,
-        // ✅ Subcategory
         subcategory_name: schema_1.subcategories.name,
         subcategory_nameAr: schema_1.subcategories.nameAr,
         subcategory_nameFr: schema_1.subcategories.nameFr,
@@ -191,7 +186,6 @@ const getAllFoods = async (req, res) => {
     if (rawFoods.length === 0) {
         return (0, response_1.SuccessResponse)(res, { message: "Get all foods success", data: [] });
     }
-    // ✅ إعادة بناء الشكل
     const allFoods = rawFoods.map(f => ({
         id: f.id,
         name: f.name,
@@ -299,20 +293,15 @@ exports.getFoodById = getFoodById;
 const updateFood = async (req, res) => {
     const { id } = req.params;
     const data = req.body;
-    // سحب بيانات المستخدم من الـ التوكن (التي وضعها الـ middleware)
     const userId = req.user?.id;
     const userType = req.user?.type;
     if (!userId) {
         throw new BadRequest_1.BadRequest("User ID missing or unauthorized");
     }
-    // ✅ تحديد الصلاحيات: 
-    // لو سوبر آدمن، هيبحث بـ ID الأكلة بس عشان من حقه يعدل أي أكلة
-    // لو صاحب مطعم، لازم ID الأكلة و ID المطعم يتطابقوا (Data Ownership)
     const isSuperAdmin = userType === "super_admin";
     const queryCondition = isSuperAdmin
         ? (0, drizzle_orm_1.eq)(schema_1.food.id, id)
         : (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.id, id), (0, drizzle_orm_1.eq)(schema_1.food.restaurantid, userId));
-    // ✅ تأكد إن الأكلة موجودة وتخص نفس الريستورانت (في حالة الفيندور)
     const existingFood = await connection_1.db
         .select()
         .from(schema_1.food)
@@ -321,7 +310,6 @@ const updateFood = async (req, res) => {
     if (!existingFood[0]) {
         throw new NotFound_1.NotFound("Food not found or you don't have permission to edit it");
     }
-    // ✅ الحقول المسموح بتحديثها فقط
     const allowedFields = [
         "name",
         "nameAr",
@@ -330,8 +318,9 @@ const updateFood = async (req, res) => {
         "descriptionAr",
         "descriptionFr",
         "price",
-        "categoryId",
-        "isAvailable",
+        "categoryid", // Fixed spelling based on previous messages
+        "subcategoryid", // Fixed spelling
+        "status",
         "image"
     ];
     const updateData = {
@@ -339,8 +328,7 @@ const updateFood = async (req, res) => {
     };
     for (const key of allowedFields) {
         if (data[key] !== undefined) {
-            // 🖼️ معالجة الصورة
-            if (key === "image") {
+            if (key === "image" && data[key] && typeof data[key] === "string" && data[key].startsWith("data:image")) {
                 updateData[key] = await (0, handleImages_1.handleImageUpdate)(req, existingFood[0].image, data[key], "foods");
             }
             else {
@@ -348,10 +336,18 @@ const updateFood = async (req, res) => {
             }
         }
     }
-    // ✅ تنفيذ التحديث (استخدمنا نفس الـ queryCondition هنا عشان السوبر آدمن يقدر يحدث بنجاح)
-    await connection_1.db.update(schema_1.food)
-        .set(updateData)
-        .where(queryCondition);
+    // categories processing logic (from previous optimization)
+    const incomingCategoryId = data.categoryid ?? data.categoryId;
+    if (incomingCategoryId !== undefined) {
+        updateData.categoryid = incomingCategoryId === "" ? null : incomingCategoryId;
+    }
+    const incomingSubcategoryId = data.subcategoryid ?? data.subcategoryId;
+    if (incomingSubcategoryId !== undefined) {
+        updateData.subcategoryid = incomingSubcategoryId === "" ? null : incomingSubcategoryId;
+    }
+    if (Object.keys(updateData).length > 1) {
+        await connection_1.db.update(schema_1.food).set(updateData).where(queryCondition);
+    }
     // ===========================
     // ✅ Variations Update
     // ===========================
@@ -392,16 +388,15 @@ const updateFood = async (req, res) => {
                         optionName: option.optionName,
                         optionNameAr: option.optionNameAr,
                         optionNameFr: option.optionNameFr,
-                        additionalPrice: option.additionalPrice
-                            ? option.additionalPrice.toString()
-                            : "0",
+                        additionalPrice: option.additionalPrice ? option.additionalPrice.toString() : "0",
                         status: option.status !== undefined ? option.status : true,
+                        // 👇 التعديل هنا: استقبال isDefault
+                        isDefault: option.isDefault !== undefined ? option.isDefault : false,
                     });
                 }
             }
         }
     }
-    // 🔄 جلب البيانات الجديدة بعد التحديث لإرسالها للفرونت إند
     const updatedFood = await connection_1.db
         .select()
         .from(schema_1.food)
@@ -547,3 +542,31 @@ const toggleOptionStatus = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Option status updated successfully" });
 };
 exports.toggleOptionStatus = toggleOptionStatus;
+// =============================================
+// 🌟 NEW: TOGGLE Option Default (Smart Toggle)
+// =============================================
+const toggleOptionDefault = async (req, res) => {
+    const { id } = req.params; // ده الأي دي بتاع الـ option اللي دست على السويتش بتاعه
+    const { isDefault } = req.body;
+    if (typeof isDefault !== "boolean") {
+        throw new BadRequest_1.BadRequest("isDefault must be a boolean");
+    }
+    // 1. نجيب الأوبشن عشان نعرف هو تبع أي فارييشن
+    const existing = await connection_1.db.select().from(schema_1.variationOptions).where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, id)).limit(1);
+    if (!existing[0])
+        throw new NotFound_1.NotFound("Option not found");
+    const variationId = existing[0].variationId;
+    // 2. لو إنت بتخلي الأوبشن ده (true)، يبقى منطقياً لازم نخلي باقي الأوبشنز لنفس الفارييشن (false)
+    // عشان ميحصلش تضارب ويبقى فيه أكتر من سعر افتراضي لنفس الفارييشن في نفس الوقت
+    if (isDefault === true) {
+        await connection_1.db.update(schema_1.variationOptions)
+            .set({ isDefault: false })
+            .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, variationId));
+    }
+    // 3. نحدث الأوبشن نفسه بالحالة الجديدة
+    await connection_1.db.update(schema_1.variationOptions)
+        .set({ isDefault })
+        .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, id));
+    return (0, response_1.SuccessResponse)(res, { message: "Option default status updated successfully" });
+};
+exports.toggleOptionDefault = toggleOptionDefault;
