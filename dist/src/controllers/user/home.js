@@ -234,13 +234,13 @@ const getRestaurantDetails = async (req, res) => {
                         name: row.categoryName,
                         nameAr: row.categoryNameAr,
                         nameFr: row.categoryNameFr,
-                    } : null,
+                    } : [],
                     subcategory: row.subcategoryId ? {
                         id: row.subcategoryId,
                         name: row.subcategoryName,
                         nameAr: row.subcategoryNameAr,
                         nameFr: row.subcategoryNameFr,
-                    } : null,
+                    } : [],
                     // 👇 الـ Addon المرتبط بالأكلة
                     addon: row.addonId ? {
                         id: row.addonId,
@@ -258,8 +258,8 @@ const getRestaurantDetails = async (req, res) => {
                             name: row.addonCategoryName,
                             nameAr: row.addonCategoryNameAr,
                             nameFr: row.addonCategoryNameFr,
-                        } : null
-                    } : null
+                        } : []
+                    } : []
                 };
             }
             // 3. تجميع الـ Variations داخل الأكل
