@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions } from "../../models/schema";
+import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory } from "../../models/schema";
 import { eq, and, like, or, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
@@ -287,10 +287,72 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         };
     });
 
+    // ==========================================
+    // جلب الـ Addons مع الـ Categories
+    // ==========================================
+    const rawAddons = await db.select({
+        addonId: addons.id,
+        addonName: addons.name,
+        addonNameAr: addons.nameAr,
+        addonNameFr: addons.nameFr,
+        addonPrice: addons.price,
+        addonStockType: addons.stock_type,
+        
+        categoryId: adonescategory.id,
+        categoryName: adonescategory.name,
+        categoryNameAr: adonescategory.nameAr,
+        categoryNameFr: adonescategory.nameFr,
+    })
+    .from(addons)
+    .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
+    .where(and(
+        eq(addons.restaurantid, restaurantId),
+        eq(addons.status, "active")
+    ));
+
+    // تجميع الـ Addons حسب الـ Category
+    const groupedAddonsObj = rawAddons.reduce((acc: any, row) => {
+        const catId = row.categoryId || "uncategorized";
+        
+        if (!acc[catId]) {
+            acc[catId] = {
+                id: catId === "uncategorized" ? null : catId,
+                name: row.categoryName || "Other",
+                nameAr: row.categoryNameAr || "أخرى",
+                nameFr: row.categoryNameFr || "Autre",
+                addons: []
+            };
+        }
+
+        if (row.addonId) {
+            acc[catId].addons.push({
+                id: row.addonId,
+                name: row.addonName,
+                nameAr: row.addonNameAr,
+                nameFr: row.addonNameFr,
+                price: row.addonPrice,
+                stockType: row.addonStockType
+            });
+        }
+
+        return acc;
+    }, {});
+
+    const finalAddons = Object.values(groupedAddonsObj).map((category: any) => {
+        return {
+            id: category.id,
+            name: category.name,
+            nameAr: category.nameAr,
+            nameFr: category.nameFr,
+            addons: category.addons
+        };
+    });
+
     return SuccessResponse(res, {
         data: {
             restaurant: restaurantWithFav,
-            menu: finalMenu
+            menu: finalMenu,
+            addons: finalAddons
         }
     });
 };

@@ -250,10 +250,62 @@ const getRestaurantDetails = async (req, res) => {
             })
         };
     });
+    // ==========================================
+    // جلب الـ Addons مع الـ Categories
+    // ==========================================
+    const rawAddons = await connection_1.db.select({
+        addonId: schema_1.addons.id,
+        addonName: schema_1.addons.name,
+        addonNameAr: schema_1.addons.nameAr,
+        addonNameFr: schema_1.addons.nameFr,
+        addonPrice: schema_1.addons.price,
+        addonStockType: schema_1.addons.stock_type,
+        categoryId: schema_1.adonescategory.id,
+        categoryName: schema_1.adonescategory.name,
+        categoryNameAr: schema_1.adonescategory.nameAr,
+        categoryNameFr: schema_1.adonescategory.nameFr,
+    })
+        .from(schema_1.addons)
+        .leftJoin(schema_1.adonescategory, (0, drizzle_orm_1.eq)(schema_1.addons.adonescategoryid, schema_1.adonescategory.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.addons.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.addons.status, "active")));
+    // تجميع الـ Addons حسب الـ Category
+    const groupedAddonsObj = rawAddons.reduce((acc, row) => {
+        const catId = row.categoryId || "uncategorized";
+        if (!acc[catId]) {
+            acc[catId] = {
+                id: catId === "uncategorized" ? null : catId,
+                name: row.categoryName || "Other",
+                nameAr: row.categoryNameAr || "أخرى",
+                nameFr: row.categoryNameFr || "Autre",
+                addons: []
+            };
+        }
+        if (row.addonId) {
+            acc[catId].addons.push({
+                id: row.addonId,
+                name: row.addonName,
+                nameAr: row.addonNameAr,
+                nameFr: row.addonNameFr,
+                price: row.addonPrice,
+                stockType: row.addonStockType
+            });
+        }
+        return acc;
+    }, {});
+    const finalAddons = Object.values(groupedAddonsObj).map((category) => {
+        return {
+            id: category.id,
+            name: category.name,
+            nameAr: category.nameAr,
+            nameFr: category.nameFr,
+            addons: category.addons
+        };
+    });
     return (0, response_1.SuccessResponse)(res, {
         data: {
             restaurant: restaurantWithFav,
-            menu: finalMenu
+            menu: finalMenu,
+            addons: finalAddons
         }
     });
 };
