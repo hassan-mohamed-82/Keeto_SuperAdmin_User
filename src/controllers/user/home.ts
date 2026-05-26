@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory } from "../../models/schema";
+import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory, subcategories } from "../../models/schema";
 import { eq, and, like, or, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
@@ -184,6 +184,12 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         categoryName: categories.name,
         categoryNameAr: categories.nameAr,
         categoryNameFr: categories.nameFr,
+
+        // 👇 بيانات الـ Subcategory
+        subcategoryId: subcategories.id,
+        subcategoryName: subcategories.name,
+        subcategoryNameAr: subcategories.nameAr,
+        subcategoryNameFr: subcategories.nameFr,
         
         variationId: foodVariations.id,
         variationName: foodVariations.name,
@@ -217,6 +223,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
     })
     .from(food)
     .leftJoin(categories, eq(food.categoryid, categories.id))
+    .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
     .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))
     .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
     .leftJoin(addons, eq(food.addonsId, addons.id))
@@ -256,6 +263,18 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                     image: row.image,
                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
                     variations: {},
+                    category: row.categoryId ? {
+                        id: row.categoryId,
+                        name: row.categoryName,
+                        nameAr: row.categoryNameAr,
+                        nameFr: row.categoryNameFr,
+                    } : [],
+                    subcategory: row.subcategoryId ? {
+                        id: row.subcategoryId,
+                        name: row.subcategoryName,
+                        nameAr: row.subcategoryNameAr,
+                        nameFr: row.subcategoryNameFr,
+                    } : [],
                     // 👇 الـ Addon المرتبط بالأكلة
                     addon: row.addonId ? {
                         id: row.addonId,
@@ -273,8 +292,8 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                             name: row.addonCategoryName,
                             nameAr: row.addonCategoryNameAr,
                             nameFr: row.addonCategoryNameFr,
-                        } : null
-                    } : null
+                        } : []
+                    } : []
                 };
             }
 
@@ -324,10 +343,72 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         };
     });
 
+    // ==========================================
+    // جلب الـ Addons مع الـ Categories
+    // ==========================================
+    const rawAddons = await db.select({
+        addonId: addons.id,
+        addonName: addons.name,
+        addonNameAr: addons.nameAr,
+        addonNameFr: addons.nameFr,
+        addonPrice: addons.price,
+        addonStockType: addons.stock_type,
+        
+        categoryId: adonescategory.id,
+        categoryName: adonescategory.name,
+        categoryNameAr: adonescategory.nameAr,
+        categoryNameFr: adonescategory.nameFr,
+    })
+    .from(addons)
+    .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
+    .where(and(
+        eq(addons.restaurantid, restaurantId),
+        eq(addons.status, "active")
+    ));
+
+    // تجميع الـ Addons حسب الـ Category
+    const groupedAddonsObj = rawAddons.reduce((acc: any, row) => {
+        const catId = row.categoryId || "uncategorized";
+        
+        if (!acc[catId]) {
+            acc[catId] = {
+                id: catId === "uncategorized" ? null : catId,
+                name: row.categoryName || "Other",
+                nameAr: row.categoryNameAr || "أخرى",
+                nameFr: row.categoryNameFr || "Autre",
+                addons: []
+            };
+        }
+
+        if (row.addonId) {
+            acc[catId].addons.push({
+                id: row.addonId,
+                name: row.addonName,
+                nameAr: row.addonNameAr,
+                nameFr: row.addonNameFr,
+                price: row.addonPrice,
+                stockType: row.addonStockType
+            });
+        }
+
+        return acc;
+    }, {});
+
+    const finalAddons = Object.values(groupedAddonsObj).map((category: any) => {
+        return {
+            id: category.id,
+            name: category.name,
+            nameAr: category.nameAr,
+            nameFr: category.nameFr,
+            addons: category.addons
+        };
+    });
+
     return SuccessResponse(res, {
         data: {
             restaurant: restaurantWithFav,
-            menu: finalMenu
+            menu: finalMenu,
+            addons: finalAddons
         }
     });
 };
