@@ -171,12 +171,25 @@ const getRestaurantDetails = async (req, res) => {
         optionName: schema_1.variationOptions.optionName,
         optionNameAr: schema_1.variationOptions.optionNameAr,
         optionNameFr: schema_1.variationOptions.optionNameFr,
-        additionalPrice: schema_1.variationOptions.additionalPrice
+        additionalPrice: schema_1.variationOptions.additionalPrice,
+        // 👇 بيانات الـ Addon المرتبط بالأكلة
+        addonId: schema_1.addons.id,
+        addonName: schema_1.addons.name,
+        addonNameAr: schema_1.addons.nameAr,
+        addonNameFr: schema_1.addons.nameFr,
+        addonPrice: schema_1.addons.price,
+        addonStockType: schema_1.addons.stock_type,
+        addonCategoryId: schema_1.adonescategory.id,
+        addonCategoryName: schema_1.adonescategory.name,
+        addonCategoryNameAr: schema_1.adonescategory.nameAr,
+        addonCategoryNameFr: schema_1.adonescategory.nameFr,
     })
         .from(schema_1.food)
         .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.food.categoryid, schema_1.categories.id))
         .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.food.id, schema_1.foodVariations.foodId))
         .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId))
+        .leftJoin(schema_1.addons, (0, drizzle_orm_1.eq)(schema_1.food.addonsId, schema_1.addons.id))
+        .leftJoin(schema_1.adonescategory, (0, drizzle_orm_1.eq)(schema_1.addons.adonescategoryid, schema_1.adonescategory.id))
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active")));
     // 👇 تجميع الداتا بناءً على الـ Category ID بدلاً من الاسم
     const groupedMenuObj = rawMenu.reduce((acc, row) => {
@@ -205,7 +218,22 @@ const getRestaurantDetails = async (req, res) => {
                     price: row.price,
                     image: row.image,
                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
-                    variations: {}
+                    variations: {},
+                    // 👇 الـ Addon المرتبط بالأكلة
+                    addon: row.addonId ? {
+                        id: row.addonId,
+                        name: row.addonName,
+                        nameAr: row.addonNameAr,
+                        nameFr: row.addonNameFr,
+                        price: row.addonPrice,
+                        stockType: row.addonStockType,
+                        category: row.addonCategoryId ? {
+                            id: row.addonCategoryId,
+                            name: row.addonCategoryName,
+                            nameAr: row.addonCategoryNameAr,
+                            nameFr: row.addonCategoryNameFr,
+                        } : null
+                    } : null
                 };
             }
             // 3. تجميع الـ Variations داخل الأكل
@@ -250,62 +278,10 @@ const getRestaurantDetails = async (req, res) => {
             })
         };
     });
-    // ==========================================
-    // جلب الـ Addons مع الـ Categories
-    // ==========================================
-    const rawAddons = await connection_1.db.select({
-        addonId: schema_1.addons.id,
-        addonName: schema_1.addons.name,
-        addonNameAr: schema_1.addons.nameAr,
-        addonNameFr: schema_1.addons.nameFr,
-        addonPrice: schema_1.addons.price,
-        addonStockType: schema_1.addons.stock_type,
-        categoryId: schema_1.adonescategory.id,
-        categoryName: schema_1.adonescategory.name,
-        categoryNameAr: schema_1.adonescategory.nameAr,
-        categoryNameFr: schema_1.adonescategory.nameFr,
-    })
-        .from(schema_1.addons)
-        .leftJoin(schema_1.adonescategory, (0, drizzle_orm_1.eq)(schema_1.addons.adonescategoryid, schema_1.adonescategory.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.addons.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.addons.status, "active")));
-    // تجميع الـ Addons حسب الـ Category
-    const groupedAddonsObj = rawAddons.reduce((acc, row) => {
-        const catId = row.categoryId || "uncategorized";
-        if (!acc[catId]) {
-            acc[catId] = {
-                id: catId === "uncategorized" ? null : catId,
-                name: row.categoryName || "Other",
-                nameAr: row.categoryNameAr || "أخرى",
-                nameFr: row.categoryNameFr || "Autre",
-                addons: []
-            };
-        }
-        if (row.addonId) {
-            acc[catId].addons.push({
-                id: row.addonId,
-                name: row.addonName,
-                nameAr: row.addonNameAr,
-                nameFr: row.addonNameFr,
-                price: row.addonPrice,
-                stockType: row.addonStockType
-            });
-        }
-        return acc;
-    }, {});
-    const finalAddons = Object.values(groupedAddonsObj).map((category) => {
-        return {
-            id: category.id,
-            name: category.name,
-            nameAr: category.nameAr,
-            nameFr: category.nameFr,
-            addons: category.addons
-        };
-    });
     return (0, response_1.SuccessResponse)(res, {
         data: {
             restaurant: restaurantWithFav,
-            menu: finalMenu,
-            addons: finalAddons
+            menu: finalMenu
         }
     });
 };
