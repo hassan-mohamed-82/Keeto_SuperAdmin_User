@@ -227,7 +227,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
     .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
     .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))
     .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
-    .leftJoin(addons, eq(food.addonsId, addons.id))
+    .leftJoin(addons, sql`JSON_CONTAINS(${food.addonsId}, JSON_QUOTE(${addons.id}))`)
     .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
     .where(and(
         eq(food.restaurantid, restaurantId),

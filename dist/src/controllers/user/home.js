@@ -199,7 +199,7 @@ const getRestaurantDetails = async (req, res) => {
         .leftJoin(schema_1.subcategories, (0, drizzle_orm_1.eq)(schema_1.food.subcategoryid, schema_1.subcategories.id))
         .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.food.id, schema_1.foodVariations.foodId))
         .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId))
-        .leftJoin(schema_1.addons, (0, drizzle_orm_1.eq)(schema_1.food.addonsId, schema_1.addons.id))
+        .leftJoin(schema_1.addons, (0, drizzle_orm_1.sql) `JSON_CONTAINS(${schema_1.food.addonsId}, JSON_QUOTE(${schema_1.addons.id}))`)
         .leftJoin(schema_1.adonescategory, (0, drizzle_orm_1.eq)(schema_1.addons.adonescategoryid, schema_1.adonescategory.id))
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active")));
     // 👇 تجميع الداتا بناءً على الـ Category ID بدلاً من الاسم
