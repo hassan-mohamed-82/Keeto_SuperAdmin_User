@@ -190,6 +190,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         subcategoryName: subcategories.name,
         subcategoryNameAr: subcategories.nameAr,
         subcategoryNameFr: subcategories.nameFr,
+        order_level: subcategories.order_Level,
         
         variationId: foodVariations.id,
         variationName: foodVariations.name,
@@ -274,6 +275,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                         name: row.subcategoryName,
                         nameAr: row.subcategoryNameAr,
                         nameFr: row.subcategoryNameFr,
+                        order_level:row.order_level,
                     } : [],
                     // 👇 الـ Addon المرتبط بالأكلة
                     addon: row.addonId ? {
