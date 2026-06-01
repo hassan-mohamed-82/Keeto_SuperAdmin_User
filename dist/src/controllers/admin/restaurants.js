@@ -43,6 +43,27 @@ const decrementCuisineCount = async (cuisineId) => {
             .where((0, drizzle_orm_1.eq)(schema_1.cuisines.id, cuisineId));
     }
 };
+// Helper: Safely parse arrays that might come as JSON strings, comma-separated strings, or single values
+const safeParseArray = (input) => {
+    if (!input)
+        return [];
+    if (Array.isArray(input))
+        return input;
+    if (typeof input === "string") {
+        try {
+            const parsed = JSON.parse(input);
+            if (Array.isArray(parsed))
+                return parsed;
+            // If parsed is a primitive, return the original string or the primitive in array
+            return [input];
+        }
+        catch (e) {
+            // It might be a comma-separated string or a single plain string (like a UUID)
+            return input.split(',').map(i => i.trim()).filter(Boolean);
+        }
+    }
+    return [String(input)];
+};
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
     const { name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng } = req.body;
@@ -75,14 +96,8 @@ const createRestaurant = async (req, res) => {
     const restaurantId = (0, uuid_1.v4)(); // الـ ID الموحد للمطعم
     const ownerUserId = (0, uuid_1.v4)(); // الـ ID الخاص بحساب المالك نفسه
     // تجهيز الـ Tags والـ Cuisines
-    let parsedTags = [];
-    if (tags) {
-        parsedTags = typeof tags === "string" ? JSON.parse(tags) : tags;
-    }
-    let parsedCuisines = [];
-    if (cuisineId) {
-        parsedCuisines = typeof cuisineId === "string" ? JSON.parse(cuisineId) : cuisineId;
-    }
+    const parsedTags = safeParseArray(tags);
+    const parsedCuisines = safeParseArray(cuisineId);
     // 🛡️ بدء الـ Transaction لحفظ البيانات في الجداول الثلاثة معاً
     await connection_1.db.transaction(async (tx) => {
         // 1. حفظ بيانات البزنس والمطعم في جدول الـ restaurants (بدون الإيميل والباسورد)
@@ -286,7 +301,7 @@ const updateRestaurant = async (req, res) => {
     // التحقق من المطابخ (Cuisines) إذا تم إرسالها
     let parsedCuisines = undefined;
     if (cuisineId !== undefined) {
-        parsedCuisines = typeof cuisineId === "string" ? JSON.parse(cuisineId) : cuisineId;
+        parsedCuisines = safeParseArray(cuisineId);
         if (parsedCuisines && parsedCuisines.length > 0) {
             const existingCuisines = await connection_1.db
                 .select()
@@ -362,7 +377,7 @@ const updateRestaurant = async (req, res) => {
     if (ownerPhone)
         restaurantUpdateData.ownerPhone = ownerPhone;
     if (tags !== undefined)
-        restaurantUpdateData.tags = tags;
+        restaurantUpdateData.tags = safeParseArray(tags);
     if (taxNumber !== undefined)
         restaurantUpdateData.taxNumber = taxNumber;
     if (taxExpireDate !== undefined)

@@ -43,6 +43,24 @@ const decrementCuisineCount = async (cuisineId: string) => {
     }
 };
 
+// Helper: Safely parse arrays that might come as JSON strings, comma-separated strings, or single values
+const safeParseArray = (input: any): string[] => {
+    if (!input) return [];
+    if (Array.isArray(input)) return input;
+    if (typeof input === "string") {
+        try {
+            const parsed = JSON.parse(input);
+            if (Array.isArray(parsed)) return parsed;
+            // If parsed is a primitive, return the original string or the primitive in array
+            return [input];
+        } catch (e) {
+            // It might be a comma-separated string or a single plain string (like a UUID)
+            return input.split(',').map(i => i.trim()).filter(Boolean);
+        }
+    }
+    return [String(input)];
+};
+
 export const createRestaurant = async (req: Request, res: Response) => {
     const clean = (v: any) => (typeof v === "string" ? v.trim() : v);
 
@@ -89,15 +107,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
     const ownerUserId = uuidv4();  // الـ ID الخاص بحساب المالك نفسه
 
     // تجهيز الـ Tags والـ Cuisines
-    let parsedTags: string[] = [];
-    if (tags) {
-        parsedTags = typeof tags === "string" ? JSON.parse(tags) : tags;
-    }
-
-    let parsedCuisines: string[] = [];
-    if (cuisineId) {
-        parsedCuisines = typeof cuisineId === "string" ? JSON.parse(cuisineId) : cuisineId;
-    }
+    const parsedTags: string[] = safeParseArray(tags);
+    const parsedCuisines: string[] = safeParseArray(cuisineId);
 
     // 🛡️ بدء الـ Transaction لحفظ البيانات في الجداول الثلاثة معاً
     await db.transaction(async (tx) => {
@@ -350,7 +361,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     // التحقق من المطابخ (Cuisines) إذا تم إرسالها
     let parsedCuisines: string[] | undefined = undefined;
     if (cuisineId !== undefined) {
-        parsedCuisines = typeof cuisineId === "string" ? JSON.parse(cuisineId) : cuisineId;
+        parsedCuisines = safeParseArray(cuisineId);
         
         if (parsedCuisines && parsedCuisines.length > 0) {
             const existingCuisines = await db
@@ -419,7 +430,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (ownerLastName) restaurantUpdateData.ownerLastName = ownerLastName;
     if (ownerPhone) restaurantUpdateData.ownerPhone = ownerPhone;
     
-    if (tags !== undefined) restaurantUpdateData.tags = tags;
+    if (tags !== undefined) restaurantUpdateData.tags = safeParseArray(tags);
     if (taxNumber !== undefined) restaurantUpdateData.taxNumber = taxNumber;
     if (taxExpireDate !== undefined) restaurantUpdateData.taxExpireDate = taxExpireDate;
     if (taxCertificate !== undefined) restaurantUpdateData.taxCertificate = taxCertificate;
