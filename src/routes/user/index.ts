@@ -13,6 +13,7 @@ import { authorizeRoles } from "../../middlewares/authorized";
 import favlistRouter from "./favlist";
 import restaurantFeaturesRouter from "./restaurantFeatures";
 import ratingRouter from "./rating";
+import SocialMediaRouter from "./SocialMedia";
 
 const router = Router();
 router.use("/home", homeRouter);
@@ -27,4 +28,5 @@ router.use("/favlist", favlistRouter);
 router.use("/rating", ratingRouter);
 router.use("/notifications", notificationRouter);
 router.use("/wallet", user_walletsRouter);
+router.use("/socialmedia", SocialMediaRouter);
 export default router;
