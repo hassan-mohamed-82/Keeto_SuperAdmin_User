@@ -1,11 +1,12 @@
 // controllers/admin/FinancialReportController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { orders, restaurants, restaurantBusinessPlans } from "../../models/schema";
+import { orders, restaurants, restaurantBusinessPlans, invoices } from "../../models/schema";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { UnauthorizedError } from "../../Errors";
+import { BadRequest, UnauthorizedError } from "../../Errors";
 import PDFDocument from "pdfkit";
+import { v4 as uuidv4 } from "uuid";
 // 1. تعريف الأنواع المسموحة للـ Enums
 type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" | "rejected" | "refund";
 type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
@@ -920,3 +921,87 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
     
     doc.end();
 };
+
+export const generateAndSaveInvoice = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+
+    const { restaurantId, startDate, endDate } = req.body; // هنا بناخد التواريخ من الـ body
+    if (!restaurantId || !startDate || !endDate) throw new BadRequest("Restaurant ID, Start Date, and End Date are required");
+
+    // 1. الفلترة والتأكد إن مفيش فواتير متداخلة (اختياري بس يفضل)
+    
+    const conditions = [
+        eq(orders.restaurantId, restaurantId),
+        eq(orders.status, "delivered")
+    ];
+
+    conditions.push(gte(orders.createdAt, new Date(startDate)));
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    conditions.push(lte(orders.createdAt, end));
+
+    // 2. جلب الأوردرات وحساب الفلوس (نفس اللوجيك بالظبط بتاع التقرير المالي)
+    const deliveredOrders = await db.select().from(orders).where(and(...conditions));
+    
+    let totalCash = 0, totalDigital = 0, totalSales = 0, totalComm = 0, totalSvc = 0;
+    
+    for (const order of deliveredOrders) {
+        const amount = parseFloat(order.totalAmount as string || "0");
+        const comm = parseFloat(order.appCommission as string || "0");
+        const svcFee = parseFloat(order.serviceFee as string || "0");
+
+        totalSales += amount;
+        totalComm += comm;
+        totalSvc += svcFee;
+
+        if (order.paymentMethod === "cash_on_delivery") totalCash += amount;
+        else totalDigital += amount;
+    }
+
+    // جلب نسبة العمولة
+    const businessPlans = await db.select().from(restaurantBusinessPlans).where(eq(restaurantBusinessPlans.restaurantId, restaurantId));
+    let activeCommissionRate = 0;
+    if (businessPlans.length > 0) {
+        const onlinePlan = businessPlans.find(p => p.platformType === "online_order") || businessPlans[0];
+        activeCommissionRate = parseFloat(onlinePlan.commissionRate || "0");
+    }
+
+    const restaurantOwes = (totalCash * activeCommissionRate) / 100 + (totalSvc * (totalCash / (totalSales || 1)));
+    const platformOwes = totalDigital - (totalDigital * activeCommissionRate) / 100 - (totalSvc * (totalDigital / (totalSales || 1)));
+    const netBalance = platformOwes - restaurantOwes;
+
+    // 3. 💾 حفظ الفاتورة في الداتابيز
+    const invoiceId = uuidv4();
+    const invoiceNumber = `INV-${Math.floor(100000 + Math.random() * 900000)}`; // رقم عشوائي كـ مثال
+
+    await db.insert(invoices).values({
+        id: invoiceId,
+        restaurantId,
+        invoiceNumber,
+        startDate: new Date(startDate),
+        endDate: end,
+        totalOrders: deliveredOrders.length,
+        totalGrossSales: totalSales.toFixed(2),
+        totalCashCollected: totalCash.toFixed(2),
+        totalDigitalCollected: totalDigital.toFixed(2),
+        totalCommission: totalComm.toFixed(2),
+        totalServiceFee: totalSvc.toFixed(2),
+        restaurantOwesPlatform: restaurantOwes.toFixed(2),
+        platformOwesRestaurant: platformOwes.toFixed(2),
+        netBalance: netBalance.toFixed(2),
+        status: "unpaid", // الحالة الافتراضية
+    });
+
+    return SuccessResponse(res, { message: "Invoice generated and saved successfully", data: { invoiceId } });
+};
+
+// دالة عشان السوبر أدمن يغير حالة الفاتورة لـ Paid لما يتحاسبوا
+export const markInvoiceAsPaid = async (req: Request, res: Response) => {
+    const { invoiceId } = req.params;
+    
+    await db.update(invoices).set({ status: "paid" }).where(eq(invoices.id, invoiceId));
+    
+    return SuccessResponse(res, { message: "Invoice marked as paid" });
+};
+
+

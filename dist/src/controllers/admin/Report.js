@@ -36,13 +36,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateRestaurantInvoicePDF = exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
+exports.markInvoiceAsPaid = exports.generateAndSaveInvoice = exports.generateRestaurantInvoicePDF = exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
 const pdfkit_1 = __importDefault(require("pdfkit"));
+const uuid_1 = require("uuid");
 // ==========================================
 // API 1: التقرير المالي العام 
 // ==========================================
@@ -808,3 +809,73 @@ const generateRestaurantInvoicePDF = async (req, res) => {
     doc.end();
 };
 exports.generateRestaurantInvoicePDF = generateRestaurantInvoicePDF;
+const generateAndSaveInvoice = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const { restaurantId, startDate, endDate } = req.body; // هنا بناخد التواريخ من الـ body
+    if (!restaurantId || !startDate || !endDate)
+        throw new Errors_1.BadRequest("Restaurant ID, Start Date, and End Date are required");
+    // 1. الفلترة والتأكد إن مفيش فواتير متداخلة (اختياري بس يفضل)
+    const conditions = [
+        (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId),
+        (0, drizzle_orm_1.eq)(schema_1.orders.status, "delivered")
+    ];
+    conditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(startDate)));
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    conditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
+    // 2. جلب الأوردرات وحساب الفلوس (نفس اللوجيك بالظبط بتاع التقرير المالي)
+    const deliveredOrders = await connection_1.db.select().from(schema_1.orders).where((0, drizzle_orm_1.and)(...conditions));
+    let totalCash = 0, totalDigital = 0, totalSales = 0, totalComm = 0, totalSvc = 0;
+    for (const order of deliveredOrders) {
+        const amount = parseFloat(order.totalAmount || "0");
+        const comm = parseFloat(order.appCommission || "0");
+        const svcFee = parseFloat(order.serviceFee || "0");
+        totalSales += amount;
+        totalComm += comm;
+        totalSvc += svcFee;
+        if (order.paymentMethod === "cash_on_delivery")
+            totalCash += amount;
+        else
+            totalDigital += amount;
+    }
+    // جلب نسبة العمولة
+    const businessPlans = await connection_1.db.select().from(schema_1.restaurantBusinessPlans).where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId));
+    let activeCommissionRate = 0;
+    if (businessPlans.length > 0) {
+        const onlinePlan = businessPlans.find(p => p.platformType === "online_order") || businessPlans[0];
+        activeCommissionRate = parseFloat(onlinePlan.commissionRate || "0");
+    }
+    const restaurantOwes = (totalCash * activeCommissionRate) / 100 + (totalSvc * (totalCash / (totalSales || 1)));
+    const platformOwes = totalDigital - (totalDigital * activeCommissionRate) / 100 - (totalSvc * (totalDigital / (totalSales || 1)));
+    const netBalance = platformOwes - restaurantOwes;
+    // 3. 💾 حفظ الفاتورة في الداتابيز
+    const invoiceId = (0, uuid_1.v4)();
+    const invoiceNumber = `INV-${Math.floor(100000 + Math.random() * 900000)}`; // رقم عشوائي كـ مثال
+    await connection_1.db.insert(schema_1.invoices).values({
+        id: invoiceId,
+        restaurantId,
+        invoiceNumber,
+        startDate: new Date(startDate),
+        endDate: end,
+        totalOrders: deliveredOrders.length,
+        totalGrossSales: totalSales.toFixed(2),
+        totalCashCollected: totalCash.toFixed(2),
+        totalDigitalCollected: totalDigital.toFixed(2),
+        totalCommission: totalComm.toFixed(2),
+        totalServiceFee: totalSvc.toFixed(2),
+        restaurantOwesPlatform: restaurantOwes.toFixed(2),
+        platformOwesRestaurant: platformOwes.toFixed(2),
+        netBalance: netBalance.toFixed(2),
+        status: "unpaid", // الحالة الافتراضية
+    });
+    return (0, response_1.SuccessResponse)(res, { message: "Invoice generated and saved successfully", data: { invoiceId } });
+};
+exports.generateAndSaveInvoice = generateAndSaveInvoice;
+// دالة عشان السوبر أدمن يغير حالة الفاتورة لـ Paid لما يتحاسبوا
+const markInvoiceAsPaid = async (req, res) => {
+    const { invoiceId } = req.params;
+    await connection_1.db.update(schema_1.invoices).set({ status: "paid" }).where((0, drizzle_orm_1.eq)(schema_1.invoices.id, invoiceId));
+    return (0, response_1.SuccessResponse)(res, { message: "Invoice marked as paid" });
+};
+exports.markInvoiceAsPaid = markInvoiceAsPaid;

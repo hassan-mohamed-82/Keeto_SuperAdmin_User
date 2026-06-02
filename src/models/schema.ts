@@ -39,3 +39,4 @@ export * from "./schema/user/cart";
 export * from "./schema/user/userAddHome";
 export * from "./schema/user/restaurantRating";
 export * from "./schema/user/SocialMedia";
+export * from "./schema/admin/invoices";

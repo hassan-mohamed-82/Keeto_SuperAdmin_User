@@ -9,4 +9,6 @@ router.get("/", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAs
 router.get("/detailed", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getDetailedRestaurantReport));
 router.get("/restaurant/:restaurantId", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getSingleRestaurantReport));
 router.get("/:restaurantId/invoice", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.generateRestaurantInvoicePDF));
+router.post("/restaurant/:restaurantId/invoice", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.generateAndSaveInvoice));
+router.put("/invoice/:invoiceId/mark-paid", (0, middlewares_1.hasPermission)("reports", "Edit"), (0, catchAsync_1.catchAsync)(Report_1.markInvoiceAsPaid));
 exports.default = router;
