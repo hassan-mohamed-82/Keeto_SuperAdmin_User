@@ -179,13 +179,11 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         price: food.price,
         image: food.image,
         
-        // 👇 تم إضافة الـ ID واللغات الثلاثة للكاتيجوري
         categoryId: categories.id,
         categoryName: categories.name,
         categoryNameAr: categories.nameAr,
         categoryNameFr: categories.nameFr,
 
-        // 👇 بيانات الـ Subcategory
         subcategoryId: subcategories.id,
         subcategoryName: subcategories.name,
         subcategoryNameAr: subcategories.nameAr,
@@ -200,13 +198,13 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         selectionType: foodVariations.selectionType,
         min: foodVariations.min,
         max: foodVariations.max,
+        
         optionId: variationOptions.id,
         optionName: variationOptions.optionName,
         optionNameAr: variationOptions.optionNameAr,
         optionNameFr: variationOptions.optionNameFr,
         additionalPrice: variationOptions.additionalPrice,
 
-        // 👇 بيانات الـ Addon المرتبط بالأكلة
         addonId: addons.id,
         addonName: addons.name,
         addonNameAr: addons.nameAr,
@@ -217,6 +215,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         addonRestaurantId: addons.restaurantid,
         addonCreatedAt: addons.createdAt,
         addonUpdatedAt: addons.updatedAt,
+        
         addonCategoryId: adonescategory.id,
         addonCategoryName: adonescategory.name,
         addonCategoryNameAr: adonescategory.nameAr,
@@ -234,7 +233,6 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         eq(food.status, "active")
     ));
 
-    // 👇 تجميع الداتا بناءً على الـ Category ID بدلاً من الاسم
     const groupedMenuObj = rawMenu.reduce((acc: any, row) => {
         const catId = row.categoryId || "uncategorized";
 
@@ -245,7 +243,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                 name: row.categoryName || "Other",
                 nameAr: row.categoryNameAr || "أخرى",
                 nameFr: row.categoryNameFr || "Autre",
-                foods: {} // هنجمع الأكل هنا كـ Object مؤقتاً
+                foods: {} 
             };
         }
 
@@ -264,38 +262,20 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                     image: row.image,
                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
                     variations: {},
+                    addons: {}, // 👈 تم التعديل: تجميع الـ Addons في أوبجيكت مستقل عشان نمنع التكرار
                     category: row.categoryId ? {
                         id: row.categoryId,
                         name: row.categoryName,
                         nameAr: row.categoryNameAr,
                         nameFr: row.categoryNameFr,
-                    } : [],
+                    } : null,
                     subcategory: row.subcategoryId ? {
                         id: row.subcategoryId,
                         name: row.subcategoryName,
                         nameAr: row.subcategoryNameAr,
                         nameFr: row.subcategoryNameFr,
-                        order_level:row.order_level,
-                    } : [],
-                    // 👇 الـ Addon المرتبط بالأكلة
-                    addon: row.addonId ? {
-                        id: row.addonId,
-                        name: row.addonName,
-                        nameAr: row.addonNameAr,
-                        nameFr: row.addonNameFr,
-                        price: row.addonPrice,
-                        status: row.addonStatus,
-                        stockType: row.addonStockType,
-                        restaurantId: row.addonRestaurantId,
-                        createdAt: row.addonCreatedAt,
-                        updatedAt: row.addonUpdatedAt,
-                        category: row.addonCategoryId ? {
-                            id: row.addonCategoryId,
-                            name: row.addonCategoryName,
-                            nameAr: row.addonCategoryNameAr,
-                            nameFr: row.addonCategoryNameFr,
-                        } : []
-                    } : []
+                        order_level: row.order_level,
+                    } : null,
                 };
             }
 
@@ -326,12 +306,36 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                     });
                 }
             }
+
+            // 5. 👈 تم التعديل: تجميع الـ Addons بشكل صحيح
+            if (row.addonId) {
+                if (!acc[catId].foods[row.foodId].addons[row.addonId]) {
+                    acc[catId].foods[row.foodId].addons[row.addonId] = {
+                        id: row.addonId,
+                        name: row.addonName,
+                        nameAr: row.addonNameAr,
+                        nameFr: row.addonNameFr,
+                        price: row.addonPrice,
+                        status: row.addonStatus,
+                        stockType: row.addonStockType,
+                        restaurantId: row.addonRestaurantId,
+                        createdAt: row.addonCreatedAt,
+                        updatedAt: row.addonUpdatedAt,
+                        category: row.addonCategoryId ? {
+                            id: row.addonCategoryId,
+                            name: row.addonCategoryName,
+                            nameAr: row.addonCategoryNameAr,
+                            nameFr: row.addonCategoryNameFr,
+                        } : null
+                    };
+                }
+            }
         }
 
         return acc;
     }, {});
 
-    // 👇 تحويل الكاتيجوريز والأكلات من Objects إلى Arrays عشان الـ Response يكون مظبوط
+    // 👇 تم التعديل: تحويل الـ Variations والـ Addons من Objects إلى Arrays
     const finalMenu = Object.values(groupedMenuObj).map((category: any) => {
         return {
             id: category.id,
@@ -340,13 +344,14 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             nameFr: category.nameFr,
             foods: Object.values(category.foods).map((f: any) => {
                 f.variations = Object.values(f.variations);
+                f.addons = Object.values(f.addons); // 👈 دي الخطوة اللي هتطلع الـ Addons في الـ Response كـ Array
                 return f;
             })
         };
     });
 
     // ==========================================
-    // جلب الـ Addons مع الـ Categories
+    // جلب الـ Addons مع الـ Categories (نفس الكود بتاعك بدون تغيير)
     // ==========================================
     const rawAddons = await db.select({
         addonId: addons.id,
@@ -368,7 +373,6 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         eq(addons.status, "active")
     ));
 
-    // تجميع الـ Addons حسب الـ Category
     const groupedAddonsObj = rawAddons.reduce((acc: any, row) => {
         const catId = row.categoryId || "uncategorized";
         
