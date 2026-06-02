@@ -5,6 +5,7 @@ import { orders, restaurants, restaurantBusinessPlans } from "../../models/schem
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { UnauthorizedError } from "../../Errors";
+import PDFDocument from "pdfkit";
 
 // 1. تعريف الأنواع المسموحة للـ Enums
 type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" | "rejected" | "refund";
@@ -744,4 +745,179 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             })),
         }
     });
+};
+
+// ==========================================
+// API 4: Generate Restaurant Invoice PDF
+// ==========================================
+export const generateRestaurantInvoicePDF = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+
+    const { restaurantId } = req.params;
+    const { startDate, endDate } = req.query;
+
+    if (!restaurantId) {
+        const { BadRequest } = await import("../../Errors/BadRequest");
+        throw new BadRequest("Restaurant ID is required");
+    }
+
+    const restaurant = await db
+        .select()
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+
+    if (!restaurant[0]) {
+        const { NotFound } = await import("../../Errors/NotFound");
+        throw new NotFound("Restaurant not found");
+    }
+
+    const conditions = [
+        eq(orders.restaurantId, restaurantId),
+        eq(orders.status, "delivered" as OrderStatus)
+    ];
+
+    if (startDate) {
+        conditions.push(gte(orders.createdAt, new Date(startDate as string)));
+    }
+    if (endDate) {
+        const end = new Date(endDate as string);
+        end.setHours(23, 59, 59, 999);
+        conditions.push(lte(orders.createdAt, end));
+    }
+
+    const deliveredOrders = await db
+        .select({
+            orderId: orders.id,
+            orderSource: orders.orderSource,
+            paymentMethod: orders.paymentMethod,
+            subtotal: orders.subtotal,
+            deliveryFee: orders.deliveryFee,
+            serviceFee: orders.serviceFee,
+            appCommission: orders.appCommission,
+            totalAmount: orders.totalAmount,
+        })
+        .from(orders)
+        .where(and(...conditions));
+
+    const businessPlans = await db
+        .select()
+        .from(restaurantBusinessPlans)
+        .where(eq(restaurantBusinessPlans.restaurantId, restaurantId));
+
+    let grandTotal = {
+        orders: 0,
+        revenue: 0,
+        cash: 0,
+        visa: 0,
+        wallet: 0,
+        commission: 0,
+        serviceFee: 0,
+        deliveryFee: 0,
+        subtotal: 0,
+    };
+
+    for (const order of deliveredOrders) {
+        const amount = parseFloat(order.totalAmount as string || "0");
+        const subtotal = parseFloat(order.subtotal as string || "0");
+        const commission = parseFloat(order.appCommission as string || "0");
+        const serviceFee = parseFloat(order.serviceFee as string || "0");
+        const deliveryFee = parseFloat(order.deliveryFee as string || "0");
+
+        if (order.paymentMethod === "cash_on_delivery") {
+            grandTotal.cash += amount;
+        } else if (order.paymentMethod === "visa") {
+            grandTotal.visa += amount;
+        } else if (order.paymentMethod === "wallet") {
+            grandTotal.wallet += amount;
+        }
+
+        grandTotal.orders += 1;
+        grandTotal.revenue += amount;
+        grandTotal.subtotal += subtotal;
+        grandTotal.commission += commission;
+        grandTotal.serviceFee += serviceFee;
+        grandTotal.deliveryFee += deliveryFee;
+    }
+
+    let commissionRate = 0;
+    if (businessPlans.length > 0) {
+        const onlinePlan = businessPlans.find(p => p.platformType === "online_order");
+        const activePlan = onlinePlan || businessPlans[0];
+        commissionRate = parseFloat(activePlan.commissionRate || "0");
+    }
+
+    const restaurantOwes = (grandTotal.cash * commissionRate) / 100 + 
+                           (grandTotal.serviceFee * (grandTotal.cash / grandTotal.revenue || 0));
+
+    const digitalTotal = grandTotal.visa + grandTotal.wallet;
+    const platformOwes = digitalTotal - 
+                        (digitalTotal * commissionRate) / 100 - 
+                        (grandTotal.serviceFee * (digitalTotal / grandTotal.revenue || 0));
+
+    const netBalance = platformOwes - restaurantOwes;
+
+    // Build PDF
+    const doc = new PDFDocument({ margin: 50 });
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice_${restaurant[0].name.replace(/\\s+/g, '_')}_${Date.now()}.pdf"`);
+    
+    doc.pipe(res);
+    
+    // Header
+    doc.fontSize(20).text('Keeto Restaurant Invoice', { align: 'center' });
+    doc.moveDown();
+    
+    // Restaurant Details
+    doc.fontSize(14).fillColor('black').text(`Restaurant: ${restaurant[0].name} / ${restaurant[0].nameAr}`);
+    doc.fontSize(12).text(`Date Range: ${startDate || 'All Time'} to ${endDate || 'All Time'}`);
+    doc.text(`Generated At: ${new Date().toLocaleString()}`);
+    doc.moveDown();
+    
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown();
+
+    // Summary Statistics
+    doc.fontSize(16).text('Summary', { underline: true });
+    doc.fontSize(12).text(`Total Orders: ${grandTotal.orders}`);
+    doc.text(`Total Revenue: ${grandTotal.revenue.toFixed(2)} EGP`);
+    doc.text(`Total Subtotal: ${grandTotal.subtotal.toFixed(2)} EGP`);
+    doc.moveDown();
+
+    // Payment Breakdown
+    doc.fontSize(14).text('Payment Breakdown', { underline: true });
+    doc.fontSize(12).text(`Cash on Delivery: ${grandTotal.cash.toFixed(2)} EGP`);
+    doc.text(`Visa: ${grandTotal.visa.toFixed(2)} EGP`);
+    doc.text(`Wallet: ${grandTotal.wallet.toFixed(2)} EGP`);
+    doc.moveDown();
+
+    // Fees
+    doc.fontSize(14).text('Fees & Commissions', { underline: true });
+    doc.fontSize(12).text(`Commission Rate: ${commissionRate}%`);
+    doc.text(`Total App Commission: ${grandTotal.commission.toFixed(2)} EGP`);
+    doc.text(`Total Service Fee (to Platform): ${grandTotal.serviceFee.toFixed(2)} EGP`);
+    doc.text(`Total Delivery Fee (to Restaurant): ${grandTotal.deliveryFee.toFixed(2)} EGP`);
+    doc.moveDown();
+
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown();
+
+    // Cash Due Analysis
+    doc.fontSize(16).text('Cash Due Analysis', { underline: true });
+    doc.fontSize(12).text(`Restaurant Owes Platform (from Cash Orders): ${restaurantOwes.toFixed(2)} EGP`);
+    doc.text(`Platform Owes Restaurant (from Digital Orders): ${platformOwes.toFixed(2)} EGP`);
+    
+    doc.moveDown();
+    doc.fontSize(14).text('Final Balance:', { continued: true });
+    
+    if (netBalance > 0) {
+        doc.fillColor('green').text(` Platform owes restaurant ${Math.abs(netBalance).toFixed(2)} EGP`);
+    } else if (netBalance < 0) {
+        doc.fillColor('red').text(` Restaurant owes platform ${Math.abs(netBalance).toFixed(2)} EGP`);
+    } else {
+        doc.fillColor('black').text(` No pending dues (Settled)`);
+    }
+    
+    doc.end();
 };

@@ -32,13 +32,17 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
+exports.generateRestaurantInvoicePDF = exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
+const pdfkit_1 = __importDefault(require("pdfkit"));
 // ==========================================
 // API 1: التقرير المالي العام 
 // ==========================================
@@ -654,3 +658,153 @@ const getSingleRestaurantReport = async (req, res) => {
     });
 };
 exports.getSingleRestaurantReport = getSingleRestaurantReport;
+// ==========================================
+// API 4: Generate Restaurant Invoice PDF
+// ==========================================
+const generateRestaurantInvoicePDF = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const { restaurantId } = req.params;
+    const { startDate, endDate } = req.query;
+    if (!restaurantId) {
+        const { BadRequest } = await Promise.resolve().then(() => __importStar(require("../../Errors/BadRequest")));
+        throw new BadRequest("Restaurant ID is required");
+    }
+    const restaurant = await connection_1.db
+        .select()
+        .from(schema_1.restaurants)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId))
+        .limit(1);
+    if (!restaurant[0]) {
+        const { NotFound } = await Promise.resolve().then(() => __importStar(require("../../Errors/NotFound")));
+        throw new NotFound("Restaurant not found");
+    }
+    const conditions = [
+        (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId),
+        (0, drizzle_orm_1.eq)(schema_1.orders.status, "delivered")
+    ];
+    if (startDate) {
+        conditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(startDate)));
+    }
+    if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        conditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
+    }
+    const deliveredOrders = await connection_1.db
+        .select({
+        orderId: schema_1.orders.id,
+        orderSource: schema_1.orders.orderSource,
+        paymentMethod: schema_1.orders.paymentMethod,
+        subtotal: schema_1.orders.subtotal,
+        deliveryFee: schema_1.orders.deliveryFee,
+        serviceFee: schema_1.orders.serviceFee,
+        appCommission: schema_1.orders.appCommission,
+        totalAmount: schema_1.orders.totalAmount,
+    })
+        .from(schema_1.orders)
+        .where((0, drizzle_orm_1.and)(...conditions));
+    const businessPlans = await connection_1.db
+        .select()
+        .from(schema_1.restaurantBusinessPlans)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId));
+    let grandTotal = {
+        orders: 0,
+        revenue: 0,
+        cash: 0,
+        visa: 0,
+        wallet: 0,
+        commission: 0,
+        serviceFee: 0,
+        deliveryFee: 0,
+        subtotal: 0,
+    };
+    for (const order of deliveredOrders) {
+        const amount = parseFloat(order.totalAmount || "0");
+        const subtotal = parseFloat(order.subtotal || "0");
+        const commission = parseFloat(order.appCommission || "0");
+        const serviceFee = parseFloat(order.serviceFee || "0");
+        const deliveryFee = parseFloat(order.deliveryFee || "0");
+        if (order.paymentMethod === "cash_on_delivery") {
+            grandTotal.cash += amount;
+        }
+        else if (order.paymentMethod === "visa") {
+            grandTotal.visa += amount;
+        }
+        else if (order.paymentMethod === "wallet") {
+            grandTotal.wallet += amount;
+        }
+        grandTotal.orders += 1;
+        grandTotal.revenue += amount;
+        grandTotal.subtotal += subtotal;
+        grandTotal.commission += commission;
+        grandTotal.serviceFee += serviceFee;
+        grandTotal.deliveryFee += deliveryFee;
+    }
+    let commissionRate = 0;
+    if (businessPlans.length > 0) {
+        const onlinePlan = businessPlans.find(p => p.platformType === "online_order");
+        const activePlan = onlinePlan || businessPlans[0];
+        commissionRate = parseFloat(activePlan.commissionRate || "0");
+    }
+    const restaurantOwes = (grandTotal.cash * commissionRate) / 100 +
+        (grandTotal.serviceFee * (grandTotal.cash / grandTotal.revenue || 0));
+    const digitalTotal = grandTotal.visa + grandTotal.wallet;
+    const platformOwes = digitalTotal -
+        (digitalTotal * commissionRate) / 100 -
+        (grandTotal.serviceFee * (digitalTotal / grandTotal.revenue || 0));
+    const netBalance = platformOwes - restaurantOwes;
+    // Build PDF
+    const doc = new pdfkit_1.default({ margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice_${restaurant[0].name.replace(/\\s+/g, '_')}_${Date.now()}.pdf"`);
+    doc.pipe(res);
+    // Header
+    doc.fontSize(20).text('Keeto Restaurant Invoice', { align: 'center' });
+    doc.moveDown();
+    // Restaurant Details
+    doc.fontSize(14).fillColor('black').text(`Restaurant: ${restaurant[0].name} / ${restaurant[0].nameAr}`);
+    doc.fontSize(12).text(`Date Range: ${startDate || 'All Time'} to ${endDate || 'All Time'}`);
+    doc.text(`Generated At: ${new Date().toLocaleString()}`);
+    doc.moveDown();
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown();
+    // Summary Statistics
+    doc.fontSize(16).text('Summary', { underline: true });
+    doc.fontSize(12).text(`Total Orders: ${grandTotal.orders}`);
+    doc.text(`Total Revenue: ${grandTotal.revenue.toFixed(2)} EGP`);
+    doc.text(`Total Subtotal: ${grandTotal.subtotal.toFixed(2)} EGP`);
+    doc.moveDown();
+    // Payment Breakdown
+    doc.fontSize(14).text('Payment Breakdown', { underline: true });
+    doc.fontSize(12).text(`Cash on Delivery: ${grandTotal.cash.toFixed(2)} EGP`);
+    doc.text(`Visa: ${grandTotal.visa.toFixed(2)} EGP`);
+    doc.text(`Wallet: ${grandTotal.wallet.toFixed(2)} EGP`);
+    doc.moveDown();
+    // Fees
+    doc.fontSize(14).text('Fees & Commissions', { underline: true });
+    doc.fontSize(12).text(`Commission Rate: ${commissionRate}%`);
+    doc.text(`Total App Commission: ${grandTotal.commission.toFixed(2)} EGP`);
+    doc.text(`Total Service Fee (to Platform): ${grandTotal.serviceFee.toFixed(2)} EGP`);
+    doc.text(`Total Delivery Fee (to Restaurant): ${grandTotal.deliveryFee.toFixed(2)} EGP`);
+    doc.moveDown();
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown();
+    // Cash Due Analysis
+    doc.fontSize(16).text('Cash Due Analysis', { underline: true });
+    doc.fontSize(12).text(`Restaurant Owes Platform (from Cash Orders): ${restaurantOwes.toFixed(2)} EGP`);
+    doc.text(`Platform Owes Restaurant (from Digital Orders): ${platformOwes.toFixed(2)} EGP`);
+    doc.moveDown();
+    doc.fontSize(14).text('Final Balance:', { continued: true });
+    if (netBalance > 0) {
+        doc.fillColor('green').text(` Platform owes restaurant ${Math.abs(netBalance).toFixed(2)} EGP`);
+    }
+    else if (netBalance < 0) {
+        doc.fillColor('red').text(` Restaurant owes platform ${Math.abs(netBalance).toFixed(2)} EGP`);
+    }
+    else {
+        doc.fillColor('black').text(` No pending dues (Settled)`);
+    }
+    doc.end();
+};
+exports.generateRestaurantInvoicePDF = generateRestaurantInvoicePDF;
