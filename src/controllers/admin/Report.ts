@@ -6,7 +6,6 @@ import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { UnauthorizedError } from "../../Errors";
 import PDFDocument from "pdfkit";
-
 // 1. تعريف الأنواع المسموحة للـ Enums
 type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" | "rejected" | "refund";
 type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
