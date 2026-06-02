@@ -225,8 +225,8 @@ const getRestaurantDetails = async (req, res) => {
                     price: row.price,
                     image: row.image,
                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
-                    variations: {},
-                    addons: {}, // 👈 تم التعديل: تجميع الـ Addons في أوبجيكت مستقل عشان نمنع التكرار
+                    variations: {}, // تجميع الـ Variations
+                    addons: {}, // تجميع الـ Addons
                     category: row.categoryId ? {
                         id: row.categoryId,
                         name: row.categoryName,
@@ -254,21 +254,23 @@ const getRestaurantDetails = async (req, res) => {
                         selectionType: row.selectionType,
                         min: row.min,
                         max: row.max,
-                        options: []
+                        options: {} // 👈 خلينا الـ options Object لمنع التكرار
                     };
                 }
                 // 4. تجميع الـ Options داخل الـ Variations
                 if (row.optionId) {
-                    acc[catId].foods[row.foodId].variations[row.variationId].options.push({
-                        id: row.optionId,
-                        name: row.optionName,
-                        nameAr: row.optionNameAr,
-                        nameFr: row.optionNameFr,
-                        additionalPrice: row.additionalPrice
-                    });
+                    if (!acc[catId].foods[row.foodId].variations[row.variationId].options[row.optionId]) {
+                        acc[catId].foods[row.foodId].variations[row.variationId].options[row.optionId] = {
+                            id: row.optionId,
+                            name: row.optionName,
+                            nameAr: row.optionNameAr,
+                            nameFr: row.optionNameFr,
+                            additionalPrice: row.additionalPrice
+                        };
+                    }
                 }
             }
-            // 5. 👈 تم التعديل: تجميع الـ Addons بشكل صحيح
+            // 5. تجميع الـ Addons داخل الأكل
             if (row.addonId) {
                 if (!acc[catId].foods[row.foodId].addons[row.addonId]) {
                     acc[catId].foods[row.foodId].addons[row.addonId] = {
@@ -294,7 +296,7 @@ const getRestaurantDetails = async (req, res) => {
         }
         return acc;
     }, {});
-    // 👇 تم التعديل: تحويل الـ Variations والـ Addons من Objects إلى Arrays
+    // 👇 تحويل الكاتيجوريز، الأكلات، الـ Variations، الـ Options، والـ Addons من Objects إلى Arrays
     const finalMenu = Object.values(groupedMenuObj).map((category) => {
         return {
             id: category.id,
@@ -302,14 +304,19 @@ const getRestaurantDetails = async (req, res) => {
             nameAr: category.nameAr,
             nameFr: category.nameFr,
             foods: Object.values(category.foods).map((f) => {
-                f.variations = Object.values(f.variations);
-                f.addons = Object.values(f.addons); // 👈 دي الخطوة اللي هتطلع الـ Addons في الـ Response كـ Array
+                // تحويل الـ variations والـ options
+                f.variations = Object.values(f.variations).map((v) => {
+                    v.options = Object.values(v.options);
+                    return v;
+                });
+                // تحويل الـ Addons
+                f.addons = Object.values(f.addons);
                 return f;
             })
         };
     });
     // ==========================================
-    // جلب الـ Addons مع الـ Categories (نفس الكود بتاعك بدون تغيير)
+    // جلب الـ Addons مع الـ Categories (للقائمة العامة)
     // ==========================================
     const rawAddons = await connection_1.db.select({
         addonId: schema_1.addons.id,
