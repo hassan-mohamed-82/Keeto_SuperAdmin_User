@@ -207,9 +207,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         message: "Restaurant and Owner account created successfully",
         data: { 
             restaurantId,
-            ownerUserId,
-            _debugBodyKeys: Object.keys(req.body),
-            _debugParsedCuisines: parsedCuisines
+            ownerUserId
         }
     }, 201);
 };
@@ -245,7 +243,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         )
     );
 
-    const allCuisinesList = await db.select({ id: cuisines.id, name: cuisines.name }).from(cuisines);
+    const allCuisinesList = await db.select().from(cuisines);
     const cuisineMap = new Map(allCuisinesList.map(c => [String(c.id).toLowerCase(), c]));
 
     const formatted = raw.map(r => {
@@ -266,12 +264,6 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             lat: r.lat,
             lng: r.lng,
             cuisines: parsedCuisines.map((id: string) => cuisineMap.get(String(id).toLowerCase())).filter(Boolean),
-            _debugCuisines: {
-                rawCuisineIds: r.cuisineIds,
-                parsedCuisines: parsedCuisines,
-                mapKeysCount: cuisineMap.size,
-                exampleKeys: Array.from(cuisineMap.keys()).slice(0, 3)
-            },
 
             zone: r.zone_id
                 ? { id: r.zone_id, name: r.zone_name }
@@ -318,7 +310,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
     let restaurantCuisines: any[] = [];
     if (parsedCuisines && parsedCuisines.length > 0) {
         restaurantCuisines = await db
-            .select({ id: cuisines.id, name: cuisines.name })
+            .select()
             .from(cuisines)
             .where(inArray(cuisines.id, parsedCuisines));
     }

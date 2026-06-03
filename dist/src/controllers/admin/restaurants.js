@@ -188,9 +188,7 @@ const createRestaurant = async (req, res) => {
         message: "Restaurant and Owner account created successfully",
         data: {
             restaurantId,
-            ownerUserId,
-            _debugBodyKeys: Object.keys(req.body),
-            _debugParsedCuisines: parsedCuisines
+            ownerUserId
         }
     }, 201);
 };
@@ -219,7 +217,7 @@ const getAllRestaurants = async (req, res) => {
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurants.zoneId, schema_1.zones.id))
         // عمل Join لجلب حساب المالك فقط المرتبط بالمطعم
         .leftJoin(schema_1.restrauntadmin, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restrauntadmin.restaurantId), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")));
-    const allCuisinesList = await connection_1.db.select({ id: schema_1.cuisines.id, name: schema_1.cuisines.name }).from(schema_1.cuisines);
+    const allCuisinesList = await connection_1.db.select().from(schema_1.cuisines);
     const cuisineMap = new Map(allCuisinesList.map(c => [String(c.id).toLowerCase(), c]));
     const formatted = raw.map(r => {
         let parsedCuisines = safeParseArray(r.cuisineIds);
@@ -238,12 +236,6 @@ const getAllRestaurants = async (req, res) => {
             lat: r.lat,
             lng: r.lng,
             cuisines: parsedCuisines.map((id) => cuisineMap.get(String(id).toLowerCase())).filter(Boolean),
-            _debugCuisines: {
-                rawCuisineIds: r.cuisineIds,
-                parsedCuisines: parsedCuisines,
-                mapKeysCount: cuisineMap.size,
-                exampleKeys: Array.from(cuisineMap.keys()).slice(0, 3)
-            },
             zone: r.zone_id
                 ? { id: r.zone_id, name: r.zone_name }
                 : null,
@@ -277,7 +269,7 @@ const getRestaurantById = async (req, res) => {
     let restaurantCuisines = [];
     if (parsedCuisines && parsedCuisines.length > 0) {
         restaurantCuisines = await connection_1.db
-            .select({ id: schema_1.cuisines.id, name: schema_1.cuisines.name })
+            .select()
             .from(schema_1.cuisines)
             .where((0, drizzle_orm_1.inArray)(schema_1.cuisines.id, parsedCuisines));
     }
