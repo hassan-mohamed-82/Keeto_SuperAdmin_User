@@ -28,7 +28,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     orderSource: (0, mysql_core_1.mysqlEnum)("order_source", ["online_order", "food_aggregator", "mykeeto"]).notNull(),
     // onlineOrderType:mysqlEnum("online_order_type", ["app"]).default(),
     // 👇 التعديل هنا: شلنا الربط وخليناها Enum بتلات قيم بس
-    paymentMethod: (0, mysql_core_1.mysqlEnum)("payment_method", ["cash_on_delivery", "visa", "wallet"]).notNull(),
+    paymentMethod: (0, mysql_core_1.mysqlEnum)("payment_method", ["cash_on_delivery", "visa", "wallet", "الدفع عند الاستلام", "بطاقة", "محفظتى"]).notNull(),
     orderType: (0, mysql_core_1.mysqlEnum)("order_type", ["delivery", "takeaway", "dine_in"]).default("delivery"),
     subtotal: (0, mysql_core_1.decimal)("subtotal", { precision: 10, scale: 2 }).notNull(),
     deliveryFee: (0, mysql_core_1.decimal)("delivery_fee", { precision: 10, scale: 2 }).default("0.00"),

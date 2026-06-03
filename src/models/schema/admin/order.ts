@@ -33,7 +33,7 @@ export const orders = mysqlTable("orders", {
     // onlineOrderType:mysqlEnum("online_order_type", ["app"]).default(),
 
     // 👇 التعديل هنا: شلنا الربط وخليناها Enum بتلات قيم بس
-    paymentMethod: mysqlEnum("payment_method", ["cash_on_delivery", "visa", "wallet"]).notNull(),
+    paymentMethod: mysqlEnum("payment_method", ["cash_on_delivery", "visa", "wallet","الدفع عند الاستلام", "بطاقة","محفظتى"]).notNull(),
 
     orderType: mysqlEnum("order_type", ["delivery", "takeaway", "dine_in"]).default("delivery"),
 
