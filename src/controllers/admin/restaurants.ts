@@ -67,10 +67,19 @@ const safeParseArray = (input: any): string[] => {
     }
     
     return result.map(item => {
+        let str = '';
         if (typeof item === 'object' && item !== null) {
-            return String(item.id || item.value || item).trim();
+            str = String(item.id || item.value || item).trim();
+        } else {
+            str = String(item).trim();
         }
-        return String(item).trim();
+        // Remove extra quotes if somehow double stringified
+        if (str.startsWith('"') && str.endsWith('"')) {
+            str = str.slice(1, -1);
+        } else if (str.startsWith("'") && str.endsWith("'")) {
+            str = str.slice(1, -1);
+        }
+        return str.trim();
     }).filter(Boolean);
 };
 
@@ -230,7 +239,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
     );
 
     const allCuisinesList = await db.select({ id: cuisines.id, name: cuisines.name }).from(cuisines);
-    const cuisineMap = new Map(allCuisinesList.map(c => [c.id, c]));
+    const cuisineMap = new Map(allCuisinesList.map(c => [String(c.id).toLowerCase(), c]));
 
     const formatted = raw.map(r => {
         let parsedCuisines = safeParseArray(r.cuisineIds);
@@ -249,7 +258,13 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             email: r.email || null, // إرجاع الإيميل في الـ Response
             lat: r.lat,
             lng: r.lng,
-            cuisines: parsedCuisines.map((id: string) => cuisineMap.get(id)).filter(Boolean),
+            cuisines: parsedCuisines.map((id: string) => cuisineMap.get(String(id).toLowerCase())).filter(Boolean),
+            _debugCuisines: {
+                rawCuisineIds: r.cuisineIds,
+                parsedCuisines: parsedCuisines,
+                mapKeysCount: cuisineMap.size,
+                exampleKeys: Array.from(cuisineMap.keys()).slice(0, 3)
+            },
 
             zone: r.zone_id
                 ? { id: r.zone_id, name: r.zone_name }
