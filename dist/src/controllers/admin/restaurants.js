@@ -183,7 +183,13 @@ const getAllRestaurants = async (req, res) => {
         .from(schema_1.restaurants)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurants.zoneId, schema_1.zones.id))
         .leftJoin(schema_1.restrauntadmin, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restrauntadmin.restaurantId), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")));
-    const allCuisinesList = await connection_1.db.select().from(schema_1.cuisines);
+    // تحديد الـ 4 حقول فقط للـ cuisines
+    const allCuisinesList = await connection_1.db.select({
+        id: schema_1.cuisines.id,
+        name: schema_1.cuisines.name,
+        nameAr: schema_1.cuisines.nameAr,
+        nameFr: schema_1.cuisines.nameFr
+    }).from(schema_1.cuisines);
     const cuisineMap = new Map(allCuisinesList.map(c => [String(c.id).toLowerCase(), c]));
     const formatted = raw.map(r => {
         let parsedCuisines = safeParseArray(r.cuisineIds);
@@ -233,8 +239,14 @@ const getRestaurantById = async (req, res) => {
     let parsedCuisines = safeParseArray(row.restaurantObj.cuisineId);
     let restaurantCuisines = [];
     if (parsedCuisines && parsedCuisines.length > 0) {
+        // تحديد الـ 4 حقول فقط للـ cuisines
         restaurantCuisines = await connection_1.db
-            .select()
+            .select({
+            id: schema_1.cuisines.id,
+            name: schema_1.cuisines.name,
+            nameAr: schema_1.cuisines.nameAr,
+            nameFr: schema_1.cuisines.nameFr
+        })
             .from(schema_1.cuisines)
             .where((0, drizzle_orm_1.inArray)(schema_1.cuisines.id, parsedCuisines));
     }

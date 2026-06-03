@@ -217,7 +217,14 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         )
     );
 
-    const allCuisinesList = await db.select().from(cuisines);
+    // تحديد الـ 4 حقول فقط للـ cuisines
+    const allCuisinesList = await db.select({
+        id: cuisines.id,
+        name: cuisines.name,
+        nameAr: cuisines.nameAr,
+        nameFr: cuisines.nameFr
+    }).from(cuisines);
+
     const cuisineMap = new Map(allCuisinesList.map(c => [String(c.id).toLowerCase(), c]));
 
     const formatted = raw.map(r => {
@@ -281,8 +288,14 @@ export const getRestaurantById = async (req: Request, res: Response) => {
 
     let restaurantCuisines: any[] = [];
     if (parsedCuisines && parsedCuisines.length > 0) {
+        // تحديد الـ 4 حقول فقط للـ cuisines
         restaurantCuisines = await db
-            .select()
+            .select({
+                id: cuisines.id,
+                name: cuisines.name,
+                nameAr: cuisines.nameAr,
+                nameFr: cuisines.nameFr
+            })
             .from(cuisines)
             .where(inArray(cuisines.id, parsedCuisines));
     }
