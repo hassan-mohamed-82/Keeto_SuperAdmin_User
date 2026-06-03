@@ -239,6 +239,7 @@ const getActiveOrders = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
+    const { restaurantId } = req.query;
     const activeOrders = await connection_1.db
         .select({
         orderId: schema_1.orders.id,
@@ -252,7 +253,7 @@ const getActiveOrders = async (req, res) => {
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), 
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, String(restaurantId)) : undefined, 
     // 🔥 تجلب فقط الطلبات التي لم تنتهِ بعد
     (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["pending", "accepted", "preparing", "out_for_delivery"])))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
@@ -266,6 +267,7 @@ const getOrderHistory = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
+    const { restaurantId } = req.query;
     const historyOrders = await connection_1.db
         .select({
         orderId: schema_1.orders.id,
@@ -279,7 +281,7 @@ const getOrderHistory = async (req, res) => {
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), 
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, String(restaurantId)) : undefined, 
     // 🔥 تجلب فقط الطلبات التي انتهت (تم إضافة المرفوض والمسترجع)
     (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["delivered", "cancelled", "rejected", "refund"])))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));

@@ -286,6 +286,8 @@ export const checkout = async (req: Request | any, res: Response) => {
 export const getActiveOrders = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id; 
+    const { restaurantId } = req.query;
+
     const activeOrders = await db
         .select({
             orderId: orders.id,
@@ -302,6 +304,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
         .where(
             and(
                 eq(orders.userId, userId),
+                restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
                 // 🔥 تجلب فقط الطلبات التي لم تنتهِ بعد
                 inArray(orders.status, ["pending", "accepted", "preparing", "out_for_delivery"])
             )
@@ -317,6 +320,8 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
 export const getOrderHistory = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id; 
+    const { restaurantId } = req.query;
+
     const historyOrders = await db
         .select({
             orderId: orders.id,
@@ -333,6 +338,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
         .where(
             and(
                 eq(orders.userId, userId),
+                restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
                 // 🔥 تجلب فقط الطلبات التي انتهت (تم إضافة المرفوض والمسترجع)
                 inArray(orders.status, ["delivered", "cancelled", "rejected", "refund"])
             )
