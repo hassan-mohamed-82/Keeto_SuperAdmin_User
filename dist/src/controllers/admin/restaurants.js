@@ -89,7 +89,14 @@ const safeParseArray = (input) => {
 };
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
-    const { name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng } = req.body;
+    let cuisineId = req.body.cuisineId;
+    if (cuisineId === undefined)
+        cuisineId = req.body['cuisineId[]'];
+    if (cuisineId === undefined)
+        cuisineId = req.body.cuisines;
+    if (cuisineId === undefined)
+        cuisineId = req.body['cuisines[]'];
     if (!name || !nameAr || !nameFr || !address || !addressAr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
     }
@@ -181,7 +188,9 @@ const createRestaurant = async (req, res) => {
         message: "Restaurant and Owner account created successfully",
         data: {
             restaurantId,
-            ownerUserId
+            ownerUserId,
+            _debugBodyKeys: Object.keys(req.body),
+            _debugParsedCuisines: parsedCuisines
         }
     }, 201);
 };
@@ -287,7 +296,14 @@ const getRestaurantById = async (req, res) => {
 exports.getRestaurantById = getRestaurantById;
 const updateRestaurant = async (req, res) => {
     const { id } = req.params; // restaurant_id
-    const { name, nameAr, nameFr, address, addressAr, addressFr, cuisineId, zoneId, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, } = req.body;
+    let cuisineId = req.body.cuisineId;
+    if (cuisineId === undefined)
+        cuisineId = req.body['cuisineId[]'];
+    if (cuisineId === undefined)
+        cuisineId = req.body.cuisines;
+    if (cuisineId === undefined)
+        cuisineId = req.body['cuisines[]'];
     // 1. التأكد من وجود المطعم
     const [existingRestaurant] = await connection_1.db
         .select()
