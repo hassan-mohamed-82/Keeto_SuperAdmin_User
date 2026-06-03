@@ -263,6 +263,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             email: r.email || null, // إرجاع الإيميل في الـ Response
             lat: r.lat,
             lng: r.lng,
+            cuisineId: parsedCuisines, // 👈 تم إضافة الحقل هنا
             cuisines: parsedCuisines.map((id: string) => cuisineMap.get(String(id).toLowerCase())).filter(Boolean),
 
             zone: r.zone_id
@@ -318,11 +319,13 @@ export const getRestaurantById = async (req: Request, res: Response) => {
     const formattedRestaurant = {
         ...row.restaurantObj,
         email: row.ownerEmail || null, // دمج الإيميل مع الكائن المرجع لتطابق الـ Frontend المتوقع
+        cuisineId: parsedCuisines, // 👈 تم إضافة الحقل هنا (سيكتب فوق الحقل الأصلي الخام لضمان أنه Array)
         cuisines: restaurantCuisines,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
     };
     
-    delete (formattedRestaurant as any).cuisineId;
+    // تم إلغاء مسح الحقل لأننا قمنا بتعريفه صراحةً في الأعلى
+    // delete (formattedRestaurant as any).cuisineId;
 
     return SuccessResponse(res, { 
         message: "Get restaurant by id success", 
