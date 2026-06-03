@@ -46,19 +46,32 @@ const decrementCuisineCount = async (cuisineId: string) => {
 // Helper: Safely parse arrays that might come as JSON strings, comma-separated strings, or single values
 const safeParseArray = (input: any): string[] => {
     if (!input) return [];
-    if (Array.isArray(input)) return input;
-    if (typeof input === "string") {
+    
+    let result: any[] = [];
+    if (Array.isArray(input)) {
+        result = input;
+    } else if (typeof input === "string") {
         try {
             const parsed = JSON.parse(input);
-            if (Array.isArray(parsed)) return parsed;
-            // If parsed is a primitive, return the original string or the primitive in array
-            return [input];
+            if (Array.isArray(parsed)) {
+                result = parsed;
+            } else {
+                result = [input];
+            }
         } catch (e) {
-            // It might be a comma-separated string or a single plain string (like a UUID)
-            return input.split(',').map(i => i.trim()).filter(Boolean);
+            // It might be a comma-separated string or a single plain string
+            result = input.split(',');
         }
+    } else {
+        result = [String(input)];
     }
-    return [String(input)];
+    
+    return result.map(item => {
+        if (typeof item === 'object' && item !== null) {
+            return String(item.id || item.value || item).trim();
+        }
+        return String(item).trim();
+    }).filter(Boolean);
 };
 
 export const createRestaurant = async (req: Request, res: Response) => {
@@ -220,14 +233,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
     const cuisineMap = new Map(allCuisinesList.map(c => [c.id, c]));
 
     const formatted = raw.map(r => {
-        let parsedCuisines: string[] = [];
-        if (r.cuisineIds) {
-            try {
-                parsedCuisines = typeof r.cuisineIds === "string" ? JSON.parse(r.cuisineIds) : r.cuisineIds;
-            } catch (e) {
-                parsedCuisines = [];
-            }
-        }
+        let parsedCuisines = safeParseArray(r.cuisineIds);
 
         return {
             id: r.id,
@@ -285,16 +291,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
 
     const row = rawRestaurants[0];
     
-    let parsedCuisines: string[] = [];
-    if (row.restaurantObj.cuisineId) {
-        try {
-            parsedCuisines = typeof row.restaurantObj.cuisineId === "string" 
-                ? JSON.parse(row.restaurantObj.cuisineId) 
-                : row.restaurantObj.cuisineId;
-        } catch (e) {
-            parsedCuisines = [];
-        }
-    }
+    let parsedCuisines = safeParseArray(row.restaurantObj.cuisineId);
 
     let restaurantCuisines: any[] = [];
     if (parsedCuisines && parsedCuisines.length > 0) {
@@ -466,7 +463,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
 
     // التحكم في عداد المطبخ (Cuisine Count) إذا تغيرت المطابخ
     if (parsedCuisines !== undefined) {
-        const oldCuisines = existingRestaurant.cuisineId || [];
+        const oldCuisines = safeParseArray(existingRestaurant.cuisineId);
         const newCuisines = parsedCuisines || [];
 
         // تقليل العداد للمطابخ المحذوفة
@@ -501,10 +498,9 @@ export const deleteRestaurant = async (req: Request, res: Response) => {
     }
 
     // 1. تقليل عداد المطابخ قبل المسح
-    if (existingRestaurant[0].cuisineId) {
-        for (const cid of existingRestaurant[0].cuisineId) {
-            await decrementCuisineCount(cid);
-        }
+    const oldCuisines = safeParseArray(existingRestaurant[0].cuisineId);
+    for (const cid of oldCuisines) {
+        await decrementCuisineCount(cid);
     }
 
     // 2. استخدام الـ Transaction لمسح السجلات المرتبطة بشكل آمن ومترابط

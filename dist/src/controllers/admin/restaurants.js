@@ -47,22 +47,34 @@ const decrementCuisineCount = async (cuisineId) => {
 const safeParseArray = (input) => {
     if (!input)
         return [];
-    if (Array.isArray(input))
-        return input;
-    if (typeof input === "string") {
+    let result = [];
+    if (Array.isArray(input)) {
+        result = input;
+    }
+    else if (typeof input === "string") {
         try {
             const parsed = JSON.parse(input);
-            if (Array.isArray(parsed))
-                return parsed;
-            // If parsed is a primitive, return the original string or the primitive in array
-            return [input];
+            if (Array.isArray(parsed)) {
+                result = parsed;
+            }
+            else {
+                result = [input];
+            }
         }
         catch (e) {
-            // It might be a comma-separated string or a single plain string (like a UUID)
-            return input.split(',').map(i => i.trim()).filter(Boolean);
+            // It might be a comma-separated string or a single plain string
+            result = input.split(',');
         }
     }
-    return [String(input)];
+    else {
+        result = [String(input)];
+    }
+    return result.map(item => {
+        if (typeof item === 'object' && item !== null) {
+            return String(item.id || item.value || item).trim();
+        }
+        return String(item).trim();
+    }).filter(Boolean);
 };
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
@@ -190,15 +202,7 @@ const getAllRestaurants = async (req, res) => {
     const allCuisinesList = await connection_1.db.select({ id: schema_1.cuisines.id, name: schema_1.cuisines.name }).from(schema_1.cuisines);
     const cuisineMap = new Map(allCuisinesList.map(c => [c.id, c]));
     const formatted = raw.map(r => {
-        let parsedCuisines = [];
-        if (r.cuisineIds) {
-            try {
-                parsedCuisines = typeof r.cuisineIds === "string" ? JSON.parse(r.cuisineIds) : r.cuisineIds;
-            }
-            catch (e) {
-                parsedCuisines = [];
-            }
-        }
+        let parsedCuisines = safeParseArray(r.cuisineIds);
         return {
             id: r.id,
             name: r.name,
@@ -243,17 +247,7 @@ const getRestaurantById = async (req, res) => {
         throw new NotFound_1.NotFound("Restaurant not found");
     }
     const row = rawRestaurants[0];
-    let parsedCuisines = [];
-    if (row.restaurantObj.cuisineId) {
-        try {
-            parsedCuisines = typeof row.restaurantObj.cuisineId === "string"
-                ? JSON.parse(row.restaurantObj.cuisineId)
-                : row.restaurantObj.cuisineId;
-        }
-        catch (e) {
-            parsedCuisines = [];
-        }
-    }
+    let parsedCuisines = safeParseArray(row.restaurantObj.cuisineId);
     let restaurantCuisines = [];
     if (parsedCuisines && parsedCuisines.length > 0) {
         restaurantCuisines = await connection_1.db
@@ -416,7 +410,7 @@ const updateRestaurant = async (req, res) => {
     });
     // التحكم في عداد المطبخ (Cuisine Count) إذا تغيرت المطابخ
     if (parsedCuisines !== undefined) {
-        const oldCuisines = existingRestaurant.cuisineId || [];
+        const oldCuisines = safeParseArray(existingRestaurant.cuisineId);
         const newCuisines = parsedCuisines || [];
         // تقليل العداد للمطابخ المحذوفة
         for (const cid of oldCuisines) {
@@ -445,10 +439,9 @@ const deleteRestaurant = async (req, res) => {
         throw new NotFound_1.NotFound("Restaurant not found");
     }
     // 1. تقليل عداد المطابخ قبل المسح
-    if (existingRestaurant[0].cuisineId) {
-        for (const cid of existingRestaurant[0].cuisineId) {
-            await decrementCuisineCount(cid);
-        }
+    const oldCuisines = safeParseArray(existingRestaurant[0].cuisineId);
+    for (const cid of oldCuisines) {
+        await decrementCuisineCount(cid);
     }
     // 2. استخدام الـ Transaction لمسح السجلات المرتبطة بشكل آمن ومترابط
     await connection_1.db.transaction(async (tx) => {
