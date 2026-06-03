@@ -25,7 +25,8 @@ const checkout = async (req, res) => {
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest_1.BadRequest("Invalid order source");
     }
-    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet"];
+    // 👇 التعديل 1: إضافة الكلمات العربي هنا عشان تعدي من الـ Validation
+    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet", "الدفع عند الاستلام", "بطاقة", "محفظتى"];
     if (!validPaymentMethods.includes(paymentMethod)) {
         throw new BadRequest_1.BadRequest("Invalid payment method");
     }
@@ -109,7 +110,8 @@ const checkout = async (req, res) => {
     // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
-    if (paymentMethod === "wallet") {
+    // 👇 التعديل 2: إضافة الدفع بالمحفظة بالعربي للشرط ده
+    if (paymentMethod === "wallet" || paymentMethod === "محفظتى") {
         const walletResult = await connection_1.db.select().from(schema_1.userWallets).where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId)).limit(1);
         userWallet = walletResult[0];
         const currentBalance = parseFloat(userWallet?.balance || "0");
@@ -126,7 +128,8 @@ const checkout = async (req, res) => {
     // ==========================================
     await connection_1.db.transaction(async (tx) => {
         // أ. خصم محفظة العميل (لو الدفع محفظة)
-        if (paymentMethod === "wallet" && userWallet) {
+        // 👇 التعديل 3: التحقق هنا كمان من الكلمة العربي
+        if ((paymentMethod === "wallet" || paymentMethod === "محفظتى") && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance);
             const newBalance = balanceBefore - totalAmount;
             await tx.update(schema_1.userWallets)
@@ -183,7 +186,8 @@ const checkout = async (req, res) => {
         const appDues = appCommission + serviceFee;
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
-        if (paymentMethod === "cash_on_delivery") {
+        // 👇 التعديل 4: معالجة حالة الكاش سواء جات بالإنجليزي أو العربي
+        if (paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام") {
             newRestBalance -= appDues;
             newCollectedCash += totalAmount;
         }
@@ -197,16 +201,18 @@ const checkout = async (req, res) => {
             totalEarning: (currentTotalEarning + restaurantEarning).toString()
         })
             .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId));
+        // 👇 التعديل 5: تسجيل حركة محفظة المطعم مع مراعاة الكلمة العربي
+        const isCash = paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام";
         await tx.insert(schema_1.restaurantWalletTransactions).values({
             id: (0, uuid_1.v4)(),
             restaurantId,
             type: "order_payment",
-            amount: paymentMethod === "cash_on_delivery" ? `-${appDues}` : `${restaurantEarning}`,
+            amount: isCash ? `-${appDues}` : `${restaurantEarning}`,
             balanceBefore: currentRestBalance.toString(),
             balanceAfter: newRestBalance.toString(),
             method: paymentMethod,
             reference: orderNumber,
-            note: paymentMethod === "cash_on_delivery" ? "Commission deducted from cash order" : "Earnings added from digital payment"
+            note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment"
         });
     });
     // ==========================================
@@ -223,9 +229,10 @@ const checkout = async (req, res) => {
             type: "new_order"
         }
     });
+    // استخدام order_level لتطابق استجابة الـ API مع المعايير المطلوبة
     return (0, response_1.SuccessResponse)(res, {
         message: "Order created successfully",
-        data: {
+        order_level: {
             orderDetails: { orderId, orderNumber, subtotal, deliveryFee, serviceFee, totalAmount },
             customerDetails: userInfo
         }

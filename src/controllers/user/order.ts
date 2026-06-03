@@ -29,14 +29,13 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
     
-   
-    
     const validOrderSources = ["online_order", "food_aggregator", "mykeeto"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest("Invalid order source");
     }
 
-    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet"];
+    // 👇 التعديل 1: إضافة الكلمات العربي هنا عشان تعدي من الـ Validation
+    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet", "الدفع عند الاستلام", "بطاقة", "محفظتى"];
     if (!validPaymentMethods.includes(paymentMethod)) {
         throw new BadRequest("Invalid payment method");
     }
@@ -142,7 +141,8 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
-    if (paymentMethod === "wallet") {
+    // 👇 التعديل 2: إضافة الدفع بالمحفظة بالعربي للشرط ده
+    if (paymentMethod === "wallet" || paymentMethod === "محفظتى") {
         const walletResult = await db.select().from(userWallets).where(eq(userWallets.userId, userId)).limit(1);
         userWallet = walletResult[0];
 
@@ -163,7 +163,8 @@ export const checkout = async (req: Request | any, res: Response) => {
     await db.transaction(async (tx) => {
         
         // أ. خصم محفظة العميل (لو الدفع محفظة)
-        if (paymentMethod === "wallet" && userWallet) {
+        // 👇 التعديل 3: التحقق هنا كمان من الكلمة العربي
+        if ((paymentMethod === "wallet" || paymentMethod === "محفظتى") && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance as string);
             const newBalance = balanceBefore - totalAmount;
 
@@ -229,7 +230,8 @@ export const checkout = async (req: Request | any, res: Response) => {
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
 
-        if (paymentMethod === "cash_on_delivery") {
+        // 👇 التعديل 4: معالجة حالة الكاش سواء جات بالإنجليزي أو العربي
+        if (paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام") {
             newRestBalance -= appDues;
             newCollectedCash += totalAmount; 
         } else {
@@ -244,16 +246,18 @@ export const checkout = async (req: Request | any, res: Response) => {
             })
             .where(eq(restaurantWallets.restaurantId, restaurantId));
 
+        // 👇 التعديل 5: تسجيل حركة محفظة المطعم مع مراعاة الكلمة العربي
+        const isCash = paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام";
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
             restaurantId,
             type: "order_payment",
-            amount: paymentMethod === "cash_on_delivery" ? `-${appDues}` : `${restaurantEarning}`,
+            amount: isCash ? `-${appDues}` : `${restaurantEarning}`,
             balanceBefore: currentRestBalance.toString(),
             balanceAfter: newRestBalance.toString(),
             method: paymentMethod,
             reference: orderNumber,
-            note: paymentMethod === "cash_on_delivery" ? "Commission deducted from cash order" : "Earnings added from digital payment"
+            note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment"
         });
     });
 
@@ -272,9 +276,10 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
     });
 
+    // استخدام order_level لتطابق استجابة الـ API مع المعايير المطلوبة
     return SuccessResponse(res, {
         message: "Order created successfully",
-        data: {
+        order_level: {
             orderDetails: { orderId, orderNumber, subtotal, deliveryFee, serviceFee, totalAmount },
             customerDetails: userInfo
         }
