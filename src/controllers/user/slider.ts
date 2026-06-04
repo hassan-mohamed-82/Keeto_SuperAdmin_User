@@ -1,19 +1,19 @@
-import { socialmedia } from "../../models/schema";
-import { db } from "../../models/connection";
-import { eq } from "drizzle-orm";
-import { SuccessResponse } from "../../utils/response";
-import { NotFound } from "../../Errors";
 import { Request, Response } from "express";
+import { db } from "../../models/connection";
+import { sliders } from "../../models/schema";
+import { eq } from "drizzle-orm";
+import { NotFound } from "../../Errors";
+import { SuccessResponse } from "../../utils/response";
 
-export const getSocialMedia = async (req: Request, res: Response) => {
+export const getSliders = async (req: Request, res: Response) => {
   const { resId } = req.params;
   if (!resId) {
     throw new NotFound("restaurant id");
   }
   const data = await db
     .select()
-    .from(socialmedia)
-    .where(eq(socialmedia.restaurantid, resId));
+    .from(sliders)
+    .where(eq(sliders.restaurantid, resId));
 
   return SuccessResponse(res, { data });
 }

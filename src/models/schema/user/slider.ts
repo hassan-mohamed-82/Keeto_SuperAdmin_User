@@ -8,10 +8,10 @@ import {
     int,
     boolean,
 } from "drizzle-orm/mysql-core";
-import { restaurants } from "./restaurants";
+import { restaurants } from "../admin/restaurants";
 import { sql } from "drizzle-orm";
 
-export const images = mysqlTable("images", {
+export const sliders = mysqlTable("sliders", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     restaurantid: char("restaurantid", { length: 36 })
         .references(() => restaurants.id)

@@ -14,10 +14,15 @@ import favlistRouter from "./favlist";
 import restaurantFeaturesRouter from "./restaurantFeatures";
 import ratingRouter from "./rating";
 import SocialMediaRouter from "./SocialMedia";
+import sliderRouter from "./slider";
+import imageRouter from "./image";
 
 const router = Router();
 router.use("/home", homeRouter);
 router.use("/auth", authRouter);
+router.use("/socialmedia", SocialMediaRouter);
+router.use("/slider", sliderRouter);
+router.use("/image", imageRouter);
 router.use(authenticated,authorizeRoles("user"));
 router.use("/profile", profileRouter);
 router.use("/restaurants", restaurantFeaturesRouter);
@@ -28,5 +33,5 @@ router.use("/favlist", favlistRouter);
 router.use("/rating", ratingRouter);
 router.use("/notifications", notificationRouter);
 router.use("/wallet", user_walletsRouter);
-router.use("/socialmedia", SocialMediaRouter);
+
 export default router;
