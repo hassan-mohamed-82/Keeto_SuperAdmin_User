@@ -157,6 +157,13 @@ const getallcategory = async (req, res) => {
     })
         .from(schema_1.categories)
         .where((0, drizzle_orm_1.eq)(schema_1.categories.status, "active"));
-    return (0, response_1.SuccessResponse)(res, { message: "Get all categories success", data: allCategories });
+    const allrestaurnat = await connection_1.db
+        .select({
+        id: schema_1.restaurants.id,
+        name: schema_1.restaurants.name,
+    })
+        .from(schema_1.restaurants)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"));
+    return (0, response_1.SuccessResponse)(res, { message: "Get all categories success", data: { categories: allCategories, restaurants: allrestaurnat } });
 };
 exports.getallcategory = getallcategory;

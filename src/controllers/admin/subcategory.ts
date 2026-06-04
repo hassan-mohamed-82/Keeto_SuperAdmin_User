@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { subcategories, categories } from "../../models/schema";
+import { subcategories, categories, restaurants } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -175,5 +175,12 @@ export const getallcategory=async(req:Request,res:Response)=>{
         })
         .from(categories)
         .where(eq(categories.status, "active"));
-    return SuccessResponse(res, { message: "Get all categories success", data: allCategories });
+    const allrestaurnat=await db
+        .select({
+            id: restaurants.id,
+            name: restaurants.name,
+        })
+        .from(restaurants)
+        .where(eq(restaurants.status, "active"));
+    return SuccessResponse(res, { message: "Get all categories success", data: { categories: allCategories, restaurants: allrestaurnat } });
 }
