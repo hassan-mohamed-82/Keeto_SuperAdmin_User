@@ -11,7 +11,7 @@ const connection_1 = require("../models/connection"); // مسار الاتصال
 const schema_1 = require("../models/schema"); // مسار الـ schema بتاعك
 const facebookLoginOrSignup = async (req, res) => {
     try {
-        const { accessToken, fcmToken } = req.body;
+        const { accessToken } = req.body;
         if (!accessToken) {
             return res.status(400).json({ success: false, message: "Access Token is required" });
         }
@@ -34,7 +34,6 @@ const facebookLoginOrSignup = async (req, res) => {
                     .set({
                     facebookId: fbUser.id,
                     photo: userByEmail[0].photo || fbPhotoUrl, // نحط صورة الفيس لو معندوش صورة
-                    fcmToken: fcmToken || userByEmail[0].fcmToken
                 })
                     .where((0, drizzle_orm_1.eq)(schema_1.users.id, userByEmail[0].id));
                 userRecord = { ...userByEmail[0], facebookId: fbUser.id, photo: userByEmail[0].photo || fbPhotoUrl };
@@ -47,7 +46,6 @@ const facebookLoginOrSignup = async (req, res) => {
                 email: fbUser.email || null,
                 facebookId: fbUser.id,
                 photo: fbPhotoUrl,
-                fcmToken: fcmToken || null,
                 isVerified: true, // متوثق من الفيس بوك
                 // phone & password will be null
             });

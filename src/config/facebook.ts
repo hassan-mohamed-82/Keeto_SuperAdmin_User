@@ -7,7 +7,7 @@ import { users } from "../models/schema"; // مسار الـ schema بتاعك
 
 export const facebookLoginOrSignup = async (req: Request, res: Response) => {
     try {
-        const { accessToken, fcmToken } = req.body;
+        const { accessToken } = req.body;
 
         if (!accessToken) {
             return res.status(400).json({ success: false, message: "Access Token is required" });
@@ -39,7 +39,6 @@ export const facebookLoginOrSignup = async (req: Request, res: Response) => {
                     .set({ 
                         facebookId: fbUser.id,
                         photo: userByEmail[0].photo || fbPhotoUrl, // نحط صورة الفيس لو معندوش صورة
-                        fcmToken: fcmToken || userByEmail[0].fcmToken
                     })
                     .where(eq(users.id, userByEmail[0].id));
                 
@@ -54,7 +53,6 @@ export const facebookLoginOrSignup = async (req: Request, res: Response) => {
                 email: fbUser.email || null,
                 facebookId: fbUser.id,
                 photo: fbPhotoUrl,
-                fcmToken: fcmToken || null,
                 isVerified: true, // متوثق من الفيس بوك
                 // phone & password will be null
             });
