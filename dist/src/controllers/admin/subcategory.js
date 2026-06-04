@@ -9,7 +9,7 @@ const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
 const createSubcategory = async (req, res) => {
-    const { name, nameAr, nameFr, categoryId, priority, status } = req.body;
+    const { name, nameAr, nameFr, categoryId, priority, status, restaurantId } = req.body;
     if (!name || !nameAr || !nameFr || !categoryId) {
         throw new BadRequest_1.BadRequest("Subcategory name, nameAr, nameFr, and category ID are required");
     }
@@ -31,6 +31,7 @@ const createSubcategory = async (req, res) => {
         categoryId,
         priority: priority || "low",
         status: status || "active",
+        restaurantId: restaurantId || null,
     });
     return (0, response_1.SuccessResponse)(res, { message: "Create subcategory success", data: { id } }, 201);
 };

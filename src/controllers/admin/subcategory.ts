@@ -8,7 +8,7 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
 export const createSubcategory = async (req: Request, res: Response) => {
-    const { name, nameAr, nameFr, categoryId, priority, status } = req.body;
+    const { name, nameAr, nameFr, categoryId, priority, status,restaurantId } = req.body;
 
     if (!name || !nameAr || !nameFr || !categoryId) {
         throw new BadRequest("Subcategory name, nameAr, nameFr, and category ID are required");
@@ -37,6 +37,7 @@ export const createSubcategory = async (req: Request, res: Response) => {
         categoryId,
         priority: priority || "low",
         status: status || "active",
+        restaurantId: restaurantId || null,
     });
 
     return SuccessResponse(res, { message: "Create subcategory success", data: { id } }, 201);
