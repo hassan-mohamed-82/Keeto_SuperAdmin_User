@@ -4,7 +4,8 @@ import { db } from "../../models/connection";
 import { cities, countries, users, userWallets, zones, } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { UnauthorizedError } from "../../Errors";
+import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
+import bcrypt from "bcrypt";
 
 export const getProfile = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -65,6 +66,43 @@ export const updateProfile = async (req: Request | any, res: Response) => {
 
 
 export const changepassword = async (req: Request | any, res: Response) => {
+ if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id; 
+     const { oldPassword, newPassword } = req.body;
 
-    
+    if (!userId) {
+        throw new UnauthorizedError("Unauthorized");
+    }
+
+    if (!oldPassword || !newPassword) {
+        throw new BadRequest("Old password and new password are required");
+    }
+
+    const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+    if (!user) {
+        throw new NotFound("Admin profile not found");
+    }
+
+    if (!user.password) {
+        throw new BadRequest("Cannot change password for this account");
+    }
+    const isPasswordValid = await bcrypt.compare(oldPassword, user.password);
+    if (!isPasswordValid) {
+        throw new BadRequest("Invalid old password");
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await db
+        .update(users)
+        .set({ password: hashedPassword })
+        .where(eq(users.id, userId));
+
+    return SuccessResponse(res, { message: "Password changed successfully" });
 }

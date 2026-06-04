@@ -9,4 +9,5 @@ const router = (0, express_1.Router)();
 router.get("/", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(profile_1.getProfile));
 router.put("/", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(profile_1.updateProfile));
 router.put("/fcm-token", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(fcmToken_1.updateFcmToken));
+router.put("/cahange", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(profile_1.changepassword));
 exports.default = router;
