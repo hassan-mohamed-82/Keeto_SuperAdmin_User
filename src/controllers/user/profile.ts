@@ -62,3 +62,9 @@ export const updateProfile = async (req: Request | any, res: Response) => {
 
     return SuccessResponse(res, { message: "Profile updated successfully" });
 };
+
+
+export const changepassword = async (req: Request | any, res: Response) => {
+
+    
+}

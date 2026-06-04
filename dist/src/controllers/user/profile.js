@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateProfile = exports.getProfile = void 0;
+exports.changepassword = exports.updateProfile = exports.getProfile = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -57,3 +57,6 @@ const updateProfile = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Profile updated successfully" });
 };
 exports.updateProfile = updateProfile;
+const changepassword = async (req, res) => {
+};
+exports.changepassword = changepassword;
