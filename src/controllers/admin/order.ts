@@ -51,6 +51,12 @@ export const getOrderDetails = async (req: Request, res: Response) => {
             orderDate: orders.createdAt,
             totalAmount: orders.totalAmount,
             orderStatus: orders.status,
+            subtotal:orders.subtotal,
+            deliveryFee:orders.deliveryFee,
+            serviceFee:orders.serviceFee,
+            paymentMethod:orders.paymentMethod,
+            
+
             
             customerName: users.name,
             customerPhone: users.phone,

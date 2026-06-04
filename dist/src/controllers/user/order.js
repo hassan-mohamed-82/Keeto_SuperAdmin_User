@@ -126,6 +126,7 @@ const checkout = async (req, res) => {
     // ==========================================
     // 10. Execute Order (Transaction)
     // ==========================================
+    const localTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
     await connection_1.db.transaction(async (tx) => {
         // أ. خصم محفظة العميل (لو الدفع محفظة)
         // 👇 التعديل 3: التحقق هنا كمان من الكلمة العربي
@@ -143,7 +144,8 @@ const checkout = async (req, res) => {
                 amount: totalAmount.toString(),
                 balanceBefore: balanceBefore.toString(),
                 reference: orderNumber,
-                status: "approved"
+                status: "approved",
+                createdAt: localTime
             });
         }
         // ب. تسجيل بيانات الأوردر نفسه
@@ -163,7 +165,8 @@ const checkout = async (req, res) => {
             serviceFee: serviceFee.toString(),
             appCommission: appCommission.toString(),
             totalAmount: totalAmount.toString(),
-            status: "pending"
+            status: "pending",
+            createdAt: localTime
         });
         // ج. تفريغ الكارت وتسجيل الأصناف
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
@@ -212,7 +215,8 @@ const checkout = async (req, res) => {
             balanceAfter: newRestBalance.toString(),
             method: paymentMethod,
             reference: orderNumber,
-            note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment"
+            note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment",
+            createdAt: localTime
         });
     });
     // ==========================================
