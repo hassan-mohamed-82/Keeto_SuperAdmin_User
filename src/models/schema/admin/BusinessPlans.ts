@@ -1,13 +1,13 @@
 import { mysqlTable, varchar, char, timestamp, decimal, boolean, mysqlEnum } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
-import { restaurants} from "./restaurants"; // تأكد من استيراد جدول المطاعم بشكل صحيح
+import { restaurants } from "./restaurants"; 
 
 export const restaurantBusinessPlans = mysqlTable("restaurant_business_plans", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     restaurantId: char("restaurant_id", { length: 36 }).references(() => restaurants.id).notNull(),
 
-    // نوع المنصة
-    platformType: mysqlEnum("platform_type", ["online_order", "food_aggregator", "mykeeto"]).notNull(),
+    // 💡 التعديل هنا: زودنا "pos"
+    platformType: mysqlEnum("platform_type", ["online_order", "food_aggregator", "mykeeto", "pos"]).notNull(),
 
     // الاشتراكات
     isMonthlyActive: boolean("is_monthly_active").default(false),

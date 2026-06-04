@@ -3,12 +3,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.restaurantBusinessPlans = void 0;
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
-const restaurants_1 = require("./restaurants"); // تأكد من استيراد جدول المطاعم بشكل صحيح
+const restaurants_1 = require("./restaurants");
 exports.restaurantBusinessPlans = (0, mysql_core_1.mysqlTable)("restaurant_business_plans", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 }).references(() => restaurants_1.restaurants.id).notNull(),
-    // نوع المنصة
-    platformType: (0, mysql_core_1.mysqlEnum)("platform_type", ["online_order", "food_aggregator", "mykeeto"]).notNull(),
+    // 💡 التعديل هنا: زودنا "pos"
+    platformType: (0, mysql_core_1.mysqlEnum)("platform_type", ["online_order", "food_aggregator", "mykeeto", "pos"]).notNull(),
     // الاشتراكات
     isMonthlyActive: (0, mysql_core_1.boolean)("is_monthly_active").default(false),
     monthlyAmount: (0, mysql_core_1.decimal)("monthly_amount", { precision: 10, scale: 2 }).default("0.00"),
