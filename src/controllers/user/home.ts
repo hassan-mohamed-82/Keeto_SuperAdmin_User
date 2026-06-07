@@ -663,27 +663,47 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         throw new BadRequest("please enter your search term");
     }
 
-    // 1. تنظيف وتوحيد نص البحث المرسل (حذف الشرطات، المسافات، وعلامة ')
+    // 1. تنظيف وتوحيد نص البحث المرسل (حذف الشرطات، المسافات، الأبوستروف، وعلامة &)
     const cleanQuery = query.trim().toLowerCase();
-    const normalizedQuery = cleanQuery.replace(/[-\s']/g, ""); // يحول "mataam-wast-albalad" إلى "mataamwastalbalad"
+    
+    // تحويل الـ "-" أو "_" أو "&" في البحث إلى نص مبسط
+    const normalizedQuery = cleanQuery.replace(/[-\s'&_]/g, "");
+    
+    // const normalizedQuery = cleanQuery.replace(/[-\s']/g, ""); // يحول "mataam-wast-albalad" إلى "mataamwastalbalad"
+
     const searchTerm = `%${cleanQuery}%`;
     const normalizedSearchTerm = `%${normalizedQuery}%`;
 
-    // 2. بناء شروط دقيقة تطهر بيانات قاعدة البيانات من الفواصل والعلامات أثناء المقارنة
+    // 2. بناء شروط دقيقة تطهر بيانات قاعدة البيانات من الفواصل والعلامات (بما فيها &) أثناء المقارنة
     const restaurantConditions = [
-        // أ) تطابق عبر الـ LIKE العادي (بشرط ألا يكون الحقل فارغاً منقوعاً)
+        // أ) تطابق عبر الـ LIKE العادي للإنجليزي والفرنسي والعربي
         and(sql`${restaurants.name} != ''`, like(restaurants.name, searchTerm)),
         and(sql`${restaurants.nameAr} != ''`, like(restaurants.nameAr, searchTerm)),
         and(sql`${restaurants.nameFr} != ''`, like(restaurants.nameFr, searchTerm)),
 
-        // ب) التطابق التام الذكي بعد تنظيف (المسافات، الشرطات، وعلامة ') - حل مشكلة الـ Slugs والأبوستروف
-        sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
-        sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
-        sql`REPLACE(REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
+        // ب) التطابق التام الذكي بعد تنظيف (المسافات، الشرطات، الأبوستروف، وعلامة &)
+        sql`REPLACE(REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", ''), '&', '') = ${normalizedQuery}`,
+        sql`REPLACE(REPLACE(REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', ''), "'", ''), '&', '') = ${normalizedQuery}`,
+        sql`REPLACE(REPLACE(REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', ''), "'", ''), '&', '') = ${normalizedQuery}`,
 
-        // ج) احتياطياً: في حال كان الـ Slug جزءاً من اسم أطول مخزن في قاعدة البيانات
-        sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", '') LIKE ${normalizedSearchTerm}`
+        // ج) التطابق الجزئي (LIKE) بعد التنظيف الكامل للجدول لحل مشكلة الـ Slugs المعقدة
+        sql`REPLACE(REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", ''), '&', '') LIKE ${normalizedSearchTerm}`
     ];
+
+    //     const restaurantConditions = [
+    //     // أ) تطابق عبر الـ LIKE العادي (بشرط ألا يكون الحقل فارغاً منقوعاً)
+    //     and(sql`${restaurants.name} != ''`, like(restaurants.name, searchTerm)),
+    //     and(sql`${restaurants.nameAr} != ''`, like(restaurants.nameAr, searchTerm)),
+    //     and(sql`${restaurants.nameFr} != ''`, like(restaurants.nameFr, searchTerm)),
+
+    //     // ب) التطابق التام الذكي بعد تنظيف (المسافات، الشرطات، وعلامة ') - حل مشكلة الـ Slugs والأبوستروف
+    //     sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
+    //     sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
+    //     sql`REPLACE(REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
+
+    //     // ج) احتياطياً: في حال كان الـ Slug جزءاً من اسم أطول مخزن في قاعدة البيانات
+    //     sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", '') LIKE ${normalizedSearchTerm}`
+    // ];
 
     // 3. جلب البيانات بناءً على شروط اسم المطعم الصارمة فقط
     const flatResults = await db
@@ -706,11 +726,11 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         .where(
             and(
                 eq(restaurants.status, "active"),
-                or(...restaurantConditions) // تطبيق الفلترة الصارمة والذكية هنا
+                or(...restaurantConditions) 
             )
         );
 
-    // 4. تجميع البيانات المجلوبة (Grouping Logic) من جداول مفلطحة إلى شجرة مرابطة
+    // 4. تجميع البيانات المجلوبة (Grouping Logic)
     const restaurantsMap = new Map();
 
     for (const row of flatResults) {
@@ -721,7 +741,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
         if (!r || !r.id) continue;
 
-        // تجميع المطعم
         if (!restaurantsMap.has(r.id)) {
             restaurantsMap.set(r.id, {
                 ...r,
@@ -731,7 +750,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
         const currentRestaurant = restaurantsMap.get(r.id);
 
-        // تجميع الأكلات (Food)
         if (f && f.id) {
             if (!currentRestaurant.food.has(f.id)) {
                 currentRestaurant.food.set(f.id, {
@@ -742,7 +760,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
             const currentFood = currentRestaurant.food.get(f.id);
 
-            // تجميع الأحجام/الأنواع (Variations)
             if (v && v.id) {
                 if (!currentFood.variations.has(v.id)) {
                     currentFood.variations.set(v.id, {
@@ -753,7 +770,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
                 const currentVariation = currentFood.variations.get(v.id);
 
-                // تجميع الخيارات الإضافية (Options)
                 if (o && o.id) {
                     const exists = currentVariation.options.some(
                         (opt: any) => opt.id === o.id
@@ -767,7 +783,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         }
     }
 
-    // 5. تحويل الـ Maps إلى Arrays ليكون الـ Response جاهزاً ونظيفاً للفرونت إند
+    // 5. تحويل الـ Maps إلى Arrays
     const formattedData = Array.from(restaurantsMap.values()).map((restaurant: any) => ({
         ...restaurant,
         food: Array.from(restaurant.food.values()).map((foodItem: any) => ({
