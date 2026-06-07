@@ -29,6 +29,8 @@ export const cartItems = mysqlTable("cart_items", {
     // 🔥 variations محفوظة بشكل snapshot
     variations: json("variations"),
 
+    note: varchar("note", { length: 500 }),
+
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

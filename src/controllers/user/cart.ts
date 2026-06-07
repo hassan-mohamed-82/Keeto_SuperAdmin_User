@@ -40,7 +40,7 @@ const deepParseJSON = (data: any): any => {
 ========================================= */
 export const addToCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
-    const { foodId, quantity = 1, variations = [] } = req.body;
+    const { foodId, quantity = 1, variations = [], note } = req.body;
 
     const safeVariations = Array.isArray(variations) ? variations : [];
 
@@ -124,7 +124,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
                 quantity: newQty,
                 unitPrice: unitPrice.toString(),
                 totalPrice: (unitPrice * newQty).toString(),
-                variations: JSON.stringify(normalized) 
+                variations: JSON.stringify(normalized),
+                // update note only if provided
+                ...(note !== undefined ? { note: note || null } : {})
             })
             .where(eq(cartItems.id, existingSame.id));
 
@@ -137,7 +139,8 @@ export const addToCart = async (req: Request | any, res: Response) => {
             quantity,
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * quantity).toString(),
-            variations: JSON.stringify(normalized)
+            variations: JSON.stringify(normalized),
+            note: note || null
         });
     }
 
@@ -167,7 +170,8 @@ export const getCart = async (req: Request | any, res: Response) => {
             quantity: cartItems.quantity,
             unitPrice: cartItems.unitPrice,
             totalPrice: cartItems.totalPrice,
-            variations: cartItems.variations
+            variations: cartItems.variations,
+            note: cartItems.note
         })
         .from(cartItems)
         .leftJoin(food, eq(cartItems.foodId, food.id))
@@ -225,7 +229,8 @@ export const getCart = async (req: Request | any, res: Response) => {
                 quantity: item.quantity,
                 unitPrice: item.unitPrice,
                 totalPrice: item.totalPrice,
-                variations: details
+                variations: details,
+                note: item.note || null
             };
         })
     );
@@ -241,7 +246,7 @@ export const getCart = async (req: Request | any, res: Response) => {
 export const updateCartItem = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
-    const { quantity, variations } = req.body;
+    const { quantity, variations, note } = req.body;
 
     const [cartItem] = await db
         .select()
@@ -300,7 +305,9 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
             quantity: qty,
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * qty).toString(),
-            variations: JSON.stringify(safeVariations)
+            variations: JSON.stringify(safeVariations),
+            // update note only if provided
+            ...(note !== undefined ? { note: note || null } : {})
         })
         .where(and(eq(cartItems.id, cartItemId), eq(cartItems.userId, userId)));
 

@@ -23,7 +23,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id; 
     
-    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId } = req.body;
+    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note } = req.body;
 
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
@@ -92,7 +92,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             quantity: item.quantity,
             basePrice: basePrice.toString(),
             variationsPrice: varPrice.toString(),
-            totalPrice: itemTotal.toString()
+            totalPrice: itemTotal.toString(),
+            note: item.note || null
         });
     }
 
@@ -203,6 +204,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             serviceFee: serviceFee.toString(),
             appCommission: appCommission.toString(),
             totalAmount: totalAmount.toString(),
+            note: note || null,
             status: "pending",
             createdAt: localTime
         });
@@ -379,6 +381,8 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             serviceFee: orders.serviceFee,
             totalAmount: orders.totalAmount,
 
+            note: orders.note,
+
             restaurantName: restaurants.name,
             restaurantImage: restaurants.logo
         })
@@ -398,7 +402,8 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             quantity: orderItems.quantity,
             basePrice: orderItems.basePrice,
             variationsPrice: orderItems.variationsPrice,
-            totalPrice: orderItems.totalPrice
+            totalPrice: orderItems.totalPrice,
+            note: orderItems.note
         })
         .from(orderItems)
         .leftJoin(food, eq(orderItems.foodId, food.id))
