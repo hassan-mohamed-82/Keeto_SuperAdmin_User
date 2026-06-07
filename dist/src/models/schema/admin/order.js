@@ -48,6 +48,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     ]).default("pending"),
     // 👇 وده حقل سبب الإلغاء عشان المطعم يكتبه
     cancelReason: (0, mysql_core_1.text)("cancel_reason"),
+    note: (0, mysql_core_1.text)("note"),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });
@@ -66,4 +67,5 @@ exports.orderItems = (0, mysql_core_1.mysqlTable)("order_items", {
     basePrice: (0, mysql_core_1.decimal)("base_price", { precision: 10, scale: 2 }).notNull(),
     variationsPrice: (0, mysql_core_1.decimal)("variations_price", { precision: 10, scale: 2 }).default("0.00"),
     totalPrice: (0, mysql_core_1.decimal)("total_price", { precision: 10, scale: 2 }).notNull(),
+    note: (0, mysql_core_1.text)("note"),
 });

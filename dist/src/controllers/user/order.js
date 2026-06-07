@@ -10,6 +10,18 @@ const NotFound_1 = require("../../Errors/NotFound");
 const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
 const notifications_1 = require("../../utils/notifications");
+// 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
+const formatToEgyptTime = (date) => {
+    return new Intl.DateTimeFormat("ar-EG", {
+        timeZone: "Africa/Cairo",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+    }).format(date);
+};
 // ==========================================
 // 1. إنشاء الطلب (Checkout)
 // ==========================================
@@ -17,7 +29,7 @@ const checkout = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
-    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId } = req.body;
+    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note } = req.body;
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
@@ -25,7 +37,6 @@ const checkout = async (req, res) => {
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest_1.BadRequest("Invalid order source");
     }
-    // 👇 التعديل 1: إضافة الكلمات العربي هنا عشان تعدي من الـ Validation
     const validPaymentMethods = ["cash_on_delivery", "visa", "wallet", "الدفع عند الاستلام", "بطاقة", "محفظتى"];
     if (!validPaymentMethods.includes(paymentMethod)) {
         throw new BadRequest_1.BadRequest("Invalid payment method");
@@ -75,7 +86,8 @@ const checkout = async (req, res) => {
             quantity: item.quantity,
             basePrice: basePrice.toString(),
             variationsPrice: varPrice.toString(),
-            totalPrice: itemTotal.toString()
+            totalPrice: itemTotal.toString(),
+            note: item.note || null
         });
     }
     const serviceFee = plan ? parseFloat(plan.serviceFee || "0") : 0;
@@ -110,7 +122,6 @@ const checkout = async (req, res) => {
     // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
-    // 👇 التعديل 2: إضافة الدفع بالمحفظة بالعربي للشرط ده
     if (paymentMethod === "wallet" || paymentMethod === "محفظتى") {
         const walletResult = await connection_1.db.select().from(schema_1.userWallets).where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId)).limit(1);
         userWallet = walletResult[0];
@@ -126,10 +137,10 @@ const checkout = async (req, res) => {
     // ==========================================
     // 10. Execute Order (Transaction)
     // ==========================================
-    const localTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
+    // 👇 2. التعديل الجذري: استخدام التوقيت العالمي الموحد في قاعدة البيانات 
+    const now = new Date();
     await connection_1.db.transaction(async (tx) => {
-        // أ. خصم محفظة العميل (لو الدفع محفظة)
-        // 👇 التعديل 3: التحقق هنا كمان من الكلمة العربي
+        // أ. خصم محفظة العميل
         if ((paymentMethod === "wallet" || paymentMethod === "محفظتى") && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance);
             const newBalance = balanceBefore - totalAmount;
@@ -145,7 +156,7 @@ const checkout = async (req, res) => {
                 balanceBefore: balanceBefore.toString(),
                 reference: orderNumber,
                 status: "approved",
-                createdAt: localTime
+                createdAt: now // 👈 تسجيل بـ UTC
             });
         }
         // ب. تسجيل بيانات الأوردر نفسه
@@ -165,8 +176,9 @@ const checkout = async (req, res) => {
             serviceFee: serviceFee.toString(),
             appCommission: appCommission.toString(),
             totalAmount: totalAmount.toString(),
+            note: note || null,
             status: "pending",
-            createdAt: localTime
+            createdAt: now // 👈 تسجيل بـ UTC
         });
         // ج. تفريغ الكارت وتسجيل الأصناف
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
@@ -189,7 +201,6 @@ const checkout = async (req, res) => {
         const appDues = appCommission + serviceFee;
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
-        // 👇 التعديل 4: معالجة حالة الكاش سواء جات بالإنجليزي أو العربي
         if (paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام") {
             newRestBalance -= appDues;
             newCollectedCash += totalAmount;
@@ -204,7 +215,6 @@ const checkout = async (req, res) => {
             totalEarning: (currentTotalEarning + restaurantEarning).toString()
         })
             .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId));
-        // 👇 التعديل 5: تسجيل حركة محفظة المطعم مع مراعاة الكلمة العربي
         const isCash = paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام";
         await tx.insert(schema_1.restaurantWalletTransactions).values({
             id: (0, uuid_1.v4)(),
@@ -216,28 +226,38 @@ const checkout = async (req, res) => {
             method: paymentMethod,
             reference: orderNumber,
             note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment",
-            createdAt: localTime
+            createdAt: now // 👈 تسجيل بـ UTC
         });
     });
     // ==========================================
     // 11. Send Notification to Restaurant
     // ==========================================
+    // 👇 3. فرمتة الوقت لنص الإشعار فقط، وإرسال الـ ISO Date في الـ Payload
+    const cairoTimeFormatted = formatToEgyptTime(now);
     await (0, notifications_1.sendPushNotification)({
         recipientType: "restaurant",
         recipientId: restaurantId,
-        title: "New Order Received! 🛒",
-        body: `You have received a new order #${orderNumber} for ${totalAmount}.`,
+        title: "طلب جديد! 🛒",
+        body: `تم استلام طلب جديد #${orderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
         data: {
             orderId,
             orderNumber,
-            type: "new_order"
+            type: "new_order",
+            createdAt: now.toISOString() // 👈 بنبعت الوقت للفرونت إند بـ صيغة ISO عشان يتفهم صح هناك
         }
     });
-    // استخدام order_level لتطابق استجابة الـ API مع المعايير المطلوبة
     return (0, response_1.SuccessResponse)(res, {
         message: "Order created successfully",
         order_level: {
-            orderDetails: { orderId, orderNumber, subtotal, deliveryFee, serviceFee, totalAmount },
+            orderDetails: {
+                orderId,
+                orderNumber,
+                subtotal,
+                deliveryFee,
+                serviceFee,
+                totalAmount,
+                createdAt: now.toISOString() // 👈 بنبعتها كمان في الـ API Response 
+            },
             customerDetails: userInfo
         }
     });
@@ -319,6 +339,7 @@ const getOrderDetails = async (req, res) => {
         deliveryFee: schema_1.orders.deliveryFee,
         serviceFee: schema_1.orders.serviceFee,
         totalAmount: schema_1.orders.totalAmount,
+        note: schema_1.orders.note,
         restaurantName: schema_1.restaurants.name,
         restaurantImage: schema_1.restaurants.logo
     })
@@ -336,7 +357,8 @@ const getOrderDetails = async (req, res) => {
         quantity: schema_1.orderItems.quantity,
         basePrice: schema_1.orderItems.basePrice,
         variationsPrice: schema_1.orderItems.variationsPrice,
-        totalPrice: schema_1.orderItems.totalPrice
+        totalPrice: schema_1.orderItems.totalPrice,
+        note: schema_1.orderItems.note
     })
         .from(schema_1.orderItems)
         .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.orderItems.foodId, schema_1.food.id))

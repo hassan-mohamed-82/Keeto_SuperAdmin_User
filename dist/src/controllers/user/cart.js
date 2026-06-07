@@ -33,7 +33,7 @@ const deepParseJSON = (data) => {
 ========================================= */
 const addToCart = async (req, res) => {
     const userId = req.user?.id;
-    const { foodId, quantity = 1, variations = [] } = req.body;
+    const { foodId, quantity = 1, variations = [], note } = req.body;
     const safeVariations = Array.isArray(variations) ? variations : [];
     const [itemFood] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.id, foodId)).limit(1);
     if (!itemFood)
@@ -102,7 +102,9 @@ const addToCart = async (req, res) => {
             quantity: newQty,
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * newQty).toString(),
-            variations: JSON.stringify(normalized)
+            variations: JSON.stringify(normalized),
+            // update note only if provided
+            ...(note !== undefined ? { note: note || null } : {})
         })
             .where((0, drizzle_orm_1.eq)(schema_1.cartItems.id, existingSame.id));
     }
@@ -115,7 +117,8 @@ const addToCart = async (req, res) => {
             quantity,
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * quantity).toString(),
-            variations: JSON.stringify(normalized)
+            variations: JSON.stringify(normalized),
+            note: note || null
         });
     }
     return (0, response_1.SuccessResponse)(res, {
@@ -143,7 +146,8 @@ const getCart = async (req, res) => {
         quantity: schema_1.cartItems.quantity,
         unitPrice: schema_1.cartItems.unitPrice,
         totalPrice: schema_1.cartItems.totalPrice,
-        variations: schema_1.cartItems.variations
+        variations: schema_1.cartItems.variations,
+        note: schema_1.cartItems.note
     })
         .from(schema_1.cartItems)
         .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, schema_1.food.id))
@@ -193,7 +197,8 @@ const getCart = async (req, res) => {
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             totalPrice: item.totalPrice,
-            variations: details
+            variations: details,
+            note: item.note || null
         };
     }));
     return (0, response_1.SuccessResponse)(res, {
@@ -207,7 +212,7 @@ exports.getCart = getCart;
 const updateCartItem = async (req, res) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
-    const { quantity, variations } = req.body;
+    const { quantity, variations, note } = req.body;
     const [cartItem] = await connection_1.db
         .select()
         .from(schema_1.cartItems)
@@ -259,7 +264,9 @@ const updateCartItem = async (req, res) => {
         quantity: qty,
         unitPrice: unitPrice.toString(),
         totalPrice: (unitPrice * qty).toString(),
-        variations: JSON.stringify(safeVariations)
+        variations: JSON.stringify(safeVariations),
+        // update note only if provided
+        ...(note !== undefined ? { note: note || null } : {})
     })
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.id, cartItemId), (0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId)));
     return (0, response_1.SuccessResponse)(res, {
