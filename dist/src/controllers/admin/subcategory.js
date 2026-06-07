@@ -44,6 +44,7 @@ const getAllSubcategories = async (req, res) => {
         nameAr: schema_1.subcategories.nameAr,
         nameFr: schema_1.subcategories.nameFr,
         categoryId: schema_1.subcategories.categoryId,
+        restaurantId: schema_1.subcategories.restaurantId,
         priority: schema_1.subcategories.priority,
         status: schema_1.subcategories.status,
         createdAt: schema_1.subcategories.createdAt,
@@ -55,9 +56,17 @@ const getAllSubcategories = async (req, res) => {
             nameFr: schema_1.categories.nameFr,
             status: schema_1.categories.status,
         },
+        restaurant: {
+            id: schema_1.restaurants.id,
+            name: schema_1.restaurants.name,
+            nameAr: schema_1.restaurants.nameAr,
+            nameFr: schema_1.restaurants.nameFr,
+            status: schema_1.restaurants.status,
+        },
     })
         .from(schema_1.subcategories)
-        .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.subcategories.categoryId, schema_1.categories.id));
+        .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.subcategories.categoryId, schema_1.categories.id))
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.subcategories.restaurantId, schema_1.restaurants.id));
     return (0, response_1.SuccessResponse)(res, { message: "Get all subcategories success", data: allSubcategories });
 };
 exports.getAllSubcategories = getAllSubcategories;
@@ -70,6 +79,7 @@ const getSubcategoryById = async (req, res) => {
         nameAr: schema_1.subcategories.nameAr,
         nameFr: schema_1.subcategories.nameFr,
         categoryId: schema_1.subcategories.categoryId,
+        restaurantId: schema_1.subcategories.restaurantId,
         priority: schema_1.subcategories.priority,
         status: schema_1.subcategories.status,
         createdAt: schema_1.subcategories.createdAt,
@@ -81,9 +91,17 @@ const getSubcategoryById = async (req, res) => {
             nameFr: schema_1.categories.nameFr,
             status: schema_1.categories.status,
         },
+        restaurant: {
+            id: schema_1.restaurants.id,
+            name: schema_1.restaurants.name,
+            nameAr: schema_1.restaurants.nameAr,
+            nameFr: schema_1.restaurants.nameFr,
+            status: schema_1.restaurants.status,
+        },
     })
         .from(schema_1.subcategories)
         .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.subcategories.categoryId, schema_1.categories.id))
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.subcategories.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.eq)(schema_1.subcategories.id, id))
         .limit(1);
     if (!subcategory[0]) {

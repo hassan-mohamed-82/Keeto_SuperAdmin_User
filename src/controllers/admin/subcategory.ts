@@ -51,6 +51,7 @@ export const getAllSubcategories = async (req: Request, res: Response) => {
             nameAr: subcategories.nameAr,
             nameFr: subcategories.nameFr,
             categoryId: subcategories.categoryId,
+            restaurantId: subcategories.restaurantId,
             priority: subcategories.priority,
             status: subcategories.status,
             createdAt: subcategories.createdAt,
@@ -62,9 +63,17 @@ export const getAllSubcategories = async (req: Request, res: Response) => {
                 nameFr: categories.nameFr,
                 status: categories.status,
             },
+            restaurant: {
+                id: restaurants.id,
+                name: restaurants.name,
+                nameAr: restaurants.nameAr,
+                nameFr: restaurants.nameFr,
+                status: restaurants.status,
+            },
         })
         .from(subcategories)
-        .leftJoin(categories, eq(subcategories.categoryId, categories.id));
+        .leftJoin(categories, eq(subcategories.categoryId, categories.id))
+        .leftJoin(restaurants, eq(subcategories.restaurantId, restaurants.id));
 
     return SuccessResponse(res, { message: "Get all subcategories success", data: allSubcategories });
 };
@@ -79,6 +88,7 @@ export const getSubcategoryById = async (req: Request, res: Response) => {
             nameAr: subcategories.nameAr,
             nameFr: subcategories.nameFr,
             categoryId: subcategories.categoryId,
+            restaurantId: subcategories.restaurantId,
             priority: subcategories.priority,
             status: subcategories.status,
             createdAt: subcategories.createdAt,
@@ -90,9 +100,17 @@ export const getSubcategoryById = async (req: Request, res: Response) => {
                 nameFr: categories.nameFr,
                 status: categories.status,
             },
+            restaurant: {
+                id: restaurants.id,
+                name: restaurants.name,
+                nameAr: restaurants.nameAr,
+                nameFr: restaurants.nameFr,
+                status: restaurants.status,
+            },
         })
         .from(subcategories)
         .leftJoin(categories, eq(subcategories.categoryId, categories.id))
+        .leftJoin(restaurants, eq(subcategories.restaurantId, restaurants.id))
         .where(eq(subcategories.id, id))
         .limit(1);
 
