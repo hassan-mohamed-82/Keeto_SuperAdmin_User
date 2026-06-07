@@ -8,7 +8,7 @@ const Users_1 = require("../user/Users");
 const order_1 = require("./order");
 exports.coupons = (0, mysql_core_1.mysqlTable)("coupons", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
-    // The promo code users type in (unique per restaurant)
+    // The promo code users type in (unique per restaurant or global)
     code: (0, mysql_core_1.varchar)("code", { length: 50 }).notNull(),
     name: (0, mysql_core_1.varchar)("name", { length: 255 }).notNull(),
     nameAr: (0, mysql_core_1.varchar)("name_ar", { length: 255 }),
@@ -32,6 +32,7 @@ exports.coupons = (0, mysql_core_1.mysqlTable)("coupons", {
     startDate: (0, mysql_core_1.timestamp)("start_date"),
     endDate: (0, mysql_core_1.timestamp)("end_date"),
     isActive: (0, mysql_core_1.boolean)("is_active").default(true),
+    isGlobal: (0, mysql_core_1.boolean)("is_global").default(false).notNull(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

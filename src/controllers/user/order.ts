@@ -3,7 +3,7 @@ import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { 
     orders, orderItems, restaurantBusinessPlans, food, restaurants, 
-    restaurantWallets, restaurantWalletTransactions, // 👈 ضفنا جداول محفظة المطعم
+    restaurantWallets, restaurantWalletTransactions, 
     restaurantZoneDeliveryFees, zoneDeliveryFees, restaurantSettings, 
     restaurantSchedules, cartItems, users, addresses, branches,
     userWallets, userWalletTransactions 
@@ -15,6 +15,19 @@ import { NotFound } from "../../Errors/NotFound";
 import { v4 as uuidv4 } from "uuid";
 import { UnauthorizedError } from "../../Errors";
 import { sendPushNotification } from "../../utils/notifications";
+
+// 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
+const formatToEgyptTime = (date: Date) => {
+    return new Intl.DateTimeFormat("ar-EG", { // غيرتها لـ ar-EG عشان تطلع بالعربي لو حابة
+        timeZone: "Africa/Cairo",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+    }).format(date);
+};
 
 // ==========================================
 // 1. إنشاء الطلب (Checkout)
@@ -28,13 +41,11 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
-    
     const validOrderSources = ["online_order", "food_aggregator", "mykeeto"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest("Invalid order source");
     }
 
-    // 👇 التعديل 1: إضافة الكلمات العربي هنا عشان تعدي من الـ Validation
     const validPaymentMethods = ["cash_on_delivery", "visa", "wallet", "الدفع عند الاستلام", "بطاقة", "محفظتى"];
     if (!validPaymentMethods.includes(paymentMethod)) {
         throw new BadRequest("Invalid payment method");
@@ -142,7 +153,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
-    // 👇 التعديل 2: إضافة الدفع بالمحفظة بالعربي للشرط ده
     if (paymentMethod === "wallet" || paymentMethod === "محفظتى") {
         const walletResult = await db.select().from(userWallets).where(eq(userWallets.userId, userId)).limit(1);
         userWallet = walletResult[0];
@@ -161,11 +171,12 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 10. Execute Order (Transaction)
     // ==========================================
-    const localTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
+    
+    // 👇 2. التعديل الجذري: استخدام التوقيت العالمي الموحد في قاعدة البيانات 
+    const now = new Date(); 
+
     await db.transaction(async (tx) => {
-        
-        // أ. خصم محفظة العميل (لو الدفع محفظة)
-        // 👇 التعديل 3: التحقق هنا كمان من الكلمة العربي
+        // أ. خصم محفظة العميل
         if ((paymentMethod === "wallet" || paymentMethod === "محفظتى") && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance as string);
             const newBalance = balanceBefore - totalAmount;
@@ -183,7 +194,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                 balanceBefore: balanceBefore.toString(),
                 reference: orderNumber,
                 status: "approved",
-                createdAt: localTime
+                createdAt: now // 👈 تسجيل بـ UTC
             });
         }
 
@@ -206,7 +217,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             totalAmount: totalAmount.toString(),
             note: note || null,
             status: "pending",
-            createdAt: localTime
+            createdAt: now // 👈 تسجيل بـ UTC
         });
 
         // ج. تفريغ الكارت وتسجيل الأصناف
@@ -235,7 +246,6 @@ export const checkout = async (req: Request | any, res: Response) => {
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
 
-        // 👇 التعديل 4: معالجة حالة الكاش سواء جات بالإنجليزي أو العربي
         if (paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام") {
             newRestBalance -= appDues;
             newCollectedCash += totalAmount; 
@@ -251,7 +261,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             })
             .where(eq(restaurantWallets.restaurantId, restaurantId));
 
-        // 👇 التعديل 5: تسجيل حركة محفظة المطعم مع مراعاة الكلمة العربي
         const isCash = paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام";
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
@@ -263,30 +272,42 @@ export const checkout = async (req: Request | any, res: Response) => {
             method: paymentMethod,
             reference: orderNumber,
             note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment",
-            createdAt: localTime
+            createdAt: now // 👈 تسجيل بـ UTC
         });
     });
 
     // ==========================================
     // 11. Send Notification to Restaurant
     // ==========================================
+    
+    // 👇 3. فرمتة الوقت لنص الإشعار فقط، وإرسال الـ ISO Date في الـ Payload
+    const cairoTimeFormatted = formatToEgyptTime(now);
+
     await sendPushNotification({
         recipientType: "restaurant",
         recipientId: restaurantId,
-        title: "New Order Received! 🛒",
-        body: `You have received a new order #${orderNumber} for ${totalAmount}.`,
+        title: "طلب جديد! 🛒",
+        body: `تم استلام طلب جديد #${orderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
         data: {
             orderId,
             orderNumber,
-            type: "new_order"
+            type: "new_order",
+            createdAt: now.toISOString() // 👈 بنبعت الوقت للفرونت إند بـ صيغة ISO عشان يتفهم صح هناك
         }
     });
 
-    // استخدام order_level لتطابق استجابة الـ API مع المعايير المطلوبة
     return SuccessResponse(res, {
         message: "Order created successfully",
         order_level: {
-            orderDetails: { orderId, orderNumber, subtotal, deliveryFee, serviceFee, totalAmount },
+            orderDetails: { 
+                orderId, 
+                orderNumber, 
+                subtotal, 
+                deliveryFee, 
+                serviceFee, 
+                totalAmount,
+                createdAt: now.toISOString() // 👈 بنبعتها كمان في الـ API Response 
+            },
             customerDetails: userInfo
         }
     });

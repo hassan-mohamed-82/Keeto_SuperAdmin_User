@@ -6,7 +6,7 @@ const coupon_1 = require("../../controllers/admin/coupon");
 const router = (0, express_1.Router)();
 ``;
 // Validate a coupon code before placing order
-router.post("/validate", (0, catchAsync_1.catchAsync)(coupon_1.validateCouponEndpoint));
+// router.post("/validate", catchAsync(validateCouponEndpoint));
 // CRUD
 router.post("/", (0, catchAsync_1.catchAsync)(coupon_1.createCoupon));
 router.get("/", (0, catchAsync_1.catchAsync)(coupon_1.getAllCoupons));
