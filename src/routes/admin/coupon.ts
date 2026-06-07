@@ -7,14 +7,14 @@ import {
     updateCoupon,
     deleteCoupon,
     toggleCouponStatus,
-    validateCouponEndpoint,
+    // validateCouponEndpoint,
     getCouponUsages,
 } from "../../controllers/admin/coupon";
 
 const router = Router();
 ``
 // Validate a coupon code before placing order
-router.post("/validate", catchAsync(validateCouponEndpoint));
+// router.post("/validate", catchAsync(validateCouponEndpoint));
 
 // CRUD
 router.post("/", catchAsync(createCoupon));

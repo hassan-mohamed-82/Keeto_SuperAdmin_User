@@ -16,8 +16,7 @@ import { orders } from "./order";
 export const coupons = mysqlTable("coupons", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
-
-    // The promo code users type in (unique per restaurant)
+    // The promo code users type in (unique per restaurant or global)
     code: varchar("code", { length: 50 }).notNull(),
 
     name: varchar("name", { length: 255 }).notNull(),
@@ -51,6 +50,8 @@ export const coupons = mysqlTable("coupons", {
     endDate: timestamp("end_date"),
 
     isActive: boolean("is_active").default(true),
+    
+    isGlobal: boolean("is_global").default(false).notNull(),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
