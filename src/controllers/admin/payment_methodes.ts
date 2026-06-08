@@ -28,7 +28,7 @@ export const getPaymentMethods = async (req: Request, res: Response) => {
 export const updatepaymentmethodstatus = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { isActive } = req.body;
-    if(!id || !isActive ){
+    if( !isActive ){
         throw new BadRequest("Missing required fields");
     }
     const [paymentMethod] = await db.update(paymentMethods).set({
