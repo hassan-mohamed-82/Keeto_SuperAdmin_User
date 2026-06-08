@@ -75,7 +75,17 @@ exports.updateUserAddress = updateUserAddress;
 const getZones = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
-    const zone = await connection_1.db.select().from(schema_1.zones);
-    return (0, response_1.SuccessResponse)(res, { data: zone });
+    const zoneData = await connection_1.db
+        .select({
+        zone: schema_1.zones,
+        city: schema_1.cities
+    })
+        .from(schema_1.zones)
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.zones.cityId, schema_1.cities.id));
+    const formattedZones = zoneData.map(item => ({
+        ...item.zone,
+        city: item.city
+    }));
+    return (0, response_1.SuccessResponse)(res, { data: formattedZones });
 };
 exports.getZones = getZones;

@@ -1,6 +1,6 @@
 import{Request,Response} from "express";
 import { db } from "../../models/connection";
-import { users , addresses, zones} from "../../models/schema";
+import { users, addresses, zones, cities } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, UnauthorizedError } from "../../Errors";
@@ -78,7 +78,19 @@ export const updateUserAddress = async (req: Request, res: Response) => {
 
 export const getZones = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
-    const zone = await db.select().from(zones);
+    
+    const zoneData = await db
+        .select({
+            zone: zones,
+            city: cities
+        })
+        .from(zones)
+        .leftJoin(cities, eq(zones.cityId, cities.id));
 
-    return SuccessResponse(res, { data: zone });
+    const formattedZones = zoneData.map(item => ({
+        ...item.zone,
+        city: item.city
+    }));
+
+    return SuccessResponse(res, { data: formattedZones });
 }
