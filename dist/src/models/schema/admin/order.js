@@ -9,6 +9,7 @@ const Users_1 = require("../user/Users");
 // تم مسح الـ import الخاص بـ paymentMethods
 const schema_1 = require("../../schema");
 const address_1 = require("../user/address");
+const payment_methodes_1 = require("./payment_methodes");
 exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     orderNumber: (0, mysql_core_1.varchar)("order_number", { length: 20 }).notNull().unique(),
@@ -28,7 +29,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     orderSource: (0, mysql_core_1.mysqlEnum)("order_source", ["online_order", "food_aggregator", "mykeeto"]).notNull(),
     // onlineOrderType:mysqlEnum("online_order_type", ["app"]).default(),
     // 👇 التعديل هنا: شلنا الربط وخليناها Enum بتلات قيم بس
-    paymentMethod: (0, mysql_core_1.mysqlEnum)("payment_method", ["cash_on_delivery", "visa", "wallet", "الدفع عند الاستلام", "بطاقة", "محفظتى"]).notNull(),
+    paymentMethod: (0, mysql_core_1.char)("payment_method", { length: 36 }).references(() => payment_methodes_1.paymentMethods.id),
     orderType: (0, mysql_core_1.mysqlEnum)("order_type", ["delivery", "takeaway", "dine_in"]).default("delivery"),
     subtotal: (0, mysql_core_1.decimal)("subtotal", { precision: 10, scale: 2 }).notNull(),
     deliveryFee: (0, mysql_core_1.decimal)("delivery_fee", { precision: 10, scale: 2 }).default("0.00"),

@@ -37,10 +37,14 @@ const checkout = async (req, res) => {
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest_1.BadRequest("Invalid order source");
     }
-    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet", "الدفع عند الاستلام", "بطاقة", "محفظتى"];
-    if (!validPaymentMethods.includes(paymentMethod)) {
-        throw new BadRequest_1.BadRequest("Invalid payment method");
+    const [selectedPayment] = await connection_1.db.select().from(schema_1.paymentMethods).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.id, paymentMethod)).limit(1);
+    if (!selectedPayment || !selectedPayment.isActive) {
+        throw new BadRequest_1.BadRequest("Invalid or inactive payment method");
     }
+    const paymentMethodName = selectedPayment.name;
+    const paymentMethodNameAr = selectedPayment.nameAr;
+    const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
+    const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
     // ==========================================
     // 2. Idempotency Check
     // ==========================================
@@ -122,7 +126,7 @@ const checkout = async (req, res) => {
     // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
-    if (paymentMethod === "wallet" || paymentMethod === "محفظتى") {
+    if (isWalletPayment) {
         const walletResult = await connection_1.db.select().from(schema_1.userWallets).where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId)).limit(1);
         userWallet = walletResult[0];
         const currentBalance = parseFloat(userWallet?.balance || "0");
@@ -141,7 +145,7 @@ const checkout = async (req, res) => {
     const now = new Date();
     await connection_1.db.transaction(async (tx) => {
         // أ. خصم محفظة العميل
-        if ((paymentMethod === "wallet" || paymentMethod === "محفظتى") && userWallet) {
+        if (isWalletPayment && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance);
             const newBalance = balanceBefore - totalAmount;
             await tx.update(schema_1.userWallets)
@@ -201,7 +205,7 @@ const checkout = async (req, res) => {
         const appDues = appCommission + serviceFee;
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
-        if (paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام") {
+        if (isCashPayment) {
             newRestBalance -= appDues;
             newCollectedCash += totalAmount;
         }
@@ -215,7 +219,7 @@ const checkout = async (req, res) => {
             totalEarning: (currentTotalEarning + restaurantEarning).toString()
         })
             .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId));
-        const isCash = paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام";
+        const isCash = isCashPayment;
         await tx.insert(schema_1.restaurantWalletTransactions).values({
             id: (0, uuid_1.v4)(),
             restaurantId,
@@ -223,7 +227,7 @@ const checkout = async (req, res) => {
             amount: isCash ? `-${appDues}` : `${restaurantEarning}`,
             balanceBefore: currentRestBalance.toString(),
             balanceAfter: newRestBalance.toString(),
-            method: paymentMethod,
+            method: paymentMethodName,
             reference: orderNumber,
             note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment",
             createdAt: now // 👈 تسجيل بـ UTC
@@ -391,12 +395,12 @@ const getOrderPrerequisites = async (req, res) => {
             // ب) فروع المطعم
             connection_1.db.select().from(schema_1.branches).where((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId)),
         ]);
-        // ج) طرق الدفع (بقت Static Array بدل الداتا بيز)
-        const activePaymentMethods = [
-            { id: "cash_on_delivery", name: "Cash on Delivery" },
-            { id: "visa", name: "Credit Card (Visa/Mastercard)" },
-            { id: "wallet", name: "My Wallet" }
-        ];
+        // ج) طرق الدفع 
+        const activePaymentMethods = await connection_1.db.select({
+            id: schema_1.paymentMethods.id,
+            name: schema_1.paymentMethods.name,
+            nameAr: schema_1.paymentMethods.nameAr
+        }).from(schema_1.paymentMethods).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.isActive, true));
         // تجميع الداتا وإرسالها
         return (0, response_1.SuccessResponse)(res, {
             data: {

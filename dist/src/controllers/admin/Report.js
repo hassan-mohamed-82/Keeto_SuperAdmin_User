@@ -60,7 +60,7 @@ const getFinancialReport = async (req, res) => {
         conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.status, status));
     }
     if (paymentMethod) {
-        conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, paymentMethod));
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.paymentMethods.name, paymentMethod));
     }
     // 👆
     if (startDate) {
@@ -77,7 +77,7 @@ const getFinancialReport = async (req, res) => {
         orderId: schema_1.orders.id,
         orderNumber: schema_1.orders.orderNumber,
         status: schema_1.orders.status,
-        paymentMethod: schema_1.orders.paymentMethod,
+        paymentMethod: schema_1.paymentMethods.name,
         orderType: schema_1.orders.orderType,
         subtotal: schema_1.orders.subtotal,
         deliveryFee: schema_1.orders.deliveryFee,
@@ -90,6 +90,7 @@ const getFinancialReport = async (req, res) => {
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+        .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where(conditions.length > 0 ? (0, drizzle_orm_1.and)(...conditions) : undefined)
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
     let totalRevenue = 0;
@@ -164,7 +165,7 @@ const getDetailedRestaurantReport = async (req, res) => {
         .select({
         orderId: schema_1.orders.id,
         orderSource: schema_1.orders.orderSource,
-        paymentMethod: schema_1.orders.paymentMethod,
+        paymentMethod: schema_1.paymentMethods.name,
         subtotal: schema_1.orders.subtotal,
         deliveryFee: schema_1.orders.deliveryFee,
         serviceFee: schema_1.orders.serviceFee,
@@ -175,6 +176,7 @@ const getDetailedRestaurantReport = async (req, res) => {
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+        .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where((0, drizzle_orm_1.and)(...conditions));
     // ==========================================
     // 3. Fetch business plans for all restaurants
@@ -427,7 +429,7 @@ const getSingleRestaurantReport = async (req, res) => {
         .select({
         orderId: schema_1.orders.id,
         orderSource: schema_1.orders.orderSource,
-        paymentMethod: schema_1.orders.paymentMethod,
+        paymentMethod: schema_1.paymentMethods.name,
         subtotal: schema_1.orders.subtotal,
         deliveryFee: schema_1.orders.deliveryFee,
         serviceFee: schema_1.orders.serviceFee,
@@ -435,6 +437,7 @@ const getSingleRestaurantReport = async (req, res) => {
         totalAmount: schema_1.orders.totalAmount,
     })
         .from(schema_1.orders)
+        .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where((0, drizzle_orm_1.and)(...conditions));
     // ==========================================
     // 4. Fetch restaurant business plans
