@@ -7,8 +7,12 @@ const drizzle_orm_1 = require("drizzle-orm");
 const updateSettings = async (req, res) => {
     const restaurantId = req.params.restaurantId;
     const { settings, schedules } = req.body;
-    if (!restaurantId) {
+    if (!restaurantId || restaurantId === "undefined") {
         res.status(400).json({ success: false, message: "Restaurant id is not valid" });
+        return;
+    }
+    if (!settings && !schedules) {
+        res.status(400).json({ success: false, message: "No settings or schedules provided in the request body" });
         return;
     }
     // بدأ الـ Transaction
@@ -17,18 +21,23 @@ const updateSettings = async (req, res) => {
         if (settings && Object.keys(settings).length > 0) {
             const existingSettings = await tx.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1);
             if (existingSettings.length > 0) {
-                await tx.update(schema_1.restaurantSettings)
-                    .set({
-                    ...settings,
-                    minOrderAmount: settings.minOrderAmount !== undefined ? String(settings.minOrderAmount) : undefined,
-                })
-                    .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId));
+                // Remove id and restaurantId to prevent updating primary keys
+                const { id, restaurantId: restId, ...updatePayload } = settings;
+                if (Object.keys(updatePayload).length > 0) {
+                    await tx.update(schema_1.restaurantSettings)
+                        .set({
+                        ...updatePayload,
+                        minOrderAmount: updatePayload.minOrderAmount !== undefined ? String(updatePayload.minOrderAmount) : undefined,
+                    })
+                        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId));
+                }
             }
             else {
+                const { id, restaurantId: restId, ...insertPayload } = settings;
                 await tx.insert(schema_1.restaurantSettings).values({
-                    ...settings,
+                    ...insertPayload,
                     restaurantId,
-                    minOrderAmount: settings.minOrderAmount !== undefined ? String(settings.minOrderAmount) : undefined,
+                    minOrderAmount: insertPayload.minOrderAmount !== undefined ? String(insertPayload.minOrderAmount) : undefined,
                 });
             }
         }

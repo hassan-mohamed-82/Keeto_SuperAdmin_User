@@ -84,6 +84,75 @@ export const checkout = async (req: Request | any, res: Response) => {
     }
 
     // ==========================================
+    // 4.1 Validate Restaurant Settings & Schedules
+    // ==========================================
+    const [settings] = await db.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1);
+    
+    if (settings) {
+        // التحقق من نوع الطلب المسموح
+        if (orderType === "takeaway" && !settings.takeaway) {
+            throw new BadRequest("This restaurant does not accept takeaway orders");
+        }
+        if (orderType === "dine_in" && !settings.dineIn) {
+            throw new BadRequest("This restaurant does not accept dine-in orders");
+        }
+        if (orderType === "delivery" && !settings.homeDelivery) {
+            throw new BadRequest("This restaurant does not accept delivery orders");
+        }
+
+        // التحقق من مواعيد العمل لو مش مفتوح 24 ساعة
+        if (!settings.isAlwaysOpen) {
+            // نجيب توقيت مصر عشان نقارن بيه (عشان السيرفر ممكن يكون في توقيت مختلف)
+            const egyptDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
+            const dayOfWeek = egyptDate.getDay(); // 0 = الأحد, 1 = الإثنين, ... 6 = السبت
+            
+            const currentHour = egyptDate.getHours().toString().padStart(2, '0');
+            const currentMinute = egyptDate.getMinutes().toString().padStart(2, '0');
+            const currentTimeStr = `${currentHour}:${currentMinute}`;
+
+            const todaySchedules = await db.select().from(restaurantSchedules)
+                .where(and(
+                    eq(restaurantSchedules.restaurantId, restaurantId),
+                    eq(restaurantSchedules.dayOfWeek, dayOfWeek)
+                ));
+
+            // لو مفيش مواعيد متسجلة خالص لليوم ده، أو كل الفترات إجازة
+            if (todaySchedules.length === 0 || todaySchedules.every(s => s.isOffDay)) {
+                throw new BadRequest("The restaurant is closed today");
+            }
+
+            let isOpenNow = false;
+            for (const schedule of todaySchedules) {
+                if (schedule.isOffDay) continue;
+                
+                // لو مش محددين وقت، بنعتبره مفتوح في الفترة دي
+                if (!schedule.openingTime || !schedule.closingTime) {
+                    isOpenNow = true;
+                    break;
+                }
+                
+                // معالجة لو المطعم بيقفل بعد نص الليل (مثلاً يفتح 18:00 ويقفل 02:00)
+                if (schedule.closingTime < schedule.openingTime) {
+                    if (currentTimeStr >= schedule.openingTime || currentTimeStr <= schedule.closingTime) {
+                        isOpenNow = true;
+                        break;
+                    }
+                } else {
+                    // المواعيد العادية (مثلاً 09:00 إلى 23:00)
+                    if (currentTimeStr >= schedule.openingTime && currentTimeStr <= schedule.closingTime) {
+                        isOpenNow = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!isOpenNow) {
+                throw new BadRequest("The restaurant is currently closed");
+            }
+        }
+    }
+
+    // ==========================================
     // 5. Calculate Subtotal from Cart Snapshots
     // ==========================================
     let subtotal = 0;
