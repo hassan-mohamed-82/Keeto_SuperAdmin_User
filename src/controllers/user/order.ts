@@ -6,7 +6,7 @@ import {
     restaurantWallets, restaurantWalletTransactions, 
     restaurantZoneDeliveryFees, zoneDeliveryFees, restaurantSettings, 
     restaurantSchedules, cartItems, users, addresses, branches,
-    userWallets, userWalletTransactions 
+    userWallets, userWalletTransactions, paymentMethods
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -46,10 +46,14 @@ export const checkout = async (req: Request | any, res: Response) => {
         throw new BadRequest("Invalid order source");
     }
 
-    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet", "الدفع عند الاستلام", "بطاقة", "محفظتى"];
-    if (!validPaymentMethods.includes(paymentMethod)) {
-        throw new BadRequest("Invalid payment method");
+    const [selectedPayment] = await db.select().from(paymentMethods).where(eq(paymentMethods.id, paymentMethod)).limit(1);
+    if (!selectedPayment || !selectedPayment.isActive) {
+        throw new BadRequest("Invalid or inactive payment method");
     }
+    const paymentMethodName = selectedPayment.name;
+    const paymentMethodNameAr = selectedPayment.nameAr;
+    const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
+    const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
 
     // ==========================================
     // 2. Idempotency Check
@@ -153,7 +157,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
-    if (paymentMethod === "wallet" || paymentMethod === "محفظتى") {
+    if (isWalletPayment) {
         const walletResult = await db.select().from(userWallets).where(eq(userWallets.userId, userId)).limit(1);
         userWallet = walletResult[0];
 
@@ -177,7 +181,7 @@ export const checkout = async (req: Request | any, res: Response) => {
 
     await db.transaction(async (tx) => {
         // أ. خصم محفظة العميل
-        if ((paymentMethod === "wallet" || paymentMethod === "محفظتى") && userWallet) {
+        if (isWalletPayment && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance as string);
             const newBalance = balanceBefore - totalAmount;
 
@@ -246,7 +250,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
 
-        if (paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام") {
+        if (isCashPayment) {
             newRestBalance -= appDues;
             newCollectedCash += totalAmount; 
         } else {
@@ -261,7 +265,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             })
             .where(eq(restaurantWallets.restaurantId, restaurantId));
 
-        const isCash = paymentMethod === "cash_on_delivery" || paymentMethod === "الدفع عند الاستلام";
+        const isCash = isCashPayment;
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
             restaurantId,
@@ -269,7 +273,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             amount: isCash ? `-${appDues}` : `${restaurantEarning}`,
             balanceBefore: currentRestBalance.toString(),
             balanceAfter: newRestBalance.toString(),
-            method: paymentMethod,
+            method: paymentMethodName,
             reference: orderNumber,
             note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment",
             createdAt: now // 👈 تسجيل بـ UTC
@@ -462,12 +466,12 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
             db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
         ]);
 
-        // ج) طرق الدفع (بقت Static Array بدل الداتا بيز)
-        const activePaymentMethods = [
-            { id: "cash_on_delivery", name: "Cash on Delivery" },
-            { id: "visa", name: "Credit Card (Visa/Mastercard)" },
-            { id: "wallet", name: "My Wallet" }
-        ];
+        // ج) طرق الدفع 
+        const activePaymentMethods = await db.select({
+            id: paymentMethods.id,
+            name: paymentMethods.name,
+            nameAr: paymentMethods.nameAr
+        }).from(paymentMethods).where(eq(paymentMethods.isActive, true));
 
         // تجميع الداتا وإرسالها
         return SuccessResponse(res, { 

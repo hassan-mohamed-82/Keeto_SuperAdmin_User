@@ -7,6 +7,8 @@ import { users } from "../user/Users";
 import { branches } from "../../schema";
 import { addresses } from "../user/address";
 
+import { paymentMethods } from "./payment_methodes";
+
 export const orders = mysqlTable("orders", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     orderNumber: varchar("order_number", { length: 20 }).notNull().unique(),
@@ -33,7 +35,7 @@ export const orders = mysqlTable("orders", {
     // onlineOrderType:mysqlEnum("online_order_type", ["app"]).default(),
 
     // 👇 التعديل هنا: شلنا الربط وخليناها Enum بتلات قيم بس
-    paymentMethod: mysqlEnum("payment_method", ["cash_on_delivery", "visa", "wallet","الدفع عند الاستلام", "بطاقة","محفظتى"]).notNull(),
+    paymentMethod:char("payment_method", { length: 36 }).references(() => paymentMethods.id),
 
     orderType: mysqlEnum("order_type", ["delivery", "takeaway", "dine_in"]).default("delivery"),
 

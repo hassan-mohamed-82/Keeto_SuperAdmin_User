@@ -1,7 +1,7 @@
 // controllers/admin/FinancialReportController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { orders, restaurants, restaurantBusinessPlans, invoices } from "../../models/schema";
+import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods } from "../../models/schema";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
@@ -30,7 +30,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         conditions.push(eq(orders.status, status as OrderStatus)); 
     }
     if (paymentMethod) {
-        conditions.push(eq(orders.paymentMethod, paymentMethod as PaymentMethod)); 
+        conditions.push(eq(paymentMethods.name, paymentMethod as string)); 
     }
     // 👆
     
@@ -49,7 +49,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             orderId: orders.id,
             orderNumber: orders.orderNumber,
             status: orders.status,
-            paymentMethod: orders.paymentMethod,
+            paymentMethod: paymentMethods.name,
             orderType: orders.orderType,
             
             subtotal: orders.subtotal,
@@ -65,6 +65,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(orders.createdAt));
 
@@ -147,7 +148,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         .select({
             orderId: orders.id,
             orderSource: orders.orderSource,
-            paymentMethod: orders.paymentMethod,
+            paymentMethod: paymentMethods.name,
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee,
@@ -158,6 +159,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(and(...conditions));
 
     // ==========================================
@@ -474,7 +476,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         .select({
             orderId: orders.id,
             orderSource: orders.orderSource,
-            paymentMethod: orders.paymentMethod,
+            paymentMethod: paymentMethods.name,
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee,
@@ -482,6 +484,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             totalAmount: orders.totalAmount,
         })
         .from(orders)
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(and(...conditions));
 
     // ==========================================
