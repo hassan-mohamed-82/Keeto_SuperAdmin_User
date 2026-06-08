@@ -379,40 +379,34 @@ exports.getOrderDetails = getOrderDetails;
 // 5. متطلبات الطلب المسبقة (Order Prerequisites)
 // ==========================================
 const getOrderPrerequisites = async (req, res) => {
-    try {
-        if (!req.user) {
-            throw new Errors_1.UnauthorizedError("Unauthenticated: Token is missing or invalid");
-        }
-        const userId = req.user.id;
-        const restaurantId = req.query.restaurantId;
-        if (!restaurantId) {
-            throw new BadRequest_1.BadRequest("restaurantId is required");
-        }
-        // جلب البيانات المطلوبة من الداتا بيز
-        const [userAddresses, restaurantBranches] = await Promise.all([
-            // أ) عناوين اليوزر 
-            connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId)),
-            // ب) فروع المطعم
-            connection_1.db.select().from(schema_1.branches).where((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId)),
-        ]);
-        // ج) طرق الدفع 
-        const activePaymentMethods = await connection_1.db.select({
-            id: schema_1.paymentMethods.id,
-            name: schema_1.paymentMethods.name,
-            nameAr: schema_1.paymentMethods.nameAr
-        }).from(schema_1.paymentMethods).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.isActive, true));
-        // تجميع الداتا وإرسالها
-        return (0, response_1.SuccessResponse)(res, {
-            data: {
-                addresses: userAddresses,
-                branches: restaurantBranches,
-                paymentMethods: activePaymentMethods
-            }
-        });
+    if (!req.user) {
+        throw new Errors_1.UnauthorizedError("Unauthenticated: Token is missing or invalid");
     }
-    catch (error) {
-        console.error("Error fetching order prerequisites:", error);
-        return res.status(500).json({ success: false, message: "Internal server error" });
+    const userId = req.user.id;
+    const restaurantId = req.query.restaurantId;
+    if (!restaurantId) {
+        throw new BadRequest_1.BadRequest("restaurantId is required");
     }
+    // جلب البيانات المطلوبة من الداتا بيز
+    const [userAddresses, restaurantBranches] = await Promise.all([
+        // أ) عناوين اليوزر 
+        connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId)),
+        // ب) فروع المطعم
+        connection_1.db.select().from(schema_1.branches).where((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId)),
+    ]);
+    // ج) طرق الدفع 
+    const activePaymentMethods = await connection_1.db.select({
+        id: schema_1.paymentMethods.id,
+        name: schema_1.paymentMethods.name,
+        nameAr: schema_1.paymentMethods.nameAr
+    }).from(schema_1.paymentMethods).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.isActive, true));
+    // تجميع الداتا وإرسالها
+    return (0, response_1.SuccessResponse)(res, {
+        data: {
+            addresses: userAddresses,
+            branches: restaurantBranches,
+            paymentMethods: activePaymentMethods
+        }
+    });
 };
 exports.getOrderPrerequisites = getOrderPrerequisites;

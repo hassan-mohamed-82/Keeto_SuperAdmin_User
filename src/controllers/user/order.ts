@@ -446,44 +446,38 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
 // 5. متطلبات الطلب المسبقة (Order Prerequisites)
 // ==========================================
 export const getOrderPrerequisites = async (req: Request | any, res: Response) => {
-    try {
-        if (!req.user) {
-            throw new UnauthorizedError("Unauthenticated: Token is missing or invalid");
-        }
-        const userId = req.user.id;
-        const restaurantId = req.query.restaurantId as string;
-
-        if (!restaurantId) {
-            throw new BadRequest("restaurantId is required");
-        }
-
-        // جلب البيانات المطلوبة من الداتا بيز
-        const [userAddresses, restaurantBranches] = await Promise.all([
-            // أ) عناوين اليوزر 
-            db.select().from(addresses).where(eq(addresses.userId, userId)),
-            
-            // ب) فروع المطعم
-            db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
-        ]);
-
-        // ج) طرق الدفع 
-        const activePaymentMethods = await db.select({
-            id: paymentMethods.id,
-            name: paymentMethods.name,
-            nameAr: paymentMethods.nameAr
-        }).from(paymentMethods).where(eq(paymentMethods.isActive, true));
-
-        // تجميع الداتا وإرسالها
-        return SuccessResponse(res, { 
-            data: {
-                addresses: userAddresses,
-                branches: restaurantBranches,
-                paymentMethods: activePaymentMethods
-            }
-        });
-
-    } catch (error) {
-        console.error("Error fetching order prerequisites:", error);
-        return res.status(500).json({ success: false, message: "Internal server error" });
+    if (!req.user) {
+        throw new UnauthorizedError("Unauthenticated: Token is missing or invalid");
     }
+    const userId = req.user.id;
+    const restaurantId = req.query.restaurantId as string;
+
+    if (!restaurantId) {
+        throw new BadRequest("restaurantId is required");
+    }
+
+    // جلب البيانات المطلوبة من الداتا بيز
+    const [userAddresses, restaurantBranches] = await Promise.all([
+        // أ) عناوين اليوزر 
+        db.select().from(addresses).where(eq(addresses.userId, userId)),
+        
+        // ب) فروع المطعم
+        db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
+    ]);
+
+    // ج) طرق الدفع 
+    const activePaymentMethods = await db.select({
+        id: paymentMethods.id,
+        name: paymentMethods.name,
+        nameAr: paymentMethods.nameAr
+    }).from(paymentMethods).where(eq(paymentMethods.isActive, true));
+
+    // تجميع الداتا وإرسالها
+    return SuccessResponse(res, { 
+        data: {
+            addresses: userAddresses,
+            branches: restaurantBranches,
+            paymentMethods: activePaymentMethods
+        }
+    });
 };
