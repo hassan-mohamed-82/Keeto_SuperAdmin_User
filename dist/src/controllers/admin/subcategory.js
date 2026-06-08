@@ -112,7 +112,7 @@ const getSubcategoryById = async (req, res) => {
 exports.getSubcategoryById = getSubcategoryById;
 const updateSubcategory = async (req, res) => {
     const { id } = req.params;
-    const { name, nameAr, nameFr, categoryId, priority, status } = req.body;
+    const { name, nameAr, nameFr, categoryId, priority, status, restaurantId } = req.body;
     const existingSubcategory = await connection_1.db
         .select()
         .from(schema_1.subcategories)
@@ -132,6 +132,17 @@ const updateSubcategory = async (req, res) => {
             throw new BadRequest_1.BadRequest("Category not found");
         }
     }
+    // Check if restaurant exists if restaurantId is provided
+    if (restaurantId) {
+        const existingRestaurant = await connection_1.db
+            .select()
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId))
+            .limit(1);
+        if (!existingRestaurant[0]) {
+            throw new BadRequest_1.BadRequest("Restaurant not found");
+        }
+    }
     const updateData = {
         updatedAt: new Date(),
     };
@@ -147,6 +158,8 @@ const updateSubcategory = async (req, res) => {
         updateData.priority = priority;
     if (status)
         updateData.status = status;
+    if (restaurantId)
+        updateData.restaurantId = restaurantId;
     if (Object.keys(updateData).length === 1) {
         throw new BadRequest_1.BadRequest("No data to update");
     }
