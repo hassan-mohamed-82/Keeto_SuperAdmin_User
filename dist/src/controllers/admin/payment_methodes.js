@@ -27,12 +27,12 @@ exports.getPaymentMethods = getPaymentMethods;
 const updatepaymentmethodstatus = async (req, res) => {
     const { id } = req.params;
     const { isActive } = req.body;
-    if (!isActive) {
+    if (isActive === undefined) {
         throw new Errors_1.BadRequest("Missing required fields");
     }
-    const [paymentMethod] = await connection_1.db.update(schema_1.paymentMethods).set({
-        isActive: isActive || true,
+    await connection_1.db.update(schema_1.paymentMethods).set({
+        isActive: isActive,
     }).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.id, id));
-    return (0, response_1.SuccessResponse)(res, { data: paymentMethod });
+    return (0, response_1.SuccessResponse)(res, { message: "Payment method status updated successfully" });
 };
 exports.updatepaymentmethodstatus = updatepaymentmethodstatus;
