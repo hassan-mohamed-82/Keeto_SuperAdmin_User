@@ -10,6 +10,7 @@ const NotFound_1 = require("../../Errors/NotFound");
 const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
 const notifications_1 = require("../../utils/notifications");
+const geo_1 = require("../../utils/geo");
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date) => {
     return new Intl.DateTimeFormat("ar-EG", {
@@ -75,7 +76,6 @@ const checkout = async (req, res) => {
     // ==========================================
     const [settings] = await connection_1.db.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1);
     if (settings) {
-        // التحقق من نوع الطلب المسموح
         if (orderType === "takeaway" && !settings.takeaway) {
             throw new BadRequest_1.BadRequest("This restaurant does not accept takeaway orders");
         }
@@ -85,17 +85,14 @@ const checkout = async (req, res) => {
         if (orderType === "delivery" && !settings.homeDelivery) {
             throw new BadRequest_1.BadRequest("This restaurant does not accept delivery orders");
         }
-        // التحقق من مواعيد العمل لو مش مفتوح 24 ساعة
         if (!settings.isAlwaysOpen) {
-            // نجيب توقيت مصر عشان نقارن بيه (عشان السيرفر ممكن يكون في توقيت مختلف)
             const egyptDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
-            const dayOfWeek = egyptDate.getDay(); // 0 = الأحد, 1 = الإثنين, ... 6 = السبت
+            const dayOfWeek = egyptDate.getDay();
             const currentHour = egyptDate.getHours().toString().padStart(2, '0');
             const currentMinute = egyptDate.getMinutes().toString().padStart(2, '0');
             const currentTimeStr = `${currentHour}:${currentMinute}`;
             const todaySchedules = await connection_1.db.select().from(schema_1.restaurantSchedules)
                 .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.dayOfWeek, dayOfWeek)));
-            // لو مفيش مواعيد متسجلة خالص لليوم ده، أو كل الفترات إجازة
             if (todaySchedules.length === 0 || todaySchedules.every(s => s.isOffDay)) {
                 throw new BadRequest_1.BadRequest("The restaurant is closed today");
             }
@@ -103,12 +100,10 @@ const checkout = async (req, res) => {
             for (const schedule of todaySchedules) {
                 if (schedule.isOffDay)
                     continue;
-                // لو مش محددين وقت، بنعتبره مفتوح في الفترة دي
                 if (!schedule.openingTime || !schedule.closingTime) {
                     isOpenNow = true;
                     break;
                 }
-                // معالجة لو المطعم بيقفل بعد نص الليل (مثلاً يفتح 18:00 ويقفل 02:00)
                 if (schedule.closingTime < schedule.openingTime) {
                     if (currentTimeStr >= schedule.openingTime || currentTimeStr <= schedule.closingTime) {
                         isOpenNow = true;
@@ -116,7 +111,6 @@ const checkout = async (req, res) => {
                     }
                 }
                 else {
-                    // المواعيد العادية (مثلاً 09:00 إلى 23:00)
                     if (currentTimeStr >= schedule.openingTime && currentTimeStr <= schedule.closingTime) {
                         isOpenNow = true;
                         break;
@@ -155,22 +149,41 @@ const checkout = async (req, res) => {
     const serviceFee = plan ? parseFloat(plan.serviceFee || "0") : 0;
     let appCommission = orderSource === "food_aggregator" ? subtotal * (parseFloat(plan?.commissionRate || "0") / 100) : 0;
     // ==========================================
-    // 6. Smart Delivery Logic
+    // 6. Smart Delivery Logic (Zone + Radius Hybrid)
     // ==========================================
     let deliveryFee = 0;
     if (orderType === "delivery") {
         if (!addressId)
             throw new BadRequest_1.BadRequest("Delivery address is required");
+        if (!branchId)
+            throw new BadRequest_1.BadRequest("Branch is required for delivery orders");
+        // أ. جلب بيانات العنوان والتحقق منه
         const [userAddress] = await connection_1.db.select().from(schema_1.addresses)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId), (0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId))).limit(1);
         if (!userAddress)
             throw new BadRequest_1.BadRequest("Invalid delivery address");
+        // ب. جلب بيانات الفرع المختار للتأكد من موقعه الجغرافي ونصف القطر
+        const [branch] = await connection_1.db.select().from(schema_1.branches)
+            .where((0, drizzle_orm_1.eq)(schema_1.branches.id, branchId)).limit(1);
+        if (!branch)
+            throw new BadRequest_1.BadRequest("Invalid branch selected");
+        // ج. الفحص الأول: التأكد من تسعير المنطقة (Zone Validation)
         const resolvedZoneId = userZoneId || userAddress.zoneId;
         const [selfFee] = await connection_1.db.select().from(schema_1.restaurantZoneDeliveryFees)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, resolvedZoneId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.status, "active"))).limit(1);
         if (!selfFee)
             throw new BadRequest_1.BadRequest("Restaurant does not deliver to your zone directly");
         deliveryFee = parseFloat(selfFee.deliveryFee || "0");
+        // د. الفحص الثاني: التأكد من النطاق الجغرافي بالمتر/الكيلومتر (Radius Validation)
+        if (branch.lat && branch.lng && branch.deliveryRadiusKm) {
+            const distance = (0, geo_1.calculateDistance)(Number(branch.lat), Number(branch.lng), Number(userAddress.lat), Number(userAddress.lng));
+            if (distance > Number(branch.deliveryRadiusKm)) {
+                throw new BadRequest_1.BadRequest("عذراً، عنوانك خارج نطاق التوصيل الجغرافي المسموح به لهذا الفرع");
+            }
+        }
+        else {
+            throw new BadRequest_1.BadRequest("إعدادات التوصيل الجغرافية لهذا الفرع غير مكتملة");
+        }
     }
     const totalAmount = subtotal + deliveryFee + serviceFee;
     const orderId = (0, uuid_1.v4)();
@@ -199,7 +212,6 @@ const checkout = async (req, res) => {
     // ==========================================
     // 10. Execute Order (Transaction)
     // ==========================================
-    // 👇 2. التعديل الجذري: استخدام التوقيت العالمي الموحد في قاعدة البيانات 
     const now = new Date();
     await connection_1.db.transaction(async (tx) => {
         // أ. خصم محفظة العميل
@@ -218,7 +230,7 @@ const checkout = async (req, res) => {
                 balanceBefore: balanceBefore.toString(),
                 reference: orderNumber,
                 status: "approved",
-                createdAt: now // 👈 تسجيل بـ UTC
+                createdAt: now
             });
         }
         // ب. تسجيل بيانات الأوردر نفسه
@@ -240,7 +252,7 @@ const checkout = async (req, res) => {
             totalAmount: totalAmount.toString(),
             note: note || null,
             status: "pending",
-            createdAt: now // 👈 تسجيل بـ UTC
+            createdAt: now
         });
         // ج. تفريغ الكارت وتسجيل الأصناف
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
@@ -288,14 +300,14 @@ const checkout = async (req, res) => {
             method: paymentMethodName,
             reference: orderNumber,
             note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment",
-            createdAt: now // 👈 تسجيل بـ UTC
+            createdAt: now
         });
     });
     // ==========================================
     // 11. Send Notification to Restaurant
     // ==========================================
-    // 👇 3. فرمتة الوقت لنص الإشعار فقط، وإرسال الـ ISO Date في الـ Payload
-    const cairoTimeFormatted = formatToEgyptTime(now);
+    // ملاحظة: تأكد من بقاء دالة formatToEgyptTime أو استبدالها بما يماثلها لديك لقراءة النص بالإشعار
+    const cairoTimeFormatted = new Date(now).toLocaleTimeString("en-US", { timeZone: "Africa/Cairo" });
     await (0, notifications_1.sendPushNotification)({
         recipientType: "restaurant",
         recipientId: restaurantId,
@@ -305,7 +317,7 @@ const checkout = async (req, res) => {
             orderId,
             orderNumber,
             type: "new_order",
-            createdAt: now.toISOString() // 👈 بنبعت الوقت للفرونت إند بـ صيغة ISO عشان يتفهم صح هناك
+            createdAt: now.toISOString()
         }
     });
     return (0, response_1.SuccessResponse)(res, {
@@ -318,7 +330,7 @@ const checkout = async (req, res) => {
                 deliveryFee,
                 serviceFee,
                 totalAmount,
-                createdAt: now.toISOString() // 👈 بنبعتها كمان في الـ API Response 
+                createdAt: now.toISOString()
             },
             customerDetails: userInfo
         }

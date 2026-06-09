@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, timestamp, json, char, text, date, mysqlEnum ,boolean} from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, timestamp ,json, char, text, date, mysqlEnum ,boolean, int} from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { zones } from "./zone";
 
@@ -36,6 +36,7 @@ export const restaurants = mysqlTable("restaurants", {
     taxExpireDate: date("tax_expire_date"), 
     taxCertificate: varchar("tax_certificate", { length: 255 }), 
     addhome: boolean("addhome").default(false),
+    deliveryRadiusKm: int("delivery_radius_km").default(0),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),

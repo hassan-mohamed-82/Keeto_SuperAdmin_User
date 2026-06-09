@@ -9,13 +9,16 @@ exports.branches = (0, mysql_core_1.mysqlTable)("branches", {
     // مربوط بالمطعم الأساسي اللي إنت (كسوبر أدمن) لسه مكريته
     restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 }).references(() => schema_1.restaurants.id).notNull(),
     name: (0, mysql_core_1.varchar)("name", { length: 255 }).notNull(), // فرع مدينة نصر مثلاً
-    nameAr: (0, mysql_core_1.varchar)("name_ar", { length: 255 }).notNull().default(''),
-    nameFr: (0, mysql_core_1.varchar)("name_fr", { length: 255 }).notNull().default(''),
+    nameAr: (0, mysql_core_1.varchar)("name_ar", { length: 255 }),
+    nameFr: (0, mysql_core_1.varchar)("name_fr", { length: 255 }),
     address: (0, mysql_core_1.text)("address").notNull(),
-    addressAr: (0, mysql_core_1.text)("address_ar").notNull().default(''),
-    addressFr: (0, mysql_core_1.text)("address_fr").notNull().default(''),
+    addressAr: (0, mysql_core_1.text)("address_ar"),
+    addressFr: (0, mysql_core_1.text)("address_fr"),
     phoneNumber: (0, mysql_core_1.varchar)("phone_number", { length: 50 }),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }).references(() => schema_1.zones.id).notNull(), // عشان منطقة توصيل الفرع ده
+    deliveryRadiusKm: (0, mysql_core_1.int)("delivery_radius_km").default(0),
+    lat: (0, mysql_core_1.varchar)("lat", { length: 255 }),
+    lng: (0, mysql_core_1.varchar)("lng", { length: 255 }),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });

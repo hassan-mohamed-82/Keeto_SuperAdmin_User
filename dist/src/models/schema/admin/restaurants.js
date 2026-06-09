@@ -31,6 +31,7 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     taxExpireDate: (0, mysql_core_1.date)("tax_expire_date"),
     taxCertificate: (0, mysql_core_1.varchar)("tax_certificate", { length: 255 }),
     addhome: (0, mysql_core_1.boolean)("addhome").default(false),
+    deliveryRadiusKm: (0, mysql_core_1.int)("delivery_radius_km").default(0),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),

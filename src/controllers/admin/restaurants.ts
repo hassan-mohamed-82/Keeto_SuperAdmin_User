@@ -67,7 +67,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         zoneId, logo, cover, minDeliveryTime, maxDeliveryTime,
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
-        lat,lng
+        lat,lng,deliveryRadiusKm
     } = req.body;
 
     let cuisineId = req.body.cuisineId;
@@ -132,6 +132,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             cover: coverUrl || '',
             lat:lat || '',
             lng:lng || '',
+            deliveryRadiusKm:deliveryRadiusKm ? clean(deliveryRadiusKm) : null,
             minDeliveryTime: minDeliveryTime ? clean(minDeliveryTime) : null,
             maxDeliveryTime: maxDeliveryTime ? clean(maxDeliveryTime) : null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",
@@ -198,6 +199,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         addressAr: restaurants.addressAr,
         addressFr: restaurants.addressFr,
         logo: restaurants.logo,
+        deliveryRadiusKm: restaurants.deliveryRadiusKm,
         lat: restaurants.lat,
         lng: restaurants.lng,
         cover: restaurants.cover,
@@ -242,6 +244,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             cover: r.cover,
             status: r.status,
             email: r.email || null, 
+            deliveryRadiusKm: r.deliveryRadiusKm,
             lat: r.lat,
             lng: r.lng,
             cuisines: parsedCuisines.map((id: string) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
@@ -323,7 +326,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         minDeliveryTime, maxDeliveryTime, deliveryTimeUnit,
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
-        email, password, confirmPassword, status,
+        email, password, confirmPassword, status,deliveryRadiusKm
     } = req.body;
 
     let cuisineId = req.body.cuisineId;
@@ -404,7 +407,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (zoneId) restaurantUpdateData.zoneId = zoneId;
     if (lat !== undefined) restaurantUpdateData.lat = lat;
     if (lng !== undefined) restaurantUpdateData.lng = lng;
-    
+    if (deliveryRadiusKm !== undefined) restaurantUpdateData.deliveryRadiusKm = deliveryRadiusKm;
     if (logo) {
         restaurantUpdateData.logo = await handleImageUpdate(req, existingRestaurant.logo, logo, "restaurants");
     }

@@ -57,7 +57,7 @@ const safeParseArray = (input) => {
 };
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
-    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm } = req.body;
     let cuisineId = req.body.cuisineId;
     if (cuisineId === undefined)
         cuisineId = req.body['cuisineId[]'];
@@ -113,6 +113,7 @@ const createRestaurant = async (req, res) => {
             cover: coverUrl || '',
             lat: lat || '',
             lng: lng || '',
+            deliveryRadiusKm: deliveryRadiusKm ? clean(deliveryRadiusKm) : null,
             minDeliveryTime: minDeliveryTime ? clean(minDeliveryTime) : null,
             maxDeliveryTime: maxDeliveryTime ? clean(maxDeliveryTime) : null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",
@@ -171,6 +172,7 @@ const getAllRestaurants = async (req, res) => {
         addressAr: schema_1.restaurants.addressAr,
         addressFr: schema_1.restaurants.addressFr,
         logo: schema_1.restaurants.logo,
+        deliveryRadiusKm: schema_1.restaurants.deliveryRadiusKm,
         lat: schema_1.restaurants.lat,
         lng: schema_1.restaurants.lng,
         cover: schema_1.restaurants.cover,
@@ -205,6 +207,7 @@ const getAllRestaurants = async (req, res) => {
             cover: r.cover,
             status: r.status,
             email: r.email || null,
+            deliveryRadiusKm: r.deliveryRadiusKm,
             lat: r.lat,
             lng: r.lng,
             cuisines: parsedCuisines.map((id) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
@@ -266,7 +269,7 @@ const getRestaurantById = async (req, res) => {
 exports.getRestaurantById = getRestaurantById;
 const updateRestaurant = async (req, res) => {
     const { id } = req.params;
-    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm } = req.body;
     let cuisineId = req.body.cuisineId;
     if (cuisineId === undefined)
         cuisineId = req.body['cuisineId[]'];
@@ -342,6 +345,8 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.lat = lat;
     if (lng !== undefined)
         restaurantUpdateData.lng = lng;
+    if (deliveryRadiusKm !== undefined)
+        restaurantUpdateData.deliveryRadiusKm = deliveryRadiusKm;
     if (logo) {
         restaurantUpdateData.logo = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant.logo, logo, "restaurants");
     }
