@@ -9,12 +9,12 @@ export const restaurants = mysqlTable("restaurants", {
     name: varchar("name", { length: 255 }).notNull(),
     nameAr: varchar("name_ar", { length: 255 }),
     nameFr: varchar("name_fr", { length: 255 }),
-    address: text("address").notNull(),
-    addressAr: text("address_ar").notNull().default(''),
-    addressFr: text("address_fr").notNull().default(''),
+    address: text("address"),
+    addressAr: text("address_ar").default(''),
+    addressFr: text("address_fr").default(''),
     
     cuisineId: json("cuisine_id").$type<string[]>().default([]),
-    zoneId: char("zone_id", { length: 36 }).references(() => zones.id).notNull(),
+    zoneId: char("zone_id", { length: 36 }).references(() => zones.id),
  
     logo: varchar("logo", { length: 500 }).notNull(),
     cover: varchar("cover", { length: 500 }),

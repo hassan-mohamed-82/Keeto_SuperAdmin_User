@@ -75,7 +75,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
     if (cuisineId === undefined) cuisineId = req.body.cuisines;
     if (cuisineId === undefined) cuisineId = req.body['cuisines[]'];
 
-    if (!name || !nameAr || !nameFr || !address || !addressAr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
+    if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest("Missing required fields");
     }
 

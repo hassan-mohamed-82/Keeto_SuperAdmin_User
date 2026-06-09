@@ -65,7 +65,7 @@ const createRestaurant = async (req, res) => {
         cuisineId = req.body.cuisines;
     if (cuisineId === undefined)
         cuisineId = req.body['cuisines[]'];
-    if (!name || !nameAr || !nameFr || !address || !addressAr || !zoneId || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
+    if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
     }
     // التحقق من تكرار الإيميل في جدول حسابات مديري المطاعم
