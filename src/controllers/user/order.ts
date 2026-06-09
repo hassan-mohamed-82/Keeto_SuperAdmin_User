@@ -215,20 +215,20 @@ export const checkout = async (req: Request | any, res: Response) => {
         deliveryFee = parseFloat(selfFee.deliveryFee as string || "0");
 
         // د. الفحص الثاني: التأكد من النطاق الجغرافي بالمتر/الكيلومتر (Radius Validation)
-        if (branch.lat && branch.lng && branch.deliveryRadiusKm) {
-            const distance = calculateDistance(
-                Number(branch.lat),
-                Number(branch.lng),
-                Number(userAddress.lat),
-                Number(userAddress.lng)
-            );
+        // if (branch.lat && branch.lng && branch.deliveryRadiusKm) {
+        //     const distance = calculateDistance(
+        //         Number(branch.lat),
+        //         Number(branch.lng),
+        //         Number(userAddress.lat),
+        //         Number(userAddress.lng)
+        //     );
 
-            if (distance > Number(branch.deliveryRadiusKm)) {
-                throw new BadRequest("عذراً، عنوانك خارج نطاق التوصيل الجغرافي المسموح به لهذا الفرع");
-            }
-        } else {
-            throw new BadRequest("إعدادات التوصيل الجغرافية لهذا الفرع غير مكتملة");
-        }
+        //     if (distance > Number(branch.deliveryRadiusKm)) {
+        //         throw new BadRequest("عذراً، عنوانك خارج نطاق التوصيل الجغرافي المسموح به لهذا الفرع");
+        //     }
+        // } else {
+        //     throw new BadRequest("إعدادات التوصيل الجغرافية لهذا الفرع غير مكتملة");
+        // }
     }
 
     const totalAmount = subtotal + deliveryFee + serviceFee;

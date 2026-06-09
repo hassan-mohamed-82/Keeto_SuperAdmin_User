@@ -10,7 +10,6 @@ const NotFound_1 = require("../../Errors/NotFound");
 const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
 const notifications_1 = require("../../utils/notifications");
-const geo_1 = require("../../utils/geo");
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date) => {
     return new Intl.DateTimeFormat("ar-EG", {
@@ -176,15 +175,19 @@ const checkout = async (req, res) => {
             throw new BadRequest_1.BadRequest("Restaurant does not deliver to your zone directly");
         deliveryFee = parseFloat(selfFee.deliveryFee || "0");
         // د. الفحص الثاني: التأكد من النطاق الجغرافي بالمتر/الكيلومتر (Radius Validation)
-        if (branch.lat && branch.lng && branch.deliveryRadiusKm) {
-            const distance = (0, geo_1.calculateDistance)(Number(branch.lat), Number(branch.lng), Number(userAddress.lat), Number(userAddress.lng));
-            if (distance > Number(branch.deliveryRadiusKm)) {
-                throw new BadRequest_1.BadRequest("عذراً، عنوانك خارج نطاق التوصيل الجغرافي المسموح به لهذا الفرع");
-            }
-        }
-        else {
-            throw new BadRequest_1.BadRequest("إعدادات التوصيل الجغرافية لهذا الفرع غير مكتملة");
-        }
+        // if (branch.lat && branch.lng && branch.deliveryRadiusKm) {
+        //     const distance = calculateDistance(
+        //         Number(branch.lat),
+        //         Number(branch.lng),
+        //         Number(userAddress.lat),
+        //         Number(userAddress.lng)
+        //     );
+        //     if (distance > Number(branch.deliveryRadiusKm)) {
+        //         throw new BadRequest("عذراً، عنوانك خارج نطاق التوصيل الجغرافي المسموح به لهذا الفرع");
+        //     }
+        // } else {
+        //     throw new BadRequest("إعدادات التوصيل الجغرافية لهذا الفرع غير مكتملة");
+        // }
     }
     const totalAmount = subtotal + deliveryFee + serviceFee;
     const orderId = (0, uuid_1.v4)();
