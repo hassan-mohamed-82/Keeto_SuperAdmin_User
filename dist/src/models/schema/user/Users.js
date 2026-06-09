@@ -18,5 +18,6 @@ exports.users = (0, mysql_core_1.mysqlTable)("users", {
     facebookId: (0, mysql_core_1.varchar)("facebook_id", { length: 255 }).unique(),
     googleId: (0, mysql_core_1.varchar)("google_id", { length: 255 }).unique(),
     isVerified: (0, mysql_core_1.boolean)("is_verified").default(false),
+    status: (0, mysql_core_1.mysqlEnum)("status", ["active", "blocked"]).default("active"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });

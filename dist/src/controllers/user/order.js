@@ -74,54 +74,55 @@ const checkout = async (req, res) => {
     // ==========================================
     // 4.1 Validate Restaurant Settings & Schedules
     // ==========================================
-    const [settings] = await connection_1.db.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1);
-    if (settings) {
-        if (orderType === "takeaway" && !settings.takeaway) {
-            throw new BadRequest_1.BadRequest("This restaurant does not accept takeaway orders");
-        }
-        if (orderType === "dine_in" && !settings.dineIn) {
-            throw new BadRequest_1.BadRequest("This restaurant does not accept dine-in orders");
-        }
-        if (orderType === "delivery" && !settings.homeDelivery) {
-            throw new BadRequest_1.BadRequest("This restaurant does not accept delivery orders");
-        }
-        if (!settings.isAlwaysOpen) {
-            const egyptDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
-            const dayOfWeek = egyptDate.getDay();
-            const currentHour = egyptDate.getHours().toString().padStart(2, '0');
-            const currentMinute = egyptDate.getMinutes().toString().padStart(2, '0');
-            const currentTimeStr = `${currentHour}:${currentMinute}`;
-            const todaySchedules = await connection_1.db.select().from(schema_1.restaurantSchedules)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.dayOfWeek, dayOfWeek)));
-            if (todaySchedules.length === 0 || todaySchedules.every(s => s.isOffDay)) {
-                throw new BadRequest_1.BadRequest("The restaurant is closed today");
-            }
-            let isOpenNow = false;
-            for (const schedule of todaySchedules) {
-                if (schedule.isOffDay)
-                    continue;
-                if (!schedule.openingTime || !schedule.closingTime) {
-                    isOpenNow = true;
-                    break;
-                }
-                if (schedule.closingTime < schedule.openingTime) {
-                    if (currentTimeStr >= schedule.openingTime || currentTimeStr <= schedule.closingTime) {
-                        isOpenNow = true;
-                        break;
-                    }
-                }
-                else {
-                    if (currentTimeStr >= schedule.openingTime && currentTimeStr <= schedule.closingTime) {
-                        isOpenNow = true;
-                        break;
-                    }
-                }
-            }
-            if (!isOpenNow) {
-                throw new BadRequest_1.BadRequest("The restaurant is currently closed");
-            }
-        }
-    }
+    // const [settings] = await db.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1);
+    // if (settings) {
+    //     if (orderType === "takeaway" && !settings.takeaway) {
+    //         throw new BadRequest("This restaurant does not accept takeaway orders");
+    //     }
+    //     if (orderType === "dine_in" && !settings.dineIn) {
+    //         throw new BadRequest("This restaurant does not accept dine-in orders");
+    //     }
+    //     if (orderType === "delivery" && !settings.homeDelivery) {
+    //         throw new BadRequest("This restaurant does not accept delivery orders");
+    //     }
+    //     if (!settings.isAlwaysOpen) {
+    //         const egyptDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
+    //         const dayOfWeek = egyptDate.getDay(); 
+    //         const currentHour = egyptDate.getHours().toString().padStart(2, '0');
+    //         const currentMinute = egyptDate.getMinutes().toString().padStart(2, '0');
+    //         const currentTimeStr = `${currentHour}:${currentMinute}`;
+    //         const todaySchedules = await db.select().from(restaurantSchedules)
+    //             .where(and(
+    //                 eq(restaurantSchedules.restaurantId, restaurantId),
+    //                 eq(restaurantSchedules.dayOfWeek, dayOfWeek)
+    //             ));
+    //         if (todaySchedules.length === 0 || todaySchedules.every(s => s.isOffDay)) {
+    //             throw new BadRequest("The restaurant is closed today");
+    //         }
+    //         let isOpenNow = false;
+    //         for (const schedule of todaySchedules) {
+    //             if (schedule.isOffDay) continue;
+    //             if (!schedule.openingTime || !schedule.closingTime) {
+    //                 isOpenNow = true;
+    //                 break;
+    //             }
+    //             if (schedule.closingTime < schedule.openingTime) {
+    //                 if (currentTimeStr >= schedule.openingTime || currentTimeStr <= schedule.closingTime) {
+    //                     isOpenNow = true;
+    //                     break;
+    //                 }
+    //             } else {
+    //                 if (currentTimeStr >= schedule.openingTime && currentTimeStr <= schedule.closingTime) {
+    //                     isOpenNow = true;
+    //                     break;
+    //                 }
+    //             }
+    //         }
+    //         if (!isOpenNow) {
+    //             throw new BadRequest("The restaurant is currently closed");
+    //         }
+    //     }
+    // }
     // ==========================================
     // 5. Calculate Subtotal from Cart Snapshots
     // ==========================================

@@ -28,6 +28,7 @@ import zoneDeliveryFeesRouter from "./zoneDeliveryFees";
 import RatingRouter from "./rating";
 import discountRouter from "./discount";
 import couponRouter from "./coupon";
+import KeetoUsersRouter from "./Keeto_users";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -61,6 +62,7 @@ router.use("/user-wallets", user_walletsRouter);
 router.use("/zone-delivery-fees", zoneDeliveryFeesRouter);
 router.use("/ratings", RatingRouter);
 router.use("/discounts", discountRouter);
-router.use("/coupons", couponRouter)
+router.use("/coupons", couponRouter);
+router.use("/keeto-users", KeetoUsersRouter);
 
 export default router;

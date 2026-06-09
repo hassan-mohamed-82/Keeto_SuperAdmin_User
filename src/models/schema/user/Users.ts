@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, text, timestamp, char, boolean, longtext } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, text, timestamp, char, boolean, longtext, mysqlEnum } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { countries } from "../admin/country";
 import { cities } from "../admin/city";
@@ -26,5 +26,6 @@ export const users = mysqlTable("users", {
     googleId: varchar("google_id", { length: 255 }).unique(),
     
     isVerified: boolean("is_verified").default(false),
+    status: mysqlEnum("status", ["active", "blocked"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),
 });
