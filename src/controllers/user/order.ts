@@ -85,68 +85,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     }
 
     // ==========================================
-    // 4.1 Validate Restaurant Settings & Schedules
-    // ==========================================
-    // const [settings] = await db.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1);
-    
-    // if (settings) {
-    //     if (orderType === "takeaway" && !settings.takeaway) {
-    //         throw new BadRequest("This restaurant does not accept takeaway orders");
-    //     }
-    //     if (orderType === "dine_in" && !settings.dineIn) {
-    //         throw new BadRequest("This restaurant does not accept dine-in orders");
-    //     }
-    //     if (orderType === "delivery" && !settings.homeDelivery) {
-    //         throw new BadRequest("This restaurant does not accept delivery orders");
-    //     }
-
-    //     if (!settings.isAlwaysOpen) {
-    //         const egyptDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
-    //         const dayOfWeek = egyptDate.getDay(); 
-            
-    //         const currentHour = egyptDate.getHours().toString().padStart(2, '0');
-    //         const currentMinute = egyptDate.getMinutes().toString().padStart(2, '0');
-    //         const currentTimeStr = `${currentHour}:${currentMinute}`;
-
-    //         const todaySchedules = await db.select().from(restaurantSchedules)
-    //             .where(and(
-    //                 eq(restaurantSchedules.restaurantId, restaurantId),
-    //                 eq(restaurantSchedules.dayOfWeek, dayOfWeek)
-    //             ));
-
-    //         if (todaySchedules.length === 0 || todaySchedules.every(s => s.isOffDay)) {
-    //             throw new BadRequest("The restaurant is closed today");
-    //         }
-
-    //         let isOpenNow = false;
-    //         for (const schedule of todaySchedules) {
-    //             if (schedule.isOffDay) continue;
-                
-    //             if (!schedule.openingTime || !schedule.closingTime) {
-    //                 isOpenNow = true;
-    //                 break;
-    //             }
-                
-    //             if (schedule.closingTime < schedule.openingTime) {
-    //                 if (currentTimeStr >= schedule.openingTime || currentTimeStr <= schedule.closingTime) {
-    //                     isOpenNow = true;
-    //                     break;
-    //                 }
-    //             } else {
-    //                 if (currentTimeStr >= schedule.openingTime && currentTimeStr <= schedule.closingTime) {
-    //                     isOpenNow = true;
-    //                     break;
-    //                 }
-    //             }
-    //         }
-
-    //         if (!isOpenNow) {
-    //             throw new BadRequest("The restaurant is currently closed");
-    //         }
-    //     }
-    // }
-
-    // ==========================================
     // 5. Calculate Subtotal from Cart Snapshots
     // ==========================================
     let subtotal = 0;
@@ -157,6 +95,8 @@ export const checkout = async (req: Request | any, res: Response) => {
         let varPrice = 0;
 
         const vars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
+        
+        // ⚠️ تأكد إن السعر في الفرونت إند اسمه additionalPrice، لو اسمه حاجة تانية غيرها هنا
         if (Array.isArray(vars)) {
             varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
         }
@@ -171,6 +111,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             basePrice: basePrice.toString(),
             variationsPrice: varPrice.toString(),
             totalPrice: itemTotal.toString(),
+            variations: vars, // ✅ التعديل هنا: إضافة الفارييشنز عشان متكونش null
             note: item.note || null
         });
     }
@@ -186,7 +127,6 @@ export const checkout = async (req: Request | any, res: Response) => {
         if (!addressId) throw new BadRequest("Delivery address is required");
         if (!branchId) throw new BadRequest("Branch is required for delivery orders");
 
-        // أ. جلب بيانات العنوان والتحقق منه
         const [userAddress] = await db.select().from(addresses)
             .where(and(
                 eq(addresses.id, addressId),
@@ -195,13 +135,11 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         if (!userAddress) throw new BadRequest("Invalid delivery address");
 
-        // ب. جلب بيانات الفرع المختار للتأكد من موقعه الجغرافي ونصف القطر
         const [branch] = await db.select().from(branches)
             .where(eq(branches.id, branchId)).limit(1);
         
         if (!branch) throw new BadRequest("Invalid branch selected");
 
-        // ج. الفحص الأول: التأكد من تسعير المنطقة (Zone Validation)
         const resolvedZoneId = userZoneId || userAddress.zoneId;
 
         const [selfFee] = await db.select().from(restaurantZoneDeliveryFees)
@@ -213,22 +151,6 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         if (!selfFee) throw new BadRequest("Restaurant does not deliver to your zone directly");
         deliveryFee = parseFloat(selfFee.deliveryFee as string || "0");
-
-        // د. الفحص الثاني: التأكد من النطاق الجغرافي بالمتر/الكيلومتر (Radius Validation)
-        // if (branch.lat && branch.lng && branch.deliveryRadiusKm) {
-        //     const distance = calculateDistance(
-        //         Number(branch.lat),
-        //         Number(branch.lng),
-        //         Number(userAddress.lat),
-        //         Number(userAddress.lng)
-        //     );
-
-        //     if (distance > Number(branch.deliveryRadiusKm)) {
-        //         throw new BadRequest("عذراً، عنوانك خارج نطاق التوصيل الجغرافي المسموح به لهذا الفرع");
-        //     }
-        // } else {
-        //     throw new BadRequest("إعدادات التوصيل الجغرافية لهذا الفرع غير مكتملة");
-        // }
     }
 
     const totalAmount = subtotal + deliveryFee + serviceFee;
@@ -266,7 +188,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     const now = new Date(); 
 
     await db.transaction(async (tx) => {
-        // أ. خصم محفظة العميل
         if (isWalletPayment && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance as string);
             const newBalance = balanceBefore - totalAmount;
@@ -288,7 +209,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             });
         }
 
-        // ب. تسجيل بيانات الأوردر نفسه
+        // تسجيل بيانات الأوردر نفسه
         await tx.insert(orders).values({
             id: orderId,
             orderNumber,
@@ -298,7 +219,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             branchId, 
             addressId: addressId || null,
             orderSource,
-            paymentMethod,
+            paymentMethod, // ✅ هيفضل بالـ ID زي ما طلبت
             orderType: orderType || "delivery",
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
@@ -310,11 +231,11 @@ export const checkout = async (req: Request | any, res: Response) => {
             createdAt: now
         });
 
-        // ج. تفريغ الكارت وتسجيل الأصناف
+        // تفريغ الكارت وتسجيل الأصناف
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(cartItems).where(eq(cartItems.userId, userId)); 
 
-        // د. تسويات محفظة المطعم
+        // تسويات محفظة المطعم
         if (!restaurantWallet) {
             await tx.insert(restaurantWallets).values({
                 id: uuidv4(),
@@ -369,7 +290,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 11. Send Notification to Restaurant
     // ==========================================
-    // ملاحظة: تأكد من بقاء دالة formatToEgyptTime أو استبدالها بما يماثلها لديك لقراءة النص بالإشعار
     const cairoTimeFormatted = new Date(now).toLocaleTimeString("en-US", { timeZone: "Africa/Cairo" });
 
     await sendPushNotification({

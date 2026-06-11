@@ -71,58 +71,6 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Order failed. This restaurant has no active business plan.");
     }
     // ==========================================
-    // 4.1 Validate Restaurant Settings & Schedules
-    // ==========================================
-    // const [settings] = await db.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1);
-    // if (settings) {
-    //     if (orderType === "takeaway" && !settings.takeaway) {
-    //         throw new BadRequest("This restaurant does not accept takeaway orders");
-    //     }
-    //     if (orderType === "dine_in" && !settings.dineIn) {
-    //         throw new BadRequest("This restaurant does not accept dine-in orders");
-    //     }
-    //     if (orderType === "delivery" && !settings.homeDelivery) {
-    //         throw new BadRequest("This restaurant does not accept delivery orders");
-    //     }
-    //     if (!settings.isAlwaysOpen) {
-    //         const egyptDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
-    //         const dayOfWeek = egyptDate.getDay(); 
-    //         const currentHour = egyptDate.getHours().toString().padStart(2, '0');
-    //         const currentMinute = egyptDate.getMinutes().toString().padStart(2, '0');
-    //         const currentTimeStr = `${currentHour}:${currentMinute}`;
-    //         const todaySchedules = await db.select().from(restaurantSchedules)
-    //             .where(and(
-    //                 eq(restaurantSchedules.restaurantId, restaurantId),
-    //                 eq(restaurantSchedules.dayOfWeek, dayOfWeek)
-    //             ));
-    //         if (todaySchedules.length === 0 || todaySchedules.every(s => s.isOffDay)) {
-    //             throw new BadRequest("The restaurant is closed today");
-    //         }
-    //         let isOpenNow = false;
-    //         for (const schedule of todaySchedules) {
-    //             if (schedule.isOffDay) continue;
-    //             if (!schedule.openingTime || !schedule.closingTime) {
-    //                 isOpenNow = true;
-    //                 break;
-    //             }
-    //             if (schedule.closingTime < schedule.openingTime) {
-    //                 if (currentTimeStr >= schedule.openingTime || currentTimeStr <= schedule.closingTime) {
-    //                     isOpenNow = true;
-    //                     break;
-    //                 }
-    //             } else {
-    //                 if (currentTimeStr >= schedule.openingTime && currentTimeStr <= schedule.closingTime) {
-    //                     isOpenNow = true;
-    //                     break;
-    //                 }
-    //             }
-    //         }
-    //         if (!isOpenNow) {
-    //             throw new BadRequest("The restaurant is currently closed");
-    //         }
-    //     }
-    // }
-    // ==========================================
     // 5. Calculate Subtotal from Cart Snapshots
     // ==========================================
     let subtotal = 0;
@@ -131,6 +79,7 @@ const checkout = async (req, res) => {
         const basePrice = parseFloat(item.unitPrice || "0");
         let varPrice = 0;
         const vars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
+        // ⚠️ تأكد إن السعر في الفرونت إند اسمه additionalPrice، لو اسمه حاجة تانية غيرها هنا
         if (Array.isArray(vars)) {
             varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
         }
@@ -143,6 +92,7 @@ const checkout = async (req, res) => {
             basePrice: basePrice.toString(),
             variationsPrice: varPrice.toString(),
             totalPrice: itemTotal.toString(),
+            variations: vars, // ✅ التعديل هنا: إضافة الفارييشنز عشان متكونش null
             note: item.note || null
         });
     }
@@ -157,37 +107,20 @@ const checkout = async (req, res) => {
             throw new BadRequest_1.BadRequest("Delivery address is required");
         if (!branchId)
             throw new BadRequest_1.BadRequest("Branch is required for delivery orders");
-        // أ. جلب بيانات العنوان والتحقق منه
         const [userAddress] = await connection_1.db.select().from(schema_1.addresses)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId), (0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId))).limit(1);
         if (!userAddress)
             throw new BadRequest_1.BadRequest("Invalid delivery address");
-        // ب. جلب بيانات الفرع المختار للتأكد من موقعه الجغرافي ونصف القطر
         const [branch] = await connection_1.db.select().from(schema_1.branches)
             .where((0, drizzle_orm_1.eq)(schema_1.branches.id, branchId)).limit(1);
         if (!branch)
             throw new BadRequest_1.BadRequest("Invalid branch selected");
-        // ج. الفحص الأول: التأكد من تسعير المنطقة (Zone Validation)
         const resolvedZoneId = userZoneId || userAddress.zoneId;
         const [selfFee] = await connection_1.db.select().from(schema_1.restaurantZoneDeliveryFees)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, resolvedZoneId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.status, "active"))).limit(1);
         if (!selfFee)
             throw new BadRequest_1.BadRequest("Restaurant does not deliver to your zone directly");
         deliveryFee = parseFloat(selfFee.deliveryFee || "0");
-        // د. الفحص الثاني: التأكد من النطاق الجغرافي بالمتر/الكيلومتر (Radius Validation)
-        // if (branch.lat && branch.lng && branch.deliveryRadiusKm) {
-        //     const distance = calculateDistance(
-        //         Number(branch.lat),
-        //         Number(branch.lng),
-        //         Number(userAddress.lat),
-        //         Number(userAddress.lng)
-        //     );
-        //     if (distance > Number(branch.deliveryRadiusKm)) {
-        //         throw new BadRequest("عذراً، عنوانك خارج نطاق التوصيل الجغرافي المسموح به لهذا الفرع");
-        //     }
-        // } else {
-        //     throw new BadRequest("إعدادات التوصيل الجغرافية لهذا الفرع غير مكتملة");
-        // }
     }
     const totalAmount = subtotal + deliveryFee + serviceFee;
     const orderId = (0, uuid_1.v4)();
@@ -218,7 +151,6 @@ const checkout = async (req, res) => {
     // ==========================================
     const now = new Date();
     await connection_1.db.transaction(async (tx) => {
-        // أ. خصم محفظة العميل
         if (isWalletPayment && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance);
             const newBalance = balanceBefore - totalAmount;
@@ -237,7 +169,7 @@ const checkout = async (req, res) => {
                 createdAt: now
             });
         }
-        // ب. تسجيل بيانات الأوردر نفسه
+        // تسجيل بيانات الأوردر نفسه
         await tx.insert(schema_1.orders).values({
             id: orderId,
             orderNumber,
@@ -247,7 +179,7 @@ const checkout = async (req, res) => {
             branchId,
             addressId: addressId || null,
             orderSource,
-            paymentMethod,
+            paymentMethod, // ✅ هيفضل بالـ ID زي ما طلبت
             orderType: orderType || "delivery",
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
@@ -258,10 +190,10 @@ const checkout = async (req, res) => {
             status: "pending",
             createdAt: now
         });
-        // ج. تفريغ الكارت وتسجيل الأصناف
+        // تفريغ الكارت وتسجيل الأصناف
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-        // د. تسويات محفظة المطعم
+        // تسويات محفظة المطعم
         if (!restaurantWallet) {
             await tx.insert(schema_1.restaurantWallets).values({
                 id: (0, uuid_1.v4)(),
@@ -310,7 +242,6 @@ const checkout = async (req, res) => {
     // ==========================================
     // 11. Send Notification to Restaurant
     // ==========================================
-    // ملاحظة: تأكد من بقاء دالة formatToEgyptTime أو استبدالها بما يماثلها لديك لقراءة النص بالإشعار
     const cairoTimeFormatted = new Date(now).toLocaleTimeString("en-US", { timeZone: "Africa/Cairo" });
     await (0, notifications_1.sendPushNotification)({
         recipientType: "restaurant",
