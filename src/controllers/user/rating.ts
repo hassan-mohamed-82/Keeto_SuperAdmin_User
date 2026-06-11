@@ -5,12 +5,15 @@ import { eq, and, sql, avg, count } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
-
+import { UnauthorizedError } from "../../Errors";
 // ==========================================
 // 1. Add or Update Rating (User)
 // ==========================================
 export const rateRestaurant = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
+    if (!userId) {
+        throw new UnauthorizedError ("User not found");
+    }
     const { restaurantId, rating, comment } = req.body;
 
     if (!restaurantId || !rating) {

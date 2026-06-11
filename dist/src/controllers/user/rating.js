@@ -7,11 +7,15 @@ const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const NotFound_1 = require("../../Errors/NotFound");
+const Errors_1 = require("../../Errors");
 // ==========================================
 // 1. Add or Update Rating (User)
 // ==========================================
 const rateRestaurant = async (req, res) => {
     const userId = req.user?.id;
+    if (!userId) {
+        throw new Errors_1.UnauthorizedError("User not found");
+    }
     const { restaurantId, rating, comment } = req.body;
     if (!restaurantId || !rating) {
         throw new BadRequest_1.BadRequest("restaurantId and rating are required");

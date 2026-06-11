@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { rateRestaurant, getMyRating ,getRestaurantRatings} from "../../controllers/user/rating";
 import { catchAsync } from "../../utils/catchAsync";
+import { authenticated } from "../../middlewares/authenticated";
 
 const router = Router();
 
-router.post("/", catchAsync(rateRestaurant));
+router.post("/",authenticated,catchAsync(rateRestaurant));
 router.get("/:restaurantId", catchAsync(getMyRating));
 router.get("/restaurant/:restaurantId", catchAsync(getRestaurantRatings));
 
