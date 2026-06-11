@@ -41,3 +41,4 @@ export * from "./schema/user/restaurantRating";
 export * from "./schema/user/SocialMedia";
 export * from "./schema/admin/invoices";
 export * from "./schema/user/slider"
+export * from "./schema/admin/restraurant_user";
