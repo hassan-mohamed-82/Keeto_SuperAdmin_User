@@ -1,28 +1,39 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getSettingsByRestaurantId = exports.updateSettings = void 0;
-const connection_1 = require("../../models/connection"); // غير المسار حسب مكان ملف اتصال قاعدة البيانات عندك
+const connection_1 = require("../../models/connection"); // تأكد من مسار الاتصال بقاعدة البيانات
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
+// 1. دالة تحديث الإعدادات (بعد التعديل)
 const updateSettings = async (req, res) => {
     const restaurantId = req.params.restaurantId;
-    const { settings, schedules } = req.body;
+    // سحب schedules و settings وأي بيانات إضافية مبعوتة خارج الـ settings
+    const { schedules, settings, ...otherSettings } = req.body;
     if (!restaurantId || restaurantId === "undefined") {
         res.status(400).json({ success: false, message: "Restaurant id is not valid" });
         return;
     }
-    if (!settings && !schedules) {
+    // دمج كل الإعدادات في Object واحد لضمان عدم ضياع أي حقول
+    const finalSettings = {
+        ...(settings || {}),
+        ...otherSettings
+    };
+    // التحقق من وجود بيانات للتحديث
+    if (Object.keys(finalSettings).length === 0 && (!schedules || schedules.length === 0)) {
         res.status(400).json({ success: false, message: "No settings or schedules provided in the request body" });
         return;
     }
-    // بدأ الـ Transaction
+    // بدأ الـ Transaction لضمان تنفيذ كل العمليات معاً
     await connection_1.db.transaction(async (tx) => {
-        // 1. تحديث الإعدادات (لو مبعوتة)
-        if (settings && Object.keys(settings).length > 0) {
-            const existingSettings = await tx.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1);
+        // -- أ: تحديث الإعدادات --
+        if (Object.keys(finalSettings).length > 0) {
+            const existingSettings = await tx.select()
+                .from(schema_1.restaurantSettings)
+                .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
+                .limit(1);
+            // إزالة الحقول التي لا يجب تحديثها
+            const { id, restaurantId: restId, ...updatePayload } = finalSettings;
             if (existingSettings.length > 0) {
-                // Remove id and restaurantId to prevent updating primary keys
-                const { id, restaurantId: restId, ...updatePayload } = settings;
                 if (Object.keys(updatePayload).length > 0) {
                     await tx.update(schema_1.restaurantSettings)
                         .set({
@@ -33,31 +44,29 @@ const updateSettings = async (req, res) => {
                 }
             }
             else {
-                const { id, restaurantId: restId, ...insertPayload } = settings;
+                // في حالة عدم وجود إعدادات سابقة، يتم إنشاؤها
                 await tx.insert(schema_1.restaurantSettings).values({
-                    ...insertPayload,
+                    ...updatePayload,
                     restaurantId,
-                    minOrderAmount: insertPayload.minOrderAmount !== undefined ? String(insertPayload.minOrderAmount) : undefined,
+                    minOrderAmount: updatePayload.minOrderAmount !== undefined ? String(updatePayload.minOrderAmount) : undefined,
                 });
             }
         }
-        // 2. تحديث المواعيد والفترات (لو مبعوتة)
+        // -- ب: تحديث المواعيد والفترات --
         if (schedules && Array.isArray(schedules)) {
-            // خطوة أ: مسح كل المواعيد القديمة للمطعم ده
+            // مسح كل المواعيد القديمة
             await tx.delete(schema_1.restaurantSchedules)
                 .where((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId));
-            // لو المصفوفة مش فاضية، هنضيف الجديد
+            // إضافة المواعيد الجديدة إن وجدت
             if (schedules.length > 0) {
-                // تجهيز الداتا الجديدة للـ Insert
                 const schedulesToInsert = schedules.map((schedule) => ({
                     restaurantId: restaurantId,
                     dayOfWeek: schedule.dayOfWeek,
                     isOffDay: schedule.isOffDay,
-                    // لو اليوم إجازة، هنخلي الأوقات null لضمان نظافة الداتا
+                    // تعيين الأوقات كـ null إذا كان اليوم إجازة
                     openingTime: schedule.isOffDay ? null : schedule.openingTime,
                     closingTime: schedule.isOffDay ? null : schedule.closingTime,
                 }));
-                // خطوة ب: إضافة المواعيد والفترات الجديدة
                 await tx.insert(schema_1.restaurantSchedules).values(schedulesToInsert);
             }
         }
@@ -68,19 +77,28 @@ const updateSettings = async (req, res) => {
     });
 };
 exports.updateSettings = updateSettings;
+// 2. دالة جلب الإعدادات (بدون تغييرات جذرية، تعمل بشكل سليم)
 const getSettingsByRestaurantId = async (req, res) => {
     const restaurantId = req.params.restaurantId;
-    if (!restaurantId) {
+    if (!restaurantId || restaurantId === "undefined") {
         res.status(400).json({ success: false, message: "Restaurant id is required" });
         return;
     }
-    const settings = await connection_1.db.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1);
-    const schedules = await connection_1.db.select().from(schema_1.restaurantSchedules).where((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId));
+    const settings = await connection_1.db.select()
+        .from(schema_1.restaurantSettings)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+    const schedules = await connection_1.db.select()
+        .from(schema_1.restaurantSchedules)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId));
     let settingsResult = settings[0];
-    // لو مفيش إعدادات خالص للمطعم ده، هنكريتله إعدادات افتراضية
+    // إنشاء إعدادات افتراضية في حال عدم وجودها مسبقاً
     if (!settingsResult) {
         await connection_1.db.insert(schema_1.restaurantSettings).values({ restaurantId });
-        const newSettings = await connection_1.db.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1);
+        const newSettings = await connection_1.db.select()
+            .from(schema_1.restaurantSettings)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
+            .limit(1);
         settingsResult = newSettings[0];
     }
     res.status(200).json({
