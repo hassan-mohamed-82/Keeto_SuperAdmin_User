@@ -11,13 +11,14 @@ import {
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
+import { food } from "./food";
 
 // ==========================================
 // 1. Discounts Table (الجدول الرئيسي)
 // ==========================================
 export const discounts = mysqlTable("discounts", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
-        
+
     name: varchar("name", { length: 255 }).notNull(),
     nameAr: varchar("name_ar", { length: 255 }),
     nameFr: varchar("name_fr", { length: 255 }),
@@ -64,4 +65,23 @@ export const discountRestaurants = mysqlTable("discount_restaurants", {
 }, (table) => ({
     // قيد يمنع تكرار ربط نفس الخصم بنفس المطعم
     discountRestaurantUnique: uniqueIndex("discount_restaurant_unique_idx").on(table.discountId, table.restaurantId),
+}));
+
+// ==========================================
+// 3. Discount Foods Table (Optional Specific Products)
+// ==========================================
+export const discountFoods = mysqlTable("discount_foods", {
+    id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+
+    discountId: char("discount_id", { length: 36 })
+        .references(() => discounts.id, { onDelete: "cascade" })
+        .notNull(),
+
+    foodId: char("food_id", { length: 36 })
+        .references(() => food.id, { onDelete: "cascade" })
+        .notNull(),
+
+    createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+    discountFoodUnique: uniqueIndex("discount_food_unique_idx").on(table.discountId, table.foodId),
 }));
