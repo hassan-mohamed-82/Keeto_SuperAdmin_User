@@ -8,4 +8,8 @@ const router = (0, express_1.Router)();
 router.get("/", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getFinancialReport));
 router.get("/detailed", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getDetailedRestaurantReport));
 router.get("/restaurant/:restaurantId", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getSingleRestaurantReport));
+router.get("/restaurant/:restaurantId/invoices", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getRestaurantInvoices));
+router.get("/invoice/:invoiceId/pdf", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.generateRestaurantInvoicePDF));
+router.post("/restaurant/invoice", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.generateAndSaveInvoice));
+router.put("/invoice/:invoiceId/mark-paid", (0, middlewares_1.hasPermission)("reports", "Edit"), (0, catchAsync_1.catchAsync)(Report_1.markInvoiceAsPaid));
 exports.default = router;

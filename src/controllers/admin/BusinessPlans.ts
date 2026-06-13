@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import {  restaurantBusinessPlans, restaurants } from "../../models/schema";
+import { restaurantBusinessPlans, restaurants } from "../../models/schema";
 import { eq, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -9,54 +9,79 @@ import { v4 as uuidv4 } from "uuid";
 import { UnauthorizedError } from "../../Errors";
 
 // ==========================================
-// 1. إضافة خطة عمل لمطعم (Create)
+// 1. إضافة خطط عمل (الـ pos مربوط بـ isOn وبدون عمولات)
 // ==========================================
 export const createBusinessPlan = async (req: Request, res: Response) => {
-    const { 
-        restaurantId, platformType, 
-        isMonthlyActive, monthlyAmount, 
-        isQuarterlyActive, quarterlyAmount, 
-        isAnnuallyActive, annuallyAmount, 
-        commissionRate, serviceFee 
-    } = req.body;
+    const { restaurantId, platforms } = req.body;
 
-    if (!restaurantId || !platformType) {
-        throw new BadRequest("Restaurant ID and Platform Type are required");
+    if (!restaurantId || !platforms || !Array.isArray(platforms)) {
+        throw new BadRequest("Restaurant ID and a valid 'platforms' array are required");
     }
 
-    // التأكد إن المطعم ملوش خطة مسجلة لنفس نوع المنصة قبل كده
-    const existingPlan = await db
-        .select()
+    // جلب البيانات القديمة للمطعم عشان نمنع التكرار
+    const existingPlans = await db
+        .select({ platformType: restaurantBusinessPlans.platformType })
         .from(restaurantBusinessPlans)
-        .where(
-            and(
-                eq(restaurantBusinessPlans.restaurantId, restaurantId),
-                eq(restaurantBusinessPlans.platformType, platformType)
-            )
-        )
-        .limit(1);
+        .where(eq(restaurantBusinessPlans.restaurantId, restaurantId));
 
-    if (existingPlan[0]) {
-        throw new BadRequest(`there is already a plan for this restaurant: ${platformType}`);
+    const existingTypes = existingPlans.map(p => p.platformType);
+    const valuesToInsert = [];
+
+    for (const platform of platforms) {
+        const isPos = platform.platformType === "pos";
+
+        // 💡 لو المنصة POS والسويتش بتاعها مش true، نتجاهلها
+        if (isPos && platform.isOn !== true) {
+            continue; 
+        }
+
+        if (existingTypes.includes(platform.platformType)) {
+            throw new BadRequest(`There is already a plan for this restaurant on platform: ${platform.platformType}`);
+        }
+
+        // 💡 Validation المبالغ للباقات (لو متفعلة)
+        if (platform.isMonthlyActive && parseFloat(platform.monthlyAmount || "0") <= 0) {
+            throw new BadRequest(`You can't activate the monthly plan with a zero amount for ${platform.platformType}`);
+        }
+        if (platform.isQuarterlyActive && parseFloat(platform.quarterlyAmount || "0") <= 0) {
+            throw new BadRequest(`You can't activate the quarterly plan with a zero amount for ${platform.platformType}`);
+        }
+        if (platform.isAnnuallyActive && parseFloat(platform.annuallyAmount || "0") <= 0) {
+            throw new BadRequest(`You can't activate the annually plan with a zero amount for ${platform.platformType}`);
+        }
+
+        // تجهيز الداتا للحفظ
+        valuesToInsert.push({
+            id: uuidv4(),
+            restaurantId,
+            platformType: platform.platformType,
+            
+            // الباقات
+            isMonthlyActive: platform.isMonthlyActive || false,
+            monthlyAmount: platform.monthlyAmount || "0.00",
+            isQuarterlyActive: platform.isQuarterlyActive || false,
+            quarterlyAmount: platform.quarterlyAmount || "0.00",
+            isAnnuallyActive: platform.isAnnuallyActive || false,
+            annuallyAmount: platform.annuallyAmount || "0.00",
+            
+            // العمولات: لو المنصة pos بنجبرها تبقى 0.00، لو غير كده بناخد القيمة المبعوتة
+            commissionRate: isPos ? "0.00" : (platform.commissionRate || "0.00"),
+            serviceFee: isPos ? "0.00" : (platform.serviceFee || "0.00")
+        });
     }
 
-    const id = uuidv4();
+    // لو مفيش أي بيانات صالحة للإضافة
+    if (valuesToInsert.length === 0) {
+        throw new BadRequest("No valid platforms provided to be saved");
+    }
 
-    await db.insert(restaurantBusinessPlans).values({
-        id,
-        restaurantId,
-        platformType,
-        isMonthlyActive: isMonthlyActive || false,
-        monthlyAmount: monthlyAmount || "0.00",
-        isQuarterlyActive: isQuarterlyActive || false,
-        quarterlyAmount: quarterlyAmount || "0.00",
-        isAnnuallyActive: isAnnuallyActive || false,
-        annuallyAmount: annuallyAmount || "0.00",
-        commissionRate: commissionRate || "0.00",
-        serviceFee: serviceFee || "0.00"
-    });
+    // الإضافة الجماعية في خطوة واحدة
+    await db.insert(restaurantBusinessPlans).values(valuesToInsert);
 
-    return SuccessResponse(res, { message: "business plan created successfully", data: { id } }, 201);
+    return SuccessResponse(res, { 
+        message: "Business plans created successfully", 
+        insertedCount: valuesToInsert.length 
+    }, 201);
 };
 
 // ==========================================
@@ -95,7 +120,6 @@ export const getBusinessPlanById = async (req: Request, res: Response) => {
 // ==========================================
 // 4. تحديث خطة العمل (Update)
 // ==========================================
-// تحديث خطة العمل (جوه ملف BusinessPlan.ts)
 export const updateBusinessPlan = async (req: Request, res: Response) => {
     const { id } = req.params;
     const updateData = req.body;
@@ -111,27 +135,31 @@ export const updateBusinessPlan = async (req: Request, res: Response) => {
     }
 
     // 💡 الـ Validation الذكي للسويتشات:
-    // لو السويتش الشهري اتبعت بـ true، لازم نتأكد إن المبلغ أكبر من صفر
     if (updateData.isMonthlyActive === true) {
         const amount = parseFloat(updateData.monthlyAmount || existingPlan[0].monthlyAmount);
         if (amount <= 0) throw new BadRequest("you can't activate the monthly plan with a zero amount");
     }
-
-    // لو السويتش الربع سنوي اتبعت بـ true
     if (updateData.isQuarterlyActive === true) {
         const amount = parseFloat(updateData.quarterlyAmount || existingPlan[0].quarterlyAmount);
         if (amount <= 0) throw new BadRequest("you can't activate the quarterly plan with a zero amount");
     }
-
-    // لو السويتش السنوي اتبعت بـ true
     if (updateData.isAnnuallyActive === true) {
         const amount = parseFloat(updateData.annuallyAmount || existingPlan[0].annuallyAmount);
         if (amount <= 0) throw new BadRequest("you can't activate the annually plan with a zero amount");
     }
 
+    // 💡 تأكيد إضافي: لو المنصة pos نمنع تحديث العمولات لأي رقم غير صفر
+    if (existingPlan[0].platformType === "pos") {
+        updateData.commissionRate = "0.00";
+        updateData.serviceFee = "0.00";
+    }
+
     // منع تعديل الثوابت
+    delete updateData.id;
     delete updateData.restaurantId;
     delete updateData.platformType;
+    delete updateData.createdAt;
+    delete updateData.updatedAt;
 
     if (Object.keys(updateData).length === 0) {
         throw new BadRequest("no valid fields provided for update");
@@ -143,6 +171,7 @@ export const updateBusinessPlan = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, { message: "business plan updated successfully" });
 };
+
 // ==========================================
 // 5. حذف خطة العمل (Delete)
 // ==========================================
@@ -164,23 +193,22 @@ export const deleteBusinessPlan = async (req: Request, res: Response) => {
     return SuccessResponse(res, { message: "business plan deleted successfully" });
 };
 
-
-
+// ==========================================
+// 6. جلب كل خطط العمل للمطاعم (Admin)
+// ==========================================
 export const getallresstrauntplans = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
-    // 1. استخدام innerJoin لربط الجدولين ببعض
     const allPlansData = await db.select({
-        plan: restaurantBusinessPlans,     // الداتا بتاعة الباقة
-        restaurant: restaurants            // الداتا بتاعة المطعم
+        plan: restaurantBusinessPlans,
+        restaurant: restaurants
     })
     .from(restaurantBusinessPlans)
     .innerJoin(restaurants, eq(restaurantBusinessPlans.restaurantId, restaurants.id));
 
-    // 2. إعادة تشكيل الداتا (Formatting) عشان ترجع بشكل أنظف للفرونت إند
     const formattedPlans = allPlansData.map((item) => ({
-        ...item.plan, // هنفرد كل بيانات الباقة
-        restaurantDetails: item.restaurant // هنحط بيانات المطعم كلها جوه Object اسمه restaurantDetails
+        ...item.plan, 
+        restaurantDetails: item.restaurant 
     }));
 
     return SuccessResponse(res, { 

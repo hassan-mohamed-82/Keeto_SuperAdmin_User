@@ -9,7 +9,7 @@ const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
 const createSubcategory = async (req, res) => {
-    const { name, nameAr, nameFr, categoryId, priority, status } = req.body;
+    const { name, nameAr, nameFr, categoryId, priority, status, restaurantId } = req.body;
     if (!name || !nameAr || !nameFr || !categoryId) {
         throw new BadRequest_1.BadRequest("Subcategory name, nameAr, nameFr, and category ID are required");
     }
@@ -31,6 +31,7 @@ const createSubcategory = async (req, res) => {
         categoryId,
         priority: priority || "low",
         status: status || "active",
+        restaurantId: restaurantId || null,
     });
     return (0, response_1.SuccessResponse)(res, { message: "Create subcategory success", data: { id } }, 201);
 };
@@ -43,6 +44,7 @@ const getAllSubcategories = async (req, res) => {
         nameAr: schema_1.subcategories.nameAr,
         nameFr: schema_1.subcategories.nameFr,
         categoryId: schema_1.subcategories.categoryId,
+        restaurantId: schema_1.subcategories.restaurantId,
         priority: schema_1.subcategories.priority,
         status: schema_1.subcategories.status,
         createdAt: schema_1.subcategories.createdAt,
@@ -54,9 +56,17 @@ const getAllSubcategories = async (req, res) => {
             nameFr: schema_1.categories.nameFr,
             status: schema_1.categories.status,
         },
+        restaurant: {
+            id: schema_1.restaurants.id,
+            name: schema_1.restaurants.name,
+            nameAr: schema_1.restaurants.nameAr,
+            nameFr: schema_1.restaurants.nameFr,
+            status: schema_1.restaurants.status,
+        },
     })
         .from(schema_1.subcategories)
-        .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.subcategories.categoryId, schema_1.categories.id));
+        .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.subcategories.categoryId, schema_1.categories.id))
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.subcategories.restaurantId, schema_1.restaurants.id));
     return (0, response_1.SuccessResponse)(res, { message: "Get all subcategories success", data: allSubcategories });
 };
 exports.getAllSubcategories = getAllSubcategories;
@@ -69,6 +79,7 @@ const getSubcategoryById = async (req, res) => {
         nameAr: schema_1.subcategories.nameAr,
         nameFr: schema_1.subcategories.nameFr,
         categoryId: schema_1.subcategories.categoryId,
+        restaurantId: schema_1.subcategories.restaurantId,
         priority: schema_1.subcategories.priority,
         status: schema_1.subcategories.status,
         createdAt: schema_1.subcategories.createdAt,
@@ -80,9 +91,17 @@ const getSubcategoryById = async (req, res) => {
             nameFr: schema_1.categories.nameFr,
             status: schema_1.categories.status,
         },
+        restaurant: {
+            id: schema_1.restaurants.id,
+            name: schema_1.restaurants.name,
+            nameAr: schema_1.restaurants.nameAr,
+            nameFr: schema_1.restaurants.nameFr,
+            status: schema_1.restaurants.status,
+        },
     })
         .from(schema_1.subcategories)
         .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.subcategories.categoryId, schema_1.categories.id))
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.subcategories.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.eq)(schema_1.subcategories.id, id))
         .limit(1);
     if (!subcategory[0]) {
@@ -93,7 +112,7 @@ const getSubcategoryById = async (req, res) => {
 exports.getSubcategoryById = getSubcategoryById;
 const updateSubcategory = async (req, res) => {
     const { id } = req.params;
-    const { name, nameAr, nameFr, categoryId, priority, status } = req.body;
+    const { name, nameAr, nameFr, categoryId, priority, status, restaurantId } = req.body;
     const existingSubcategory = await connection_1.db
         .select()
         .from(schema_1.subcategories)
@@ -113,6 +132,17 @@ const updateSubcategory = async (req, res) => {
             throw new BadRequest_1.BadRequest("Category not found");
         }
     }
+    // Check if restaurant exists if restaurantId is provided
+    if (restaurantId) {
+        const existingRestaurant = await connection_1.db
+            .select()
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId))
+            .limit(1);
+        if (!existingRestaurant[0]) {
+            throw new BadRequest_1.BadRequest("Restaurant not found");
+        }
+    }
     const updateData = {
         updatedAt: new Date(),
     };
@@ -128,6 +158,8 @@ const updateSubcategory = async (req, res) => {
         updateData.priority = priority;
     if (status)
         updateData.status = status;
+    if (restaurantId)
+        updateData.restaurantId = restaurantId;
     if (Object.keys(updateData).length === 1) {
         throw new BadRequest_1.BadRequest("No data to update");
     }
@@ -157,6 +189,13 @@ const getallcategory = async (req, res) => {
     })
         .from(schema_1.categories)
         .where((0, drizzle_orm_1.eq)(schema_1.categories.status, "active"));
-    return (0, response_1.SuccessResponse)(res, { message: "Get all categories success", data: allCategories });
+    const allrestaurnat = await connection_1.db
+        .select({
+        id: schema_1.restaurants.id,
+        name: schema_1.restaurants.name,
+    })
+        .from(schema_1.restaurants)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"));
+    return (0, response_1.SuccessResponse)(res, { message: "Get all categories success", data: { categories: allCategories, restaurants: allrestaurnat } });
 };
 exports.getallcategory = getallcategory;

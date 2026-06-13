@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { users, emailVerifications } from "../../models/schema";
+import { users, emailVerifications, restaurant_users } from "../../models/schema";
 import { eq, and } from "drizzle-orm";
 import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
@@ -210,7 +210,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
 // 3. Login
 // ===================================
 export const login = async (req: Request, res: Response) => {
-    const { email, password } = req.body;
+    const { email, password, restaurantId } = req.body;
 
     if (!email || !password) throw new BadRequest("Email and password are required");
 
@@ -225,11 +225,23 @@ export const login = async (req: Request, res: Response) => {
     const isMatch = await bcrypt.compare(password, user.password!);
     if (!isMatch) throw new BadRequest("Invalid credentials");
 
+    if (user.status === "blocked") {
+        throw new BadRequest("Your account has been blocked. Please contact support.");
+    }
+
+    if (restaurantId) {
+        const [existingLink] = await db.select().from(restaurant_users)
+            .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, user.id)))
+            .limit(1);
+        if (!existingLink) {
+            await db.insert(restaurant_users).values({ restaurantId, userId: user.id });
+        }
+    }
+
     const token = generateUserToken({ id: user.id, name: user.name });
 
     return SuccessResponse(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email } } });
 };
-
 // ===================================
 // 4. Forgot Password
 // ===================================

@@ -2,9 +2,9 @@ import { Request, Response } from "express";
 import { OAuth2Client } from "google-auth-library";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import { users, restaurant_users } from "../models/schema";
 import { db } from "../models/connection";
-import { users } from "../models/schema"; // تأكد من مسار الـ schema الصحيح عندك
-import { eq, or } from "drizzle-orm";
+import { eq, or, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 dotenv.config();
@@ -12,18 +12,12 @@ dotenv.config();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export const verifyGoogleToken = async (req: Request, res: Response) => {
-  const { token } = req.body;
+  const { token, restaurantId } = req.body;
 
   try {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    
-    if (!clientId) {
-      throw new Error("GOOGLE_CLIENT_ID is missing from environment variables");
-    }
-
     const ticket = await client.verifyIdToken({
       idToken: token,
-      audience: clientId,
+      audience: process.env.GOOGLE_CLIENT_ID,
     });
 
     const payload = ticket.getPayload();
@@ -34,83 +28,70 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         .json({ success: false, message: "Invalid Google payload" });
     }
 
-    // استخراج بيانات المستخدم من جوجل
-    const googleId = payload.sub; 
-    const email = payload.email || null;
+    const email = payload.email!;
     const name = payload.name || "Unknown User";
-    const photo = payload.picture || null;
+    const googleId = payload.sub;
 
-    // 🔍 البحث عن اليوزر بالـ googleId أو الإيميل
-    const conditions = [eq(users.googleId, googleId)];
-    if (email) {
-      conditions.push(eq(users.email, email));
-    }
-
-    const [existingUser] = await db
+    // 🔍 check if user exists by googleId OR email
+    const existingUsers = await db
       .select()
       .from(users)
-      .where(or(...conditions))
+      .where(or(eq(users.googleId, googleId), eq(users.email, email)))
       .limit(1);
 
-    let userId: string;
-    let userName: string | null = name;
-    let userEmail: string | null = email;
+    let user = existingUsers[0];
 
-    if (!existingUser) {
-      // ➕ تسجيل مستخدم جديد (Signup)
-      userId = uuidv4();
-      
+    if (!user) {
+      // ➕ Signup (new user)
+      const newId = uuidv4();
       await db.insert(users).values({
-        id: userId,
+        id: newId,
+        googleId,
         email,
         name,
-        photo,
-        googleId, 
-        isVerified: true, 
+        isVerified: true,
       });
+      user = { id: newId, name, email, googleId, phone: null, photo: null, fcmToken: null, password: null, isVerified: true, status: "active", createdAt: new Date(), facebookId: null };
     } else {
-      // 👤 تسجيل دخول لمستخدم حالي (Login)
-      userId = existingUser.id;
-      userName = existingUser.name;
-      userEmail = existingUser.email;
-
-      // 🔄 ربط حساب جوجل بالحساب القديم لو مسجل بالإيميل قبل كده
-      if (!existingUser.googleId) {
-        await db
-          .update(users)
-          .set({ googleId, isVerified: true })
-          .where(eq(users.id, userId));
+      // 👤 Login (existing user)
+      // لو المستخدم كان موجود بالإيميل بس ومفيش googleId نخزنه
+      if (!user.googleId) {
+        await db.update(users).set({ googleId }).where(eq(users.id, user.id));
+        user.googleId = googleId;
       }
     }
 
-    // 🔑 إنشاء الـ JWT وإضافة كل البيانات اللي الميدلوير بيحتاجها (id, role, name, type)
-    const authToken = jwt.sign(
-      { 
-        id: userId,
-        role: "user",
-        name: userName,
-        type: "user"
-      }, 
-      process.env.JWT_SECRET!, 
-      {
-        expiresIn: "7d",
+    // 🚫 Check if user is blocked
+    if (user.status === "blocked") {
+      return res.status(403).json({ success: false, message: "Your account has been blocked. Please contact support." });
+    }
+
+    // 🔗 Link to restaurant if restaurantId is provided
+    if (restaurantId) {
+      const existingLink = await db.select().from(restaurant_users)
+        .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, user.id)))
+        .limit(1);
+      if (existingLink.length === 0) {
+        await db.insert(restaurant_users).values({ restaurantId, userId: user.id });
       }
-    );
+    }
+
+    // 🔑 Generate JWT
+    const authToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET!, {
+      expiresIn: "7d",
+    });
 
     return res.json({
       success: true,
       token: authToken,
       user: {
-        id: userId,
-        name: userName,
-        email: userEmail,
-        photo,
-        role: "user",
-        type: "user"
+        id: user.id,
+        name: user.name,
+        email: user.email,
       },
     });
   } catch (error) {
     console.error("Google login error:", error);
-    res.status(401).json({ success: false, message: "Invalid token or authentication failed" });
+    res.status(401).json({ success: false, message: "Invalid token" });
   }
 };

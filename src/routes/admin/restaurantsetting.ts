@@ -6,6 +6,9 @@ import { updateRestaurantSettingsSchema } from "../../validation/admin/restauran
 import { hasPermission } from "../../middlewares/";
 const router = Router();
 router.get("/:restaurantId", hasPermission("RestaurantSettings", "View"), catchAsync(getSettingsByRestaurantId));
-router.put("/:restaurantId", hasPermission("RestaurantSettings", "Edit"), validate(updateRestaurantSettingsSchema), catchAsync(updateSettings));
+router.put("/:restaurantId",
+hasPermission("RestaurantSettings", "Edit"),
+//  validate(updateRestaurantSettingsSchema),
+ catchAsync(updateSettings));
 
 export default router;

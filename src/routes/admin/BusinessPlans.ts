@@ -14,10 +14,12 @@ const router = Router();
 
 
 router.get("/", hasPermission("BusninessPlan", "View"), catchAsync(getallresstrauntplans));
-router.post("/", validate(createBusinessPlanSchema), hasPermission("BusninessPlan", "Add"), catchAsync(createBusinessPlan));
+router.post("/",// validate(createBusinessPlanSchema),
+ hasPermission("BusninessPlan", "Add"), catchAsync(createBusinessPlan));
 router.get("/restaurant/:restaurantId", hasPermission("BusninessPlan", "View"), catchAsync(getBusinessPlansByRestaurant));
 router.get("/:id", hasPermission("BusninessPlan", "View"), catchAsync(getBusinessPlanById));
-router.put("/:id", validate(updateBusinessPlanSchema), hasPermission("BusninessPlan", "Edit"), catchAsync(updateBusinessPlan));
+router.put("/:id",// validate(updateBusinessPlanSchema)
+ hasPermission("BusninessPlan", "Edit"), catchAsync(updateBusinessPlan));
 router.delete("/:id", hasPermission("BusninessPlan", "Delete"), catchAsync(deleteBusinessPlan));
 
 

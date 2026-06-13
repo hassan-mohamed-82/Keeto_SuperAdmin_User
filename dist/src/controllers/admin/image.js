@@ -1,76 +1,71 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateImage = exports.getImageById = exports.deleteImage = exports.getAllImages = exports.createImage = void 0;
-const connection_1 = require("../../models/connection");
-const schema_1 = require("../../models/schema");
-const drizzle_orm_1 = require("drizzle-orm");
-const response_1 = require("../../utils/response");
-const NotFound_1 = require("../../Errors/NotFound");
-const BadRequest_1 = require("../../Errors/BadRequest");
-const uuid_1 = require("uuid");
-const handleImages_1 = require("../../utils/handleImages");
-const createImage = async (req, res) => {
-    const { img } = req.body;
-    const result = await (0, handleImages_1.saveBase64Image)(req, img, "images");
-    if (!result.url) {
-        throw new BadRequest_1.BadRequest("Image is required.");
-    }
-    const id = (0, uuid_1.v4)();
-    await connection_1.db.insert(schema_1.images).values({
-        id,
-        img: result.url,
-    });
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Image created successfully",
-        data: {
-            id,
-            img: result.url
-        }
-    }, 201);
-};
-exports.createImage = createImage;
-const getAllImages = async (req, res) => {
-    const image = await connection_1.db.select().from(schema_1.images);
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Images fetched successfully",
-        data: image,
-    }, 200);
-};
-exports.getAllImages = getAllImages;
-const deleteImage = async (req, res) => {
-    const { id } = req.params;
-    await connection_1.db.delete(schema_1.images).where((0, drizzle_orm_1.eq)(schema_1.images.id, id));
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Image deleted successfully",
-    }, 200);
-};
-exports.deleteImage = deleteImage;
-const getImageById = async (req, res) => {
-    const { id } = req.params;
-    const image = await connection_1.db.select().from(schema_1.images).where((0, drizzle_orm_1.eq)(schema_1.images.id, id));
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Image fetched successfully",
-        data: image[0],
-    }, 200);
-};
-exports.getImageById = getImageById;
-const updateImage = async (req, res) => {
-    const { id } = req.params;
-    const { img } = req.body;
-    const image = await connection_1.db.select().from(schema_1.images).where((0, drizzle_orm_1.eq)(schema_1.images.id, id));
-    if (!image[0]) {
-        throw new NotFound_1.NotFound("Image not found");
-    }
-    const updatedUrl = await (0, handleImages_1.handleImageUpdate)(req, image[0].img, img, "images");
-    if (!updatedUrl) {
-        throw new BadRequest_1.BadRequest("Image is required.");
-    }
-    await connection_1.db.update(schema_1.images).set({
-        img: updatedUrl,
-    }).where((0, drizzle_orm_1.eq)(schema_1.images.id, id));
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Image updated successfully",
-        data: updatedUrl,
-    }, 200);
-};
-exports.updateImage = updateImage;
+// import { Request, Response } from "express";
+// import { db } from "../../models/connection";
+// import { images } from "../../models/schema";
+// import { eq } from "drizzle-orm";
+// import { SuccessResponse } from "../../utils/response";
+// import { NotFound } from "../../Errors/NotFound";
+// import { BadRequest } from "../../Errors/BadRequest";
+// import bcrypt from "bcrypt";
+// import { v4 as uuidv4 } from "uuid";
+// import { saveBase64Image, handleImageUpdate } from "../../utils/handleImages";
+// export const createImage = async (req: Request, res: Response) => {
+//     const { img, periorty, } = req.body;
+//     const result = await saveBase64Image(req, img, "images");
+//     if (!result.url) {
+//         throw new BadRequest("Image is required.");
+//     }
+//     const id = uuidv4();
+//     await db.insert(images).values({
+//         id,
+//         img: result.url,
+//     });
+//     return SuccessResponse(res, {
+//         message: "Image created successfully",
+//         data: {
+//             id,
+//             img: result.url
+//         }
+//     }, 201);
+// };
+// export const getAllImages = async (req: Request, res: Response) => {
+//     const image = await db.select().from(images);
+//     return SuccessResponse(res, {
+//         message: "Images fetched successfully",
+//         data: image,
+//     }, 200);
+// };
+// export const deleteImage = async (req: Request, res: Response) => {
+//     const { id } = req.params;
+//     await db.delete(images).where(eq(images.id, id));
+//     return SuccessResponse(res, {
+//         message: "Image deleted successfully",
+//     }, 200);
+// };
+// export const getImageById = async (req: Request, res: Response) => {
+//     const { id } = req.params;
+//     const image = await db.select().from(images).where(eq(images.id, id));
+//     return SuccessResponse(res, {
+//         message: "Image fetched successfully",
+//         data: image[0],
+//     }, 200);
+// };
+// export const updateImage = async (req: Request, res: Response) => {
+//     const { id } = req.params;
+//     const { img } = req.body;
+//     const image = await db.select().from(images).where(eq(images.id, id));
+//     if (!image[0]) {
+//         throw new NotFound("Image not found");
+//     }
+//     const updatedUrl = await handleImageUpdate(req, image[0].img, img, "images");
+//     if (!updatedUrl) {
+//         throw new BadRequest("Image is required.");
+//     }
+//     await db.update(images).set({
+//         img: updatedUrl,
+//     }).where(eq(images.id, id));
+//     return SuccessResponse(res, {
+//         message: "Image updated successfully",
+//         data: updatedUrl,
+//     }, 200);
+// };

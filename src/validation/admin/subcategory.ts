@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const createSubcategorySchema = z.object({
+    restaurantId: z.string().uuid("Invalid Restaurant ID").optional(),
     // العلاقة بالقسم الرئيسي (Required)
     categoryId: z.string().uuid("Invalid Category ID"),
 

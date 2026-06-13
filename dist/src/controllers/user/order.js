@@ -9,6 +9,19 @@ const BadRequest_1 = require("../../Errors/BadRequest");
 const NotFound_1 = require("../../Errors/NotFound");
 const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
+const notifications_1 = require("../../utils/notifications");
+// 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
+const formatToEgyptTime = (date) => {
+    return new Intl.DateTimeFormat("ar-EG", {
+        timeZone: "Africa/Cairo",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+    }).format(date);
+};
 // ==========================================
 // 1. إنشاء الطلب (Checkout)
 // ==========================================
@@ -16,22 +29,22 @@ const checkout = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
-    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId } = req.body;
+    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note } = req.body;
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
-    // التحقق من branchId
-    if (!branchId) {
-        throw new BadRequest_1.BadRequest("Branch ID is required");
-    }
     const validOrderSources = ["online_order", "food_aggregator", "mykeeto"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest_1.BadRequest("Invalid order source");
     }
-    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet"];
-    if (!validPaymentMethods.includes(paymentMethod)) {
-        throw new BadRequest_1.BadRequest("Invalid payment method");
+    const [selectedPayment] = await connection_1.db.select().from(schema_1.paymentMethods).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.id, paymentMethod)).limit(1);
+    if (!selectedPayment || !selectedPayment.isActive) {
+        throw new BadRequest_1.BadRequest("Invalid or inactive payment method");
     }
+    const paymentMethodName = selectedPayment.name;
+    const paymentMethodNameAr = selectedPayment.nameAr;
+    const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
+    const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
     // ==========================================
     // 2. Idempotency Check
     // ==========================================
@@ -66,6 +79,7 @@ const checkout = async (req, res) => {
         const basePrice = parseFloat(item.unitPrice || "0");
         let varPrice = 0;
         const vars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
+        // ⚠️ تأكد إن السعر في الفرونت إند اسمه additionalPrice، لو اسمه حاجة تانية غيرها هنا
         if (Array.isArray(vars)) {
             varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
         }
@@ -77,22 +91,30 @@ const checkout = async (req, res) => {
             quantity: item.quantity,
             basePrice: basePrice.toString(),
             variationsPrice: varPrice.toString(),
-            totalPrice: itemTotal.toString()
+            totalPrice: itemTotal.toString(),
+            variations: vars, // ✅ التعديل هنا: إضافة الفارييشنز عشان متكونش null
+            note: item.note || null
         });
     }
     const serviceFee = plan ? parseFloat(plan.serviceFee || "0") : 0;
     let appCommission = orderSource === "food_aggregator" ? subtotal * (parseFloat(plan?.commissionRate || "0") / 100) : 0;
     // ==========================================
-    // 6. Smart Delivery Logic
+    // 6. Smart Delivery Logic (Zone + Radius Hybrid)
     // ==========================================
     let deliveryFee = 0;
     if (orderType === "delivery") {
         if (!addressId)
             throw new BadRequest_1.BadRequest("Delivery address is required");
+        if (!branchId)
+            throw new BadRequest_1.BadRequest("Branch is required for delivery orders");
         const [userAddress] = await connection_1.db.select().from(schema_1.addresses)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId), (0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId))).limit(1);
         if (!userAddress)
             throw new BadRequest_1.BadRequest("Invalid delivery address");
+        const [branch] = await connection_1.db.select().from(schema_1.branches)
+            .where((0, drizzle_orm_1.eq)(schema_1.branches.id, branchId)).limit(1);
+        if (!branch)
+            throw new BadRequest_1.BadRequest("Invalid branch selected");
         const resolvedZoneId = userZoneId || userAddress.zoneId;
         const [selfFee] = await connection_1.db.select().from(schema_1.restaurantZoneDeliveryFees)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, resolvedZoneId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.status, "active"))).limit(1);
@@ -112,7 +134,7 @@ const checkout = async (req, res) => {
     // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
-    if (paymentMethod === "wallet") {
+    if (isWalletPayment) {
         const walletResult = await connection_1.db.select().from(schema_1.userWallets).where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId)).limit(1);
         userWallet = walletResult[0];
         const currentBalance = parseFloat(userWallet?.balance || "0");
@@ -127,9 +149,9 @@ const checkout = async (req, res) => {
     // ==========================================
     // 10. Execute Order (Transaction)
     // ==========================================
+    const now = new Date();
     await connection_1.db.transaction(async (tx) => {
-        // أ. خصم محفظة العميل (لو الدفع محفظة)
-        if (paymentMethod === "wallet" && userWallet) {
+        if (isWalletPayment && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance);
             const newBalance = balanceBefore - totalAmount;
             await tx.update(schema_1.userWallets)
@@ -143,10 +165,11 @@ const checkout = async (req, res) => {
                 amount: totalAmount.toString(),
                 balanceBefore: balanceBefore.toString(),
                 reference: orderNumber,
-                status: "approved"
+                status: "approved",
+                createdAt: now
             });
         }
-        // ب. تسجيل بيانات الأوردر نفسه
+        // تسجيل بيانات الأوردر نفسه
         await tx.insert(schema_1.orders).values({
             id: orderId,
             orderNumber,
@@ -156,19 +179,21 @@ const checkout = async (req, res) => {
             branchId,
             addressId: addressId || null,
             orderSource,
-            paymentMethod,
+            paymentMethod, // ✅ هيفضل بالـ ID زي ما طلبت
             orderType: orderType || "delivery",
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
             serviceFee: serviceFee.toString(),
             appCommission: appCommission.toString(),
             totalAmount: totalAmount.toString(),
-            status: "pending"
+            note: note || null,
+            status: "pending",
+            createdAt: now
         });
-        // ج. تفريغ الكارت وتسجيل الأصناف
+        // تفريغ الكارت وتسجيل الأصناف
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-        // د. تسويات محفظة المطعم
+        // تسويات محفظة المطعم
         if (!restaurantWallet) {
             await tx.insert(schema_1.restaurantWallets).values({
                 id: (0, uuid_1.v4)(),
@@ -186,7 +211,7 @@ const checkout = async (req, res) => {
         const appDues = appCommission + serviceFee;
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
-        if (paymentMethod === "cash_on_delivery") {
+        if (isCashPayment) {
             newRestBalance -= appDues;
             newCollectedCash += totalAmount;
         }
@@ -200,22 +225,48 @@ const checkout = async (req, res) => {
             totalEarning: (currentTotalEarning + restaurantEarning).toString()
         })
             .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId));
+        const isCash = isCashPayment;
         await tx.insert(schema_1.restaurantWalletTransactions).values({
             id: (0, uuid_1.v4)(),
             restaurantId,
             type: "order_payment",
-            amount: paymentMethod === "cash_on_delivery" ? `-${appDues}` : `${restaurantEarning}`,
+            amount: isCash ? `-${appDues}` : `${restaurantEarning}`,
             balanceBefore: currentRestBalance.toString(),
             balanceAfter: newRestBalance.toString(),
-            method: paymentMethod,
+            method: paymentMethodName,
             reference: orderNumber,
-            note: paymentMethod === "cash_on_delivery" ? "Commission deducted from cash order" : "Earnings added from digital payment"
+            note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment",
+            createdAt: now
         });
+    });
+    // ==========================================
+    // 11. Send Notification to Restaurant
+    // ==========================================
+    const cairoTimeFormatted = new Date(now).toLocaleTimeString("en-US", { timeZone: "Africa/Cairo" });
+    await (0, notifications_1.sendPushNotification)({
+        recipientType: "restaurant",
+        recipientId: restaurantId,
+        title: "طلب جديد! 🛒",
+        body: `تم استلام طلب جديد #${orderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
+        data: {
+            orderId,
+            orderNumber,
+            type: "new_order",
+            createdAt: now.toISOString()
+        }
     });
     return (0, response_1.SuccessResponse)(res, {
         message: "Order created successfully",
-        data: {
-            orderDetails: { orderId, orderNumber, subtotal, deliveryFee, serviceFee, totalAmount },
+        order_level: {
+            orderDetails: {
+                orderId,
+                orderNumber,
+                subtotal,
+                deliveryFee,
+                serviceFee,
+                totalAmount,
+                createdAt: now.toISOString()
+            },
             customerDetails: userInfo
         }
     });
@@ -228,6 +279,7 @@ const getActiveOrders = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
+    const { restaurantId } = req.query;
     const activeOrders = await connection_1.db
         .select({
         orderId: schema_1.orders.id,
@@ -241,7 +293,7 @@ const getActiveOrders = async (req, res) => {
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), 
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, String(restaurantId)) : undefined, 
     // 🔥 تجلب فقط الطلبات التي لم تنتهِ بعد
     (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["pending", "accepted", "preparing", "out_for_delivery"])))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
@@ -255,6 +307,7 @@ const getOrderHistory = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
+    const { restaurantId } = req.query;
     const historyOrders = await connection_1.db
         .select({
         orderId: schema_1.orders.id,
@@ -268,7 +321,7 @@ const getOrderHistory = async (req, res) => {
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), 
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, String(restaurantId)) : undefined, 
     // 🔥 تجلب فقط الطلبات التي انتهت (تم إضافة المرفوض والمسترجع)
     (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["delivered", "cancelled", "rejected", "refund"])))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
@@ -295,6 +348,7 @@ const getOrderDetails = async (req, res) => {
         deliveryFee: schema_1.orders.deliveryFee,
         serviceFee: schema_1.orders.serviceFee,
         totalAmount: schema_1.orders.totalAmount,
+        note: schema_1.orders.note,
         restaurantName: schema_1.restaurants.name,
         restaurantImage: schema_1.restaurants.logo
     })
@@ -312,7 +366,8 @@ const getOrderDetails = async (req, res) => {
         quantity: schema_1.orderItems.quantity,
         basePrice: schema_1.orderItems.basePrice,
         variationsPrice: schema_1.orderItems.variationsPrice,
-        totalPrice: schema_1.orderItems.totalPrice
+        totalPrice: schema_1.orderItems.totalPrice,
+        note: schema_1.orderItems.note
     })
         .from(schema_1.orderItems)
         .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.orderItems.foodId, schema_1.food.id))
@@ -329,40 +384,34 @@ exports.getOrderDetails = getOrderDetails;
 // 5. متطلبات الطلب المسبقة (Order Prerequisites)
 // ==========================================
 const getOrderPrerequisites = async (req, res) => {
-    try {
-        if (!req.user) {
-            throw new Errors_1.UnauthorizedError("Unauthenticated: Token is missing or invalid");
-        }
-        const userId = req.user.id;
-        const restaurantId = req.query.restaurantId;
-        if (!restaurantId) {
-            throw new BadRequest_1.BadRequest("restaurantId is required");
-        }
-        // جلب البيانات المطلوبة من الداتا بيز
-        const [userAddresses, restaurantBranches] = await Promise.all([
-            // أ) عناوين اليوزر 
-            connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId)),
-            // ب) فروع المطعم
-            connection_1.db.select().from(schema_1.branches).where((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId)),
-        ]);
-        // ج) طرق الدفع (بقت Static Array بدل الداتا بيز)
-        const activePaymentMethods = [
-            { id: "cash_on_delivery", name: "Cash on Delivery" },
-            { id: "visa", name: "Credit Card (Visa/Mastercard)" },
-            { id: "wallet", name: "My Wallet" }
-        ];
-        // تجميع الداتا وإرسالها
-        return (0, response_1.SuccessResponse)(res, {
-            data: {
-                addresses: userAddresses,
-                branches: restaurantBranches,
-                paymentMethods: activePaymentMethods
-            }
-        });
+    if (!req.user) {
+        throw new Errors_1.UnauthorizedError("Unauthenticated: Token is missing or invalid");
     }
-    catch (error) {
-        console.error("Error fetching order prerequisites:", error);
-        return res.status(500).json({ success: false, message: "Internal server error" });
+    const userId = req.user.id;
+    const restaurantId = req.query.restaurantId;
+    if (!restaurantId) {
+        throw new BadRequest_1.BadRequest("restaurantId is required");
     }
+    // جلب البيانات المطلوبة من الداتا بيز
+    const [userAddresses, restaurantBranches] = await Promise.all([
+        // أ) عناوين اليوزر 
+        connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId)),
+        // ب) فروع المطعم
+        connection_1.db.select().from(schema_1.branches).where((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId)),
+    ]);
+    // ج) طرق الدفع 
+    const activePaymentMethods = await connection_1.db.select({
+        id: schema_1.paymentMethods.id,
+        name: schema_1.paymentMethods.name,
+        nameAr: schema_1.paymentMethods.nameAr
+    }).from(schema_1.paymentMethods).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.isActive, true));
+    // تجميع الداتا وإرسالها
+    return (0, response_1.SuccessResponse)(res, {
+        data: {
+            addresses: userAddresses,
+            branches: restaurantBranches,
+            paymentMethods: activePaymentMethods
+        }
+    });
 };
 exports.getOrderPrerequisites = getOrderPrerequisites;

@@ -32,13 +32,18 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
+exports.markInvoiceAsPaid = exports.generateAndSaveInvoice = exports.generateRestaurantInvoicePDF = exports.getRestaurantInvoices = exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
+const pdfkit_1 = __importDefault(require("pdfkit"));
+const uuid_1 = require("uuid");
 // ==========================================
 // API 1: التقرير المالي العام 
 // ==========================================
@@ -55,7 +60,7 @@ const getFinancialReport = async (req, res) => {
         conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.status, status));
     }
     if (paymentMethod) {
-        conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, paymentMethod));
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.paymentMethods.name, paymentMethod));
     }
     // 👆
     if (startDate) {
@@ -72,7 +77,7 @@ const getFinancialReport = async (req, res) => {
         orderId: schema_1.orders.id,
         orderNumber: schema_1.orders.orderNumber,
         status: schema_1.orders.status,
-        paymentMethod: schema_1.orders.paymentMethod,
+        paymentMethod: schema_1.paymentMethods.name,
         orderType: schema_1.orders.orderType,
         subtotal: schema_1.orders.subtotal,
         deliveryFee: schema_1.orders.deliveryFee,
@@ -85,6 +90,7 @@ const getFinancialReport = async (req, res) => {
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+        .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where(conditions.length > 0 ? (0, drizzle_orm_1.and)(...conditions) : undefined)
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
     let totalRevenue = 0;
@@ -159,7 +165,7 @@ const getDetailedRestaurantReport = async (req, res) => {
         .select({
         orderId: schema_1.orders.id,
         orderSource: schema_1.orders.orderSource,
-        paymentMethod: schema_1.orders.paymentMethod,
+        paymentMethod: schema_1.paymentMethods.name,
         subtotal: schema_1.orders.subtotal,
         deliveryFee: schema_1.orders.deliveryFee,
         serviceFee: schema_1.orders.serviceFee,
@@ -170,6 +176,7 @@ const getDetailedRestaurantReport = async (req, res) => {
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+        .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where((0, drizzle_orm_1.and)(...conditions));
     // ==========================================
     // 3. Fetch business plans for all restaurants
@@ -422,7 +429,7 @@ const getSingleRestaurantReport = async (req, res) => {
         .select({
         orderId: schema_1.orders.id,
         orderSource: schema_1.orders.orderSource,
-        paymentMethod: schema_1.orders.paymentMethod,
+        paymentMethod: schema_1.paymentMethods.name,
         subtotal: schema_1.orders.subtotal,
         deliveryFee: schema_1.orders.deliveryFee,
         serviceFee: schema_1.orders.serviceFee,
@@ -430,6 +437,7 @@ const getSingleRestaurantReport = async (req, res) => {
         totalAmount: schema_1.orders.totalAmount,
     })
         .from(schema_1.orders)
+        .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where((0, drizzle_orm_1.and)(...conditions));
     // ==========================================
     // 4. Fetch restaurant business plans
@@ -654,3 +662,185 @@ const getSingleRestaurantReport = async (req, res) => {
     });
 };
 exports.getSingleRestaurantReport = getSingleRestaurantReport;
+// ==========================================
+// API 3.5: Get All Invoices for a Restaurant
+// ==========================================
+const getRestaurantInvoices = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const { restaurantId } = req.params;
+    const { status } = req.query;
+    if (!restaurantId) {
+        const { BadRequest } = await Promise.resolve().then(() => __importStar(require("../../Errors/BadRequest")));
+        throw new BadRequest("Restaurant ID is required");
+    }
+    const conditions = [
+        (0, drizzle_orm_1.eq)(schema_1.invoices.restaurantId, restaurantId)
+    ];
+    if (status) {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.invoices.status, status));
+    }
+    const restaurantInvoices = await connection_1.db
+        .select()
+        .from(schema_1.invoices)
+        .where((0, drizzle_orm_1.and)(...conditions))
+        .orderBy((0, drizzle_orm_1.desc)(schema_1.invoices.createdAt));
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Invoices retrieved successfully",
+        data: restaurantInvoices
+    });
+};
+exports.getRestaurantInvoices = getRestaurantInvoices;
+// ==========================================
+// API 4: Generate Restaurant Invoice PDF
+// ==========================================
+const generateRestaurantInvoicePDF = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const { invoiceId } = req.params;
+    if (!invoiceId) {
+        const { BadRequest } = await Promise.resolve().then(() => __importStar(require("../../Errors/BadRequest")));
+        throw new BadRequest("Invoice ID is required");
+    }
+    const invoice = await connection_1.db
+        .select()
+        .from(schema_1.invoices)
+        .where((0, drizzle_orm_1.eq)(schema_1.invoices.id, invoiceId))
+        .limit(1);
+    if (!invoice[0]) {
+        const { NotFound } = await Promise.resolve().then(() => __importStar(require("../../Errors/NotFound")));
+        throw new NotFound("Invoice not found");
+    }
+    const restaurant = await connection_1.db
+        .select()
+        .from(schema_1.restaurants)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, invoice[0].restaurantId))
+        .limit(1);
+    if (!restaurant[0]) {
+        const { NotFound } = await Promise.resolve().then(() => __importStar(require("../../Errors/NotFound")));
+        throw new NotFound("Restaurant not found");
+    }
+    const invoiceData = invoice[0];
+    // Build PDF
+    const doc = new pdfkit_1.default({ margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice_${restaurant[0].name.replace(/\s+/g, '_')}_${invoiceData.invoiceNumber}.pdf"`);
+    doc.pipe(res);
+    // Header
+    doc.fontSize(20).text('Keeto Restaurant Invoice', { align: 'center' });
+    doc.moveDown();
+    // Restaurant Details
+    doc.fontSize(14).fillColor('black').text(`Restaurant: ${restaurant[0].name} / ${restaurant[0].nameAr || ''}`);
+    doc.fontSize(12).text(`Invoice Number: ${invoiceData.invoiceNumber}`);
+    doc.text(`Date Range: ${new Date(invoiceData.startDate).toLocaleDateString()} to ${new Date(invoiceData.endDate).toLocaleDateString()}`);
+    doc.text(`Generated At: ${new Date(invoiceData.createdAt || Date.now()).toLocaleString()}`);
+    doc.text(`Status: ${invoiceData.status?.toUpperCase() || 'UNPAID'}`);
+    doc.moveDown();
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown();
+    // Summary Statistics
+    doc.fontSize(16).text('Summary', { underline: true });
+    doc.fontSize(12).text(`Total Orders: ${invoiceData.totalOrders}`);
+    doc.text(`Total Gross Sales: ${invoiceData.totalGrossSales} EGP`);
+    doc.moveDown();
+    // Payment Breakdown
+    doc.fontSize(14).text('Payment Breakdown', { underline: true });
+    doc.fontSize(12).text(`Cash Collected: ${invoiceData.totalCashCollected} EGP`);
+    doc.text(`Digital Collected: ${invoiceData.totalDigitalCollected} EGP`);
+    doc.moveDown();
+    // Fees
+    doc.fontSize(14).text('Fees & Commissions', { underline: true });
+    doc.fontSize(12).text(`Total Commission: ${invoiceData.totalCommission} EGP`);
+    doc.text(`Total Service Fee: ${invoiceData.totalServiceFee} EGP`);
+    doc.moveDown();
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown();
+    // Cash Due Analysis
+    doc.fontSize(16).text('Cash Due Analysis', { underline: true });
+    doc.fontSize(12).text(`Restaurant Owes Platform: ${invoiceData.restaurantOwesPlatform} EGP`);
+    doc.text(`Platform Owes Restaurant: ${invoiceData.platformOwesRestaurant} EGP`);
+    doc.moveDown();
+    doc.fontSize(14).text('Final Balance:', { continued: true });
+    const netBalance = parseFloat(invoiceData.netBalance);
+    if (netBalance > 0) {
+        doc.fillColor('green').text(` Platform owes restaurant ${Math.abs(netBalance).toFixed(2)} EGP`);
+    }
+    else if (netBalance < 0) {
+        doc.fillColor('red').text(` Restaurant owes platform ${Math.abs(netBalance).toFixed(2)} EGP`);
+    }
+    else {
+        doc.fillColor('black').text(` No pending dues (Settled)`);
+    }
+    doc.end();
+};
+exports.generateRestaurantInvoicePDF = generateRestaurantInvoicePDF;
+const generateAndSaveInvoice = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const { restaurantId, startDate, endDate } = req.body; // هنا بناخد التواريخ من الـ body
+    if (!restaurantId || !startDate || !endDate)
+        throw new Errors_1.BadRequest("Restaurant ID, Start Date, and End Date are required");
+    // 1. الفلترة والتأكد إن مفيش فواتير متداخلة (اختياري بس يفضل)
+    const conditions = [
+        (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId),
+        (0, drizzle_orm_1.eq)(schema_1.orders.status, "delivered")
+    ];
+    conditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(startDate)));
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    conditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
+    // 2. جلب الأوردرات وحساب الفلوس (نفس اللوجيك بالظبط بتاع التقرير المالي)
+    const deliveredOrders = await connection_1.db.select().from(schema_1.orders).where((0, drizzle_orm_1.and)(...conditions));
+    let totalCash = 0, totalDigital = 0, totalSales = 0, totalComm = 0, totalSvc = 0;
+    for (const order of deliveredOrders) {
+        const amount = parseFloat(order.totalAmount || "0");
+        const comm = parseFloat(order.appCommission || "0");
+        const svcFee = parseFloat(order.serviceFee || "0");
+        totalSales += amount;
+        totalComm += comm;
+        totalSvc += svcFee;
+        if (order.paymentMethod === "cash_on_delivery")
+            totalCash += amount;
+        else
+            totalDigital += amount;
+    }
+    // جلب نسبة العمولة
+    const businessPlans = await connection_1.db.select().from(schema_1.restaurantBusinessPlans).where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId));
+    let activeCommissionRate = 0;
+    if (businessPlans.length > 0) {
+        const onlinePlan = businessPlans.find(p => p.platformType === "online_order") || businessPlans[0];
+        activeCommissionRate = parseFloat(onlinePlan.commissionRate || "0");
+    }
+    const restaurantOwes = (totalCash * activeCommissionRate) / 100 + (totalSvc * (totalCash / (totalSales || 1)));
+    const platformOwes = totalDigital - (totalDigital * activeCommissionRate) / 100 - (totalSvc * (totalDigital / (totalSales || 1)));
+    const netBalance = platformOwes - restaurantOwes;
+    // 3. 💾 حفظ الفاتورة في الداتابيز
+    const invoiceId = (0, uuid_1.v4)();
+    const invoiceNumber = `INV-${Math.floor(100000 + Math.random() * 900000)}`; // رقم عشوائي كـ مثال
+    await connection_1.db.insert(schema_1.invoices).values({
+        id: invoiceId,
+        restaurantId,
+        invoiceNumber,
+        startDate: new Date(startDate),
+        endDate: end,
+        totalOrders: deliveredOrders.length,
+        totalGrossSales: totalSales.toFixed(2),
+        totalCashCollected: totalCash.toFixed(2),
+        totalDigitalCollected: totalDigital.toFixed(2),
+        totalCommission: totalComm.toFixed(2),
+        totalServiceFee: totalSvc.toFixed(2),
+        restaurantOwesPlatform: restaurantOwes.toFixed(2),
+        platformOwesRestaurant: platformOwes.toFixed(2),
+        netBalance: netBalance.toFixed(2),
+        status: "unpaid", // الحالة الافتراضية
+    });
+    return (0, response_1.SuccessResponse)(res, { message: "Invoice generated and saved successfully", data: { invoiceId } });
+};
+exports.generateAndSaveInvoice = generateAndSaveInvoice;
+// دالة عشان السوبر أدمن يغير حالة الفاتورة لـ Paid لما يتحاسبوا
+const markInvoiceAsPaid = async (req, res) => {
+    const { invoiceId } = req.params;
+    await connection_1.db.update(schema_1.invoices).set({ status: "paid" }).where((0, drizzle_orm_1.eq)(schema_1.invoices.id, invoiceId));
+    return (0, response_1.SuccessResponse)(res, { message: "Invoice marked as paid" });
+};
+exports.markInvoiceAsPaid = markInvoiceAsPaid;

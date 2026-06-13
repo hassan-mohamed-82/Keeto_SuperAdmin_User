@@ -54,3 +54,7 @@ __exportStar(require("./schema/user/favouriteliste"), exports);
 __exportStar(require("./schema/user/cart"), exports);
 __exportStar(require("./schema/user/userAddHome"), exports);
 __exportStar(require("./schema/user/restaurantRating"), exports);
+__exportStar(require("./schema/user/SocialMedia"), exports);
+__exportStar(require("./schema/admin/invoices"), exports);
+__exportStar(require("./schema/user/slider"), exports);
+__exportStar(require("./schema/admin/restraurant_user"), exports);

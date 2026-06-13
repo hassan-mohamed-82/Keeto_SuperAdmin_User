@@ -1,11 +1,12 @@
 // controllers/admin/FinancialReportController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { orders, restaurants, restaurantBusinessPlans } from "../../models/schema";
+import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods } from "../../models/schema";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { UnauthorizedError } from "../../Errors";
-
+import { BadRequest, UnauthorizedError } from "../../Errors";
+import PDFDocument from "pdfkit";
+import { v4 as uuidv4 } from "uuid";
 // 1. تعريف الأنواع المسموحة للـ Enums
 type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" | "rejected" | "refund";
 type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
@@ -29,7 +30,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         conditions.push(eq(orders.status, status as OrderStatus)); 
     }
     if (paymentMethod) {
-        conditions.push(eq(orders.paymentMethod, paymentMethod as PaymentMethod)); 
+        conditions.push(eq(paymentMethods.name, paymentMethod as string)); 
     }
     // 👆
     
@@ -48,7 +49,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             orderId: orders.id,
             orderNumber: orders.orderNumber,
             status: orders.status,
-            paymentMethod: orders.paymentMethod,
+            paymentMethod: paymentMethods.name,
             orderType: orders.orderType,
             
             subtotal: orders.subtotal,
@@ -64,6 +65,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(orders.createdAt));
 
@@ -146,7 +148,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         .select({
             orderId: orders.id,
             orderSource: orders.orderSource,
-            paymentMethod: orders.paymentMethod,
+            paymentMethod: paymentMethods.name,
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee,
@@ -157,6 +159,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(and(...conditions));
 
     // ==========================================
@@ -473,7 +476,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         .select({
             orderId: orders.id,
             orderSource: orders.orderSource,
-            paymentMethod: orders.paymentMethod,
+            paymentMethod: paymentMethods.name,
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee,
@@ -481,6 +484,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             totalAmount: orders.totalAmount,
         })
         .from(orders)
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(and(...conditions));
 
     // ==========================================
@@ -745,3 +749,223 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         }
     });
 };
+
+// ==========================================
+// API 3.5: Get All Invoices for a Restaurant
+// ==========================================
+export const getRestaurantInvoices = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+
+    const { restaurantId } = req.params;
+    const { status } = req.query;
+
+    if (!restaurantId) {
+        const { BadRequest } = await import("../../Errors/BadRequest");
+        throw new BadRequest("Restaurant ID is required");
+    }
+
+    const conditions = [
+        eq(invoices.restaurantId, restaurantId)
+    ];
+
+    if (status) {
+        conditions.push(eq(invoices.status, status as any));
+    }
+
+    const restaurantInvoices = await db
+        .select()
+        .from(invoices)
+        .where(and(...conditions))
+        .orderBy(desc(invoices.createdAt));
+
+    return SuccessResponse(res, {
+        message: "Invoices retrieved successfully",
+        data: restaurantInvoices
+    });
+};
+
+// ==========================================
+// API 4: Generate Restaurant Invoice PDF
+// ==========================================
+export const generateRestaurantInvoicePDF = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+
+    const { invoiceId } = req.params;
+
+    if (!invoiceId) {
+        const { BadRequest } = await import("../../Errors/BadRequest");
+        throw new BadRequest("Invoice ID is required");
+    }
+
+    const invoice = await db
+        .select()
+        .from(invoices)
+        .where(eq(invoices.id, invoiceId))
+        .limit(1);
+
+    if (!invoice[0]) {
+        const { NotFound } = await import("../../Errors/NotFound");
+        throw new NotFound("Invoice not found");
+    }
+
+    const restaurant = await db
+        .select()
+        .from(restaurants)
+        .where(eq(restaurants.id, invoice[0].restaurantId))
+        .limit(1);
+
+    if (!restaurant[0]) {
+        const { NotFound } = await import("../../Errors/NotFound");
+        throw new NotFound("Restaurant not found");
+    }
+
+    const invoiceData = invoice[0];
+
+    // Build PDF
+    const doc = new PDFDocument({ margin: 50 });
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice_${restaurant[0].name.replace(/\s+/g, '_')}_${invoiceData.invoiceNumber}.pdf"`);
+    
+    doc.pipe(res);
+    
+    // Header
+    doc.fontSize(20).text('Keeto Restaurant Invoice', { align: 'center' });
+    doc.moveDown();
+    
+    // Restaurant Details
+    doc.fontSize(14).fillColor('black').text(`Restaurant: ${restaurant[0].name} / ${restaurant[0].nameAr || ''}`);
+    doc.fontSize(12).text(`Invoice Number: ${invoiceData.invoiceNumber}`);
+    doc.text(`Date Range: ${new Date(invoiceData.startDate).toLocaleDateString()} to ${new Date(invoiceData.endDate).toLocaleDateString()}`);
+    doc.text(`Generated At: ${new Date(invoiceData.createdAt || Date.now()).toLocaleString()}`);
+    doc.text(`Status: ${invoiceData.status?.toUpperCase() || 'UNPAID'}`);
+    doc.moveDown();
+    
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown();
+
+    // Summary Statistics
+    doc.fontSize(16).text('Summary', { underline: true });
+    doc.fontSize(12).text(`Total Orders: ${invoiceData.totalOrders}`);
+    doc.text(`Total Gross Sales: ${invoiceData.totalGrossSales} EGP`);
+    doc.moveDown();
+
+    // Payment Breakdown
+    doc.fontSize(14).text('Payment Breakdown', { underline: true });
+    doc.fontSize(12).text(`Cash Collected: ${invoiceData.totalCashCollected} EGP`);
+    doc.text(`Digital Collected: ${invoiceData.totalDigitalCollected} EGP`);
+    doc.moveDown();
+
+    // Fees
+    doc.fontSize(14).text('Fees & Commissions', { underline: true });
+    doc.fontSize(12).text(`Total Commission: ${invoiceData.totalCommission} EGP`);
+    doc.text(`Total Service Fee: ${invoiceData.totalServiceFee} EGP`);
+    doc.moveDown();
+
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown();
+
+    // Cash Due Analysis
+    doc.fontSize(16).text('Cash Due Analysis', { underline: true });
+    doc.fontSize(12).text(`Restaurant Owes Platform: ${invoiceData.restaurantOwesPlatform} EGP`);
+    doc.text(`Platform Owes Restaurant: ${invoiceData.platformOwesRestaurant} EGP`);
+    
+    doc.moveDown();
+    doc.fontSize(14).text('Final Balance:', { continued: true });
+    
+    const netBalance = parseFloat(invoiceData.netBalance as string);
+    
+    if (netBalance > 0) {
+        doc.fillColor('green').text(` Platform owes restaurant ${Math.abs(netBalance).toFixed(2)} EGP`);
+    } else if (netBalance < 0) {
+        doc.fillColor('red').text(` Restaurant owes platform ${Math.abs(netBalance).toFixed(2)} EGP`);
+    } else {
+        doc.fillColor('black').text(` No pending dues (Settled)`);
+    }
+    
+    doc.end();
+};
+
+export const generateAndSaveInvoice = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+
+    const { restaurantId, startDate, endDate } = req.body; // هنا بناخد التواريخ من الـ body
+    if (!restaurantId || !startDate || !endDate) throw new BadRequest("Restaurant ID, Start Date, and End Date are required");
+
+    // 1. الفلترة والتأكد إن مفيش فواتير متداخلة (اختياري بس يفضل)
+    
+    const conditions = [
+        eq(orders.restaurantId, restaurantId),
+        eq(orders.status, "delivered")
+    ];
+
+    conditions.push(gte(orders.createdAt, new Date(startDate)));
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    conditions.push(lte(orders.createdAt, end));
+
+    // 2. جلب الأوردرات وحساب الفلوس (نفس اللوجيك بالظبط بتاع التقرير المالي)
+    const deliveredOrders = await db.select().from(orders).where(and(...conditions));
+    
+    let totalCash = 0, totalDigital = 0, totalSales = 0, totalComm = 0, totalSvc = 0;
+    
+    for (const order of deliveredOrders) {
+        const amount = parseFloat(order.totalAmount as string || "0");
+        const comm = parseFloat(order.appCommission as string || "0");
+        const svcFee = parseFloat(order.serviceFee as string || "0");
+
+        totalSales += amount;
+        totalComm += comm;
+        totalSvc += svcFee;
+
+        if (order.paymentMethod === "cash_on_delivery") totalCash += amount;
+        else totalDigital += amount;
+    }
+
+    // جلب نسبة العمولة
+    const businessPlans = await db.select().from(restaurantBusinessPlans).where(eq(restaurantBusinessPlans.restaurantId, restaurantId));
+    let activeCommissionRate = 0;
+    if (businessPlans.length > 0) {
+        const onlinePlan = businessPlans.find(p => p.platformType === "online_order") || businessPlans[0];
+        activeCommissionRate = parseFloat(onlinePlan.commissionRate || "0");
+    }
+
+    const restaurantOwes = (totalCash * activeCommissionRate) / 100 + (totalSvc * (totalCash / (totalSales || 1)));
+    const platformOwes = totalDigital - (totalDigital * activeCommissionRate) / 100 - (totalSvc * (totalDigital / (totalSales || 1)));
+    const netBalance = platformOwes - restaurantOwes;
+
+    // 3. 💾 حفظ الفاتورة في الداتابيز
+    const invoiceId = uuidv4();
+    const invoiceNumber = `INV-${Math.floor(100000 + Math.random() * 900000)}`; // رقم عشوائي كـ مثال
+
+    await db.insert(invoices).values({
+        id: invoiceId,
+        restaurantId,
+        invoiceNumber,
+        startDate: new Date(startDate),
+        endDate: end,
+        totalOrders: deliveredOrders.length,
+        totalGrossSales: totalSales.toFixed(2),
+        totalCashCollected: totalCash.toFixed(2),
+        totalDigitalCollected: totalDigital.toFixed(2),
+        totalCommission: totalComm.toFixed(2),
+        totalServiceFee: totalSvc.toFixed(2),
+        restaurantOwesPlatform: restaurantOwes.toFixed(2),
+        platformOwesRestaurant: platformOwes.toFixed(2),
+        netBalance: netBalance.toFixed(2),
+        status: "unpaid", // الحالة الافتراضية
+    });
+
+    return SuccessResponse(res, { message: "Invoice generated and saved successfully", data: { invoiceId } });
+};
+
+// دالة عشان السوبر أدمن يغير حالة الفاتورة لـ Paid لما يتحاسبوا
+export const markInvoiceAsPaid = async (req: Request, res: Response) => {
+    const { invoiceId } = req.params;
+    
+    await db.update(invoices).set({ status: "paid" }).where(eq(invoices.id, invoiceId));
+    
+    return SuccessResponse(res, { message: "Invoice marked as paid" });
+};
+
+

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateSubcategorySchema = exports.createSubcategorySchema = void 0;
 const zod_1 = require("zod");
 exports.createSubcategorySchema = zod_1.z.object({
+    restaurantId: zod_1.z.string().uuid("Invalid Restaurant ID").optional(),
     // العلاقة بالقسم الرئيسي (Required)
     categoryId: zod_1.z.string().uuid("Invalid Category ID"),
     // الحقل الأساسي (Required)

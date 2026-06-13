@@ -3,10 +3,10 @@ import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { 
     orders, orderItems, restaurantBusinessPlans, food, restaurants, 
-    restaurantWallets, restaurantWalletTransactions, // 👈 ضفنا جداول محفظة المطعم
+    restaurantWallets, restaurantWalletTransactions, 
     restaurantZoneDeliveryFees, zoneDeliveryFees, restaurantSettings, 
     restaurantSchedules, cartItems, users, addresses, branches,
-    userWallets, userWalletTransactions 
+    userWallets, userWalletTransactions, paymentMethods
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -14,6 +14,21 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { v4 as uuidv4 } from "uuid";
 import { UnauthorizedError } from "../../Errors";
+import { sendPushNotification } from "../../utils/notifications";
+import { calculateDistance } from "../../utils/geo";
+
+// 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
+const formatToEgyptTime = (date: Date) => {
+    return new Intl.DateTimeFormat("ar-EG", { // غيرتها لـ ar-EG عشان تطلع بالعربي لو حابة
+        timeZone: "Africa/Cairo",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+    }).format(date);
+};
 
 // ==========================================
 // 1. إنشاء الطلب (Checkout)
@@ -22,26 +37,24 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id; 
     
-    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId } = req.body;
+    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note } = req.body;
 
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
-    
-    // التحقق من branchId
-    if (!branchId) {
-        throw new BadRequest("Branch ID is required");
-    }
-    
     const validOrderSources = ["online_order", "food_aggregator", "mykeeto"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest("Invalid order source");
     }
 
-    const validPaymentMethods = ["cash_on_delivery", "visa", "wallet"];
-    if (!validPaymentMethods.includes(paymentMethod)) {
-        throw new BadRequest("Invalid payment method");
+    const [selectedPayment] = await db.select().from(paymentMethods).where(eq(paymentMethods.id, paymentMethod)).limit(1);
+    if (!selectedPayment || !selectedPayment.isActive) {
+        throw new BadRequest("Invalid or inactive payment method");
     }
+    const paymentMethodName = selectedPayment.name;
+    const paymentMethodNameAr = selectedPayment.nameAr;
+    const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
+    const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
 
     // ==========================================
     // 2. Idempotency Check
@@ -82,6 +95,8 @@ export const checkout = async (req: Request | any, res: Response) => {
         let varPrice = 0;
 
         const vars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
+        
+        // ⚠️ تأكد إن السعر في الفرونت إند اسمه additionalPrice، لو اسمه حاجة تانية غيرها هنا
         if (Array.isArray(vars)) {
             varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
         }
@@ -95,7 +110,9 @@ export const checkout = async (req: Request | any, res: Response) => {
             quantity: item.quantity,
             basePrice: basePrice.toString(),
             variationsPrice: varPrice.toString(),
-            totalPrice: itemTotal.toString()
+            totalPrice: itemTotal.toString(),
+            variations: vars, // ✅ التعديل هنا: إضافة الفارييشنز عشان متكونش null
+            note: item.note || null
         });
     }
 
@@ -103,11 +120,12 @@ export const checkout = async (req: Request | any, res: Response) => {
     let appCommission = orderSource === "food_aggregator" ? subtotal * (parseFloat(plan?.commissionRate as string || "0") / 100) : 0;
 
     // ==========================================
-    // 6. Smart Delivery Logic
+    // 6. Smart Delivery Logic (Zone + Radius Hybrid)
     // ==========================================
     let deliveryFee = 0;
     if (orderType === "delivery") {
         if (!addressId) throw new BadRequest("Delivery address is required");
+        if (!branchId) throw new BadRequest("Branch is required for delivery orders");
 
         const [userAddress] = await db.select().from(addresses)
             .where(and(
@@ -116,6 +134,11 @@ export const checkout = async (req: Request | any, res: Response) => {
             )).limit(1);
 
         if (!userAddress) throw new BadRequest("Invalid delivery address");
+
+        const [branch] = await db.select().from(branches)
+            .where(eq(branches.id, branchId)).limit(1);
+        
+        if (!branch) throw new BadRequest("Invalid branch selected");
 
         const resolvedZoneId = userZoneId || userAddress.zoneId;
 
@@ -144,7 +167,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 8. فحص محفظة العميل
     // ==========================================
     let userWallet = null;
-    if (paymentMethod === "wallet") {
+    if (isWalletPayment) {
         const walletResult = await db.select().from(userWallets).where(eq(userWallets.userId, userId)).limit(1);
         userWallet = walletResult[0];
 
@@ -162,10 +185,10 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 10. Execute Order (Transaction)
     // ==========================================
+    const now = new Date(); 
+
     await db.transaction(async (tx) => {
-        
-        // أ. خصم محفظة العميل (لو الدفع محفظة)
-        if (paymentMethod === "wallet" && userWallet) {
+        if (isWalletPayment && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance as string);
             const newBalance = balanceBefore - totalAmount;
 
@@ -181,11 +204,12 @@ export const checkout = async (req: Request | any, res: Response) => {
                 amount: totalAmount.toString(),
                 balanceBefore: balanceBefore.toString(),
                 reference: orderNumber,
-                status: "approved"
+                status: "approved",
+                createdAt: now
             });
         }
 
-        // ب. تسجيل بيانات الأوردر نفسه
+        // تسجيل بيانات الأوردر نفسه
         await tx.insert(orders).values({
             id: orderId,
             orderNumber,
@@ -195,21 +219,23 @@ export const checkout = async (req: Request | any, res: Response) => {
             branchId, 
             addressId: addressId || null,
             orderSource,
-            paymentMethod,
+            paymentMethod, // ✅ هيفضل بالـ ID زي ما طلبت
             orderType: orderType || "delivery",
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
             serviceFee: serviceFee.toString(),
             appCommission: appCommission.toString(),
             totalAmount: totalAmount.toString(),
-            status: "pending"
+            note: note || null,
+            status: "pending",
+            createdAt: now
         });
 
-        // ج. تفريغ الكارت وتسجيل الأصناف
+        // تفريغ الكارت وتسجيل الأصناف
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(cartItems).where(eq(cartItems.userId, userId)); 
 
-        // د. تسويات محفظة المطعم
+        // تسويات محفظة المطعم
         if (!restaurantWallet) {
             await tx.insert(restaurantWallets).values({
                 id: uuidv4(),
@@ -231,7 +257,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
 
-        if (paymentMethod === "cash_on_delivery") {
+        if (isCashPayment) {
             newRestBalance -= appDues;
             newCollectedCash += totalAmount; 
         } else {
@@ -246,23 +272,51 @@ export const checkout = async (req: Request | any, res: Response) => {
             })
             .where(eq(restaurantWallets.restaurantId, restaurantId));
 
+        const isCash = isCashPayment;
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
             restaurantId,
             type: "order_payment",
-            amount: paymentMethod === "cash_on_delivery" ? `-${appDues}` : `${restaurantEarning}`,
+            amount: isCash ? `-${appDues}` : `${restaurantEarning}`,
             balanceBefore: currentRestBalance.toString(),
             balanceAfter: newRestBalance.toString(),
-            method: paymentMethod,
+            method: paymentMethodName,
             reference: orderNumber,
-            note: paymentMethod === "cash_on_delivery" ? "Commission deducted from cash order" : "Earnings added from digital payment"
+            note: isCash ? "Commission deducted from cash order" : "Earnings added from digital payment",
+            createdAt: now
         });
+    });
+
+    // ==========================================
+    // 11. Send Notification to Restaurant
+    // ==========================================
+    const cairoTimeFormatted = new Date(now).toLocaleTimeString("en-US", { timeZone: "Africa/Cairo" });
+
+    await sendPushNotification({
+        recipientType: "restaurant",
+        recipientId: restaurantId,
+        title: "طلب جديد! 🛒",
+        body: `تم استلام طلب جديد #${orderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
+        data: {
+            orderId,
+            orderNumber,
+            type: "new_order",
+            createdAt: now.toISOString()
+        }
     });
 
     return SuccessResponse(res, {
         message: "Order created successfully",
-        data: {
-            orderDetails: { orderId, orderNumber, subtotal, deliveryFee, serviceFee, totalAmount },
+        order_level: {
+            orderDetails: { 
+                orderId, 
+                orderNumber, 
+                subtotal, 
+                deliveryFee, 
+                serviceFee, 
+                totalAmount,
+                createdAt: now.toISOString() 
+            },
             customerDetails: userInfo
         }
     });
@@ -273,6 +327,8 @@ export const checkout = async (req: Request | any, res: Response) => {
 export const getActiveOrders = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id; 
+    const { restaurantId } = req.query;
+
     const activeOrders = await db
         .select({
             orderId: orders.id,
@@ -289,6 +345,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
         .where(
             and(
                 eq(orders.userId, userId),
+                restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
                 // 🔥 تجلب فقط الطلبات التي لم تنتهِ بعد
                 inArray(orders.status, ["pending", "accepted", "preparing", "out_for_delivery"])
             )
@@ -304,6 +361,8 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
 export const getOrderHistory = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id; 
+    const { restaurantId } = req.query;
+
     const historyOrders = await db
         .select({
             orderId: orders.id,
@@ -320,6 +379,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
         .where(
             and(
                 eq(orders.userId, userId),
+                restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
                 // 🔥 تجلب فقط الطلبات التي انتهت (تم إضافة المرفوض والمسترجع)
                 inArray(orders.status, ["delivered", "cancelled", "rejected", "refund"])
             )
@@ -351,6 +411,8 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             serviceFee: orders.serviceFee,
             totalAmount: orders.totalAmount,
 
+            note: orders.note,
+
             restaurantName: restaurants.name,
             restaurantImage: restaurants.logo
         })
@@ -370,7 +432,8 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             quantity: orderItems.quantity,
             basePrice: orderItems.basePrice,
             variationsPrice: orderItems.variationsPrice,
-            totalPrice: orderItems.totalPrice
+            totalPrice: orderItems.totalPrice,
+            note: orderItems.note
         })
         .from(orderItems)
         .leftJoin(food, eq(orderItems.foodId, food.id))
@@ -388,44 +451,38 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
 // 5. متطلبات الطلب المسبقة (Order Prerequisites)
 // ==========================================
 export const getOrderPrerequisites = async (req: Request | any, res: Response) => {
-    try {
-        if (!req.user) {
-            throw new UnauthorizedError("Unauthenticated: Token is missing or invalid");
-        }
-        const userId = req.user.id;
-        const restaurantId = req.query.restaurantId as string;
-
-        if (!restaurantId) {
-            throw new BadRequest("restaurantId is required");
-        }
-
-        // جلب البيانات المطلوبة من الداتا بيز
-        const [userAddresses, restaurantBranches] = await Promise.all([
-            // أ) عناوين اليوزر 
-            db.select().from(addresses).where(eq(addresses.userId, userId)),
-            
-            // ب) فروع المطعم
-            db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
-        ]);
-
-        // ج) طرق الدفع (بقت Static Array بدل الداتا بيز)
-        const activePaymentMethods = [
-            { id: "cash_on_delivery", name: "Cash on Delivery" },
-            { id: "visa", name: "Credit Card (Visa/Mastercard)" },
-            { id: "wallet", name: "My Wallet" }
-        ];
-
-        // تجميع الداتا وإرسالها
-        return SuccessResponse(res, { 
-            data: {
-                addresses: userAddresses,
-                branches: restaurantBranches,
-                paymentMethods: activePaymentMethods
-            }
-        });
-
-    } catch (error) {
-        console.error("Error fetching order prerequisites:", error);
-        return res.status(500).json({ success: false, message: "Internal server error" });
+    if (!req.user) {
+        throw new UnauthorizedError("Unauthenticated: Token is missing or invalid");
     }
+    const userId = req.user.id;
+    const restaurantId = req.query.restaurantId as string;
+
+    if (!restaurantId) {
+        throw new BadRequest("restaurantId is required");
+    }
+
+    // جلب البيانات المطلوبة من الداتا بيز
+    const [userAddresses, restaurantBranches] = await Promise.all([
+        // أ) عناوين اليوزر 
+        db.select().from(addresses).where(eq(addresses.userId, userId)),
+        
+        // ب) فروع المطعم
+        db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
+    ]);
+
+    // ج) طرق الدفع 
+    const activePaymentMethods = await db.select({
+        id: paymentMethods.id,
+        name: paymentMethods.name,
+        nameAr: paymentMethods.nameAr
+    }).from(paymentMethods).where(eq(paymentMethods.isActive, true));
+
+    // تجميع الداتا وإرسالها
+    return SuccessResponse(res, { 
+        data: {
+            addresses: userAddresses,
+            branches: restaurantBranches,
+            paymentMethods: activePaymentMethods
+        }
+    });
 };

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { subcategories, categories } from "../../models/schema";
+import { subcategories, categories, restaurants } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -8,7 +8,7 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
 export const createSubcategory = async (req: Request, res: Response) => {
-    const { name, nameAr, nameFr, categoryId, priority, status } = req.body;
+    const { name, nameAr, nameFr, categoryId, priority, status,restaurantId } = req.body;
 
     if (!name || !nameAr || !nameFr || !categoryId) {
         throw new BadRequest("Subcategory name, nameAr, nameFr, and category ID are required");
@@ -37,6 +37,7 @@ export const createSubcategory = async (req: Request, res: Response) => {
         categoryId,
         priority: priority || "low",
         status: status || "active",
+        restaurantId: restaurantId || null,
     });
 
     return SuccessResponse(res, { message: "Create subcategory success", data: { id } }, 201);
@@ -50,6 +51,7 @@ export const getAllSubcategories = async (req: Request, res: Response) => {
             nameAr: subcategories.nameAr,
             nameFr: subcategories.nameFr,
             categoryId: subcategories.categoryId,
+            restaurantId: subcategories.restaurantId,
             priority: subcategories.priority,
             status: subcategories.status,
             createdAt: subcategories.createdAt,
@@ -61,9 +63,17 @@ export const getAllSubcategories = async (req: Request, res: Response) => {
                 nameFr: categories.nameFr,
                 status: categories.status,
             },
+            restaurant: {
+                id: restaurants.id,
+                name: restaurants.name,
+                nameAr: restaurants.nameAr,
+                nameFr: restaurants.nameFr,
+                status: restaurants.status,
+            },
         })
         .from(subcategories)
-        .leftJoin(categories, eq(subcategories.categoryId, categories.id));
+        .leftJoin(categories, eq(subcategories.categoryId, categories.id))
+        .leftJoin(restaurants, eq(subcategories.restaurantId, restaurants.id));
 
     return SuccessResponse(res, { message: "Get all subcategories success", data: allSubcategories });
 };
@@ -78,6 +88,7 @@ export const getSubcategoryById = async (req: Request, res: Response) => {
             nameAr: subcategories.nameAr,
             nameFr: subcategories.nameFr,
             categoryId: subcategories.categoryId,
+            restaurantId: subcategories.restaurantId,
             priority: subcategories.priority,
             status: subcategories.status,
             createdAt: subcategories.createdAt,
@@ -89,9 +100,17 @@ export const getSubcategoryById = async (req: Request, res: Response) => {
                 nameFr: categories.nameFr,
                 status: categories.status,
             },
+            restaurant: {
+                id: restaurants.id,
+                name: restaurants.name,
+                nameAr: restaurants.nameAr,
+                nameFr: restaurants.nameFr,
+                status: restaurants.status,
+            },
         })
         .from(subcategories)
         .leftJoin(categories, eq(subcategories.categoryId, categories.id))
+        .leftJoin(restaurants, eq(subcategories.restaurantId, restaurants.id))
         .where(eq(subcategories.id, id))
         .limit(1);
 
@@ -104,7 +123,7 @@ export const getSubcategoryById = async (req: Request, res: Response) => {
 
 export const updateSubcategory = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, nameAr, nameFr, categoryId, priority, status } = req.body;
+    const { name, nameAr, nameFr, categoryId, priority, status ,restaurantId} = req.body;
 
     const existingSubcategory = await db
         .select()
@@ -128,6 +147,18 @@ export const updateSubcategory = async (req: Request, res: Response) => {
             throw new BadRequest("Category not found");
         }
     }
+    // Check if restaurant exists if restaurantId is provided
+    if (restaurantId) {
+        const existingRestaurant = await db
+            .select()
+            .from(restaurants)
+            .where(eq(restaurants.id, restaurantId))
+            .limit(1);
+
+        if (!existingRestaurant[0]) {
+            throw new BadRequest("Restaurant not found");
+        }
+    }
 
     const updateData: any = {
         updatedAt: new Date(),
@@ -139,7 +170,7 @@ export const updateSubcategory = async (req: Request, res: Response) => {
     if (categoryId) updateData.categoryId = categoryId;
     if (priority) updateData.priority = priority;
     if (status) updateData.status = status;
-
+    if (restaurantId) updateData.restaurantId = restaurantId;
     if (Object.keys(updateData).length === 1) {
         throw new BadRequest("No data to update");
     }
@@ -175,5 +206,12 @@ export const getallcategory=async(req:Request,res:Response)=>{
         })
         .from(categories)
         .where(eq(categories.status, "active"));
-    return SuccessResponse(res, { message: "Get all categories success", data: allCategories });
+    const allrestaurnat=await db
+        .select({
+            id: restaurants.id,
+            name: restaurants.name,
+        })
+        .from(restaurants)
+        .where(eq(restaurants.status, "active"));
+    return SuccessResponse(res, { message: "Get all categories success", data: { categories: allCategories, restaurants: allrestaurnat } });
 }

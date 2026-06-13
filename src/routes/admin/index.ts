@@ -19,13 +19,16 @@ import BussinessplanRouter from "./BusinessPlans";
 import restaurantsettingRouter from "./restaurantsetting";
 import payment_methodsRouter from "./payment_methods";
 import OrderRouter from "./order"
-import imageRouter from "./image";
+//import imageRouter from "./image";
 import popupRouter from "./popup";
 import user_walletsRouter from "./userWallets";
 import SelectReasonsRouter from "./selectReasons";
 import ReportRouter from "./Report"
 import zoneDeliveryFeesRouter from "./zoneDeliveryFees";
 import RatingRouter from "./rating";
+import discountRouter from "./discount";
+import couponRouter from "./coupon";
+import KeetoUsersRouter from "./Keeto_users";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -44,7 +47,7 @@ router.use("/cuisines", CuisineRouter);
 router.use("/categories", CategoryRouter);
 router.use("/subcategories", SubcategoryRouter);
 router.use("/order", OrderRouter);
-router.use("/image", imageRouter);
+//router.use("/image", imageRouter);
 router.use("/policy", policyRouter);
 router.use("/adonescategory", AdonecategoryRouter);
 router.use("/restaurants", RestaurantRouter);
@@ -58,5 +61,8 @@ router.use("/payment-methods", payment_methodsRouter);
 router.use("/user-wallets", user_walletsRouter);
 router.use("/zone-delivery-fees", zoneDeliveryFeesRouter);
 router.use("/ratings", RatingRouter);
+router.use("/discounts", discountRouter);
+router.use("/coupons", couponRouter);
+router.use("/keeto-users", KeetoUsersRouter);
 
 export default router;

@@ -23,7 +23,7 @@ exports.food = (0, mysql_core_1.mysqlTable)("food", {
     Nutrition: (0, mysql_core_1.text)("nutrition"),
     allergen_ingredients: (0, mysql_core_1.text)("allergen_ingredients"),
     is_Halal: (0, mysql_core_1.boolean)("is_Halal").default(false),
-    addonsId: (0, mysql_core_1.char)("addons_id", { length: 36 }).references(() => schema_1.addons.id),
+    addonsId: (0, mysql_core_1.json)("addons_ids").$type().default([]),
     startTime: (0, mysql_core_1.varchar)("start_time", { length: 255 }).notNull(),
     endTime: (0, mysql_core_1.varchar)("end_time", { length: 255 }).notNull(),
     search_tags: (0, mysql_core_1.varchar)("search_tags", { length: 255 }),

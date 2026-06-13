@@ -181,7 +181,7 @@ exports.verifyEmail = verifyEmail;
 // 3. Login
 // ===================================
 const login = async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, restaurantId } = req.body;
     if (!email || !password)
         throw new BadRequest_1.BadRequest("Email and password are required");
     const [user] = await connection_1.db.select().from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.email, email)).limit(1);
@@ -194,6 +194,17 @@ const login = async (req, res) => {
     const isMatch = await bcrypt_1.default.compare(password, user.password);
     if (!isMatch)
         throw new BadRequest_1.BadRequest("Invalid credentials");
+    if (user.status === "blocked") {
+        throw new BadRequest_1.BadRequest("Your account has been blocked. Please contact support.");
+    }
+    if (restaurantId) {
+        const [existingLink] = await connection_1.db.select().from(schema_1.restaurant_users)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurant_users.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurant_users.userId, user.id)))
+            .limit(1);
+        if (!existingLink) {
+            await connection_1.db.insert(schema_1.restaurant_users).values({ restaurantId, userId: user.id });
+        }
+    }
     const token = (0, jwt_1.generateUserToken)({ id: user.id, name: user.name });
     return (0, response_1.SuccessResponse)(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email } } });
 };
