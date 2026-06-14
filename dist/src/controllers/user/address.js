@@ -87,6 +87,10 @@ const getZones = async (req, res) => {
         .leftJoin(schema_1.restaurantZoneDeliveryFees, restaurantId
         ? (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.zones.id, schema_1.restaurantZoneDeliveryFees.zoneId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.status, "active"))
         : (0, drizzle_orm_1.sql) `1 = 0`);
+    console.log("=== Debugging Delivery Fees ===");
+    console.log("Restaurant ID passed:", restaurantId);
+    console.log("Sample matched fee (if any):", zoneData.find(z => z.restaurantDeliveryFee !== null)?.restaurantDeliveryFee || "None found");
+    console.log("===============================");
     const formattedZones = zoneData.map(item => ({
         ...item.zone,
         city: item.city,

@@ -100,6 +100,11 @@ export const getZones = async (req: Request, res: Response) => {
                 : sql`1 = 0`
         );
 
+    console.log("=== Debugging Delivery Fees ===");
+    console.log("Restaurant ID passed:", restaurantId);
+    console.log("Sample matched fee (if any):", zoneData.find(z => z.restaurantDeliveryFee !== null)?.restaurantDeliveryFee || "None found");
+    console.log("===============================");
+
     const formattedZones = zoneData.map(item => ({
         ...item.zone,
         city: item.city,
