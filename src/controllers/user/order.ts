@@ -11,9 +11,7 @@ import {
     orders,
     restaurants,
     orderItems,
-    restaurantBusinessPlans,
-    food
-} from "../../models/schema";
+    restaurantBusinessPlans, food } from "../../models/schema";
 import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -22,6 +20,7 @@ import { v4 as uuidv4 } from "uuid";
 import { UnauthorizedError } from "../../Errors";
 import { sendPushNotification } from "../../utils/notifications";
 import { calculateDistance } from "../../utils/geo";
+import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -43,7 +42,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
 
-    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note, couponCode, discountId } = req.body;
+    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note, couponCode } = req.body;
 
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
@@ -95,30 +94,57 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     let subtotal = 0;
     const itemsToInsert: any[] = [];
-
+    
+    // Calculate initial cart subtotal (for minOrderAmount check)
+    let initialSubtotal = 0;
+    const itemsWithData = [];
     for (const item of userCart) {
-        const basePrice = parseFloat(item.unitPrice as string || "0");
-        let varPrice = 0;
-
-        const vars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
-
-        // ⚠️ تأكد إن السعر في الفرونت إند اسمه additionalPrice، لو اسمه حاجة تانية غيرها هنا
-        if (Array.isArray(vars)) {
-            varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
+        const [foodItem] = await db.select().from(food).where(eq(food.id, item.foodId)).limit(1);
+        const originalBasePrice = parseFloat(foodItem.price as string || "0");
+        const safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
+        const vars = Array.isArray(safeVars) ? safeVars : [];
+        const varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
+        
+        let initialDiscountPrice = originalBasePrice;
+        if (foodItem.discount_value && Number(foodItem.discount_value) > 0) {
+            if (foodItem.discount_type === "percentage") {
+                initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(foodItem.discount_value) / 100));
+            } else if (foodItem.discount_type === "amount" || foodItem.discount_type === "fixed") {
+                initialDiscountPrice = Math.max(0, originalBasePrice - Number(foodItem.discount_value));
+            }
         }
+        
+        initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
+        itemsWithData.push({ cartItem: item, foodItem, originalBasePrice, varPrice, vars });
+    }
 
-        const itemTotal = (basePrice + varPrice) * item.quantity;
+    const availableDiscounts = await getAvailableDiscounts(restaurantId);
+    const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+
+    for (const data of itemsWithData) {
+        const { cartItem, foodItem, originalBasePrice, varPrice, vars } = data;
+
+        const { price: discountedBasePrice, appliedDiscount } = applyPriorityDiscount(
+            { id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value },
+            originalBasePrice,
+            initialSubtotal,
+            availableDiscounts,
+            discountState,
+            true
+        );
+
+        const itemTotal = (discountedBasePrice + varPrice) * cartItem.quantity;
         subtotal += itemTotal;
 
         itemsToInsert.push({
             id: uuidv4(),
-            foodId: item.foodId,
-            quantity: item.quantity,
-            basePrice: basePrice.toString(),
+            foodId: cartItem.foodId,
+            quantity: cartItem.quantity,
+            basePrice: discountedBasePrice.toString(),
             variationsPrice: varPrice.toString(),
             totalPrice: itemTotal.toString(),
-            variations: vars, // ✅ التعديل هنا: إضافة الفارييشنز عشان متكونش null
-            note: item.note || null
+            variations: vars,
+            note: cartItem.note || null
         });
     }
 
@@ -126,56 +152,14 @@ export const checkout = async (req: Request | any, res: Response) => {
     let appCommission = orderSource === "food_aggregator" ? subtotal * (parseFloat(plan?.commissionRate as string || "0") / 100) : 0;
 
     // ==========================================
-    // 5.5 Check Coupons and Discounts
+    // 5.5 Check Coupons 
     // ==========================================
     const nowTemp = new Date();
     let totalDiscount = 0;
     let appliedCoupon: any = null;
-    let appliedDiscount: any = null;
     let isFreeDelivery = false;
 
-    // 1. Check Discount (discountId)
-    if (discountId) {
-        const [discount] = await db.select().from(discounts).where(eq(discounts.id, discountId)).limit(1);
-        if (!discount || !discount.isActive) throw new BadRequest("Invalid or inactive discount");
-
-        if (discount.startDate && new Date(discount.startDate) > nowTemp) throw new BadRequest("Discount not yet active");
-        if (discount.endDate && new Date(discount.endDate) < nowTemp) throw new BadRequest("Discount expired");
-
-        if (discount.usageLimit && discount.usedCount! >= discount.usageLimit) throw new BadRequest("Discount usage limit reached");
-        if (parseFloat(discount.minOrderAmount as string || "0") > subtotal) throw new BadRequest(`Minimum order amount of ${discount.minOrderAmount} required for this discount`);
-
-        if (!discount.isGlobal) {
-            const [discRest] = await db.select().from(discountRestaurants)
-                .where(and(eq(discountRestaurants.discountId, discountId), eq(discountRestaurants.restaurantId, restaurantId))).limit(1);
-            if (!discRest) throw new BadRequest("Discount is not applicable to this restaurant");
-        }
-
-        // Check specific foods
-        const specificFoods = await db.select().from(discountFoods).where(eq(discountFoods.discountId, discountId));
-        let applicableSubtotal = subtotal;
-        if (specificFoods.length > 0) {
-            const foodIds = specificFoods.map(f => f.foodId);
-            applicableSubtotal = itemsToInsert.filter(i => foodIds.includes(i.foodId)).reduce((sum, i) => sum + parseFloat(i.totalPrice), 0);
-            if (applicableSubtotal === 0) throw new BadRequest("Discount is not applicable to any items in your cart");
-        }
-
-        const value = parseFloat(discount.discountValue as string);
-        if (discount.discountType === "fixed_amount") {
-            totalDiscount += value;
-        } else if (discount.discountType === "percentage") {
-            let pDiscount = applicableSubtotal * (value / 100);
-            if (discount.maxDiscount) {
-                const max = parseFloat(discount.maxDiscount as string);
-                if (pDiscount > max) pDiscount = max;
-            }
-            totalDiscount += pDiscount;
-        }
-
-        appliedDiscount = discount;
-    }
-
-    // 2. Check Coupon (couponCode)
+    // 1. Check Coupon (couponCode)
     if (couponCode) {
         const [coupon] = await db.select().from(coupons).where(eq(coupons.code, couponCode)).limit(1);
         if (!coupon || !coupon.isActive) throw new BadRequest("Invalid or inactive coupon");
@@ -353,10 +337,18 @@ export const checkout = async (req: Request | any, res: Response) => {
                 .where(eq(coupons.id, appliedCoupon.id));
         }
 
-        if (appliedDiscount) {
-            await tx.update(discounts)
-                .set({ usedCount: sql`used_count + 1` })
-                .where(eq(discounts.id, appliedDiscount.id));
+        // if (appliedDiscount) {
+        //     await tx.update(discounts)
+        //         .set({ usedCount: sql`used_count + 1` })
+        //         .where(eq(discounts.id, appliedDiscount.id));
+        // }
+
+        if (discountState.appliedDiscounts.size > 0) {
+            for (const dId of Array.from(discountState.appliedDiscounts)) {
+                await tx.update(discounts)
+                    .set({ usedCount: sql`used_count + 1` })
+                    .where(eq(discounts.id, dId));
+            }
         }
 
         // تسويات محفظة المطعم

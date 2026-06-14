@@ -12,6 +12,7 @@ import { eq, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
+import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
 
 /* =========================================
    Helpers
@@ -101,8 +102,8 @@ export const addToCart = async (req: Request | any, res: Response) => {
         }
     }
 
-    const basePrice = Number(itemFood.price);
-    const unitPrice = basePrice + totalExtraPrice;
+    // 3. احتساب السعر الأصلي مع الإضافات لتخزينه في قاعدة البيانات
+    const unitPrice = Number(itemFood.price) + totalExtraPrice;
 
     const normalized = normalizeVariations(safeVariations);
     const key = JSON.stringify(normalized);
@@ -165,6 +166,9 @@ export const getCart = async (req: Request | any, res: Response) => {
             foodId: food.id,
             name: food.name,
             image: food.image,
+            price: food.price,
+            discountType: food.discount_type,
+            discountValue: food.discount_value,
             restaurantId: restaurants.id,
             restaurantName: restaurants.name,
             quantity: cartItems.quantity,
@@ -178,34 +182,51 @@ export const getCart = async (req: Request | any, res: Response) => {
         .leftJoin(restaurants, eq(cartItems.restaurantId, restaurants.id))
         .where(eq(cartItems.userId, userId));
 
-    const formatted = await Promise.all(
-        items.map(async (item: any) => {
+    if (items.length === 0) {
+        return SuccessResponse(res, { data: { items: [], totalSummary: { subtotal: 0 } } });
+    }
 
-            let parsedVariations = deepParseJSON(item.variations);
-            
-            if (!Array.isArray(parsedVariations)) {
-                parsedVariations = [];
+    const restaurantId = items[0].restaurantId;
+    
+    // 1. Calculate initial subtotal using original food price + variations to evaluate minOrderAmount correctly
+    let initialSubtotal = 0;
+    const itemsData = items.map(item => {
+        const originalBasePrice = parseFloat(item.price as string || "0");
+        const safeVariations = deepParseJSON(item.variations) || [];
+        const details = Array.isArray(safeVariations) ? safeVariations : [];
+        
+        let initialDiscountPrice = originalBasePrice;
+        if (item.discountType && Number(item.discountValue) > 0) {
+            if (item.discountType === "percentage") {
+                initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(item.discountValue) / 100));
+            } else if (item.discountType === "amount" || item.discountType === "fixed") {
+                initialDiscountPrice = Math.max(0, originalBasePrice - Number(item.discountValue));
             }
+        }
+        
+        const dbUnitPrice = parseFloat(item.unitPrice as string || "0");
+        const varPrice = dbUnitPrice - originalBasePrice;
 
-            const details: any[] = [];
+        initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
+        return { item, originalBasePrice, varPrice, details };
+    });
 
-            for (const v of parsedVariations) {
+    const availableDiscounts = await getAvailableDiscounts(restaurantId!);
+    const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+
+    let finalSubtotal = 0;
+
+    const formatted = await Promise.all(
+        itemsData.map(async (data: any) => {
+            const { item, originalBasePrice, varPrice, details } = data;
+
+            const variationDetails: any[] = [];
+            for (const v of details) {
                 if (!v.variationId || !v.optionId) continue;
-
-                const [variation] = await db
-                    .select()
-                    .from(foodVariations)
-                    .where(eq(foodVariations.id, v.variationId))
-                    .limit(1);
-
-                const [option] = await db
-                    .select()
-                    .from(variationOptions)
-                    .where(eq(variationOptions.id, v.optionId))
-                    .limit(1);
-
+                const [variation] = await db.select().from(foodVariations).where(eq(foodVariations.id, v.variationId)).limit(1);
+                const [option] = await db.select().from(variationOptions).where(eq(variationOptions.id, v.optionId)).limit(1);
                 if (variation && option) {
-                    details.push({
+                    variationDetails.push({
                         variationId: variation.id,
                         variationName: variation.name,
                         variationNameAr: variation.nameAr,
@@ -214,10 +235,22 @@ export const getCart = async (req: Request | any, res: Response) => {
                         optionNameAr: option.optionNameAr,
                         additionalPrice: option.additionalPrice
                     });
-                } else {
-                    console.log(`[Warning]: Variation or Option not found in DB! VarID: ${v.variationId}, OptID: ${v.optionId}`);
                 }
             }
+
+            const { price: discountedBasePrice } = applyPriorityDiscount(
+                { id: item.foodId, discountType: item.discountType, discountValue: item.discountValue },
+                originalBasePrice,
+                initialSubtotal,
+                availableDiscounts,
+                discountState,
+                true
+            );
+
+            const finalUnitPrice = discountedBasePrice + varPrice;
+            const finalTotalPrice = finalUnitPrice * item.quantity;
+            
+            finalSubtotal += finalTotalPrice;
 
             return {
                 cartId: item.cartId,
@@ -227,16 +260,23 @@ export const getCart = async (req: Request | any, res: Response) => {
                 restaurantId: item.restaurantId,
                 restaurantName: item.restaurantName,
                 quantity: item.quantity,
-                unitPrice: item.unitPrice,
-                totalPrice: item.totalPrice,
-                variations: details,
+                price: (originalBasePrice + varPrice).toString(), // Original unit price with variations
+                unitPrice: finalUnitPrice, // Final discounted unit price with variations
+                totalPrice: finalTotalPrice,
+                variations: variationDetails,
                 note: item.note || null
             };
         })
     );
 
     return SuccessResponse(res, {
-        data: formatted
+        message: "Cart fetched successfully",
+        data: {
+            items: formatted,
+            totalSummary: {
+                subtotal: finalSubtotal,
+            }
+        }
     });
 };
 
@@ -298,6 +338,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
     }
 
+    // 4. احتساب السعر الأصلي مع الإضافات لتخزينه في قاعدة البيانات
     const unitPrice = Number(itemFood.price) + totalExtraPrice;
 
     await db.update(cartItems)

@@ -4,6 +4,7 @@ import { cuisines, categories, restaurants, food, favorites, foodVariations, var
 import { eq, and, like, or, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
+import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
 
 // ==========================================
 // 🔥 Helper: تجهيز favorites لو اليوزر عامل login
@@ -126,6 +127,8 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         foodNameFr: food.nameFr,
         foodImage: food.image,
         price: food.price,
+        foodDiscountType: food.discount_type,   
+        foodDiscountValue: food.discount_value, 
         restaurantId: restaurants.id,
         restaurantName: restaurants.name,
         restaurantNameAr: restaurants.nameAr,
@@ -139,10 +142,42 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         eq(food.status, "active")
     ));
 
-    const result = data.map(f => ({
-        ...f,
-        isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false
-    }));
+    const uniqueRestaurants = [...new Set(data.map(f => f.restaurantId))];
+    const discountsByRestaurant = new Map();
+    for (const rId of uniqueRestaurants) {
+        if (rId) discountsByRestaurant.set(rId, await getAvailableDiscounts(rId));
+    }
+
+    const result = data.map(f => {
+        const availableDiscounts = discountsByRestaurant.get(f.restaurantId) || [];
+        const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+
+        const { price: finalDiscountPrice, discountNote } = applyPriorityDiscount(
+            { id: f.foodId, discountType: f.foodDiscountType, discountValue: f.foodDiscountValue },
+            Number(f.price),
+            0,
+            availableDiscounts,
+            discountState,
+            false
+        );
+
+        return {
+            foodId: f.foodId,
+            foodName: f.foodName,
+            foodNameAr: f.foodNameAr,
+            foodNameFr: f.foodNameFr,
+            foodImage: f.foodImage,
+            price: Number(f.price),
+            discountPrice: finalDiscountPrice,
+            discountNote,
+            restaurantId: f.restaurantId,
+            restaurantName: f.restaurantName,
+            restaurantNameAr: f.restaurantNameAr,
+            restaurantNameFr: f.restaurantNameFr,
+            restaurantLogo: f.restaurantLogo,
+            isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false
+        };
+    });
 
     return SuccessResponse(res, { data: result });
 };
@@ -177,6 +212,8 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         descriptionAr: food.descriptionAr,
         descriptionFr: food.descriptionFr,
         price: food.price,
+        foodDiscountType: food.discount_type,
+        foodDiscountValue: food.discount_value,
         image: food.image,
         
         categoryId: categories.id,
@@ -233,6 +270,9 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         eq(food.status, "active")
     ));
 
+    const availableDiscounts = await getAvailableDiscounts(restaurantId);
+    const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+
     const groupedMenuObj = rawMenu.reduce((acc: any, row) => {
         const catId = row.categoryId || "uncategorized";
 
@@ -247,9 +287,18 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             };
         }
 
-        // 2. تجميع الأكل داخل الكاتيجوري
+        // 2. تجميع الأكل داخل الكاتيجوري مع حساب الخصم المباشر
         if (row.foodId) {
             if (!acc[catId].foods[row.foodId]) {
+                const { price: calculatedDiscountPrice, discountNote } = applyPriorityDiscount(
+                    { id: row.foodId, discountType: row.foodDiscountType, discountValue: row.foodDiscountValue },
+                    Number(row.price),
+                    0,
+                    availableDiscounts,
+                    discountState,
+                    false
+                );
+
                 acc[catId].foods[row.foodId] = {
                     id: row.foodId,
                     name: row.foodName,
@@ -258,12 +307,14 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                     description: row.description,
                     descriptionAr: row.descriptionAr,
                     descriptionFr: row.descriptionFr,
-                    price: row.price,
+                    price: Number(row.price),
+                    discountPrice: calculatedDiscountPrice,
+                    discountNote,
                     image: row.image,
                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
                     
-                    variations: {}, // تجميع الـ Variations
-                    addons: {}, // تجميع الـ Addons
+                    variations: {}, 
+                    addons: {}, 
                     
                     category: row.categoryId ? {
                         id: row.categoryId,
@@ -293,7 +344,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                         selectionType: row.selectionType,
                         min: row.min,
                         max: row.max,
-                        options: {} // 👈 خلينا الـ options Object لمنع التكرار
+                        options: {} 
                     };
                 }
 
@@ -347,16 +398,13 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             nameAr: category.nameAr,
             nameFr: category.nameFr,
             foods: Object.values(category.foods).map((f: any) => {
-                
                 // تحويل الـ variations والـ options
                 f.variations = Object.values(f.variations).map((v: any) => {
                     v.options = Object.values(v.options); 
                     return v;
                 });
-                
                 // تحويل الـ Addons
                 f.addons = Object.values(f.addons); 
-                
                 return f;
             })
         };
@@ -372,7 +420,6 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         addonNameFr: addons.nameFr,
         addonPrice: addons.price,
         addonStockType: addons.stock_type,
-        
         categoryId: adonescategory.id,
         categoryName: adonescategory.name,
         categoryNameAr: adonescategory.nameAr,
@@ -470,15 +517,11 @@ export const toggleFavorite = async (req: Request, res: Response) => {
 // 6. جلب قائمة المفضلة ليوزر معين (Wishlist)
 // ==========================================
 export const getUserFavorites = async (req: Request, res: Response) => {
-    // 1. التحقق من تسجيل الدخول
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
 
-    // 2. جلب البيانات مع عمل Join لجدول المطاعم وجدول الأكلات
-    // ملاحظة: تأكد من استيراد جداول (restaurants) و (foods) في ملفك
     const favs = await db.select({
         favoriteId: favorites.id,
-        // بيانات المطعم (ستكون null لو كان السجل يخص أكلة)
         restaurant: {
             id: restaurants.id,
             name: restaurants.name,
@@ -489,9 +532,7 @@ export const getUserFavorites = async (req: Request, res: Response) => {
             address: restaurants.address,
             addressAr: restaurants.addressAr,
             addressFr: restaurants.addressFr,
-            
         },
-        // بيانات الأكلة (ستكون null لو كان السجل يخص مطعم)
         food: {
             id: food.id,
             name: food.name,
@@ -506,10 +547,35 @@ export const getUserFavorites = async (req: Request, res: Response) => {
     .leftJoin(food, eq(favorites.foodId, food.id))
     .where(eq(favorites.userId, userId));
 
-    // 3. تنسيق البيانات (اختياري): لفصل المطاعم عن الأكلات في الـ Response
+    const uniqueRestaurants = [...new Set(favs.map(f => f.restaurant?.id).filter(Boolean))];
+    const discountsByRestaurant = new Map();
+    for (const rId of uniqueRestaurants) {
+        discountsByRestaurant.set(rId, await getAvailableDiscounts(rId as string));
+    }
+
     const result = {
         restaurants: favs.filter(f => f.restaurant?.id !== null).map(f => f.restaurant),
-        foods: favs.filter(f => f.food?.id !== null).map(f => f.food)
+        foods: favs.filter(f => f.food?.id !== null).map(f => {
+            const foodObj = f.food as any;
+            const restId = f.restaurant?.id || null;
+            const availableDiscounts = restId ? discountsByRestaurant.get(restId) : [];
+            const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+
+            const { price: finalDiscountPrice, discountNote } = applyPriorityDiscount(
+                { id: foodObj.id, discountType: foodObj.discountType, discountValue: foodObj.discountValue },
+                Number(foodObj.price),
+                0,
+                availableDiscounts || [],
+                discountState,
+                false
+            );
+
+            return {
+                ...foodObj,
+                discountPrice: finalDiscountPrice,
+                discountNote
+            };
+        })
     };
 
     return SuccessResponse(res, { data: result });
@@ -654,7 +720,7 @@ export const getUserFavorites = async (req: Request, res: Response) => {
 
 
 // ==========================================
-// 2. Search Restaurant With Menu (البحث الذكي الصارم عن المطعم والمنيو)
+// 7. Search Restaurant With Menu (البحث الذكي الصارم عن المطعم والمنيو)
 // ==========================================
 export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
     const { query } = req.query;
@@ -663,49 +729,21 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         throw new BadRequest("please enter your search term");
     }
 
-    // 1. تنظيف وتوحيد نص البحث المرسل (حذف الشرطات، المسافات، الأبوستروف، وعلامة &)
     const cleanQuery = query.trim().toLowerCase();
-    
-    // تحويل الـ "-" أو "_" أو "&" في البحث إلى نص مبسط
     const normalizedQuery = cleanQuery.replace(/[-\s'&_]/g, "");
-    
-    // const normalizedQuery = cleanQuery.replace(/[-\s']/g, ""); // يحول "mataam-wast-albalad" إلى "mataamwastalbalad"
-
     const searchTerm = `%${cleanQuery}%`;
     const normalizedSearchTerm = `%${normalizedQuery}%`;
 
-    // 2. بناء شروط دقيقة تطهر بيانات قاعدة البيانات من الفواصل والعلامات (بما فيها &) أثناء المقارنة
     const restaurantConditions = [
-        // أ) تطابق عبر الـ LIKE العادي للإنجليزي والفرنسي والعربي
         and(sql`${restaurants.name} != ''`, like(restaurants.name, searchTerm)),
         and(sql`${restaurants.nameAr} != ''`, like(restaurants.nameAr, searchTerm)),
         and(sql`${restaurants.nameFr} != ''`, like(restaurants.nameFr, searchTerm)),
-
-        // ب) التطابق التام الذكي بعد تنظيف (المسافات، الشرطات، الأبوستروف، وعلامة &)
         sql`REPLACE(REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", ''), '&', '') = ${normalizedQuery}`,
         sql`REPLACE(REPLACE(REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', ''), "'", ''), '&', '') = ${normalizedQuery}`,
         sql`REPLACE(REPLACE(REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', ''), "'", ''), '&', '') = ${normalizedQuery}`,
-
-        // ج) التطابق الجزئي (LIKE) بعد التنظيف الكامل للجدول لحل مشكلة الـ Slugs المعقدة
         sql`REPLACE(REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", ''), '&', '') LIKE ${normalizedSearchTerm}`
     ];
 
-    //     const restaurantConditions = [
-    //     // أ) تطابق عبر الـ LIKE العادي (بشرط ألا يكون الحقل فارغاً منقوعاً)
-    //     and(sql`${restaurants.name} != ''`, like(restaurants.name, searchTerm)),
-    //     and(sql`${restaurants.nameAr} != ''`, like(restaurants.nameAr, searchTerm)),
-    //     and(sql`${restaurants.nameFr} != ''`, like(restaurants.nameFr, searchTerm)),
-
-    //     // ب) التطابق التام الذكي بعد تنظيف (المسافات، الشرطات، وعلامة ') - حل مشكلة الـ Slugs والأبوستروف
-    //     sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
-    //     sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.nameFr}), '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
-    //     sql`REPLACE(REPLACE(REPLACE(${restaurants.nameAr}, '-', ''), ' ', ''), "'", '') = ${normalizedQuery}`,
-
-    //     // ج) احتياطياً: في حال كان الـ Slug جزءاً من اسم أطول مخزن في قاعدة البيانات
-    //     sql`REPLACE(REPLACE(REPLACE(LOWER(${restaurants.name}), '-', ''), ' ', ''), "'", '') LIKE ${normalizedSearchTerm}`
-    // ];
-
-    // 3. جلب البيانات بناءً على شروط اسم المطعم الصارمة فقط
     const flatResults = await db
         .select({
             restaurant: restaurants,
@@ -730,7 +768,6 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
             )
         );
 
-    // 4. تجميع البيانات المجلوبة (Grouping Logic)
     const restaurantsMap = new Map();
 
     for (const row of flatResults) {
@@ -783,14 +820,37 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         }
     }
 
-    // 5. تحويل الـ Maps إلى Arrays
-    const formattedData = Array.from(restaurantsMap.values()).map((restaurant: any) => ({
-        ...restaurant,
-        food: Array.from(restaurant.food.values()).map((foodItem: any) => ({
-            ...foodItem,
-            variations: Array.from(foodItem.variations.values())
-        }))
-    }));
+    const allRestaurants = Array.from(restaurantsMap.keys());
+    const discountsByRestaurant = new Map();
+    for (const rId of allRestaurants) {
+        discountsByRestaurant.set(rId, await getAvailableDiscounts(rId));
+    }
+
+    const formattedData = Array.from(restaurantsMap.values()).map((restaurant: any) => {
+        const availableDiscounts = discountsByRestaurant.get(restaurant.id) || [];
+        const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+
+        return {
+            ...restaurant,
+            food: Array.from(restaurant.food.values()).map((foodItem: any) => {
+                const { price: finalDiscountPrice, discountNote } = applyPriorityDiscount(
+                    { id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value },
+                    Number(foodItem.price),
+                    0,
+                    availableDiscounts,
+                    discountState,
+                    false
+                );
+
+                return {
+                    ...foodItem,
+                    discountPrice: finalDiscountPrice,
+                    discountNote,
+                    variations: Array.from(foodItem.variations.values())
+                };
+            })
+        };
+    });
 
     return SuccessResponse(res, {
         message: "Fetched restaurant and menu data successfully",
