@@ -197,7 +197,8 @@ const checkout = async (req, res) => {
     // 6. Smart Delivery Logic (Zone + Radius Hybrid)
     // ==========================================
     let deliveryFee = 0;
-    if (orderType === "delivery") {
+    const resolvedOrderType = orderType || "delivery";
+    if (resolvedOrderType === "delivery") {
         if (!addressId)
             throw new BadRequest_1.BadRequest("Delivery address is required");
         if (!branchId)
@@ -280,7 +281,7 @@ const checkout = async (req, res) => {
             addressId: addressId || null,
             orderSource,
             paymentMethod, // ✅ هيفضل بالـ ID زي ما طلبت
-            orderType: orderType || "delivery",
+            orderType: resolvedOrderType,
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
             serviceFee: serviceFee.toString(),
@@ -529,12 +530,14 @@ const getOrderPrerequisites = async (req, res) => {
         name: schema_1.paymentMethods.name,
         nameAr: schema_1.paymentMethods.nameAr
     }).from(schema_1.paymentMethods).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.isActive, true));
+    const getCancelReasons = await connection_1.db.select().from(schema_1.selectReasons).where((0, drizzle_orm_1.eq)(schema_1.selectReasons.type, "user"));
     // تجميع الداتا وإرسالها
     return (0, response_1.SuccessResponse)(res, {
         data: {
             addresses: userAddresses,
             branches: restaurantBranches,
-            paymentMethods: activePaymentMethods
+            paymentMethods: activePaymentMethods,
+            reasons: getCancelReasons
         }
     });
 };
