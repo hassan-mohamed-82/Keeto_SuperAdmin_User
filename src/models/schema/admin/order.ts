@@ -5,6 +5,7 @@ import { food } from "./food";
 import { users } from "../user/Users";
 import { branches } from "../../schema";
 import { addresses } from "../user/address";
+import { selectReasons } from "./selectReasons";
 
 export const orders = mysqlTable("orders", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -48,10 +49,11 @@ export const orders = mysqlTable("orders", {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "rejected",
         "refund" 
     ]).default("pending"),
 
+    cancelReasonId: char("cancel_reason_id", { length: 36 })
+        .references(() => selectReasons.id),
     cancelReason: text("cancel_reason"),
     note: text("note"),
 

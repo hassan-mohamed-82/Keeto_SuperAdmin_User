@@ -11,14 +11,15 @@ const uuid_1 = require("uuid");
 // 1. إنشاء سبب جديد (Create)
 // ==========================================
 const createReason = async (req, res) => {
-    const { name, status } = req.body;
-    if (!name) {
-        throw new Errors_1.BadRequest("Reason name is required");
+    const { name, status, type } = req.body;
+    if (!name || !type) {
+        throw new Errors_1.BadRequest("Reason name and type are required");
     }
     const id = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.selectReasons).values({
         id,
         name,
+        type,
         // لو مبعتش حالة، الديفولت هيكون active زي ما أنت عامل في الداتا بيز
         status: status || "active",
     });

@@ -113,7 +113,7 @@ const getFinancialReport = async (req, res) => {
                 totalDigitalCollected += amount;
             }
         }
-        else if (order.status === "cancelled" || order.status === "rejected") {
+        else if (order.status === "cancelled") {
             totalCancelledOrders += 1;
         }
     });

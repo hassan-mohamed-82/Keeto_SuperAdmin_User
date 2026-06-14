@@ -31,7 +31,6 @@ export const createOrderSchema = z.object({
         "out_for_delivery", 
         "delivered", 
         "cancelled", 
-        "rejected", 
         "refund"
     ]).optional(),
     

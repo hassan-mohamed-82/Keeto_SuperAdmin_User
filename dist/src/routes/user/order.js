@@ -4,6 +4,7 @@ const express_1 = require("express");
 const catchAsync_1 = require("../../utils/catchAsync");
 const order_1 = require("../../controllers/user/order");
 const router = (0, express_1.Router)();
+router.put("/:orderId/cancel", (0, catchAsync_1.catchAsync)(order_1.cancelOrder));
 router.get("/select", (0, catchAsync_1.catchAsync)(order_1.getOrderPrerequisites));
 router.post("/checkout", (0, catchAsync_1.catchAsync)(order_1.checkout));
 router.get("/active", (0, catchAsync_1.catchAsync)(order_1.getActiveOrders));

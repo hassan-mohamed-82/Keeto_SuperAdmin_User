@@ -28,7 +28,6 @@ exports.createOrderSchema = zod_1.z.object({
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "rejected",
         "refund"
     ]).optional(),
     cancelReason: zod_1.z.string().optional(),

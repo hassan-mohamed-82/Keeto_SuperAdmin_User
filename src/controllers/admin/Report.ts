@@ -8,7 +8,7 @@ import { BadRequest, UnauthorizedError } from "../../Errors";
 import PDFDocument from "pdfkit";
 import { v4 as uuidv4 } from "uuid";
 // 1. تعريف الأنواع المسموحة للـ Enums
-type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" | "rejected" | "refund";
+type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" | "refund";
 type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
 
 // ==========================================
@@ -90,7 +90,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             } else {
                 totalDigitalCollected += amount;
             }
-        } else if (order.status === "cancelled" || order.status === "rejected") {
+        } else if (order.status === "cancelled") {
             totalCancelledOrders += 1;
         }
     });

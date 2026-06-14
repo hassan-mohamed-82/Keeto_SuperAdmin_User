@@ -8,6 +8,7 @@ const food_1 = require("./food");
 const Users_1 = require("../user/Users");
 const schema_1 = require("../../schema");
 const address_1 = require("../user/address");
+const selectReasons_1 = require("./selectReasons");
 exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     orderNumber: (0, mysql_core_1.varchar)("order_number", { length: 20 }).notNull().unique(),
@@ -41,9 +42,10 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "rejected",
         "refund"
     ]).default("pending"),
+    cancelReasonId: (0, mysql_core_1.char)("cancel_reason_id", { length: 36 })
+        .references(() => selectReasons_1.selectReasons.id),
     cancelReason: (0, mysql_core_1.text)("cancel_reason"),
     note: (0, mysql_core_1.text)("note"),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),

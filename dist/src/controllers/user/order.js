@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getOrderPrerequisites = exports.getOrderDetails = exports.getOrderHistory = exports.getActiveOrders = exports.checkout = void 0;
+exports.cancelOrder = exports.getOrderPrerequisites = exports.getOrderDetails = exports.getOrderHistory = exports.getActiveOrders = exports.checkout = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -444,8 +444,8 @@ const getOrderHistory = async (req, res) => {
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, String(restaurantId)) : undefined, 
-    // 🔥 تجلب فقط الطلبات التي انتهت (تم إضافة المرفوض والمسترجع)
-    (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["delivered", "cancelled", "rejected", "refund"])))
+    // 🔥 تجلب فقط الطلبات التي انتهت (تم إضافة المسترجع والملغى)
+    (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["delivered", "cancelled", "refund"])))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
     return (0, response_1.SuccessResponse)(res, { data: historyOrders });
 };
@@ -539,3 +539,105 @@ const getOrderPrerequisites = async (req, res) => {
     });
 };
 exports.getOrderPrerequisites = getOrderPrerequisites;
+// ==========================================
+// 6. إلغاء الطلب من قبل المستخدم (Cancel Order)
+// ==========================================
+const cancelOrder = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user.id;
+    const { orderId } = req.params;
+    const { cancelReasonId } = req.body;
+    if (!cancelReasonId)
+        throw new BadRequest_1.BadRequest("Cancel reason ID is required");
+    // 1. جلب الطلب والتأكد أنه للمستخدم وأنه قابل للإلغاء
+    const [order] = await connection_1.db.select().from(schema_1.orders).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId), (0, drizzle_orm_1.eq)(schema_1.orders.userId, userId))).limit(1);
+    if (!order)
+        throw new NotFound_1.NotFound("Order not found");
+    if (!["pending", "accepted"].includes(order.status)) {
+        throw new BadRequest_1.BadRequest("Order cannot be cancelled at this stage");
+    }
+    // 2. التحقق من سبب الإلغاء
+    const [reason] = await connection_1.db.select().from(schema_1.selectReasons).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.selectReasons.id, cancelReasonId), (0, drizzle_orm_1.eq)(schema_1.selectReasons.type, "user"))).limit(1);
+    if (!reason)
+        throw new BadRequest_1.BadRequest("Invalid cancel reason for user");
+    // 3. تحديث حالة الطلب وإرجاع المبالغ المالية (إلغاء أرباح المطعم والعمولة)
+    await connection_1.db.transaction(async (tx) => {
+        // تحديث الطلب
+        await tx.update(schema_1.orders)
+            .set({
+            status: "cancelled",
+            cancelReasonId: reason.id,
+            cancelReason: reason.name
+        })
+            .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
+        // حسابات المبالغ التي تم دفعها أو خصمها
+        const totalAmount = parseFloat(order.totalAmount || "0");
+        const appCommission = parseFloat(order.appCommission || "0");
+        const serviceFee = parseFloat(order.serviceFee || "0");
+        const subtotal = parseFloat(order.subtotal || "0");
+        const deliveryFee = parseFloat(order.deliveryFee || "0");
+        const appDues = appCommission + serviceFee;
+        const restaurantEarning = subtotal + deliveryFee - appCommission;
+        const isCashPayment = order.paymentMethod === "cash_on_delivery" || order.paymentMethod === "cash"; // Assuming ID handling elsewhere or this is resolved
+        // إرجاع فلوس المستخدم لو دفع بالمحفظة
+        // note: paymentMethod stores UUID, so we check userWalletTransactions to know if it was a wallet payment
+        const [walletTx] = await tx.select().from(schema_1.userWalletTransactions).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userWalletTransactions.reference, order.orderNumber), (0, drizzle_orm_1.eq)(schema_1.userWalletTransactions.transactionType, "order_payment"))).limit(1);
+        if (walletTx) {
+            // Revert User Wallet
+            const [userWallet] = await tx.select().from(schema_1.userWallets).where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId)).limit(1);
+            if (userWallet) {
+                const balanceBefore = parseFloat(userWallet.balance || "0");
+                const newBalance = balanceBefore + totalAmount;
+                await tx.update(schema_1.userWallets).set({ balance: newBalance.toString() }).where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId));
+                await tx.insert(schema_1.userWalletTransactions).values({
+                    id: (0, uuid_1.v4)(),
+                    userId,
+                    type: "credit",
+                    transactionType: "refund",
+                    amount: totalAmount.toString(),
+                    balanceBefore: balanceBefore.toString(),
+                    reference: order.orderNumber,
+                    status: "approved"
+                });
+            }
+        }
+        // إرجاع الفلوس/العمولات من المطعم (حيث أن الإلغاء من المستخدم، المطعم لا يتحمل العمولة)
+        const [restaurantWallet] = await tx.select().from(schema_1.restaurantWallets).where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, order.restaurantId)).limit(1);
+        if (restaurantWallet) {
+            let currentRestBalance = parseFloat(restaurantWallet.balance || "0");
+            let currentCollectedCash = parseFloat(restaurantWallet.collectedCash || "0");
+            let currentTotalEarning = parseFloat(restaurantWallet.totalEarning || "0");
+            if (isCashPayment) {
+                // نلغي خصم العمولة من رصيد المطعم، ونلغي الكاش المحصل
+                currentRestBalance += appDues;
+                currentCollectedCash -= totalAmount;
+            }
+            else {
+                // نلغي الأرباح اللي انضافت للمطعم
+                currentRestBalance -= restaurantEarning;
+            }
+            await tx.update(schema_1.restaurantWallets)
+                .set({
+                balance: currentRestBalance.toString(),
+                collectedCash: currentCollectedCash.toString(),
+                totalEarning: (currentTotalEarning - restaurantEarning).toString()
+            })
+                .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, order.restaurantId));
+            // تسجيل العملية
+            await tx.insert(schema_1.restaurantWalletTransactions).values({
+                id: (0, uuid_1.v4)(),
+                restaurantId: order.restaurantId,
+                type: "order_payment", // Or create a new type "refund"
+                amount: isCashPayment ? `${appDues}` : `-${restaurantEarning}`,
+                balanceBefore: restaurantWallet.balance,
+                balanceAfter: currentRestBalance.toString(),
+                method: order.paymentMethod,
+                reference: order.orderNumber,
+                note: "Refund/Revert due to user cancellation"
+            });
+        }
+    });
+    return (0, response_1.SuccessResponse)(res, { message: "Order cancelled successfully" });
+};
+exports.cancelOrder = cancelOrder;

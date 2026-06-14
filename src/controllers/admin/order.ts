@@ -31,9 +31,9 @@ export const getOrdersByRestaurant = async (req: Request, res: Response) => {
 
     const result = await baseQuery.where(condition).orderBy(desc(orders.createdAt));
 
-    return SuccessResponse(res, { 
-        message: "Fetched restaurant orders successfully", 
-        data: result 
+    return SuccessResponse(res, {
+        message: "Fetched restaurant orders successfully",
+        data: result
     });
 };
 
@@ -41,7 +41,7 @@ export const getOrdersByRestaurant = async (req: Request, res: Response) => {
 
 export const getOrderDetails = async (req: Request, res: Response) => {
     // 👈 هنجيب الـ orderId والـ restaurantId من الـ params
-    const { orderId, restaurantId } = req.params; 
+    const { orderId, restaurantId } = req.params;
 
     const result = await db
         .select({
@@ -51,16 +51,16 @@ export const getOrderDetails = async (req: Request, res: Response) => {
             orderDate: orders.createdAt,
             totalAmount: orders.totalAmount,
             orderStatus: orders.status,
-            subtotal:orders.subtotal,
-            deliveryFee:orders.deliveryFee,
-            serviceFee:orders.serviceFee,
-            paymentMethod:orders.paymentMethod,
-            
+            subtotal: orders.subtotal,
+            deliveryFee: orders.deliveryFee,
+            serviceFee: orders.serviceFee,
+            paymentMethod: orders.paymentMethod,
 
-            
+
+
             customerName: users.name,
             customerPhone: users.phone,
-            
+
             addressTitle: addresses.title,
             street: addresses.street,
             buildingNumber: addresses.number,
@@ -70,7 +70,7 @@ export const getOrderDetails = async (req: Request, res: Response) => {
         })
         .from(orders)
         .leftJoin(users, eq(orders.userId, users.id))
-        .leftJoin(addresses, eq(orders.addressId, addresses.id)) 
+        .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .where(
             // 👈 شرط الأمان: لازم الـ id بتاع الأوردر يطابق، وكمان يكون تبع المطعم ده
             and(
@@ -86,7 +86,7 @@ export const getOrderDetails = async (req: Request, res: Response) => {
     }
 
     return SuccessResponse(res, {
-        message: "Order details fetched successfully", 
-        data: result[0] 
+        message: "Order details fetched successfully",
+        data: result[0]
     });
 };

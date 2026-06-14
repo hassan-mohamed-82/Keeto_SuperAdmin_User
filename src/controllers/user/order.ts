@@ -1,13 +1,18 @@
 // controllers/user/OrderController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { 
-    orders, orderItems, restaurantBusinessPlans, food, restaurants, 
-    restaurantWallets, restaurantWalletTransactions, 
-    restaurantZoneDeliveryFees, zoneDeliveryFees, restaurantSettings, 
+import {
+    restaurantWallets, restaurantWalletTransactions,
+    restaurantZoneDeliveryFees, zoneDeliveryFees, restaurantSettings,
     restaurantSchedules, cartItems, users, addresses, branches,
     userWallets, userWalletTransactions, paymentMethods,
-    coupons, couponUsages, couponRestaurants, discounts, discountRestaurants, discountFoods
+    coupons, couponUsages, couponRestaurants, discounts, discountRestaurants, discountFoods,
+    selectReasons,
+    orders,
+    restaurants,
+    orderItems,
+    restaurantBusinessPlans,
+    food
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -36,8 +41,8 @@ const formatToEgyptTime = (date: Date) => {
 // ==========================================
 export const checkout = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
-    const userId = req.user.id; 
-    
+    const userId = req.user.id;
+
     const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note, couponCode, discountId } = req.body;
 
     // ==========================================
@@ -96,7 +101,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         let varPrice = 0;
 
         const vars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
-        
+
         // ⚠️ تأكد إن السعر في الفرونت إند اسمه additionalPrice، لو اسمه حاجة تانية غيرها هنا
         if (Array.isArray(vars)) {
             varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
@@ -133,13 +138,13 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (discountId) {
         const [discount] = await db.select().from(discounts).where(eq(discounts.id, discountId)).limit(1);
         if (!discount || !discount.isActive) throw new BadRequest("Invalid or inactive discount");
-        
+
         if (discount.startDate && new Date(discount.startDate) > nowTemp) throw new BadRequest("Discount not yet active");
         if (discount.endDate && new Date(discount.endDate) < nowTemp) throw new BadRequest("Discount expired");
-        
+
         if (discount.usageLimit && discount.usedCount! >= discount.usageLimit) throw new BadRequest("Discount usage limit reached");
         if (parseFloat(discount.minOrderAmount as string || "0") > subtotal) throw new BadRequest(`Minimum order amount of ${discount.minOrderAmount} required for this discount`);
-        
+
         if (!discount.isGlobal) {
             const [discRest] = await db.select().from(discountRestaurants)
                 .where(and(eq(discountRestaurants.discountId, discountId), eq(discountRestaurants.restaurantId, restaurantId))).limit(1);
@@ -166,7 +171,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
             totalDiscount += pDiscount;
         }
-        
+
         appliedDiscount = discount;
     }
 
@@ -174,13 +179,13 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (couponCode) {
         const [coupon] = await db.select().from(coupons).where(eq(coupons.code, couponCode)).limit(1);
         if (!coupon || !coupon.isActive) throw new BadRequest("Invalid or inactive coupon");
-        
+
         if (coupon.startDate && new Date(coupon.startDate) > nowTemp) throw new BadRequest("Coupon not yet active");
         if (coupon.endDate && new Date(coupon.endDate) < nowTemp) throw new BadRequest("Coupon expired");
-        
+
         if (coupon.usageLimit && coupon.usedCount! >= coupon.usageLimit) throw new BadRequest("Coupon usage limit reached");
         if (parseFloat(coupon.minOrderAmount as string || "0") > subtotal) throw new BadRequest(`Minimum order amount of ${coupon.minOrderAmount} required for this coupon`);
-        
+
         if (!coupon.isGlobal) {
             const [coupRest] = await db.select().from(couponRestaurants)
                 .where(and(eq(couponRestaurants.couponId, coupon.id), eq(couponRestaurants.restaurantId, restaurantId))).limit(1);
@@ -229,7 +234,7 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         const [branch] = await db.select().from(branches)
             .where(eq(branches.id, branchId)).limit(1);
-        
+
         if (!branch) throw new BadRequest("Invalid branch selected");
 
         const resolvedZoneId = userZoneId || userAddress.zoneId;
@@ -278,11 +283,11 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 9. جلب محفظة المطعم 
     // ==========================================
     let [restaurantWallet] = await db.select().from(restaurantWallets).where(eq(restaurantWallets.restaurantId, restaurantId)).limit(1);
-    
+
     // ==========================================
     // 10. Execute Order (Transaction)
     // ==========================================
-    const now = new Date(); 
+    const now = new Date();
 
     await db.transaction(async (tx) => {
         if (isWalletPayment && userWallet) {
@@ -296,8 +301,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             await tx.insert(userWalletTransactions).values({
                 id: uuidv4(),
                 userId,
-                type: "debit", 
-                transactionType: "order_payment", 
+                type: "debit",
+                transactionType: "order_payment",
                 amount: totalAmount.toString(),
                 balanceBefore: balanceBefore.toString(),
                 reference: orderNumber,
@@ -313,7 +318,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             idempotencyKey,
             userId,
             restaurantId,
-            branchId, 
+            branchId,
             addressId: addressId || null,
             orderSource,
             paymentMethod, // ✅ هيفضل بالـ ID زي ما طلبت
@@ -332,7 +337,7 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         // تفريغ الكارت وتسجيل الأصناف
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
-        await tx.delete(cartItems).where(eq(cartItems.userId, userId)); 
+        await tx.delete(cartItems).where(eq(cartItems.userId, userId));
 
         // تسجيل استخدام الكوبون والخصم
         if (appliedCoupon) {
@@ -371,20 +376,20 @@ export const checkout = async (req: Request | any, res: Response) => {
         const currentTotalEarning = parseFloat(restaurantWallet.totalEarning as string);
 
         const restaurantEarning = subtotal + deliveryFee - appCommission;
-        const appDues = appCommission + serviceFee; 
+        const appDues = appCommission + serviceFee;
 
         let newRestBalance = currentRestBalance;
         let newCollectedCash = currentCollectedCash;
 
         if (isCashPayment) {
             newRestBalance -= appDues;
-            newCollectedCash += totalAmount; 
+            newCollectedCash += totalAmount;
         } else {
             newRestBalance += restaurantEarning;
         }
 
         await tx.update(restaurantWallets)
-            .set({ 
+            .set({
                 balance: newRestBalance.toString(),
                 collectedCash: newCollectedCash.toString(),
                 totalEarning: (currentTotalEarning + restaurantEarning).toString()
@@ -427,16 +432,16 @@ export const checkout = async (req: Request | any, res: Response) => {
     return SuccessResponse(res, {
         message: "Order created successfully",
         order_level: {
-            orderDetails: { 
-                orderId, 
-                orderNumber, 
-                subtotal, 
-                deliveryFee, 
+            orderDetails: {
+                orderId,
+                orderNumber,
+                subtotal,
+                deliveryFee,
                 serviceFee,
                 discountAmount: totalDiscount,
                 couponCode: couponCode || null,
                 totalAmount,
-                createdAt: now.toISOString() 
+                createdAt: now.toISOString()
             },
             customerDetails: userInfo
         }
@@ -447,7 +452,7 @@ export const checkout = async (req: Request | any, res: Response) => {
 // ==========================================
 export const getActiveOrders = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
-    const userId = req.user.id; 
+    const userId = req.user.id;
     const { restaurantId } = req.query;
 
     const activeOrders = await db
@@ -481,7 +486,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
 // ==========================================
 export const getOrderHistory = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
-    const userId = req.user.id; 
+    const userId = req.user.id;
     const { restaurantId } = req.query;
 
     const historyOrders = await db
@@ -491,7 +496,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             restaurantName: restaurants.name,
             restaurantImage: restaurants.logo,
             totalAmount: orders.totalAmount,
-            status: orders.status, 
+            status: orders.status,
             createdAt: orders.createdAt,
             itemsCount: sql<number>`(SELECT COUNT(*) FROM order_items WHERE order_items.order_id = ${orders.id})`
         })
@@ -501,8 +506,8 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             and(
                 eq(orders.userId, userId),
                 restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
-                // 🔥 تجلب فقط الطلبات التي انتهت (تم إضافة المرفوض والمسترجع)
-                inArray(orders.status, ["delivered", "cancelled", "rejected", "refund"])
+                // 🔥 تجلب فقط الطلبات التي انتهت (تم إضافة المسترجع والملغى)
+                inArray(orders.status, ["delivered", "cancelled", "refund"])
             )
         )
         .orderBy(desc(orders.createdAt));
@@ -515,7 +520,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
 // ==========================================
 export const getOrderDetails = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
-    const userId = req.user.id; 
+    const userId = req.user.id;
     const { orderId } = req.params;
 
     const orderInfo = await db
@@ -588,7 +593,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     const [userAddresses, restaurantBranches] = await Promise.all([
         // أ) عناوين اليوزر 
         db.select().from(addresses).where(eq(addresses.userId, userId)),
-        
+
         // ب) فروع المطعم
         db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
     ]);
@@ -601,11 +606,121 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     }).from(paymentMethods).where(eq(paymentMethods.isActive, true));
 
     // تجميع الداتا وإرسالها
-    return SuccessResponse(res, { 
+    return SuccessResponse(res, {
         data: {
             addresses: userAddresses,
             branches: restaurantBranches,
             paymentMethods: activePaymentMethods
         }
     });
+};
+
+// ==========================================
+// 6. إلغاء الطلب من قبل المستخدم (Cancel Order)
+// ==========================================
+export const cancelOrder = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user.id;
+    const { orderId } = req.params;
+    const { cancelReasonId } = req.body;
+
+    if (!cancelReasonId) throw new BadRequest("Cancel reason ID is required");
+
+    // 1. جلب الطلب والتأكد أنه للمستخدم وأنه قابل للإلغاء
+    const [order] = await db.select().from(orders).where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1);
+    if (!order) throw new NotFound("Order not found");
+    if (!["pending", "accepted"].includes(order.status as string)) {
+        throw new BadRequest("Order cannot be cancelled at this stage");
+    }
+
+    // 2. التحقق من سبب الإلغاء
+    const [reason] = await db.select().from(selectReasons).where(and(eq(selectReasons.id, cancelReasonId), eq(selectReasons.type, "user"))).limit(1);
+    if (!reason) throw new BadRequest("Invalid cancel reason for user");
+
+    // 3. تحديث حالة الطلب وإرجاع المبالغ المالية (إلغاء أرباح المطعم والعمولة)
+    await db.transaction(async (tx) => {
+        // تحديث الطلب
+        await tx.update(orders)
+            .set({
+                status: "cancelled",
+                cancelReasonId: reason.id,
+                cancelReason: reason.name
+            })
+            .where(eq(orders.id, orderId));
+
+        // حسابات المبالغ التي تم دفعها أو خصمها
+        const totalAmount = parseFloat(order.totalAmount as string || "0");
+        const appCommission = parseFloat(order.appCommission as string || "0");
+        const serviceFee = parseFloat(order.serviceFee as string || "0");
+        const subtotal = parseFloat(order.subtotal as string || "0");
+        const deliveryFee = parseFloat(order.deliveryFee as string || "0");
+        const appDues = appCommission + serviceFee;
+        const restaurantEarning = subtotal + deliveryFee - appCommission;
+
+        const isCashPayment = order.paymentMethod === "cash_on_delivery" || order.paymentMethod === "cash"; // Assuming ID handling elsewhere or this is resolved
+
+        // إرجاع فلوس المستخدم لو دفع بالمحفظة
+        // note: paymentMethod stores UUID, so we check userWalletTransactions to know if it was a wallet payment
+        const [walletTx] = await tx.select().from(userWalletTransactions).where(and(eq(userWalletTransactions.reference, order.orderNumber), eq(userWalletTransactions.transactionType, "order_payment"))).limit(1);
+
+        if (walletTx) {
+            // Revert User Wallet
+            const [userWallet] = await tx.select().from(userWallets).where(eq(userWallets.userId, userId)).limit(1);
+            if (userWallet) {
+                const balanceBefore = parseFloat(userWallet.balance as string || "0");
+                const newBalance = balanceBefore + totalAmount;
+                await tx.update(userWallets).set({ balance: newBalance.toString() }).where(eq(userWallets.userId, userId));
+                await tx.insert(userWalletTransactions).values({
+                    id: uuidv4(),
+                    userId,
+                    type: "credit",
+                    transactionType: "refund",
+                    amount: totalAmount.toString(),
+                    balanceBefore: balanceBefore.toString(),
+                    reference: order.orderNumber,
+                    status: "approved"
+                });
+            }
+        }
+
+        // إرجاع الفلوس/العمولات من المطعم (حيث أن الإلغاء من المستخدم، المطعم لا يتحمل العمولة)
+        const [restaurantWallet] = await tx.select().from(restaurantWallets).where(eq(restaurantWallets.restaurantId, order.restaurantId)).limit(1);
+        if (restaurantWallet) {
+            let currentRestBalance = parseFloat(restaurantWallet.balance as string || "0");
+            let currentCollectedCash = parseFloat(restaurantWallet.collectedCash as string || "0");
+            let currentTotalEarning = parseFloat(restaurantWallet.totalEarning as string || "0");
+
+            if (isCashPayment) {
+                // نلغي خصم العمولة من رصيد المطعم، ونلغي الكاش المحصل
+                currentRestBalance += appDues;
+                currentCollectedCash -= totalAmount;
+            } else {
+                // نلغي الأرباح اللي انضافت للمطعم
+                currentRestBalance -= restaurantEarning;
+            }
+
+            await tx.update(restaurantWallets)
+                .set({
+                    balance: currentRestBalance.toString(),
+                    collectedCash: currentCollectedCash.toString(),
+                    totalEarning: (currentTotalEarning - restaurantEarning).toString()
+                })
+                .where(eq(restaurantWallets.restaurantId, order.restaurantId));
+
+            // تسجيل العملية
+            await tx.insert(restaurantWalletTransactions).values({
+                id: uuidv4(),
+                restaurantId: order.restaurantId,
+                type: "order_payment", // Or create a new type "refund"
+                amount: isCashPayment ? `${appDues}` : `-${restaurantEarning}`,
+                balanceBefore: restaurantWallet.balance as string,
+                balanceAfter: currentRestBalance.toString(),
+                method: order.paymentMethod,
+                reference: order.orderNumber,
+                note: "Refund/Revert due to user cancellation"
+            });
+        }
+    });
+
+    return SuccessResponse(res, { message: "Order cancelled successfully" });
 };

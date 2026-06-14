@@ -13,10 +13,10 @@ type ReasonStatus = "active" | "inactive";
 // 1. إنشاء سبب جديد (Create)
 // ==========================================
 export const createReason = async (req: Request, res: Response) => {
-    const { name, status } = req.body;
+    const { name, status, type } = req.body;
 
-    if (!name) {
-        throw new BadRequest("Reason name is required");
+    if (!name || !type) {
+        throw new BadRequest("Reason name and type are required");
     }
 
     const id = uuidv4();
@@ -24,6 +24,7 @@ export const createReason = async (req: Request, res: Response) => {
     await db.insert(selectReasons).values({
         id,
         name,
+        type,
         // لو مبعتش حالة، الديفولت هيكون active زي ما أنت عامل في الداتا بيز
         status: (status as ReasonStatus) || "active", 
     });
