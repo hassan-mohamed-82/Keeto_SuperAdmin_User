@@ -47,14 +47,14 @@ const getAllAdmins = async (req, res) => {
         updatedAt: schema_1.admins.updatedAt,
         // بيانات الـ Role
         role: {
-            id: schema_1.roles.id,
-            name: schema_1.roles.name,
-            permissions: schema_1.roles.permissions,
-            status: schema_1.roles.status,
+            id: schema_1.rolesadmin.id,
+            name: schema_1.rolesadmin.name,
+            permissions: schema_1.rolesadmin.permissions,
+            status: schema_1.rolesadmin.status,
         },
     })
         .from(schema_1.admins)
-        .leftJoin(schema_1.roles, (0, drizzle_orm_1.eq)(schema_1.admins.roleId, schema_1.roles.id));
+        .leftJoin(schema_1.rolesadmin, (0, drizzle_orm_1.eq)(schema_1.admins.roleId, schema_1.rolesadmin.id));
     return (0, response_1.SuccessResponse)(res, {
         message: "get all admins success",
         data: allAdmins
@@ -74,14 +74,14 @@ const getAdminById = async (req, res) => {
         updatedAt: schema_1.admins.updatedAt,
         // بيانات الـ Role
         role: {
-            id: schema_1.roles.id,
-            name: schema_1.roles.name,
-            permissions: schema_1.roles.permissions,
-            status: schema_1.roles.status,
+            id: schema_1.rolesadmin.id,
+            name: schema_1.rolesadmin.name,
+            permissions: schema_1.rolesadmin.permissions,
+            status: schema_1.rolesadmin.status,
         },
     })
         .from(schema_1.admins)
-        .leftJoin(schema_1.roles, (0, drizzle_orm_1.eq)(schema_1.admins.roleId, schema_1.roles.id))
+        .leftJoin(schema_1.rolesadmin, (0, drizzle_orm_1.eq)(schema_1.admins.roleId, schema_1.rolesadmin.id))
         .where((0, drizzle_orm_1.eq)(schema_1.admins.id, id));
     if (admin.length === 0) {
         throw new NotFound_1.NotFound("admin not found");
@@ -157,7 +157,7 @@ const toggleAdminStatus = async (req, res) => {
 };
 exports.toggleAdminStatus = toggleAdminStatus;
 const select = async (req, res) => {
-    const allroles = await connection_1.db.select().from(schema_1.roles);
+    const allroles = await connection_1.db.select().from(schema_1.rolesadmin);
     return (0, response_1.SuccessResponse)(res, { message: "get all roles success", data: allroles });
 };
 exports.select = select;

@@ -1,6 +1,6 @@
 import { mysqlTable, varchar, char, timestamp, mysqlEnum, json } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
-import { roles } from "./roles";
+import { rolesadmin as roles } from "./rolesadmin";
 import { Permission } from "../../../types/custom";
 
 export const admins = mysqlTable("admins", {
