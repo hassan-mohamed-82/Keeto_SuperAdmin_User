@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { roles } from "../../models/schema";
+import { rolesadmin } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -95,7 +95,7 @@ export const getAdminPermissions = async (req: Request, res: Response) => {
 
 // ✅ Get All Roles
 export const getAllRoles = async (req: Request, res: Response) => {
-    const allRoles = await db.select().from(roles);
+    const allRoles = await db.select().from(rolesadmin);
     const formattedRoles = allRoles.map(formatRole);
 
     SuccessResponse(res, { roles: formattedRoles }, 200);
@@ -107,8 +107,8 @@ export const getRoleById = async (req: Request, res: Response) => {
 
     const role = await db
         .select()
-        .from(roles)
-        .where(eq(roles.id, id))
+        .from(rolesadmin)
+        .where(eq(rolesadmin.id, id))
         .limit(1);
 
     if (!role[0]) {
@@ -128,8 +128,8 @@ export const createRole = async (req: Request, res: Response) => {
 
     const existingRole = await db
         .select()
-        .from(roles)
-        .where(eq(roles.name, name))
+        .from(rolesadmin)
+        .where(eq(rolesadmin.name, name))
         .limit(1);
 
     if (existingRole[0]) {
@@ -139,7 +139,7 @@ export const createRole = async (req: Request, res: Response) => {
     const permissionsWithIds = addIdsToPermissions(permissions || []);
 
     // ✅ ابعت array على طول - Drizzle هيتعامل معاه
-    await db.insert(roles).values({
+    await db.insert(rolesadmin).values({
         name,
         permissions: permissionsWithIds,
     });
@@ -147,8 +147,8 @@ export const createRole = async (req: Request, res: Response) => {
     // جيب الـ role اللي اتعمل
     const createdRole = await db
         .select()
-        .from(roles)
-        .where(eq(roles.name, name))
+        .from(rolesadmin)
+        .where(eq(rolesadmin.name, name))
         .limit(1);
 
     SuccessResponse(res, {
@@ -164,8 +164,8 @@ export const updateRole = async (req: Request, res: Response) => {
 
     const existingRole = await db
         .select()
-        .from(roles)
-        .where(eq(roles.id, id))
+        .from(rolesadmin)
+        .where(eq(rolesadmin.id, id))
         .limit(1);
 
     if (!existingRole[0]) {
@@ -175,8 +175,8 @@ export const updateRole = async (req: Request, res: Response) => {
     if (name && name !== existingRole[0].name) {
         const duplicateName = await db
             .select()
-            .from(roles)
-            .where(eq(roles.name, name))
+            .from(rolesadmin)
+            .where(eq(rolesadmin.name, name))
             .limit(1);
 
         if (duplicateName[0]) {
@@ -191,18 +191,18 @@ export const updateRole = async (req: Request, res: Response) => {
 
     // ✅ ابعت array على طول
     await db
-        .update(roles)
+        .update(rolesadmin)
         .set({
             name: name ?? existingRole[0].name,
             permissions: updatedPermissions,
             status: status ?? existingRole[0].status,
         })
-        .where(eq(roles.id, id));
+        .where(eq(rolesadmin.id, id));
 
     const updatedRole = await db
         .select()
-        .from(roles)
-        .where(eq(roles.id, id))
+        .from(rolesadmin)
+        .where(eq(rolesadmin.id, id))
         .limit(1);
 
     SuccessResponse(res, {
@@ -217,15 +217,15 @@ export const deleteRole = async (req: Request, res: Response) => {
 
     const existingRole = await db
         .select()
-        .from(roles)
-        .where(eq(roles.id, id))
+        .from(rolesadmin)
+        .where(eq(rolesadmin.id, id))
         .limit(1);
 
     if (!existingRole[0]) {
         throw new NotFound("Role not found");
     }
 
-    await db.delete(roles).where(eq(roles.id, id));
+    await db.delete(rolesadmin).where(eq(rolesadmin.id, id));
 
     SuccessResponse(res, { message: "Role deleted successfully" }, 200);
 };
@@ -236,8 +236,8 @@ export const toggleRoleStatus = async (req: Request, res: Response) => {
 
     const existingRole = await db
         .select()
-        .from(roles)
-        .where(eq(roles.id, id))
+        .from(rolesadmin)
+        .where(eq(rolesadmin.id, id))
         .limit(1);
 
     if (!existingRole[0]) {
@@ -246,12 +246,12 @@ export const toggleRoleStatus = async (req: Request, res: Response) => {
 
     const newStatus = existingRole[0].status === "active" ? "inactive" : "active";
 
-    await db.update(roles).set({ status: newStatus }).where(eq(roles.id, id));
+    await db.update(rolesadmin).set({ status: newStatus }).where(eq(rolesadmin.id, id));
 
     const updatedRole = await db
         .select()
-        .from(roles)
-        .where(eq(roles.id, id))
+        .from(rolesadmin)
+        .where(eq(rolesadmin.id, id))
         .limit(1);
 
     SuccessResponse(res, {
@@ -276,4 +276,5 @@ export const getAvailablePermissions = async (req: Request, res: Response) => {
         permissions,
     }, 200);
 };
+
 

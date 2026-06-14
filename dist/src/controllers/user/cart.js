@@ -7,6 +7,7 @@ const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
+const discount_1 = require("../../utils/discount");
 /* =========================================
    Helpers
 ========================================= */
@@ -83,8 +84,8 @@ const addToCart = async (req, res) => {
                 throw new BadRequest_1.BadRequest(`${v.name} is required`);
         }
     }
-    const basePrice = Number(itemFood.price);
-    const unitPrice = basePrice + totalExtraPrice;
+    // 3. احتساب السعر الأصلي مع الإضافات لتخزينه في قاعدة البيانات
+    const unitPrice = Number(itemFood.price) + totalExtraPrice;
     const normalized = normalizeVariations(safeVariations);
     const key = JSON.stringify(normalized);
     const existingItems = await connection_1.db.select().from(schema_1.cartItems)
@@ -141,6 +142,9 @@ const getCart = async (req, res) => {
         foodId: schema_1.food.id,
         name: schema_1.food.name,
         image: schema_1.food.image,
+        price: schema_1.food.price,
+        discountType: schema_1.food.discount_type,
+        discountValue: schema_1.food.discount_value,
         restaurantId: schema_1.restaurants.id,
         restaurantName: schema_1.restaurants.name,
         quantity: schema_1.cartItems.quantity,
@@ -153,27 +157,43 @@ const getCart = async (req, res) => {
         .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, schema_1.food.id))
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.cartItems.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-    const formatted = await Promise.all(items.map(async (item) => {
-        let parsedVariations = deepParseJSON(item.variations);
-        if (!Array.isArray(parsedVariations)) {
-            parsedVariations = [];
+    if (items.length === 0) {
+        return (0, response_1.SuccessResponse)(res, { data: { items: [], totalSummary: { subtotal: 0 } } });
+    }
+    const restaurantId = items[0].restaurantId;
+    // 1. Calculate initial subtotal using original food price + variations to evaluate minOrderAmount correctly
+    let initialSubtotal = 0;
+    const itemsData = items.map(item => {
+        const originalBasePrice = parseFloat(item.price || "0");
+        const safeVariations = deepParseJSON(item.variations) || [];
+        const details = Array.isArray(safeVariations) ? safeVariations : [];
+        let initialDiscountPrice = originalBasePrice;
+        if (item.discountType && Number(item.discountValue) > 0) {
+            if (item.discountType === "percentage") {
+                initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(item.discountValue) / 100));
+            }
+            else if (item.discountType === "amount" || item.discountType === "fixed") {
+                initialDiscountPrice = Math.max(0, originalBasePrice - Number(item.discountValue));
+            }
         }
-        const details = [];
-        for (const v of parsedVariations) {
+        const dbUnitPrice = parseFloat(item.unitPrice || "0");
+        const varPrice = dbUnitPrice - originalBasePrice;
+        initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
+        return { item, originalBasePrice, varPrice, details };
+    });
+    const availableDiscounts = await (0, discount_1.getAvailableDiscounts)(restaurantId);
+    const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
+    let finalSubtotal = 0;
+    const formatted = await Promise.all(itemsData.map(async (data) => {
+        const { item, originalBasePrice, varPrice, details } = data;
+        const variationDetails = [];
+        for (const v of details) {
             if (!v.variationId || !v.optionId)
                 continue;
-            const [variation] = await connection_1.db
-                .select()
-                .from(schema_1.foodVariations)
-                .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, v.variationId))
-                .limit(1);
-            const [option] = await connection_1.db
-                .select()
-                .from(schema_1.variationOptions)
-                .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, v.optionId))
-                .limit(1);
+            const [variation] = await connection_1.db.select().from(schema_1.foodVariations).where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, v.variationId)).limit(1);
+            const [option] = await connection_1.db.select().from(schema_1.variationOptions).where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, v.optionId)).limit(1);
             if (variation && option) {
-                details.push({
+                variationDetails.push({
                     variationId: variation.id,
                     variationName: variation.name,
                     variationNameAr: variation.nameAr,
@@ -183,10 +203,11 @@ const getCart = async (req, res) => {
                     additionalPrice: option.additionalPrice
                 });
             }
-            else {
-                console.log(`[Warning]: Variation or Option not found in DB! VarID: ${v.variationId}, OptID: ${v.optionId}`);
-            }
         }
+        const { price: discountedBasePrice } = (0, discount_1.applyPriorityDiscount)({ id: item.foodId, discountType: item.discountType, discountValue: item.discountValue }, originalBasePrice, initialSubtotal, availableDiscounts, discountState, true);
+        const finalUnitPrice = discountedBasePrice + varPrice;
+        const finalTotalPrice = finalUnitPrice * item.quantity;
+        finalSubtotal += finalTotalPrice;
         return {
             cartId: item.cartId,
             foodId: item.foodId,
@@ -195,14 +216,21 @@ const getCart = async (req, res) => {
             restaurantId: item.restaurantId,
             restaurantName: item.restaurantName,
             quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            totalPrice: item.totalPrice,
-            variations: details,
+            price: (originalBasePrice + varPrice).toString(), // Original unit price with variations
+            unitPrice: finalUnitPrice, // Final discounted unit price with variations
+            totalPrice: finalTotalPrice,
+            variations: variationDetails,
             note: item.note || null
         };
     }));
     return (0, response_1.SuccessResponse)(res, {
-        data: formatted
+        message: "Cart fetched successfully",
+        data: {
+            items: formatted,
+            totalSummary: {
+                subtotal: finalSubtotal,
+            }
+        }
     });
 };
 exports.getCart = getCart;
@@ -258,6 +286,7 @@ const updateCartItem = async (req, res) => {
             throw new BadRequest_1.BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
     }
+    // 4. احتساب السعر الأصلي مع الإضافات لتخزينه في قاعدة البيانات
     const unitPrice = Number(itemFood.price) + totalExtraPrice;
     await connection_1.db.update(schema_1.cartItems)
         .set({
