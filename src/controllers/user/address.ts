@@ -1,7 +1,7 @@
 import{Request,Response} from "express";
 import { db } from "../../models/connection";
-import { users, addresses, zones, cities } from "../../models/schema";
-import { eq } from "drizzle-orm";
+import { users, addresses, zones, cities, restaurantZoneDeliveryFees } from "../../models/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, UnauthorizedError } from "../../Errors";
 import { v4 as uuidv4 } from "uuid";
@@ -79,17 +79,31 @@ export const updateUserAddress = async (req: Request, res: Response) => {
 export const getZones = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     
+    const { restaurantId } = req.query;
+
     const zoneData = await db
         .select({
             zone: zones,
-            city: cities
+            city: cities,
+            restaurantDeliveryFee: restaurantZoneDeliveryFees
         })
         .from(zones)
-        .leftJoin(cities, eq(zones.cityId, cities.id));
+        .leftJoin(cities, eq(zones.cityId, cities.id))
+        .leftJoin(
+            restaurantZoneDeliveryFees,
+            restaurantId
+                ? and(
+                      eq(zones.id, restaurantZoneDeliveryFees.zoneId),
+                      eq(restaurantZoneDeliveryFees.restaurantId, restaurantId as string),
+                      eq(restaurantZoneDeliveryFees.status, "active")
+                  )
+                : sql`1 = 0`
+        );
 
     const formattedZones = zoneData.map(item => ({
         ...item.zone,
-        city: item.city
+        city: item.city,
+        restaurantDeliveryFee: item.restaurantDeliveryFee || null
     }));
 
     return SuccessResponse(res, { data: formattedZones });

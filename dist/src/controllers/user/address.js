@@ -75,16 +75,22 @@ exports.updateUserAddress = updateUserAddress;
 const getZones = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const { restaurantId } = req.query;
     const zoneData = await connection_1.db
         .select({
         zone: schema_1.zones,
-        city: schema_1.cities
+        city: schema_1.cities,
+        restaurantDeliveryFee: schema_1.restaurantZoneDeliveryFees
     })
         .from(schema_1.zones)
-        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.zones.cityId, schema_1.cities.id));
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.zones.cityId, schema_1.cities.id))
+        .leftJoin(schema_1.restaurantZoneDeliveryFees, restaurantId
+        ? (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.zones.id, schema_1.restaurantZoneDeliveryFees.zoneId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.status, "active"))
+        : (0, drizzle_orm_1.sql) `1 = 0`);
     const formattedZones = zoneData.map(item => ({
         ...item.zone,
-        city: item.city
+        city: item.city,
+        restaurantDeliveryFee: item.restaurantDeliveryFee || null
     }));
     return (0, response_1.SuccessResponse)(res, { data: formattedZones });
 };
