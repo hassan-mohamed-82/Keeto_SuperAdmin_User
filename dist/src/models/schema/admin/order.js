@@ -31,6 +31,8 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     deliveryFee: (0, mysql_core_1.decimal)("delivery_fee", { precision: 10, scale: 2 }).default("0.00"),
     serviceFee: (0, mysql_core_1.decimal)("service_fee", { precision: 10, scale: 2 }).default("0.00"),
     appCommission: (0, mysql_core_1.decimal)("app_commission", { precision: 10, scale: 2 }).default("0.00"),
+    discountAmount: (0, mysql_core_1.decimal)("discount_amount", { precision: 10, scale: 2 }).default("0.00"),
+    couponCode: (0, mysql_core_1.varchar)("coupon_code", { length: 50 }),
     totalAmount: (0, mysql_core_1.decimal)("total_amount", { precision: 10, scale: 2 }).notNull(),
     status: (0, mysql_core_1.mysqlEnum)("status", [
         "pending",

@@ -37,6 +37,8 @@ export const orders = mysqlTable("orders", {
     deliveryFee: decimal("delivery_fee", { precision: 10, scale: 2 }).default("0.00"),
     serviceFee: decimal("service_fee", { precision: 10, scale: 2 }).default("0.00"),
     appCommission: decimal("app_commission", { precision: 10, scale: 2 }).default("0.00"),
+    discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }).default("0.00"),
+    couponCode: varchar("coupon_code", { length: 50 }),
     totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
 
     status: mysqlEnum("status", [
