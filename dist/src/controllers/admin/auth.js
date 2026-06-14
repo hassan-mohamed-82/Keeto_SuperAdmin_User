@@ -30,7 +30,7 @@ async function login(req, res) {
     }
     let role = null;
     if (admin[0].roleId) {
-        role = await connection_1.db.select().from(schema_1.roles).where((0, drizzle_orm_1.eq)(schema_1.roles.id, admin[0].roleId));
+        role = await connection_1.db.select().from(schema_1.rolesadmin).where((0, drizzle_orm_1.eq)(schema_1.rolesadmin.id, admin[0].roleId));
     }
     const tokenPayload = {
         id: admin[0].id,
