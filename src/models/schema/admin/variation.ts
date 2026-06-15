@@ -1,5 +1,5 @@
 import { int } from "drizzle-orm/mysql-core"; // تأكد من استدعاء int
-import{
+import {
     mysqlTable,
     varchar,
     timestamp,
@@ -17,7 +17,7 @@ import { food } from "./food";
 export const foodVariations = mysqlTable("food_variations", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     foodId: char("food_id", { length: 36 }).references(() => food.id, { onDelete: "cascade" }).notNull(),
-    
+
     name: varchar("name", { length: 255 }).notNull(), // اسم الفارييشن
     nameAr: varchar("name_ar", { length: 255 }).notNull().default(''),
     nameFr: varchar("name_fr", { length: 255 }).notNull().default(''),
@@ -33,15 +33,15 @@ export const foodVariations = mysqlTable("food_variations", {
 export const variationOptions = mysqlTable("variation_options", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     variationId: char("variation_id", { length: 36 }).references(() => foodVariations.id, { onDelete: "cascade" }).notNull(),
-    
+
     optionName: varchar("option_name", { length: 255 }).notNull(),
     optionNameAr: varchar("option_name_ar", { length: 255 }).notNull().default(''),
     optionNameFr: varchar("option_name_fr", { length: 255 }).notNull().default(''),
-    additionalPrice: varchar("additional_price", { length: 255 }).notNull().default("0"), 
-    
+    additionalPrice: varchar("additional_price", { length: 255 }).notNull().default("0"),
+
     // 👇 الحقل الجديد للتحكم في الاختيار الافتراضي
     isDefault: boolean("is_default").default(false),
-    
+
     status: boolean("status").default(true),
 });
 

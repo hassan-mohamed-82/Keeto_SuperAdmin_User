@@ -72,25 +72,40 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Order failed. This restaurant has no active business plan.");
     }
     // ==========================================
-    // 5. Calculate Subtotal from Cart Snapshots
+    // 5. Calculate Subtotal & Secure Variation Prices
     // ==========================================
     let subtotal = 0;
     const itemsToInsert = [];
-    // Calculate initial cart subtotal (for minOrderAmount check)
     let initialSubtotal = 0;
     const itemsWithData = [];
     for (const item of userCart) {
         const [foodItem] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.id, item.foodId)).limit(1);
         const originalBasePrice = parseFloat(foodItem.price || "0");
-        // --- 🛡️ بداية التعديل لحساب الفارييشن ---
         let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
-        // الاحتياط في حالة كان الـ JSON معمول له Stringify مرتين
         if (typeof safeVars === 'string')
             safeVars = JSON.parse(safeVars);
         const vars = Array.isArray(safeVars) ? safeVars : [];
-        // دعم قراءة السعر من additionalPrice أو price أو amount
-        const varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || v.price || v.amount || "0"), 0);
-        // --- نهاية التعديل ---
+        let varPrice = 0;
+        // 🛡️ التعديل الجديد: جلب سعر الإضافة من الداتابيز مباشرة باستخدام optionId
+        for (const v of vars) {
+            if (v.optionId) {
+                // ⚠️ تأكد من اسم جدول `variationOptions` في الداتابيز عندك وعدله هنا لو مختلف
+                const [dbOption] = await connection_1.db.select()
+                    .from(schema_1.variationOptions)
+                    .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, v.optionId))
+                    .limit(1);
+                if (dbOption) {
+                    const dbOptionPrice = parseFloat((dbOption.additionalPrice || "0"));
+                    varPrice += dbOptionPrice;
+                    // حقن السعر الحقيقي في الـ object عشان يتحفظ صح في الداتابيز ويظهر في الفاتورة
+                    v.additionalPrice = dbOptionPrice.toString();
+                }
+            }
+            else {
+                // Fallback لو مفيش optionId مبعوت (حالة نادرة)
+                varPrice += parseFloat(v.additionalPrice || v.price || v.amount || "0");
+            }
+        }
         let initialDiscountPrice = originalBasePrice;
         if (foodItem.discount_value && Number(foodItem.discount_value) > 0) {
             if (foodItem.discount_type === "percentage") {
@@ -117,7 +132,7 @@ const checkout = async (req, res) => {
             basePrice: discountedBasePrice.toString(),
             variationsPrice: varPrice.toString(),
             totalPrice: itemTotal.toString(),
-            variations: vars,
+            variations: vars, // هيتم حفظها بالسعر الحقيقي اللي جبناه من الداتابيز
             note: cartItem.note || null
         });
     }
@@ -251,7 +266,7 @@ const checkout = async (req, res) => {
                 createdAt: now
             });
         }
-        // تسجيل بيانات الأوردر نفسه
+        // تسجيل بيانات الأوردر
         await tx.insert(schema_1.orders).values({
             id: orderId,
             orderNumber,
