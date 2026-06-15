@@ -177,8 +177,8 @@ export const getResturantSchedules = async (req: Request, res: Response) => {
             canDeliveryNow: status.canDeliveryNow,
             canTakeawayNow: status.canTakeawayNow,
             reason: status.reason,
-            settings: settings || null,
-            schedules: schedules
+            // settings: settings || null,
+            // schedules: schedules
         } 
     });
 };
