@@ -1,4 +1,3 @@
-
 export const MODULES = [
     "Admins",
     "Roles",
@@ -32,7 +31,6 @@ export const MODULES = [
     "zone",
     "Reasons",
     "Discounts",
-
 ] as const;
 
 export const ACTION_NAMES = ["View", "Add", "Edit", "Delete", "Status"] as const;
