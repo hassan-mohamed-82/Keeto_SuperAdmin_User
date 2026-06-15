@@ -27,7 +27,7 @@ export const orders = mysqlTable("orders", {
     addressId: char("address_id", { length: 36 })
         .references(() => addresses.id),
 
-    orderSource: mysqlEnum("order_source", ["online_order", "food_aggregator"]).notNull(),
+    orderSource: mysqlEnum("order_source", ["online_order", "food_aggregator","my_keeto"]).notNull(),
 
     // ✅ التعديل هنا: رجعناها لـ varchar عشان تقبل الـ ID (UUID) اللي مبعوت من الـ Body
     paymentMethod: varchar("payment_method", { length: 100 }).notNull(),

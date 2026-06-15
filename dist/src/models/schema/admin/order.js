@@ -24,7 +24,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
         .notNull(),
     addressId: (0, mysql_core_1.char)("address_id", { length: 36 })
         .references(() => address_1.addresses.id),
-    orderSource: (0, mysql_core_1.mysqlEnum)("order_source", ["online_order", "food_aggregator"]).notNull(),
+    orderSource: (0, mysql_core_1.mysqlEnum)("order_source", ["online_order", "food_aggregator", "my_keeto"]).notNull(),
     // ✅ التعديل هنا: رجعناها لـ varchar عشان تقبل الـ ID (UUID) اللي مبعوت من الـ Body
     paymentMethod: (0, mysql_core_1.varchar)("payment_method", { length: 100 }).notNull(),
     orderType: (0, mysql_core_1.mysqlEnum)("order_type", ["delivery", "takeaway", "dine_in"]).default("delivery"),

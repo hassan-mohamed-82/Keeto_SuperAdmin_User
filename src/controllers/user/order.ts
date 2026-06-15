@@ -101,10 +101,18 @@ export const checkout = async (req: Request | any, res: Response) => {
     for (const item of userCart) {
         const [foodItem] = await db.select().from(food).where(eq(food.id, item.foodId)).limit(1);
         const originalBasePrice = parseFloat(foodItem.price as string || "0");
-        const safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
-        const vars = Array.isArray(safeVars) ? safeVars : [];
-        const varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
         
+        // --- 🛡️ بداية التعديل لحساب الفارييشن ---
+        let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
+        // الاحتياط في حالة كان الـ JSON معمول له Stringify مرتين
+        if (typeof safeVars === 'string') safeVars = JSON.parse(safeVars);
+        
+        const vars = Array.isArray(safeVars) ? safeVars : [];
+        
+        // دعم قراءة السعر من additionalPrice أو price أو amount
+        const varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || v.price || v.amount || "0"), 0);
+        // --- نهاية التعديل ---
+
         let initialDiscountPrice = originalBasePrice;
         if (foodItem.discount_value && Number(foodItem.discount_value) > 0) {
             if (foodItem.discount_type === "percentage") {
@@ -306,7 +314,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             branchId,
             addressId: addressId || null,
             orderSource,
-            paymentMethod, // ✅ هيفضل بالـ ID زي ما طلبت
+            paymentMethod,
             orderType: resolvedOrderType,
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
@@ -337,12 +345,6 @@ export const checkout = async (req: Request | any, res: Response) => {
                 .set({ usedCount: sql`used_count + 1` })
                 .where(eq(coupons.id, appliedCoupon.id));
         }
-
-        // if (appliedDiscount) {
-        //     await tx.update(discounts)
-        //         .set({ usedCount: sql`used_count + 1` })
-        //         .where(eq(discounts.id, appliedDiscount.id));
-        // }
 
         if (discountState.appliedDiscounts.size > 0) {
             for (const dId of Array.from(discountState.appliedDiscounts)) {
