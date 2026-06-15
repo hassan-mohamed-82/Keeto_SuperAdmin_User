@@ -51,7 +51,20 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         name,
         isVerified: true,
       });
-      user = { id: newId, name, email, googleId, phone: null, photo: null, fcmToken: null, password: null, isVerified: true, status: "active", createdAt: new Date(), facebookId: null };
+      user = { 
+        id: newId, 
+        name, 
+        email, 
+        googleId, 
+        phone: null, 
+        photo: null, 
+        fcmToken: null, 
+        password: null, 
+        isVerified: true, 
+        status: "active", 
+        createdAt: new Date(), 
+        facebookId: null 
+      };
     } else {
       // 👤 Login (existing user)
       // لو المستخدم كان موجود بالإيميل بس ومفيش googleId نخزنه
@@ -76,10 +89,20 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
       }
     }
 
-    // 🔑 Generate JWT
-    const authToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET!, {
-      expiresIn: "7d",
-    });
+    // 🔑 Generate JWT (تم التعديل هنا ✅)
+    const authToken = jwt.sign(
+      { 
+        id: user.id,
+        name: user.name,
+        role: "user", // أضفنا الرول لكي يمر من الـ Middleware
+        type: "user", // أضفنا النوع لكي يخزنه الـ Middleware
+        restaurantId: restaurantId || null // تمرير الـ restaurantId إذا وجد
+      }, 
+      process.env.JWT_SECRET!, 
+      {
+        expiresIn: "7d",
+      }
+    );
 
     return res.json({
       success: true,

@@ -46,7 +46,20 @@ const verifyGoogleToken = async (req, res) => {
                 name,
                 isVerified: true,
             });
-            user = { id: newId, name, email, googleId, phone: null, photo: null, fcmToken: null, password: null, isVerified: true, status: "active", createdAt: new Date(), facebookId: null };
+            user = {
+                id: newId,
+                name,
+                email,
+                googleId,
+                phone: null,
+                photo: null,
+                fcmToken: null,
+                password: null,
+                isVerified: true,
+                status: "active",
+                createdAt: new Date(),
+                facebookId: null
+            };
         }
         else {
             // 👤 Login (existing user)
@@ -69,8 +82,14 @@ const verifyGoogleToken = async (req, res) => {
                 await connection_1.db.insert(schema_1.restaurant_users).values({ restaurantId, userId: user.id });
             }
         }
-        // 🔑 Generate JWT
-        const authToken = jsonwebtoken_1.default.sign({ id: user.id }, process.env.JWT_SECRET, {
+        // 🔑 Generate JWT (تم التعديل هنا ✅)
+        const authToken = jsonwebtoken_1.default.sign({
+            id: user.id,
+            name: user.name,
+            role: "user", // أضفنا الرول لكي يمر من الـ Middleware
+            type: "user", // أضفنا النوع لكي يخزنه الـ Middleware
+            restaurantId: restaurantId || null // تمرير الـ restaurantId إذا وجد
+        }, process.env.JWT_SECRET, {
             expiresIn: "7d",
         });
         return res.json({
