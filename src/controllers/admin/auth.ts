@@ -1,54 +1,59 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { admins, rolesadmin as roles } from "../../models/schema";
+import { admins } from "../../models/schema"; // لم نعد بحاجة لاستيراد roles هنا للاستعلام
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { BadRequest } from "../../Errors/BadRequest";
-import { UnauthorizedError } from "../../Errors";
+import { BadRequest, UnauthorizedError } from "../../Errors";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
-import { Permission, Role } from "../../types/custom";
 import { generateAdminToken } from "../../utils/jwt";
 
 export async function login(req: Request, res: Response) {
     const { email, password } = req.body;
+    
     if (!email || !password) {
         throw new BadRequest("Email and password are required");
     }
-    const admin = await db.select().from(admins).where(eq(admins.email, email));
-    if (admin.length === 0) {
+    
+    // 🔥 جلب الأدمن مع تفاصيل الرول في استعلام واحد
+    const admin = await db.query.admins.findFirst({
+        where: eq(admins.email, email),
+        with: {
+            role: true, // سيقوم Drizzle بجلب كائن الرول بالكامل تلقائياً
+        },
+    });
+    
+    if (!admin) {
         throw new UnauthorizedError("Invalid Credentials");
     }
-    const isPasswordValid = await bcrypt.compare(password, admin[0].password);
+    
+    const isPasswordValid = await bcrypt.compare(password, admin.password);
     if (!isPasswordValid) {
         throw new UnauthorizedError("Invalid Credentials");
     }
-    if (admin[0].status === "inactive") {
+    
+    if (admin.status === "inactive") {
         throw new UnauthorizedError("Admin is inactive");
     }
 
-    let role = null;
-    if (admin[0].roleId) {
-        role = await db.select().from(roles).where(eq(roles.id, admin[0].roleId));
-    }
     const tokenPayload = {
-        id: admin[0].id,
-        name: admin[0].name,
-        type: admin[0].type as "super_admin" | "admin",
+        id: admin.id,
+        name: admin.name,
+        type: admin.type as "super_admin" | "admin",
     };
 
     const token = generateAdminToken(tokenPayload);
 
-
     return SuccessResponse(res, {
-        message: "Admin logged in successfully", token, admin: {
-            name: admin[0].name,
-            email: admin[0].email,
-            phoneNumber: admin[0].phoneNumber,
-            role: role && role.length > 0 ? role[0] : null,
-            permissions: admin[0].permissions,
-            status: admin[0].status,
-            type: admin[0].type
+        message: "Admin logged in successfully", 
+        token, 
+        admin: {
+            name: admin.name,
+            email: admin.email,
+            phoneNumber: admin.phoneNumber,
+            role: admin.role, // كائن الرول جاهز هنا مباشرة
+            permissions: admin.permissions,
+            status: admin.status,
+            type: admin.type
         }
     }, 200);
 }
