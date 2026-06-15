@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { ForbiddenError, UnauthorizedError } from "../Errors";
 import { db } from "../models/connection";
 import { admins } from "../models/schema/admin/admin";
-import { roles } from "../models/schema/admin/roles"; // <-- أضف هذا الاستيراد (تأكد من المسار)
+import { roles } from "../models/schema/admin/roles"; // <-- تأكد من مسار الاستيراد
 import { restrauntadmin } from "../models/schema/admin/restrauntadmin";
 import { eq } from "drizzle-orm";
 import { ModuleName, ActionName } from "../types/constant";
@@ -22,27 +22,38 @@ export const hasPermission = (module: ModuleName, action: ActionName) => {
             let userPermissions: any[] = [];
 
             if (req.user.role === "admin") {
-                // تعديل: عمل Join لجلب بيانات الأدمن مع الدور (Role) الخاص به
-                const adminRecord = await db.select({
-                    admin: admins,
-                    role: roles
-                })
-                .from(admins)
-                .leftJoin(roles, eq(admins.roleId, roles.id)) // <-- تأكد أن اسم الحقل roleId صحيح في جدول admins
-                .where(eq(admins.id, req.user.id))
-                .limit(1);
+                // 1. الاستعلام الأول: جلب بيانات الأدمن فقط
+                const adminRecord = await db.select()
+                    .from(admins)
+                    .where(eq(admins.id, req.user.id))
+                    .limit(1);
 
-                if (!adminRecord[0] || !adminRecord[0].admin) {
+                if (!adminRecord[0]) {
                     throw new UnauthorizedError("Admin not found");
                 }
                 
-                if (adminRecord[0].admin.status !== "active") {
+                if (adminRecord[0].status !== "active") {
                     throw new ForbiddenError("Admin account is inactive");
                 }
+
+                let rolePerms: any = null;
+
+                // 2. الاستعلام الثاني: جلب بيانات الـ Role إذا كان الأدمن مرتبط بدور
+                // نبحث سواء كان الحقل اسمه roleId أو role_id
+                const roleId = (adminRecord[0] as any).roleId || (adminRecord[0] as any).role_id;
                 
-                // تعديل: قراءة الصلاحيات من جدول الـ Roles أولاً، وإذا كانت فارغة نقرأها من جدول الأدمن
-                const rolePerms = adminRecord[0].role?.permissions;
-                const adminPerms = adminRecord[0].admin.permissions;
+                if (roleId) { 
+                    const roleRecord = await db.select()
+                        .from(roles)
+                        .where(eq(roles.id, roleId))
+                        .limit(1);
+
+                    if (roleRecord[0]) {
+                        rolePerms = roleRecord[0].permissions;
+                    }
+                }
+                
+                const adminPerms = adminRecord[0].permissions;
                 
                 // نستخدم صلاحيات الـ Role إذا وجدت، وإلا نستخدم صلاحيات الأدمن
                 const perms = (rolePerms && Object.keys(rolePerms).length > 0) ? rolePerms : adminPerms;
@@ -86,5 +97,3 @@ export const hasPermission = (module: ModuleName, action: ActionName) => {
         }
     };
 };
-
-/////////
