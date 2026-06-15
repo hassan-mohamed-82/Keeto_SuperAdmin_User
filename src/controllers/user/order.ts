@@ -13,7 +13,7 @@ import {
     orderItems,
     restaurantBusinessPlans, food, 
     variationOptions} from "../../models/schema";
-import { eq, and, inArray, sql, desc } from "drizzle-orm";
+import { eq, and, inArray, sql, desc ,gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
@@ -299,6 +299,70 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     const now = new Date();
 
+    const cairoParts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Africa/Cairo",
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hour12: false
+    }).formatToParts(now);
+    const getP = (type: string) => cairoParts.find(p => p.type === type)?.value || "00";
+    const cairoYear = getP("year");
+    const cairoMonth = getP("month");
+    const cairoDay = getP("day");
+    const cairoHour = getP("hour");
+    const cairoMinute = getP("minute");
+    const currentTimeStr = `${cairoHour === "24" ? "00" : cairoHour}:${cairoMinute}`;
+    const cairoDayOfWeek = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T12:00:00`).getDay();
+
+    let shiftStartTime: Date;
+
+    const [settings] = await db
+        .select()
+        .from(restaurantSettings)
+        .where(eq(restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+
+    if (settings && !settings.isAlwaysOpen) {
+        const allSchedules = await db
+            .select()
+            .from(restaurantSchedules)
+            .where(eq(restaurantSchedules.restaurantId, restaurantId));
+
+        const todaySchedule = allSchedules.find(s => s.dayOfWeek === cairoDayOfWeek);
+
+        if (todaySchedule && todaySchedule.openingTime && !todaySchedule.isOffDay) {
+            if (currentTimeStr < todaySchedule.openingTime) {
+                const yesterday = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T12:00:00`);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yDayOfWeek = yesterday.getDay();
+                const yDateStr = yesterday.toISOString().slice(0, 10);
+                const ySchedule = allSchedules.find(s => s.dayOfWeek === yDayOfWeek);
+                const opTime = ySchedule?.openingTime || "00:00";
+                shiftStartTime = new Date(`${yDateStr}T${opTime}:00+02:00`);
+            } else {
+                shiftStartTime = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T${todaySchedule.openingTime}:00+02:00`);
+            }
+        } else {
+            shiftStartTime = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T00:00:00+02:00`);
+        }
+    } else {
+        shiftStartTime = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T00:00:00+02:00`);
+    }
+
+    const [ordersCountResult] = await db
+        .select({ count: sql<number>`count(${orders.id})` })
+        .from(orders)
+        .where(
+            and(
+                eq(orders.restaurantId, restaurantId),
+                gte(orders.createdAt, shiftStartTime)
+            )
+        );
+
+    // 🌟 هنا الرقم التسلسلي لليوم الحالي للشيفت
+    const dailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
+
+    //----------------------------------------//
+
     await db.transaction(async (tx) => {
         if (isWalletPayment && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance as string);
@@ -342,7 +406,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             totalAmount: totalAmount.toString(),
             note: note || null,
             status: "pending",
-            createdAt: now
+            createdAt: now,
+            dailyOrderNumber
         });
 
         // تفريغ الكارت وتسجيل الأصناف
@@ -437,7 +502,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             orderId,
             orderNumber,
             type: "new_order",
-            createdAt: now.toISOString()
+            createdAt: now.toISOString(),
+            dailyOrderNumber
         }
     });
 
@@ -453,7 +519,8 @@ export const checkout = async (req: Request | any, res: Response) => {
                 discountAmount: totalDiscount,
                 couponCode: couponCode || null,
                 totalAmount,
-                createdAt: now.toISOString()
+                createdAt: now.toISOString(),
+                dailyOrderNumber
             },
             customerDetails: userInfo
         }

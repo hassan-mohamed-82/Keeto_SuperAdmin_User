@@ -49,13 +49,15 @@ export const orders = mysqlTable("orders", {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "refund" 
+        "refund"
     ]).default("pending"),
 
     cancelReasonId: char("cancel_reason_id", { length: 36 })
         .references(() => selectReasons.id),
     cancelReason: text("cancel_reason"),
     note: text("note"),
+    dailyOrderNumber: int("daily_order_number").default(1),
+
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),
@@ -86,4 +88,5 @@ export const orderItems = mysqlTable("order_items", {
     variations: json("variations"),
 
     note: text("note"),
+
 });
