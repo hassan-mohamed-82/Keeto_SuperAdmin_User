@@ -149,7 +149,7 @@ const getDetailedRestaurantReport = async (req, res) => {
     // ==========================================
     const conditions = [];
     // Only fetch delivered orders for financial calculations
-    conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.status, "delivered"));
+    conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.status, "pending"));
     if (startDate) {
         conditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(startDate)));
     }
