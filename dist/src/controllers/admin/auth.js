@@ -16,16 +16,19 @@ async function login(req, res) {
     if (!email || !password) {
         throw new Errors_1.BadRequest("Email and password are required");
     }
-    // 🔥 جلب الأدمن مع تفاصيل الرول في استعلام واحد
-    const admin = await connection_1.db.query.admins.findFirst({
-        where: (0, drizzle_orm_1.eq)(schema_1.admins.email, email),
-        with: {
-            role: true, // سيقوم Drizzle بجلب كائن الرول بالكامل تلقائياً
-        },
-    });
-    if (!admin) {
+    // 🔥 جلب الأدمن مع الرول باستخدام LEFT JOIN
+    const result = await connection_1.db
+        .select({
+        admin: schema_1.admins,
+        role: schema_1.rolesadmin, // الجداول التي نريد إرجاعها
+    })
+        .from(schema_1.admins)
+        .leftJoin(schema_1.rolesadmin, (0, drizzle_orm_1.eq)(schema_1.admins.roleId, schema_1.rolesadmin.id))
+        .where((0, drizzle_orm_1.eq)(schema_1.admins.email, email));
+    if (result.length === 0) {
         throw new Errors_1.UnauthorizedError("Invalid Credentials");
     }
+    const { admin, role } = result[0]; // فصل بيانات الأدمن والرول
     const isPasswordValid = await bcrypt_1.default.compare(password, admin.password);
     if (!isPasswordValid) {
         throw new Errors_1.UnauthorizedError("Invalid Credentials");
@@ -46,7 +49,7 @@ async function login(req, res) {
             name: admin.name,
             email: admin.email,
             phoneNumber: admin.phoneNumber,
-            role: admin.role, // كائن الرول جاهز هنا مباشرة
+            role: role || null, // 👈 إذا لم يكن له رول سيرجع null
             permissions: admin.permissions,
             status: admin.status,
             type: admin.type

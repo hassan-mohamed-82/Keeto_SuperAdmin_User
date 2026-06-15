@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { admins } from "../../models/schema"; // لم نعد بحاجة لاستيراد roles هنا للاستعلام
+import { admins, rolesadmin as roles } from "../../models/schema"; // لم نعد بحاجة لاستيراد roles هنا للاستعلام
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
@@ -14,17 +14,21 @@ export async function login(req: Request, res: Response) {
         throw new BadRequest("Email and password are required");
     }
     
-    // 🔥 جلب الأدمن مع تفاصيل الرول في استعلام واحد
-    const admin = await db.query.admins.findFirst({
-        where: eq(admins.email, email),
-        with: {
-            role: true, // سيقوم Drizzle بجلب كائن الرول بالكامل تلقائياً
-        },
-    });
+    // 🔥 جلب الأدمن مع الرول باستخدام LEFT JOIN
+    const result = await db
+        .select({
+            admin: admins,
+            role: roles, // الجداول التي نريد إرجاعها
+        })
+        .from(admins)
+        .leftJoin(roles, eq(admins.roleId, roles.id))
+        .where(eq(admins.email, email));
     
-    if (!admin) {
+    if (result.length === 0) {
         throw new UnauthorizedError("Invalid Credentials");
     }
+
+    const { admin, role } = result[0]; // فصل بيانات الأدمن والرول
     
     const isPasswordValid = await bcrypt.compare(password, admin.password);
     if (!isPasswordValid) {
@@ -50,7 +54,7 @@ export async function login(req: Request, res: Response) {
             name: admin.name,
             email: admin.email,
             phoneNumber: admin.phoneNumber,
-            role: admin.role, // كائن الرول جاهز هنا مباشرة
+            role: role || null, // 👈 إذا لم يكن له رول سيرجع null
             permissions: admin.permissions,
             status: admin.status,
             type: admin.type
