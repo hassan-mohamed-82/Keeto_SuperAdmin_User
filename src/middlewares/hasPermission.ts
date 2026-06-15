@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { ForbiddenError, UnauthorizedError } from "../Errors";
 import { db } from "../models/connection";
 import { admins } from "../models/schema/admin/admin";
-import { roles } from "../models/schema/admin/roles"; // <-- تأكد من مسار الاستيراد
+import { rolesadmin } from "../models/schema/admin/rolesadmin"; // <-- تم التعديل إلى rolesadmin
 import { restrauntadmin } from "../models/schema/admin/restrauntadmin";
 import { eq } from "drizzle-orm";
 import { ModuleName, ActionName } from "../types/constant";
@@ -43,9 +43,10 @@ export const hasPermission = (module: ModuleName, action: ActionName) => {
                 const roleId = (adminRecord[0] as any).roleId || (adminRecord[0] as any).role_id;
                 
                 if (roleId) { 
+                    // تم التعديل هنا لاستخدام rolesadmin
                     const roleRecord = await db.select()
-                        .from(roles)
-                        .where(eq(roles.id, roleId))
+                        .from(rolesadmin)
+                        .where(eq(rolesadmin.id, roleId))
                         .limit(1);
 
                     if (roleRecord[0]) {
