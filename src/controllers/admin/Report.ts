@@ -130,7 +130,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
     const conditions = [];
 
     // Only fetch delivered orders for financial calculations
-    conditions.push(eq(orders.status, "delivered" as OrderStatus));
+    conditions.push(eq(orders.status, "pending" as OrderStatus));
 
     if (startDate) {
         conditions.push(gte(orders.createdAt, new Date(startDate as string)));

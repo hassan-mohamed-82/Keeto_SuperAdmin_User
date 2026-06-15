@@ -8,45 +8,61 @@ const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
-const BadRequest_1 = require("../../Errors/BadRequest");
 const Errors_1 = require("../../Errors");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const jwt_1 = require("../../utils/jwt");
 async function login(req, res) {
     const { email, password } = req.body;
     if (!email || !password) {
-        throw new BadRequest_1.BadRequest("Email and password are required");
+        throw new Errors_1.BadRequest("Email and password are required");
     }
-    const admin = await connection_1.db.select().from(schema_1.admins).where((0, drizzle_orm_1.eq)(schema_1.admins.email, email));
-    if (admin.length === 0) {
+    // جلب الأدمن مع الرول باستخدام LEFT JOIN
+    const result = await connection_1.db
+        .select({
+        admin: schema_1.admins,
+        role: schema_1.rolesadmin,
+    })
+        .from(schema_1.admins)
+        .leftJoin(schema_1.rolesadmin, (0, drizzle_orm_1.eq)(schema_1.admins.roleId, schema_1.rolesadmin.id))
+        .where((0, drizzle_orm_1.eq)(schema_1.admins.email, email));
+    if (result.length === 0) {
         throw new Errors_1.UnauthorizedError("Invalid Credentials");
     }
-    const isPasswordValid = await bcrypt_1.default.compare(password, admin[0].password);
+    const { admin, role } = result[0]; // فصل بيانات الأدمن والرول
+    const isPasswordValid = await bcrypt_1.default.compare(password, admin.password);
     if (!isPasswordValid) {
         throw new Errors_1.UnauthorizedError("Invalid Credentials");
     }
-    if (admin[0].status === "inactive") {
+    if (admin.status === "inactive") {
         throw new Errors_1.UnauthorizedError("Admin is inactive");
     }
-    let role = null;
-    if (admin[0].roleId) {
-        role = await connection_1.db.select().from(schema_1.roles).where((0, drizzle_orm_1.eq)(schema_1.roles.id, admin[0].roleId));
-    }
     const tokenPayload = {
-        id: admin[0].id,
-        name: admin[0].name,
-        type: admin[0].type,
+        id: admin.id,
+        name: admin.name,
+        type: admin.type,
     };
     const token = (0, jwt_1.generateAdminToken)(tokenPayload);
+    // تحويل الصلاحيات من نص إلى مصفوفة (JSON Object) إذا لزم الأمر
+    const parsedAdminPermissions = typeof admin.permissions === "string"
+        ? JSON.parse(admin.permissions)
+        : (admin.permissions || []);
+    const parsedRolePermissions = (role && typeof role.permissions === "string")
+        ? JSON.parse(role.permissions)
+        : (role ? role.permissions : []);
     return (0, response_1.SuccessResponse)(res, {
-        message: "Admin logged in successfully", token, admin: {
-            name: admin[0].name,
-            email: admin[0].email,
-            phoneNumber: admin[0].phoneNumber,
-            roleId: admin[0].roleId,
-            permissions: admin[0].permissions,
-            status: admin[0].status,
-            type: admin[0].type
+        message: "Admin logged in successfully",
+        token,
+        admin: {
+            name: admin.name,
+            email: admin.email,
+            phoneNumber: admin.phoneNumber,
+            role: role ? {
+                ...role,
+                permissions: parsedRolePermissions // الصلاحيات بعد التحويل
+            } : null,
+            permissions: parsedAdminPermissions, // الصلاحيات بعد التحويل
+            status: admin.status,
+            type: admin.type
         }
     }, 200);
 }

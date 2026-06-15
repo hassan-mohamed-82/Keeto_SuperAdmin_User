@@ -10,6 +10,7 @@ const NotFound_1 = require("../../Errors/NotFound");
 const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
 const notifications_1 = require("../../utils/notifications");
+const discount_1 = require("../../utils/discount");
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date) => {
     return new Intl.DateTimeFormat("ar-EG", {
@@ -29,7 +30,7 @@ const checkout = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
-    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note, couponCode, discountId } = req.body;
+    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note, couponCode } = req.body;
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
@@ -71,85 +72,80 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Order failed. This restaurant has no active business plan.");
     }
     // ==========================================
-    // 5. Calculate Subtotal from Cart Snapshots
+    // 5. Calculate Subtotal & Secure Variation Prices
     // ==========================================
     let subtotal = 0;
     const itemsToInsert = [];
+    let initialSubtotal = 0;
+    const itemsWithData = [];
     for (const item of userCart) {
-        const basePrice = parseFloat(item.unitPrice || "0");
+        const [foodItem] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.id, item.foodId)).limit(1);
+        const originalBasePrice = parseFloat(foodItem.price || "0");
+        let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
+        if (typeof safeVars === 'string')
+            safeVars = JSON.parse(safeVars);
+        const vars = Array.isArray(safeVars) ? safeVars : [];
         let varPrice = 0;
-        const vars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
-        // ⚠️ تأكد إن السعر في الفرونت إند اسمه additionalPrice، لو اسمه حاجة تانية غيرها هنا
-        if (Array.isArray(vars)) {
-            varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
+        // 🛡️ التعديل الجديد: جلب سعر الإضافة من الداتابيز مباشرة باستخدام optionId
+        for (const v of vars) {
+            if (v.optionId) {
+                // ⚠️ تأكد من اسم جدول `variationOptions` في الداتابيز عندك وعدله هنا لو مختلف
+                const [dbOption] = await connection_1.db.select()
+                    .from(schema_1.variationOptions)
+                    .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, v.optionId))
+                    .limit(1);
+                if (dbOption) {
+                    const dbOptionPrice = parseFloat((dbOption.additionalPrice || "0"));
+                    varPrice += dbOptionPrice;
+                    // حقن السعر الحقيقي في الـ object عشان يتحفظ صح في الداتابيز ويظهر في الفاتورة
+                    v.additionalPrice = dbOptionPrice.toString();
+                }
+            }
+            else {
+                // Fallback لو مفيش optionId مبعوت (حالة نادرة)
+                varPrice += parseFloat(v.additionalPrice || v.price || v.amount || "0");
+            }
         }
-        const itemTotal = (basePrice + varPrice) * item.quantity;
+        let initialDiscountPrice = originalBasePrice;
+        if (foodItem.discount_value && Number(foodItem.discount_value) > 0) {
+            if (foodItem.discount_type === "percentage") {
+                initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(foodItem.discount_value) / 100));
+            }
+            else if (foodItem.discount_type === "amount" || foodItem.discount_type === "fixed") {
+                initialDiscountPrice = Math.max(0, originalBasePrice - Number(foodItem.discount_value));
+            }
+        }
+        initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
+        itemsWithData.push({ cartItem: item, foodItem, originalBasePrice, varPrice, vars });
+    }
+    const availableDiscounts = await (0, discount_1.getAvailableDiscounts)(restaurantId);
+    const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
+    for (const data of itemsWithData) {
+        const { cartItem, foodItem, originalBasePrice, varPrice, vars } = data;
+        const { price: discountedBasePrice, appliedDiscount } = (0, discount_1.applyPriorityDiscount)({ id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value }, originalBasePrice, initialSubtotal, availableDiscounts, discountState, true);
+        const itemTotal = (discountedBasePrice + varPrice) * cartItem.quantity;
         subtotal += itemTotal;
         itemsToInsert.push({
             id: (0, uuid_1.v4)(),
-            foodId: item.foodId,
-            quantity: item.quantity,
-            basePrice: basePrice.toString(),
+            foodId: cartItem.foodId,
+            quantity: cartItem.quantity,
+            basePrice: discountedBasePrice.toString(),
             variationsPrice: varPrice.toString(),
             totalPrice: itemTotal.toString(),
-            variations: vars, // ✅ التعديل هنا: إضافة الفارييشنز عشان متكونش null
-            note: item.note || null
+            variations: vars, // هيتم حفظها بالسعر الحقيقي اللي جبناه من الداتابيز
+            note: cartItem.note || null
         });
     }
     const serviceFee = plan ? parseFloat(plan.serviceFee || "0") : 0;
     let appCommission = orderSource === "food_aggregator" ? subtotal * (parseFloat(plan?.commissionRate || "0") / 100) : 0;
     // ==========================================
-    // 5.5 Check Coupons and Discounts
+    // 5.5 Check Coupons 
     // ==========================================
     const nowTemp = new Date();
     let totalDiscount = 0;
     let appliedCoupon = null;
-    let appliedDiscount = null;
     let isFreeDelivery = false;
-    // 1. Check Discount (discountId)
-    if (discountId) {
-        const [discount] = await connection_1.db.select().from(schema_1.discounts).where((0, drizzle_orm_1.eq)(schema_1.discounts.id, discountId)).limit(1);
-        if (!discount || !discount.isActive)
-            throw new BadRequest_1.BadRequest("Invalid or inactive discount");
-        if (discount.startDate && new Date(discount.startDate) > nowTemp)
-            throw new BadRequest_1.BadRequest("Discount not yet active");
-        if (discount.endDate && new Date(discount.endDate) < nowTemp)
-            throw new BadRequest_1.BadRequest("Discount expired");
-        if (discount.usageLimit && discount.usedCount >= discount.usageLimit)
-            throw new BadRequest_1.BadRequest("Discount usage limit reached");
-        if (parseFloat(discount.minOrderAmount || "0") > subtotal)
-            throw new BadRequest_1.BadRequest(`Minimum order amount of ${discount.minOrderAmount} required for this discount`);
-        if (!discount.isGlobal) {
-            const [discRest] = await connection_1.db.select().from(schema_1.discountRestaurants)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.discountRestaurants.discountId, discountId), (0, drizzle_orm_1.eq)(schema_1.discountRestaurants.restaurantId, restaurantId))).limit(1);
-            if (!discRest)
-                throw new BadRequest_1.BadRequest("Discount is not applicable to this restaurant");
-        }
-        // Check specific foods
-        const specificFoods = await connection_1.db.select().from(schema_1.discountFoods).where((0, drizzle_orm_1.eq)(schema_1.discountFoods.discountId, discountId));
-        let applicableSubtotal = subtotal;
-        if (specificFoods.length > 0) {
-            const foodIds = specificFoods.map(f => f.foodId);
-            applicableSubtotal = itemsToInsert.filter(i => foodIds.includes(i.foodId)).reduce((sum, i) => sum + parseFloat(i.totalPrice), 0);
-            if (applicableSubtotal === 0)
-                throw new BadRequest_1.BadRequest("Discount is not applicable to any items in your cart");
-        }
-        const value = parseFloat(discount.discountValue);
-        if (discount.discountType === "fixed_amount") {
-            totalDiscount += value;
-        }
-        else if (discount.discountType === "percentage") {
-            let pDiscount = applicableSubtotal * (value / 100);
-            if (discount.maxDiscount) {
-                const max = parseFloat(discount.maxDiscount);
-                if (pDiscount > max)
-                    pDiscount = max;
-            }
-            totalDiscount += pDiscount;
-        }
-        appliedDiscount = discount;
-    }
-    // 2. Check Coupon (couponCode)
+    // 1. Check Coupon (couponCode)
     if (couponCode) {
         const [coupon] = await connection_1.db.select().from(schema_1.coupons).where((0, drizzle_orm_1.eq)(schema_1.coupons.code, couponCode)).limit(1);
         if (!coupon || !coupon.isActive)
@@ -270,7 +266,7 @@ const checkout = async (req, res) => {
                 createdAt: now
             });
         }
-        // تسجيل بيانات الأوردر نفسه
+        // تسجيل بيانات الأوردر
         await tx.insert(schema_1.orders).values({
             id: orderId,
             orderNumber,
@@ -280,7 +276,7 @@ const checkout = async (req, res) => {
             branchId,
             addressId: addressId || null,
             orderSource,
-            paymentMethod, // ✅ هيفضل بالـ ID زي ما طلبت
+            paymentMethod,
             orderType: resolvedOrderType,
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
@@ -309,10 +305,12 @@ const checkout = async (req, res) => {
                 .set({ usedCount: (0, drizzle_orm_1.sql) `used_count + 1` })
                 .where((0, drizzle_orm_1.eq)(schema_1.coupons.id, appliedCoupon.id));
         }
-        if (appliedDiscount) {
-            await tx.update(schema_1.discounts)
-                .set({ usedCount: (0, drizzle_orm_1.sql) `used_count + 1` })
-                .where((0, drizzle_orm_1.eq)(schema_1.discounts.id, appliedDiscount.id));
+        if (discountState.appliedDiscounts.size > 0) {
+            for (const dId of Array.from(discountState.appliedDiscounts)) {
+                await tx.update(schema_1.discounts)
+                    .set({ usedCount: (0, drizzle_orm_1.sql) `used_count + 1` })
+                    .where((0, drizzle_orm_1.eq)(schema_1.discounts.id, dId));
+            }
         }
         // تسويات محفظة المطعم
         if (!restaurantWallet) {

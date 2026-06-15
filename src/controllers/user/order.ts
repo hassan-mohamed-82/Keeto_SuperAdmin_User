@@ -11,7 +11,8 @@ import {
     orders,
     restaurants,
     orderItems,
-    restaurantBusinessPlans, food } from "../../models/schema";
+    restaurantBusinessPlans, food, 
+    variationOptions} from "../../models/schema";
 import { eq, and, inArray, sql, desc ,gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -90,21 +91,45 @@ export const checkout = async (req: Request | any, res: Response) => {
     }
 
     // ==========================================
-    // 5. Calculate Subtotal from Cart Snapshots
+    // 5. Calculate Subtotal & Secure Variation Prices
     // ==========================================
     let subtotal = 0;
     const itemsToInsert: any[] = [];
     
-    // Calculate initial cart subtotal (for minOrderAmount check)
     let initialSubtotal = 0;
     const itemsWithData = [];
     for (const item of userCart) {
         const [foodItem] = await db.select().from(food).where(eq(food.id, item.foodId)).limit(1);
         const originalBasePrice = parseFloat(foodItem.price as string || "0");
-        const safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
-        const vars = Array.isArray(safeVars) ? safeVars : [];
-        const varPrice = vars.reduce((sum, v) => sum + parseFloat(v.additionalPrice || "0"), 0);
         
+        let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
+        if (typeof safeVars === 'string') safeVars = JSON.parse(safeVars);
+        const vars = Array.isArray(safeVars) ? safeVars : [];
+        
+        let varPrice = 0;
+        
+        // 🛡️ التعديل الجديد: جلب سعر الإضافة من الداتابيز مباشرة باستخدام optionId
+        for (const v of vars) {
+            if (v.optionId) {
+                // ⚠️ تأكد من اسم جدول `variationOptions` في الداتابيز عندك وعدله هنا لو مختلف
+                const [dbOption] = await db.select()
+                    .from(variationOptions) 
+                    .where(eq(variationOptions.id, v.optionId))
+                    .limit(1);
+
+                if (dbOption) {
+                    const dbOptionPrice = parseFloat((dbOption.additionalPrice || "0") as string);
+                    varPrice += dbOptionPrice;
+                    
+                    // حقن السعر الحقيقي في الـ object عشان يتحفظ صح في الداتابيز ويظهر في الفاتورة
+                    v.additionalPrice = dbOptionPrice.toString(); 
+                }
+            } else {
+                // Fallback لو مفيش optionId مبعوت (حالة نادرة)
+                varPrice += parseFloat(v.additionalPrice || v.price || v.amount || "0");
+            }
+        }
+
         let initialDiscountPrice = originalBasePrice;
         if (foodItem.discount_value && Number(foodItem.discount_value) > 0) {
             if (foodItem.discount_type === "percentage") {
@@ -143,7 +168,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             basePrice: discountedBasePrice.toString(),
             variationsPrice: varPrice.toString(),
             totalPrice: itemTotal.toString(),
-            variations: vars,
+            variations: vars, // هيتم حفظها بالسعر الحقيقي اللي جبناه من الداتابيز
             note: cartItem.note || null
         });
     }
@@ -360,7 +385,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             });
         }
 
-        // تسجيل بيانات الأوردر نفسه
+        // تسجيل بيانات الأوردر
         await tx.insert(orders).values({
             id: orderId,
             orderNumber,
@@ -370,7 +395,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             branchId,
             addressId: addressId || null,
             orderSource,
-            paymentMethod, // ✅ هيفضل بالـ ID زي ما طلبت
+            paymentMethod, 
             orderType: resolvedOrderType,
             subtotal: subtotal.toString(),
             deliveryFee: deliveryFee.toString(),
@@ -402,12 +427,6 @@ export const checkout = async (req: Request | any, res: Response) => {
                 .set({ usedCount: sql`used_count + 1` })
                 .where(eq(coupons.id, appliedCoupon.id));
         }
-
-        // if (appliedDiscount) {
-        //     await tx.update(discounts)
-        //         .set({ usedCount: sql`used_count + 1` })
-        //         .where(eq(discounts.id, appliedDiscount.id));
-        // }
 
         if (discountState.appliedDiscounts.size > 0) {
             for (const dId of Array.from(discountState.appliedDiscounts)) {
