@@ -43,7 +43,7 @@ async function login(req, res) {
             name: admin[0].name,
             email: admin[0].email,
             phoneNumber: admin[0].phoneNumber,
-            roleId: admin[0].roleId,
+            role: role && role.length > 0 ? role[0] : null,
             permissions: admin[0].permissions,
             status: admin[0].status,
             type: admin[0].type
