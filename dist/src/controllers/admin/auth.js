@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.login = login;
 const connection_1 = require("../../models/connection");
-const schema_1 = require("../../models/schema"); // لم نعد بحاجة لاستيراد roles هنا للاستعلام
+const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
@@ -16,11 +16,11 @@ async function login(req, res) {
     if (!email || !password) {
         throw new Errors_1.BadRequest("Email and password are required");
     }
-    // 🔥 جلب الأدمن مع الرول باستخدام LEFT JOIN
+    // جلب الأدمن مع الرول باستخدام LEFT JOIN
     const result = await connection_1.db
         .select({
         admin: schema_1.admins,
-        role: schema_1.rolesadmin, // الجداول التي نريد إرجاعها
+        role: schema_1.rolesadmin,
     })
         .from(schema_1.admins)
         .leftJoin(schema_1.rolesadmin, (0, drizzle_orm_1.eq)(schema_1.admins.roleId, schema_1.rolesadmin.id))
@@ -42,6 +42,13 @@ async function login(req, res) {
         type: admin.type,
     };
     const token = (0, jwt_1.generateAdminToken)(tokenPayload);
+    // تحويل الصلاحيات من نص إلى مصفوفة (JSON Object) إذا لزم الأمر
+    const parsedAdminPermissions = typeof admin.permissions === "string"
+        ? JSON.parse(admin.permissions)
+        : (admin.permissions || []);
+    const parsedRolePermissions = (role && typeof role.permissions === "string")
+        ? JSON.parse(role.permissions)
+        : (role ? role.permissions : []);
     return (0, response_1.SuccessResponse)(res, {
         message: "Admin logged in successfully",
         token,
@@ -49,8 +56,11 @@ async function login(req, res) {
             name: admin.name,
             email: admin.email,
             phoneNumber: admin.phoneNumber,
-            role: role || null, // 👈 إذا لم يكن له رول سيرجع null
-            permissions: admin.permissions,
+            role: role ? {
+                ...role,
+                permissions: parsedRolePermissions // الصلاحيات بعد التحويل
+            } : null,
+            permissions: parsedAdminPermissions, // الصلاحيات بعد التحويل
             status: admin.status,
             type: admin.type
         }

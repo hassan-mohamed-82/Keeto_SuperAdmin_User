@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { admins, rolesadmin as roles } from "../../models/schema"; // لم نعد بحاجة لاستيراد roles هنا للاستعلام
+import { admins, rolesadmin as roles } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
@@ -9,32 +9,32 @@ import { generateAdminToken } from "../../utils/jwt";
 
 export async function login(req: Request, res: Response) {
     const { email, password } = req.body;
-    
+
     if (!email || !password) {
         throw new BadRequest("Email and password are required");
     }
-    
-    // 🔥 جلب الأدمن مع الرول باستخدام LEFT JOIN
+
+    // جلب الأدمن مع الرول باستخدام LEFT JOIN
     const result = await db
         .select({
             admin: admins,
-            role: roles, // الجداول التي نريد إرجاعها
+            role: roles,
         })
         .from(admins)
         .leftJoin(roles, eq(admins.roleId, roles.id))
         .where(eq(admins.email, email));
-    
+
     if (result.length === 0) {
         throw new UnauthorizedError("Invalid Credentials");
     }
 
     const { admin, role } = result[0]; // فصل بيانات الأدمن والرول
-    
+
     const isPasswordValid = await bcrypt.compare(password, admin.password);
     if (!isPasswordValid) {
         throw new UnauthorizedError("Invalid Credentials");
     }
-    
+
     if (admin.status === "inactive") {
         throw new UnauthorizedError("Admin is inactive");
     }
@@ -47,6 +47,15 @@ export async function login(req: Request, res: Response) {
 
     const token = generateAdminToken(tokenPayload);
 
+    // تحويل الصلاحيات من نص إلى مصفوفة (JSON Object) إذا لزم الأمر
+    const parsedAdminPermissions = typeof admin.permissions === "string" 
+        ? JSON.parse(admin.permissions) 
+        : (admin.permissions || []);
+
+    const parsedRolePermissions = (role && typeof role.permissions === "string") 
+        ? JSON.parse(role.permissions) 
+        : (role ? role.permissions : []);
+
     return SuccessResponse(res, {
         message: "Admin logged in successfully", 
         token, 
@@ -54,8 +63,11 @@ export async function login(req: Request, res: Response) {
             name: admin.name,
             email: admin.email,
             phoneNumber: admin.phoneNumber,
-            role: role || null, // 👈 إذا لم يكن له رول سيرجع null
-            permissions: admin.permissions,
+            role: role ? {
+                ...role,
+                permissions: parsedRolePermissions // الصلاحيات بعد التحويل
+            } : null,
+            permissions: parsedAdminPermissions, // الصلاحيات بعد التحويل
             status: admin.status,
             type: admin.type
         }
