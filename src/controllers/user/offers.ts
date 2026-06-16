@@ -71,6 +71,7 @@ export const getAllOffers = async (req: Request, res: Response) => {
                     id: restaurants.id,
                     name: restaurants.name,
                     nameAr: restaurants.nameAr,
+                    nameFr: restaurants.nameFr,
                     logo: restaurants.logo,
                     cover: restaurants.cover,
                     address: restaurants.address,

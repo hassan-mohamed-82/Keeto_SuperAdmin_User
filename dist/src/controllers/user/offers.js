@@ -57,6 +57,7 @@ const getAllOffers = async (req, res) => {
                 id: schema_1.restaurants.id,
                 name: schema_1.restaurants.name,
                 nameAr: schema_1.restaurants.nameAr,
+                nameFr: schema_1.restaurants.nameFr,
                 logo: schema_1.restaurants.logo,
                 cover: schema_1.restaurants.cover,
                 address: schema_1.restaurants.address,
