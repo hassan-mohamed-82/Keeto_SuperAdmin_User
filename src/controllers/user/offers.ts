@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { eq, and, or, isNull, lte, gte } from "drizzle-orm";
 import { db } from "../../models/connection"; // مسار الاتصال بقاعدة البيانات
-import { discounts, discountFoods, food } from "../../models/schema"; 
+import { discounts, discountFoods, food, restaurants } from "../../models/schema"; 
 
 export const getRestaurantOffers = async (req: Request, res: Response) => {
     try {
@@ -48,6 +48,7 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
 
 
 
+
 export const getAllOffers = async (req: Request, res: Response) => {
     try {
         const now = new Date();
@@ -57,7 +58,6 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 foodId: food.id,
                 foodName: food.name,
                 originalPrice: food.price,
-                restaurantId: food.restaurantid, // مهم هنا عشان اليوزر يعرف المطعم
                 
                 // تفاصيل الخصم
                 discountId: discounts.id,
@@ -65,13 +65,29 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 discountType: discounts.discountType,
                 discountValue: discounts.discountValue,
                 isGlobal: discounts.isGlobal,
+
+                // تفاصيل المطعم (مجمعة في Object)
+                restaurant: {
+                    id: restaurants.id,
+                    name: restaurants.name,
+                    nameAr: restaurants.nameAr,
+                    logo: restaurants.logo,
+                    cover: restaurants.cover,
+                    address: restaurants.address,
+                    minDeliveryTime: restaurants.minDeliveryTime,
+                    maxDeliveryTime: restaurants.maxDeliveryTime,
+                    deliveryTimeUnit: restaurants.deliveryTimeUnit,
+                }
             })
             .from(discountFoods)
             .innerJoin(discounts, eq(discountFoods.discountId, discounts.id))
             .innerJoin(food, eq(discountFoods.foodId, food.id))
+            // الربط مع جدول المطاعم
+            .innerJoin(restaurants, eq(food.restaurantid, restaurants.id)) 
             .where(
                 and(
                     eq(discounts.isActive, true), // الخصم مفعل
+                    eq(restaurants.status, "active"), // المطعم نفسه مفعل
                     
                     // التأكد إن تاريخ الخصم ساري
                     or(isNull(discounts.startDate), lte(discounts.startDate, now)),
