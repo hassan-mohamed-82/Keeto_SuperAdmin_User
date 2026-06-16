@@ -8,4 +8,6 @@ router.get("/search", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.searchRe
 router.get("/home-list", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.getHomeRestaurants));
 router.put("/:restaurantId/addhome", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.toggleAddHome));
 router.delete("/:restaurantId/addhome", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.removeFromHome));
+//check if the restaurant is open
+router.get("/resturant-schedules/:restaurantId", (0, catchAsync_1.catchAsync)(restaurantFeatures_1.getResturantSchedules));
 exports.default = router;

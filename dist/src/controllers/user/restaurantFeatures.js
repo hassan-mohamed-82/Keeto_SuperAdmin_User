@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getHomeRestaurants = exports.removeFromHome = exports.toggleAddHome = exports.searchRestaurants = void 0;
+exports.getResturantSchedules = exports.getHomeRestaurants = exports.removeFromHome = exports.toggleAddHome = exports.searchRestaurants = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -105,3 +105,105 @@ const getHomeRestaurants = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Home restaurants fetched successfully", data: results.map(cleanRestaurantResult) });
 };
 exports.getHomeRestaurants = getHomeRestaurants;
+// 5. Get all restaurant schedules
+const getResturantSchedules = async (req, res) => {
+    const { restaurantId } = req.params;
+    // 1. التأكد من وجود المطعم
+    const [restaurant] = await connection_1.db
+        .select()
+        .from(schema_1.restaurants)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId))
+        .limit(1);
+    if (!restaurant) {
+        throw new Errors_1.NotFound("Restaurant not found");
+    }
+    // 2. جلب المواعيد والإعدادات العامة
+    const schedules = await connection_1.db
+        .select()
+        .from(schema_1.restaurantSchedules)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId));
+    const [settings] = await connection_1.db
+        .select()
+        .from(schema_1.restaurantSettings)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+    // 3. حساب الحالة الحالية للمطعم بتوقيت القاهرة
+    const status = calculateCurrentStatus(settings, schedules);
+    // 4. إرجاع كل البيانات للفرونت إند جاهزة
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Restaurant schedules and current status fetched successfully",
+        data: {
+            isOpenNow: status.isOpenNow,
+            canDeliveryNow: status.canDeliveryNow,
+            canTakeawayNow: status.canTakeawayNow,
+            reason: status.reason,
+            // settings: settings || null,
+            // schedules: schedules
+        }
+    });
+};
+exports.getResturantSchedules = getResturantSchedules;
+// =========================================================================
+// 🛠️ الفانكشن الذكية لحساب حالة المطعم (تستخدم للـ API وللـ Validation)
+// =========================================================================
+function calculateCurrentStatus(settings, schedules) {
+    // القيم الافتراضية في حال غياب الإعدادات
+    const defaultStatus = { isOpenNow: true, canDeliveryNow: true, canTakeawayNow: true, reason: "Open by default" };
+    if (!settings)
+        return defaultStatus;
+    // 1. حساب وقت وتاريخ القاهرة الحالي
+    const now = new Date();
+    const cairoFormatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Africa/Cairo",
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hour12: false
+    });
+    const parts = cairoFormatter.formatToParts(now);
+    const getPart = (type) => parts.find(p => p.type === type)?.value || "00";
+    const currentTimeStr = `${getPart("hour") === "24" ? "00" : getPart("hour")}:${getPart("minute")}`;
+    const cairoDateObj = new Date(`${getPart("year")}-${getPart("month")}-${getPart("day")}T12:00:00`);
+    const currentDOW = cairoDateObj.getDay(); // 0 = الأحد، 6 = السبت
+    let isOpenBySchedule = false;
+    // 2. التحقق من جدول المواعيد إذا لم يكن المطعم (Always Open)
+    if (settings.isAlwaysOpen) {
+        isOpenBySchedule = true;
+    }
+    else {
+        const todaySchedule = schedules.find(s => s.dayOfWeek === currentDOW);
+        if (todaySchedule) {
+            if (todaySchedule.isOffDay) {
+                return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "Today is an off day" };
+            }
+            if (todaySchedule.openingTime && todaySchedule.closingTime) {
+                const openTime = todaySchedule.openingTime.slice(0, 5);
+                const closeTime = todaySchedule.closingTime.slice(0, 5);
+                if (closeTime > openTime) {
+                    // شفت طبيعي ينتهي في نفس اليوم (مثال: 09:00 إلى 23:00)
+                    if (currentTimeStr >= openTime && currentTimeStr <= closeTime) {
+                        isOpenBySchedule = true;
+                    }
+                }
+                else {
+                    // شفت يعبر منتصف الليل (مثال: 13:00 إلى 02:00 الفجر)
+                    if (currentTimeStr >= openTime || currentTimeStr <= closeTime) {
+                        isOpenBySchedule = true;
+                    }
+                }
+            }
+        }
+        else {
+            // لو مفيش جدول مسجل للمطعم، نعتبره مغلق تأميناً للسيستم
+            return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "No schedule registered for today" };
+        }
+    }
+    if (!isOpenBySchedule) {
+        return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "Restaurant is currently closed" };
+    }
+    // 3. دمج المواعيد مع إعدادات التوصيل والاستلام العامة للمطعم
+    return {
+        isOpenNow: true,
+        canDeliveryNow: Boolean(settings.homeDelivery || settings.selfDelivery),
+        canTakeawayNow: Boolean(settings.takeaway),
+        reason: "Restaurant is open and active"
+    };
+}

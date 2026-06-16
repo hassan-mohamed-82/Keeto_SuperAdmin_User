@@ -9,13 +9,13 @@ import user_walletsRouter from "./user_wallets";
 import addressRouter from "./address";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
-// import walletRouter from "./userWallets";
 import favlistRouter from "./favlist";
 import restaurantFeaturesRouter from "./restaurantFeatures";
 import ratingRouter from "./rating";
 import SocialMediaRouter from "./SocialMedia";
 import sliderRouter from "./slider";
 import imageRouter from "./image";
+import offersRouter from "./offers";
 
 const router = Router();
 router.use("/home", homeRouter);
@@ -29,10 +29,10 @@ router.use(authenticated,authorizeRoles("user"));
 router.use("/profile", profileRouter);
 router.use("/restaurants", restaurantFeaturesRouter);
 router.use("/order", orderRouter);
+router.use("/wallet",user_walletsRouter);
 router.use("/address", addressRouter);
 router.use("/cart", cartRouter);
 router.use("/favlist", favlistRouter);
 router.use("/notifications", notificationRouter);
-router.use("/wallet", user_walletsRouter);
-
+router.use("/offers", offersRouter);
 export default router;

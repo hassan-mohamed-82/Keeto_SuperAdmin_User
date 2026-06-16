@@ -48,6 +48,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
         .references(() => selectReasons_1.selectReasons.id),
     cancelReason: (0, mysql_core_1.text)("cancel_reason"),
     note: (0, mysql_core_1.text)("note"),
+    dailyOrderNumber: (0, mysql_core_1.int)("daily_order_number").default(1),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });
