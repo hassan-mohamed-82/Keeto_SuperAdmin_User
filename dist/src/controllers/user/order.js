@@ -72,6 +72,79 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Order failed. This restaurant has no active business plan.");
     }
     // ==========================================
+    // 🛡️ 4.5 فحص مواعيد المطعم وإعدادات التشغيل (Open / Delivery / Takeaway Validation)
+    // ==========================================
+    const schedulesList = await connection_1.db.select().from(schema_1.restaurantSchedules).where((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId));
+    const [settings] = await connection_1.db.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1);
+    const resolvedOrderType = orderType || "delivery";
+    // حساب توقيت القاهرة الحالي بدقة
+    const now = new Date();
+    const cairoParts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Africa/Cairo",
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hour12: false
+    }).formatToParts(now);
+    const getP = (type) => cairoParts.find(p => p.type === type)?.value || "00";
+    const cairoYear = getP("year");
+    const cairoMonth = getP("month");
+    const cairoDay = getP("day");
+    const cairoHour = getP("hour");
+    const cairoMinute = getP("minute");
+    const currentTimeStr = `${cairoHour === "24" ? "00" : cairoHour}:${cairoMinute}`;
+    const cairoDayOfWeek = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T12:00:00`).getDay();
+    let isOpenNow = false;
+    let canDeliveryNow = true;
+    let canTakeawayNow = true;
+    let closeReason = "Restaurant is currently closed";
+    if (settings) {
+        if (settings.isAlwaysOpen) {
+            isOpenNow = true;
+        }
+        else {
+            const todaySchedule = schedulesList.find(s => s.dayOfWeek === cairoDayOfWeek);
+            if (todaySchedule) {
+                if (todaySchedule.isOffDay) {
+                    isOpenNow = false;
+                    closeReason = "Today is an off day for this restaurant";
+                }
+                else if (todaySchedule.openingTime && todaySchedule.closingTime) {
+                    const openT = todaySchedule.openingTime.slice(0, 5);
+                    const closeT = todaySchedule.closingTime.slice(0, 5);
+                    if (closeT > openT) {
+                        if (currentTimeStr >= openT && currentTimeStr <= closeT)
+                            isOpenNow = true;
+                    }
+                    else {
+                        if (currentTimeStr >= openT || currentTimeStr <= closeT)
+                            isOpenNow = true;
+                    }
+                }
+            }
+            else {
+                isOpenNow = false;
+                closeReason = "No active schedule found for today";
+            }
+        }
+        // دمج مواعيد التشغيل مع قيود أنواع الطلبات من جدول الـ Settings
+        canDeliveryNow = Boolean(settings.homeDelivery || settings.selfDelivery);
+        canTakeawayNow = Boolean(settings.takeaway);
+    }
+    else {
+        // إذا لم توجد إعدادات في الداتابيز، نعتبره مغلق حمايةً للنظام
+        isOpenNow = false;
+        closeReason = "Restaurant configurations are incomplete";
+    }
+    // رمي الخطأ للفرونت إند بناءً على الحالة الفعلية
+    if (!isOpenNow) {
+        throw new BadRequest_1.BadRequest(`Order failed. ${closeReason}`);
+    }
+    if (resolvedOrderType === "delivery" && !canDeliveryNow) {
+        throw new BadRequest_1.BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
+    }
+    if (resolvedOrderType === "takeaway" && !canTakeawayNow) {
+        throw new BadRequest_1.BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
+    }
+    // ==========================================
     // 5. Calculate Subtotal & Secure Variation Prices
     // ==========================================
     let subtotal = 0;
@@ -193,7 +266,6 @@ const checkout = async (req, res) => {
     // 6. Smart Delivery Logic (Zone + Radius Hybrid)
     // ==========================================
     let deliveryFee = 0;
-    const resolvedOrderType = orderType || "delivery";
     if (resolvedOrderType === "delivery") {
         if (!addressId)
             throw new BadRequest_1.BadRequest("Delivery address is required");
@@ -246,7 +318,37 @@ const checkout = async (req, res) => {
     // ==========================================
     // 10. Execute Order (Transaction)
     // ==========================================
-    const now = new Date();
+    let shiftStartTime;
+    if (settings && !settings.isAlwaysOpen) {
+        const todaySchedule = schedulesList.find(s => s.dayOfWeek === cairoDayOfWeek);
+        if (todaySchedule && todaySchedule.openingTime && !todaySchedule.isOffDay) {
+            if (currentTimeStr < todaySchedule.openingTime) {
+                const yesterday = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T12:00:00`);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yDayOfWeek = yesterday.getDay();
+                const yDateStr = yesterday.toISOString().slice(0, 10);
+                const ySchedule = schedulesList.find(s => s.dayOfWeek === yDayOfWeek);
+                const opTime = ySchedule?.openingTime || "00:00";
+                shiftStartTime = new Date(`${yDateStr}T${opTime}:00+02:00`);
+            }
+            else {
+                shiftStartTime = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T${todaySchedule.openingTime}:00+02:00`);
+            }
+        }
+        else {
+            shiftStartTime = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T00:00:00+02:00`);
+        }
+    }
+    else {
+        shiftStartTime = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T00:00:00+02:00`);
+    }
+    const [ordersCountResult] = await connection_1.db
+        .select({ count: (0, drizzle_orm_1.sql) `count(${schema_1.orders.id})` })
+        .from(schema_1.orders)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.gte)(schema_1.orders.createdAt, shiftStartTime)));
+    // 🌟 هنا الرقم التسلسلي لليوم الحالي للشيفت
+    const dailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
+    //----------------------------------------//
     await connection_1.db.transaction(async (tx) => {
         if (isWalletPayment && userWallet) {
             const balanceBefore = parseFloat(userWallet.balance);
@@ -287,7 +389,8 @@ const checkout = async (req, res) => {
             totalAmount: totalAmount.toString(),
             note: note || null,
             status: "pending",
-            createdAt: now
+            createdAt: now,
+            dailyOrderNumber
         });
         // تفريغ الكارت وتسجيل الأصناف
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
@@ -371,7 +474,8 @@ const checkout = async (req, res) => {
             orderId,
             orderNumber,
             type: "new_order",
-            createdAt: now.toISOString()
+            createdAt: now.toISOString(),
+            dailyOrderNumber
         }
     });
     return (0, response_1.SuccessResponse)(res, {
@@ -386,7 +490,8 @@ const checkout = async (req, res) => {
                 discountAmount: totalDiscount,
                 couponCode: couponCode || null,
                 totalAmount,
-                createdAt: now.toISOString()
+                createdAt: now.toISOString(),
+                dailyOrderNumber
             },
             customerDetails: userInfo
         }

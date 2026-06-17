@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const createSelectReasonSchema = z.object({
     name: z.string().min(1, "Reason name is required").max(255),
+    type: z.enum(["user","restaurant"]).optional(),
     status: z.enum(["active", "inactive"]).optional(),
 });
 
