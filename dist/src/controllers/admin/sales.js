@@ -1,25 +1,34 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteSales = exports.updateSales = exports.getSalesById = exports.getAllSales = exports.createSales = void 0;
+exports.loginSales = exports.deleteSales = exports.updateSales = exports.getSalesById = exports.getAllSales = exports.createSales = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
 const uuid_1 = require("uuid");
+const bcrypt_1 = __importDefault(require("bcrypt"));
+const jwt_1 = require("../../utils/jwt");
 // ==========================================
 // 1. إنشاء مندوب مبيعات جديد
 // ==========================================
 const createSales = async (req, res) => {
-    const { name, phone, email, points, status } = req.body;
+    const { name, phone, email, password, points, status } = req.body;
     if (!name)
         throw new Errors_1.BadRequest("Sales name is required");
+    if (!password)
+        throw new Errors_1.BadRequest("Password is required");
+    const hashedPassword = await bcrypt_1.default.hash(password, 10);
     const newSalesId = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.sales).values({
         id: newSalesId,
         name,
         phone: phone || null,
         email: email || null,
+        password: hashedPassword,
         points: points || 0,
         status: status || "active",
     });
@@ -76,8 +85,12 @@ exports.getSalesById = getSalesById;
 // ==========================================
 const updateSales = async (req, res) => {
     const { id } = req.params;
-    const { name, phone, email, points, status } = req.body;
+    const { name, phone, email, password, points, status } = req.body;
     const [existing] = await connection_1.db.select().from(schema_1.sales).where((0, drizzle_orm_1.eq)(schema_1.sales.id, id)).limit(1);
+    let hashedPassword = existing.password;
+    if (password) {
+        hashedPassword = await bcrypt_1.default.hash(password, 10);
+    }
     if (!existing)
         throw new Errors_1.NotFound("Sales representative not found");
     await connection_1.db.update(schema_1.sales)
@@ -85,6 +98,7 @@ const updateSales = async (req, res) => {
         name: name ?? existing.name,
         phone: phone !== undefined ? phone : existing.phone,
         email: email !== undefined ? email : existing.email,
+        password: hashedPassword,
         points: points !== undefined ? points : existing.points,
         status: status ?? existing.status,
         updatedAt: new Date()
@@ -110,3 +124,40 @@ const deleteSales = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Sales representative deleted successfully" });
 };
 exports.deleteSales = deleteSales;
+// ==========================================
+// 6. تسجيل دخول مندوب مبيعات
+// ==========================================
+const loginSales = async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        throw new Errors_1.BadRequest("Email and password are required");
+    }
+    const [salesRep] = await connection_1.db.select().from(schema_1.sales).where((0, drizzle_orm_1.eq)(schema_1.sales.email, email)).limit(1);
+    if (!salesRep || !salesRep.password) {
+        throw new Errors_1.UnauthorizedError("Invalid Credentials");
+    }
+    const isPasswordValid = await bcrypt_1.default.compare(password, salesRep.password);
+    if (!isPasswordValid) {
+        throw new Errors_1.UnauthorizedError("Invalid Credentials");
+    }
+    if (salesRep.status === "inactive") {
+        throw new Errors_1.UnauthorizedError("Sales representative is inactive");
+    }
+    const token = (0, jwt_1.generateSalesToken)({
+        id: salesRep.id,
+        name: salesRep.name,
+    });
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Sales representative logged in successfully",
+        token,
+        sales: {
+            id: salesRep.id,
+            name: salesRep.name,
+            email: salesRep.email,
+            phone: salesRep.phone,
+            points: salesRep.points,
+            status: salesRep.status,
+        }
+    });
+};
+exports.loginSales = loginSales;

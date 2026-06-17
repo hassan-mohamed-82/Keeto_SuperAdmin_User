@@ -66,6 +66,24 @@ export const generateRestaurantAdminToken = (data: {
 };
 
 // =======================
+// Generate Sales Token
+// =======================
+export const generateSalesToken = (data: {
+    id: string;
+    name: string;
+}): string => {
+    return jwt.sign(
+        {
+            id: data.id,
+            name: data.name,
+            role: "sales",
+        },
+        JWT_SECRET,
+        { expiresIn: "30d" }
+    );
+};
+
+// =======================
 // Verify Token
 // =======================
 export const verifyToken = (token: string): TokenPayload => {

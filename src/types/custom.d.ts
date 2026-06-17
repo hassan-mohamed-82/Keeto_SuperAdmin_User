@@ -1,7 +1,7 @@
 // =======================
 // Role System (Updated)
 // =======================
-export type Role = "user" | "admin" | "restaurant_admin";
+export type Role = "user" | "admin" | "restaurant_admin" | "sales";
 
 // =======================
 // App User (Request.user)

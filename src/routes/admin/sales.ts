@@ -1,7 +1,10 @@
 import express from "express";
-import { createSales, getAllSales, getSalesById, updateSales, deleteSales } from "../../controllers/admin/sales";
+import { createSales, getAllSales, getSalesById, updateSales, deleteSales, loginSales } from "../../controllers/admin/sales";
 
 const router = express.Router();
+
+// POST /api/admin/sales/login
+router.post("/login", loginSales);
 
 // POST /api/admin/sales
 router.post("/", createSales);

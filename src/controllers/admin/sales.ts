@@ -4,16 +4,21 @@ import { db } from "../../models/connection";
 import { sales, restaurants } from "../../models/schema";
 import { eq, desc } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { BadRequest, NotFound } from "../../Errors";
+import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import { v4 as uuidv4 } from "uuid";
+import bcrypt from "bcrypt";
+import { generateSalesToken } from "../../utils/jwt";
 
 // ==========================================
 // 1. إنشاء مندوب مبيعات جديد
 // ==========================================
 export const createSales = async (req: Request, res: Response) => {
-    const { name, phone, email, points, status } = req.body;
+    const { name, phone, email, password, points, status } = req.body;
 
     if (!name) throw new BadRequest("Sales name is required");
+    if (!password) throw new BadRequest("Password is required");
+
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const newSalesId = uuidv4();
 
@@ -22,6 +27,7 @@ export const createSales = async (req: Request, res: Response) => {
         name,
         phone: phone || null,
         email: email || null,
+        password: hashedPassword,
         points: points || 0,
         status: status || "active",
     });
@@ -82,9 +88,14 @@ export const getSalesById = async (req: Request, res: Response) => {
 // ==========================================
 export const updateSales = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, phone, email, points, status } = req.body;
+    const { name, phone, email, password, points, status } = req.body;
 
     const [existing] = await db.select().from(sales).where(eq(sales.id, id)).limit(1);
+
+    let hashedPassword = existing.password;
+    if (password) {
+        hashedPassword = await bcrypt.hash(password, 10);
+    }
     if (!existing) throw new NotFound("Sales representative not found");
 
     await db.update(sales)
@@ -92,6 +103,7 @@ export const updateSales = async (req: Request, res: Response) => {
             name: name ?? existing.name,
             phone: phone !== undefined ? phone : existing.phone,
             email: email !== undefined ? email : existing.email,
+            password: hashedPassword,
             points: points !== undefined ? points : existing.points,
             status: status ?? existing.status,
             updatedAt: new Date()
@@ -120,4 +132,47 @@ export const deleteSales = async (req: Request, res: Response) => {
     await db.delete(sales).where(eq(sales.id, id));
 
     return SuccessResponse(res, { message: "Sales representative deleted successfully" });
+};
+
+// ==========================================
+// 6. تسجيل دخول مندوب مبيعات
+// ==========================================
+export const loginSales = async (req: Request, res: Response) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        throw new BadRequest("Email and password are required");
+    }
+
+    const [salesRep] = await db.select().from(sales).where(eq(sales.email, email)).limit(1);
+    if (!salesRep || !salesRep.password) {
+        throw new UnauthorizedError("Invalid Credentials");
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, salesRep.password);
+    if (!isPasswordValid) {
+        throw new UnauthorizedError("Invalid Credentials");
+    }
+
+    if (salesRep.status === "inactive") {
+        throw new UnauthorizedError("Sales representative is inactive");
+    }
+
+    const token = generateSalesToken({
+        id: salesRep.id,
+        name: salesRep.name,
+    });
+
+    return SuccessResponse(res, {
+        message: "Sales representative logged in successfully",
+        token,
+        sales: {
+            id: salesRep.id,
+            name: salesRep.name,
+            email: salesRep.email,
+            phone: salesRep.phone,
+            points: salesRep.points,
+            status: salesRep.status,
+        }
+    });
 };

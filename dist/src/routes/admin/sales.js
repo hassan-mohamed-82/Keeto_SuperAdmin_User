@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const sales_1 = require("../../controllers/admin/sales");
 const router = express_1.default.Router();
+// POST /api/admin/sales/login
+router.post("/login", sales_1.loginSales);
 // POST /api/admin/sales
 router.post("/", sales_1.createSales);
 // GET /api/admin/sales
