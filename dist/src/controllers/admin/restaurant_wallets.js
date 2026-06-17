@@ -31,16 +31,24 @@ exports.getAllWallets = getAllWallets;
 // ==========================================
 // 2. GET SINGLE WALLET
 // ==========================================
-const getRestaurantWallet = async (req, res) => {
-    const restaurantId = req.params.id;
-    const wallet = await connection_1.db
-        .select()
-        .from(schema_1.restaurantWallets)
-        .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId))
-        .limit(1);
-    if (!wallet[0])
-        throw new NotFound_1.NotFound("Wallet not found");
-    return (0, response_1.SuccessResponse)(res, { data: wallet[0] });
+const getRestaurantWallet = async (req, res, next) => {
+    try {
+        const restaurantId = req.params.id;
+        const wallet = await connection_1.db
+            .select()
+            .from(schema_1.restaurantWallets)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId))
+            .limit(1);
+        if (!wallet[0]) {
+            throw new NotFound_1.NotFound("Wallet not found");
+            // أو تقدر تعمل: return next(new NotFound("Wallet not found"));
+        }
+        return (0, response_1.SuccessResponse)(res, { data: wallet[0] });
+    }
+    catch (error) {
+        // تمرير الخطأ للـ Middleware الخاص بالـ Error Handling في Express
+        next(error);
+    }
 };
 exports.getRestaurantWallet = getRestaurantWallet;
 // ==========================================

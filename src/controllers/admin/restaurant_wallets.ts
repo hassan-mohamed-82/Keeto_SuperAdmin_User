@@ -1,5 +1,5 @@
 // controllers/admin/restaurantWallet.controller.ts
-import { Request, Response } from "express";
+import { Request, Response,NextFunction } from "express";
 import { db } from "../../models/connection";
 import { restaurantWallets, restaurantWalletTransactions, restaurants } from "../../models/schema";
 import { eq, desc } from "drizzle-orm";
@@ -33,18 +33,26 @@ export const getAllWallets = async (req: Request, res: Response) => {
 // ==========================================
 // 2. GET SINGLE WALLET
 // ==========================================
-export const getRestaurantWallet = async (req: Request, res: Response) => {
-   const restaurantId = req.params.id;
+export const getRestaurantWallet = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const restaurantId = req.params.id;
 
-    const wallet = await db
-        .select()
-        .from(restaurantWallets)
-        .where(eq(restaurantWallets.restaurantId, restaurantId))
-        .limit(1);
+        const wallet = await db
+            .select()
+            .from(restaurantWallets)
+            .where(eq(restaurantWallets.restaurantId, restaurantId))
+            .limit(1);
 
-    if (!wallet[0]) throw new NotFound("Wallet not found");
+        if (!wallet[0]) {
+            throw new NotFound("Wallet not found"); 
+            // أو تقدر تعمل: return next(new NotFound("Wallet not found"));
+        }
 
-    return SuccessResponse(res, { data: wallet[0] });
+        return SuccessResponse(res, { data: wallet[0] });
+    } catch (error) {
+        // تمرير الخطأ للـ Middleware الخاص بالـ Error Handling في Express
+        next(error);
+    }
 };
 
 // ==========================================
