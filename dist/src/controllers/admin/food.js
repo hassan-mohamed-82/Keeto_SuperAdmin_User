@@ -10,10 +10,48 @@ const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
 const handleImages_1 = require("../../utils/handleImages");
 // =============================================
+// 🛠️ دالة مساعدة لاستخراج الإضافات بأي شكل (FormData أو JSON)
+// =============================================
+const extractAddons = (body) => {
+    const addonKeys = Object.keys(body).filter(k => k === 'addonsId' || k === 'addons' || k === 'addonIds' ||
+        k.startsWith('addonsId[') || k.startsWith('addons['));
+    if (addonKeys.length === 0) {
+        return { isProvided: false, ids: [] };
+    }
+    let parsedAddons = [];
+    for (const key of addonKeys) {
+        const val = body[key];
+        if (typeof val === 'string') {
+            if (val.trim() === '')
+                continue;
+            try {
+                const parsed = JSON.parse(val);
+                Array.isArray(parsed) ? parsedAddons.push(...parsed) : parsedAddons.push(parsed);
+            }
+            catch {
+                val.includes(',') ? parsedAddons.push(...val.split(',')) : parsedAddons.push(val);
+            }
+        }
+        else if (Array.isArray(val)) {
+            parsedAddons.push(...val);
+        }
+        else {
+            parsedAddons.push(val);
+        }
+    }
+    const ids = [...new Set(parsedAddons.map((item) => {
+            if (typeof item === 'object' && item !== null) {
+                return item.id || item.value || item.addonId || item._id;
+            }
+            return item;
+        }).filter((id) => typeof id === 'string' && id.trim() !== ''))];
+    return { isProvided: true, ids };
+};
+// =============================================
 // CREATE Food
 // =============================================
 const createFood = async (req, res) => {
-    const { name, nameAr, nameFr, description, descriptionAr, descriptionFr, image, restaurantid, categoryid, subcategoryid, foodtype, Nutrition, allergen_ingredients, is_Halal, addonsId, startTime, endTime, search_tags, price, discount_type, discount_value, Maximum_Purchase, stock_type, status, variations, } = req.body;
+    const { name, nameAr, nameFr, description, descriptionAr, descriptionFr, image, restaurantid, categoryid, subcategoryid, foodtype, Nutrition, allergen_ingredients, is_Halal, startTime, endTime, search_tags, price, discount_type, discount_value, Maximum_Purchase, stock_type, status, variations, } = req.body;
     if (!name ||
         !nameAr ||
         !nameFr ||
@@ -52,14 +90,15 @@ const createFood = async (req, res) => {
     if (!existingSub[0]) {
         throw new BadRequest_1.BadRequest("Subcategory not found");
     }
-    if (addonsId) {
-        const existingAddon = await connection_1.db
-            .select()
-            .from(schema_1.addons)
-            .where((0, drizzle_orm_1.eq)(schema_1.addons.id, addonsId))
-            .limit(1);
-        if (!existingAddon[0]) {
-            throw new BadRequest_1.BadRequest("Addon not found");
+    // ==========================================
+    // ✅ معالجة الإضافات (Addons) بشكل آمن
+    // ==========================================
+    const { ids: finalAddonsIds } = extractAddons(req.body);
+    if (finalAddonsIds.length > 0) {
+        const existingAddons = await connection_1.db.select({ id: schema_1.addons.id }).from(schema_1.addons)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.addons.id, finalAddonsIds), (0, drizzle_orm_1.eq)(schema_1.addons.restaurantid, restaurantid)));
+        if (existingAddons.length !== finalAddonsIds.length) {
+            throw new BadRequest_1.BadRequest("One or more Addon IDs are invalid or do not belong to this restaurant");
         }
     }
     let imageUrl = "";
@@ -87,7 +126,7 @@ const createFood = async (req, res) => {
         Nutrition: Nutrition || null,
         allergen_ingredients: allergen_ingredients || null,
         is_Halal: is_Halal ?? false,
-        addonsId: addonsId || null,
+        addonsId: finalAddonsIds, // ✅ حفظ المصفوفة النظيفة
         startTime,
         endTime,
         search_tags: search_tags || null,
@@ -123,7 +162,6 @@ const createFood = async (req, res) => {
                         optionNameFr: option.optionNameFr,
                         additionalPrice: option.additionalPrice?.toString() || "0",
                         status: option.status !== undefined ? option.status : true,
-                        // 👇 التعديل هنا: استقبال isDefault
                         isDefault: option.isDefault !== undefined ? option.isDefault : false,
                     });
                 }
@@ -186,26 +224,40 @@ const getAllFoods = async (req, res) => {
     if (rawFoods.length === 0) {
         return (0, response_1.SuccessResponse)(res, { message: "Get all foods success", data: [] });
     }
-    const allFoods = rawFoods.map(f => ({
-        id: f.id,
-        name: f.name,
-        nameAr: f.nameAr,
-        nameFr: f.nameFr,
-        description: f.description,
-        descriptionAr: f.descriptionAr,
-        descriptionFr: f.descriptionFr,
-        image: f.image,
-        price: f.price,
-        restaurant: f.restaurant_id
-            ? { id: f.restaurant_id, name: f.restaurant_name, nameAr: f.restaurant_nameAr, nameFr: f.restaurant_nameFr }
-            : null,
-        category: f.category_name
-            ? { name: f.category_name, nameAr: f.category_nameAr, nameFr: f.category_nameFr }
-            : null,
-        subcategory: f.subcategory_name
-            ? { name: f.subcategory_name, nameAr: f.subcategory_nameAr, nameFr: f.subcategory_nameFr }
-            : null,
-    }));
+    const allFoods = rawFoods.map(f => {
+        // فك تشفير الإضافات لضمان رجوعها كمصفوفة نظيفة
+        let safeAddons = f.addonsId;
+        if (typeof safeAddons === 'string') {
+            try {
+                safeAddons = JSON.parse(safeAddons);
+            }
+            catch (e) {
+                safeAddons = [];
+            }
+        }
+        const cleanAddonsArray = Array.isArray(safeAddons) ? safeAddons.filter((id) => typeof id === 'string' && id.trim() !== '') : [];
+        return {
+            id: f.id,
+            name: f.name,
+            nameAr: f.nameAr,
+            nameFr: f.nameFr,
+            description: f.description,
+            descriptionAr: f.descriptionAr,
+            descriptionFr: f.descriptionFr,
+            image: f.image,
+            price: f.price,
+            addonsId: cleanAddonsArray, // ✅
+            restaurant: f.restaurant_id
+                ? { id: f.restaurant_id, name: f.restaurant_name, nameAr: f.restaurant_nameAr, nameFr: f.restaurant_nameFr }
+                : null,
+            category: f.category_name
+                ? { name: f.category_name, nameAr: f.category_nameAr, nameFr: f.category_nameFr }
+                : null,
+            subcategory: f.subcategory_name
+                ? { name: f.subcategory_name, nameAr: f.subcategory_nameAr, nameFr: f.subcategory_nameFr }
+                : null,
+        };
+    });
     return (0, response_1.SuccessResponse)(res, {
         message: "Get all foods success",
         data: allFoods
@@ -281,9 +333,25 @@ const getFoodById = async (req, res) => {
         ...v,
         options: opts.filter(o => o.variationId === v.id)
     }));
+    // فك تشفير الإضافات وإرجاعها بشكل نضيف
+    let safeAddons = foodItem[0].addonsId;
+    if (typeof safeAddons === 'string') {
+        try {
+            safeAddons = JSON.parse(safeAddons);
+        }
+        catch (e) {
+            safeAddons = [];
+        }
+    }
+    const addonsArray = Array.isArray(safeAddons) ? safeAddons : [];
+    const cleanAddonsArray = addonsArray.filter((aid) => typeof aid === 'string' && aid.trim() !== '');
     return (0, response_1.SuccessResponse)(res, {
         message: "Get food by id success",
-        data: { ...foodItem[0], variations }
+        data: {
+            ...foodItem[0],
+            addonsId: cleanAddonsArray,
+            variations
+        }
     });
 };
 exports.getFoodById = getFoodById;
@@ -318,8 +386,8 @@ const updateFood = async (req, res) => {
         "descriptionAr",
         "descriptionFr",
         "price",
-        "categoryid", // Fixed spelling based on previous messages
-        "subcategoryid", // Fixed spelling
+        "categoryid",
+        "subcategoryid",
         "status",
         "image"
     ];
@@ -336,7 +404,21 @@ const updateFood = async (req, res) => {
             }
         }
     }
-    // categories processing logic (from previous optimization)
+    // ==========================================
+    // ✅ معالجة الـ Addons بشكل مخصص وآمن 
+    // ==========================================
+    const { isProvided, ids: finalAddonsIds } = extractAddons(data);
+    if (isProvided) {
+        if (finalAddonsIds.length > 0) {
+            const existingAddons = await connection_1.db.select({ id: schema_1.addons.id }).from(schema_1.addons)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.addons.id, finalAddonsIds), (0, drizzle_orm_1.eq)(schema_1.addons.restaurantid, existingFood[0].restaurantid)));
+            if (existingAddons.length !== finalAddonsIds.length) {
+                throw new BadRequest_1.BadRequest("One or more Addon IDs are invalid or do not belong to this restaurant");
+            }
+        }
+        updateData.addonsId = finalAddonsIds; // ✅ تحديث البيانات بالمصفوفة النظيفة
+    }
+    // categories processing logic 
     const incomingCategoryId = data.categoryid ?? data.categoryId;
     if (incomingCategoryId !== undefined) {
         updateData.categoryid = incomingCategoryId === "" ? null : incomingCategoryId;
@@ -356,17 +438,14 @@ const updateFood = async (req, res) => {
             .select()
             .from(schema_1.foodVariations)
             .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, id));
-        // حذف options القديمة
         for (const v of oldVars) {
             await connection_1.db
                 .delete(schema_1.variationOptions)
                 .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, v.id));
         }
-        // حذف variations القديمة
         await connection_1.db
             .delete(schema_1.foodVariations)
             .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, id));
-        // إضافة الجديدة
         for (const variation of data.variations) {
             const variationId = (0, uuid_1.v4)();
             await connection_1.db.insert(schema_1.foodVariations).values({
@@ -390,7 +469,6 @@ const updateFood = async (req, res) => {
                         optionNameFr: option.optionNameFr,
                         additionalPrice: option.additionalPrice ? option.additionalPrice.toString() : "0",
                         status: option.status !== undefined ? option.status : true,
-                        // 👇 التعديل هنا: استقبال isDefault
                         isDefault: option.isDefault !== undefined ? option.isDefault : false,
                     });
                 }
@@ -416,12 +494,10 @@ const deleteFood = async (req, res) => {
     const existingFood = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.id, id)).limit(1);
     if (!existingFood[0])
         throw new NotFound_1.NotFound("Food not found");
-    // Prevent deletion if it's referenced in orders
     const inOrders = await connection_1.db.select().from(schema_1.orderItems).where((0, drizzle_orm_1.eq)(schema_1.orderItems.foodId, id)).limit(1);
     if (inOrders[0]) {
         throw new BadRequest_1.BadRequest("Cannot delete this food because it is associated with existing orders. Please set its status to inactive instead.");
     }
-    // Delete safe references
     await connection_1.db.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, id));
     await connection_1.db.delete(schema_1.favorites).where((0, drizzle_orm_1.eq)(schema_1.favorites.foodId, id));
     await connection_1.db.delete(schema_1.branchMenuItems).where((0, drizzle_orm_1.eq)(schema_1.branchMenuItems.foodId, id));
@@ -434,6 +510,9 @@ const deleteFood = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Delete food success" });
 };
 exports.deleteFood = deleteFood;
+// =============================================
+// GET Foods By Restaurant ID
+// =============================================
 const getFoodsByRestaurantId = async (req, res) => {
     const { id: restaurantId } = req.params;
     const foods = await connection_1.db.select({
@@ -450,12 +529,25 @@ const getFoodsByRestaurantId = async (req, res) => {
     if (foods.length === 0) {
         return (0, response_1.SuccessResponse)(res, { message: "No foods found", data: [] });
     }
-    const formatted = foods.map(row => ({
-        ...row.foodObj,
-        restaurant: row.restaurantObj ? { id: row.restaurantObj.id, name: row.restaurantObj.name } : null,
-        category: row.categoryObj ? { id: row.categoryObj.id, name: row.categoryObj.name } : null,
-        subcategory: row.subcategoryObj ? { id: row.subcategoryObj.id, name: row.subcategoryObj.name } : null,
-    }));
+    const formatted = foods.map(row => {
+        let safeAddons = row.foodObj.addonsId;
+        if (typeof safeAddons === 'string') {
+            try {
+                safeAddons = JSON.parse(safeAddons);
+            }
+            catch (e) {
+                safeAddons = [];
+            }
+        }
+        const cleanAddonsArray = Array.isArray(safeAddons) ? safeAddons.filter((aid) => typeof aid === 'string' && aid.trim() !== '') : [];
+        return {
+            ...row.foodObj,
+            addonsId: cleanAddonsArray,
+            restaurant: row.restaurantObj ? { id: row.restaurantObj.id, name: row.restaurantObj.name } : null,
+            category: row.categoryObj ? { id: row.categoryObj.id, name: row.categoryObj.name } : null,
+            subcategory: row.subcategoryObj ? { id: row.subcategoryObj.id, name: row.subcategoryObj.name } : null,
+        };
+    });
     const foodIds = formatted.map(f => f.id);
     const vars = await connection_1.db.select().from(schema_1.foodVariations).where((0, drizzle_orm_1.inArray)(schema_1.foodVariations.foodId, foodIds));
     const varIds = vars.map(v => v.id);
@@ -546,24 +638,20 @@ exports.toggleOptionStatus = toggleOptionStatus;
 // 🌟 NEW: TOGGLE Option Default (Smart Toggle)
 // =============================================
 const toggleOptionDefault = async (req, res) => {
-    const { id } = req.params; // ده الأي دي بتاع الـ option اللي دست على السويتش بتاعه
+    const { id } = req.params;
     const { isDefault } = req.body;
     if (typeof isDefault !== "boolean") {
         throw new BadRequest_1.BadRequest("isDefault must be a boolean");
     }
-    // 1. نجيب الأوبشن عشان نعرف هو تبع أي فارييشن
     const existing = await connection_1.db.select().from(schema_1.variationOptions).where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, id)).limit(1);
     if (!existing[0])
         throw new NotFound_1.NotFound("Option not found");
     const variationId = existing[0].variationId;
-    // 2. لو إنت بتخلي الأوبشن ده (true)، يبقى منطقياً لازم نخلي باقي الأوبشنز لنفس الفارييشن (false)
-    // عشان ميحصلش تضارب ويبقى فيه أكتر من سعر افتراضي لنفس الفارييشن في نفس الوقت
     if (isDefault === true) {
         await connection_1.db.update(schema_1.variationOptions)
             .set({ isDefault: false })
             .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, variationId));
     }
-    // 3. نحدث الأوبشن نفسه بالحالة الجديدة
     await connection_1.db.update(schema_1.variationOptions)
         .set({ isDefault })
         .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, id));

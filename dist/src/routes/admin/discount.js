@@ -18,5 +18,5 @@ router.put("/:id", (0, validation_1.validate)(discount_2.updateDiscountSchema), 
 // Delete discount
 router.delete("/:id", (0, middlewares_1.hasPermission)("Discounts", "Delete"), (0, catchAsync_1.catchAsync)(discount_1.deleteDiscountByAdmin));
 // Toggle active status
-router.patch("/:id/toggle-status", (0, middlewares_1.hasPermission)("Discounts", "Status"), (0, catchAsync_1.catchAsync)(discount_1.toggleDiscountStatusByAdmin));
+router.put("/:id/toggle-status", (0, middlewares_1.hasPermission)("Discounts", "Status"), (0, catchAsync_1.catchAsync)(discount_1.toggleDiscountStatusByAdmin));
 exports.default = router;

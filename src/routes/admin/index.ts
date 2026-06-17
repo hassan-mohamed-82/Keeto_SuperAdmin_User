@@ -29,6 +29,7 @@ import RatingRouter from "./rating";
 import discountRouter from "./discount";
 import couponRouter from "./coupon";
 import KeetoUsersRouter from "./Keeto_users";
+import salesRouter from "./sales";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -64,5 +65,5 @@ router.use("/ratings", RatingRouter);
 router.use("/discounts", discountRouter);
 router.use("/coupons", couponRouter);
 router.use("/keeto-users", KeetoUsersRouter);
-
+router.use("/sales", salesRouter);
 export default router;

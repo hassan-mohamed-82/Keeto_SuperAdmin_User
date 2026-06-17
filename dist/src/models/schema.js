@@ -58,3 +58,4 @@ __exportStar(require("./schema/user/SocialMedia"), exports);
 __exportStar(require("./schema/admin/invoices"), exports);
 __exportStar(require("./schema/user/slider"), exports);
 __exportStar(require("./schema/admin/restraurant_user"), exports);
+__exportStar(require("./schema/admin/sales"), exports);

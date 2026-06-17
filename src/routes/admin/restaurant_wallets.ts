@@ -7,7 +7,7 @@ import { hasPermission } from "../../middlewares/";
 const router = Router();
 
 router.get("/", hasPermission("RestaurantWallets", "View"), catchAsync(getAllWallets));
-router.get("/restaurant/:id", hasPermission("RestaurantWallets", "View"), catchAsync(getRestaurantWallet));
+router.get("/restaurant/:restaurantId", hasPermission("RestaurantWallets", "View"), catchAsync(getRestaurantWallet));
 router.get("/transactions/:restaurantId", hasPermission("RestaurantWallets", "View"), catchAsync(getWalletTransactions));
 router.put("/approve/:id", hasPermission("RestaurantWallets", "Edit"), validate(updateWalletTransactionSchema), catchAsync(approveWithdrawal));
 router.put("/collect/:id", hasPermission("RestaurantWallets", "Edit"), catchAsync(collectCashFromRestaurant));

@@ -1,9 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.restaurants = void 0;
+// models/schema/restaurants.ts
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 const zone_1 = require("./zone");
+const sales_1 = require("./sales"); // 👈 استدعاء جدول السيلز
 exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     fcmToken: (0, mysql_core_1.text)("fcm_token"),
@@ -15,12 +17,15 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     addressFr: (0, mysql_core_1.text)("address_fr").default(''),
     cuisineId: (0, mysql_core_1.json)("cuisine_id").$type().default([]),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }).references(() => zone_1.zones.id),
+    // 👇 التعديلات الجديدة هنا
+    type: (0, mysql_core_1.mysqlEnum)("type", ["mega", "super", "A", "B", "C", "C-"]).default("C"), // نوع المطعم
+    salesId: (0, mysql_core_1.char)("sales_id", { length: 36 }).references(() => sales_1.sales.id), // المندوب اللي جاب المطعم
+    // 👆
     logo: (0, mysql_core_1.varchar)("logo", { length: 500 }).notNull(),
     cover: (0, mysql_core_1.varchar)("cover", { length: 500 }),
     minDeliveryTime: (0, mysql_core_1.varchar)("min_delivery_time", { length: 50 }),
     maxDeliveryTime: (0, mysql_core_1.varchar)("max_delivery_time", { length: 50 }),
     deliveryTimeUnit: (0, mysql_core_1.varchar)("delivery_time_unit", { length: 50 }).default("Minutes"),
-    // بيانات المالك كجهة اتصال للبزنس وليس للدخول
     ownerFirstName: (0, mysql_core_1.varchar)("owner_first_name", { length: 255 }).notNull(),
     ownerLastName: (0, mysql_core_1.varchar)("owner_last_name", { length: 255 }).notNull(),
     ownerPhone: (0, mysql_core_1.varchar)("owner_phone", { length: 50 }).notNull(),

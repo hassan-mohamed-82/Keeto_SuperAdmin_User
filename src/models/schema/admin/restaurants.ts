@@ -1,6 +1,8 @@
-import { mysqlTable, varchar, timestamp ,json, char, text, date, mysqlEnum ,boolean, int} from "drizzle-orm/mysql-core";
+// models/schema/restaurants.ts
+import { mysqlTable, varchar, timestamp, json, char, text, date, mysqlEnum, boolean, int } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { zones } from "./zone";
+import { sales } from "./sales"; // 👈 استدعاء جدول السيلز
 
 export const restaurants = mysqlTable("restaurants", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -15,7 +17,12 @@ export const restaurants = mysqlTable("restaurants", {
     
     cuisineId: json("cuisine_id").$type<string[]>().default([]),
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id),
- 
+
+    // 👇 التعديلات الجديدة هنا
+    type: mysqlEnum("type", ["mega", "super", "A", "B", "C", "C-"]).default("C"), // نوع المطعم
+    salesId: char("sales_id", { length: 36 }).references(() => sales.id), // المندوب اللي جاب المطعم
+    // 👆
+
     logo: varchar("logo", { length: 500 }).notNull(),
     cover: varchar("cover", { length: 500 }),
 
@@ -23,7 +30,6 @@ export const restaurants = mysqlTable("restaurants", {
     maxDeliveryTime: varchar("max_delivery_time", { length: 50 }),
     deliveryTimeUnit: varchar("delivery_time_unit", { length: 50 }).default("Minutes"),
 
-    // بيانات المالك كجهة اتصال للبزنس وليس للدخول
     ownerFirstName: varchar("owner_first_name", { length: 255 }).notNull(),
     ownerLastName: varchar("owner_last_name", { length: 255 }).notNull(),
     ownerPhone: varchar("owner_phone", { length: 50 }).notNull(),
@@ -38,6 +44,7 @@ export const restaurants = mysqlTable("restaurants", {
     addhome: boolean("addhome").default(false),
     deliveryRadiusKm: int("delivery_radius_km").default(0),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
+    
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

@@ -34,7 +34,8 @@ const checkout = async (req, res) => {
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
-    const validOrderSources = ["online_order", "food_aggregator", "mykeeto"];
+    // ✅ تم إضافة الـ pos
+    const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest_1.BadRequest("Invalid order source");
     }
@@ -62,22 +63,26 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Your cart is empty");
     const restaurantId = userCart[0].restaurantId;
     // ==========================================
-    // 4. Get Restaurant & Business Plan
+    // 4. Get Restaurant & Matching Business Plan
     // ==========================================
     const [restaurant] = await connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId)).limit(1);
     if (!restaurant)
         throw new BadRequest_1.BadRequest("Restaurant not found");
-    const [plan] = await connection_1.db.select().from(schema_1.restaurantBusinessPlans).where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId)).limit(1);
-    if (orderSource === "food_aggregator" && (!plan || !plan.commissionRate)) {
-        throw new BadRequest_1.BadRequest("Order failed. This restaurant has no active business plan.");
+    // ✅ جلب الخطة المطابقة لمصدر الطلب تحديداً
+    const [plan] = await connection_1.db.select()
+        .from(schema_1.restaurantBusinessPlans)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.platformType, orderSource)))
+        .limit(1);
+    // ✅ منع الأوردر لو المنصة بتفرض وجود خطة (زي الأجريجيتور) والمطعم مش مشترك
+    if (!plan && orderSource === "food_aggregator") {
+        throw new BadRequest_1.BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
     }
     // ==========================================
-    // 🛡️ 4.5 فحص مواعيد المطعم وإعدادات التشغيل (Open / Delivery / Takeaway Validation)
+    // 🛡️ 4.5 فحص مواعيد المطعم وإعدادات التشغيل
     // ==========================================
     const schedulesList = await connection_1.db.select().from(schema_1.restaurantSchedules).where((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId));
     const [settings] = await connection_1.db.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1);
     const resolvedOrderType = orderType || "delivery";
-    // حساب توقيت القاهرة الحالي بدقة
     const now = new Date();
     const cairoParts = new Intl.DateTimeFormat("en-US", {
         timeZone: "Africa/Cairo",
@@ -125,16 +130,13 @@ const checkout = async (req, res) => {
                 closeReason = "No active schedule found for today";
             }
         }
-        // دمج مواعيد التشغيل مع قيود أنواع الطلبات من جدول الـ Settings
         canDeliveryNow = Boolean(settings.homeDelivery || settings.selfDelivery);
         canTakeawayNow = Boolean(settings.takeaway);
     }
     else {
-        // إذا لم توجد إعدادات في الداتابيز، نعتبره مغلق حمايةً للنظام
         isOpenNow = false;
         closeReason = "Restaurant configurations are incomplete";
     }
-    // رمي الخطأ للفرونت إند بناءً على الحالة الفعلية
     if (!isOpenNow) {
         throw new BadRequest_1.BadRequest(`Order failed. ${closeReason}`);
     }
@@ -159,10 +161,8 @@ const checkout = async (req, res) => {
             safeVars = JSON.parse(safeVars);
         const vars = Array.isArray(safeVars) ? safeVars : [];
         let varPrice = 0;
-        // 🛡️ التعديل الجديد: جلب سعر الإضافة من الداتابيز مباشرة باستخدام optionId
         for (const v of vars) {
             if (v.optionId) {
-                // ⚠️ تأكد من اسم جدول `variationOptions` في الداتابيز عندك وعدله هنا لو مختلف
                 const [dbOption] = await connection_1.db.select()
                     .from(schema_1.variationOptions)
                     .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, v.optionId))
@@ -170,12 +170,10 @@ const checkout = async (req, res) => {
                 if (dbOption) {
                     const dbOptionPrice = parseFloat((dbOption.additionalPrice || "0"));
                     varPrice += dbOptionPrice;
-                    // حقن السعر الحقيقي في الـ object عشان يتحفظ صح في الداتابيز ويظهر في الفاتورة
                     v.additionalPrice = dbOptionPrice.toString();
                 }
             }
             else {
-                // Fallback لو مفيش optionId مبعوت (حالة نادرة)
                 varPrice += parseFloat(v.additionalPrice || v.price || v.amount || "0");
             }
         }
@@ -195,7 +193,7 @@ const checkout = async (req, res) => {
     const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
     for (const data of itemsWithData) {
         const { cartItem, foodItem, originalBasePrice, varPrice, vars } = data;
-        const { price: discountedBasePrice, appliedDiscount } = (0, discount_1.applyPriorityDiscount)({ id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value }, originalBasePrice, initialSubtotal, availableDiscounts, discountState, true);
+        const { price: discountedBasePrice } = (0, discount_1.applyPriorityDiscount)({ id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value }, originalBasePrice, initialSubtotal, availableDiscounts, discountState, true);
         const itemTotal = (discountedBasePrice + varPrice) * cartItem.quantity;
         subtotal += itemTotal;
         itemsToInsert.push({
@@ -205,12 +203,16 @@ const checkout = async (req, res) => {
             basePrice: discountedBasePrice.toString(),
             variationsPrice: varPrice.toString(),
             totalPrice: itemTotal.toString(),
-            variations: vars, // هيتم حفظها بالسعر الحقيقي اللي جبناه من الداتابيز
+            variations: vars,
             note: cartItem.note || null
         });
     }
+    // ==========================================
+    // ✅ 5.2 Calculate Fees & Commission based on Plan
+    // ==========================================
     const serviceFee = plan ? parseFloat(plan.serviceFee || "0") : 0;
-    let appCommission = orderSource === "food_aggregator" ? subtotal * (parseFloat(plan?.commissionRate || "0") / 100) : 0;
+    const commissionRate = plan ? parseFloat(plan.commissionRate || "0") : 0;
+    const appCommission = subtotal * (commissionRate / 100);
     // ==========================================
     // 5.5 Check Coupons 
     // ==========================================
@@ -218,7 +220,6 @@ const checkout = async (req, res) => {
     let totalDiscount = 0;
     let appliedCoupon = null;
     let isFreeDelivery = false;
-    // 1. Check Coupon (couponCode)
     if (couponCode) {
         const [coupon] = await connection_1.db.select().from(schema_1.coupons).where((0, drizzle_orm_1.eq)(schema_1.coupons.code, couponCode)).limit(1);
         if (!coupon || !coupon.isActive)
@@ -237,7 +238,6 @@ const checkout = async (req, res) => {
             if (!coupRest)
                 throw new BadRequest_1.BadRequest("Coupon is not applicable to this restaurant");
         }
-        // Check per-user limit
         if (coupon.perUserLimit) {
             const usages = await connection_1.db.select({ count: (0, drizzle_orm_1.sql) `count(*)` }).from(schema_1.couponUsages)
                 .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.couponUsages.couponId, coupon.id), (0, drizzle_orm_1.eq)(schema_1.couponUsages.userId, userId)));
@@ -263,7 +263,7 @@ const checkout = async (req, res) => {
         appliedCoupon = coupon;
     }
     // ==========================================
-    // 6. Smart Delivery Logic (Zone + Radius Hybrid)
+    // 6. Smart Delivery Logic
     // ==========================================
     let deliveryFee = 0;
     if (resolvedOrderType === "delivery") {
@@ -346,7 +346,6 @@ const checkout = async (req, res) => {
         .select({ count: (0, drizzle_orm_1.sql) `count(${schema_1.orders.id})` })
         .from(schema_1.orders)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.gte)(schema_1.orders.createdAt, shiftStartTime)));
-    // 🌟 هنا الرقم التسلسلي لليوم الحالي للشيفت
     const dailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
     //----------------------------------------//
     await connection_1.db.transaction(async (tx) => {
@@ -368,7 +367,6 @@ const checkout = async (req, res) => {
                 createdAt: now
             });
         }
-        // تسجيل بيانات الأوردر
         await tx.insert(schema_1.orders).values({
             id: orderId,
             orderNumber,
@@ -392,10 +390,8 @@ const checkout = async (req, res) => {
             createdAt: now,
             dailyOrderNumber
         });
-        // تفريغ الكارت وتسجيل الأصناف
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-        // تسجيل استخدام الكوبون والخصم
         if (appliedCoupon) {
             await tx.insert(schema_1.couponUsages).values({
                 id: (0, uuid_1.v4)(),
@@ -415,7 +411,6 @@ const checkout = async (req, res) => {
                     .where((0, drizzle_orm_1.eq)(schema_1.discounts.id, dId));
             }
         }
-        // تسويات محفظة المطعم
         if (!restaurantWallet) {
             await tx.insert(schema_1.restaurantWallets).values({
                 id: (0, uuid_1.v4)(),

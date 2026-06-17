@@ -48,7 +48,8 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
-    const validOrderSources = ["online_order", "food_aggregator", "mykeeto"];
+    // ✅ تم إضافة الـ pos
+    const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest("Invalid order source");
     }
@@ -79,26 +80,35 @@ export const checkout = async (req: Request | any, res: Response) => {
     const restaurantId = userCart[0].restaurantId;
 
     // ==========================================
-    // 4. Get Restaurant & Business Plan
+    // 4. Get Restaurant & Matching Business Plan
     // ==========================================
     const [restaurant] = await db.select().from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
     if (!restaurant) throw new BadRequest("Restaurant not found");
 
-    const [plan] = await db.select().from(restaurantBusinessPlans).where(eq(restaurantBusinessPlans.restaurantId, restaurantId)).limit(1);
+    // ✅ جلب الخطة المطابقة لمصدر الطلب تحديداً
+    const [plan] = await db.select()
+        .from(restaurantBusinessPlans)
+        .where(
+            and(
+                eq(restaurantBusinessPlans.restaurantId, restaurantId),
+                eq(restaurantBusinessPlans.platformType, orderSource as any)
+            )
+        )
+        .limit(1);
 
-    if (orderSource === "food_aggregator" && (!plan || !plan.commissionRate)) {
-        throw new BadRequest("Order failed. This restaurant has no active business plan.");
+    // ✅ منع الأوردر لو المنصة بتفرض وجود خطة (زي الأجريجيتور) والمطعم مش مشترك
+    if (!plan && orderSource === "food_aggregator") {
+        throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
     }
 
     // ==========================================
-    // 🛡️ 4.5 فحص مواعيد المطعم وإعدادات التشغيل (Open / Delivery / Takeaway Validation)
+    // 🛡️ 4.5 فحص مواعيد المطعم وإعدادات التشغيل
     // ==========================================
     const schedulesList = await db.select().from(restaurantSchedules).where(eq(restaurantSchedules.restaurantId, restaurantId));
     const [settings] = await db.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1);
 
     const resolvedOrderType = orderType || "delivery";
 
-    // حساب توقيت القاهرة الحالي بدقة
     const now = new Date();
     const cairoParts = new Intl.DateTimeFormat("en-US", {
         timeZone: "Africa/Cairo",
@@ -145,16 +155,13 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
         }
 
-        // دمج مواعيد التشغيل مع قيود أنواع الطلبات من جدول الـ Settings
         canDeliveryNow = Boolean(settings.homeDelivery || settings.selfDelivery);
         canTakeawayNow = Boolean(settings.takeaway);
     } else {
-        // إذا لم توجد إعدادات في الداتابيز، نعتبره مغلق حمايةً للنظام
         isOpenNow = false;
         closeReason = "Restaurant configurations are incomplete";
     }
 
-    // رمي الخطأ للفرونت إند بناءً على الحالة الفعلية
     if (!isOpenNow) {
         throw new BadRequest(`Order failed. ${closeReason}`);
     }
@@ -185,10 +192,8 @@ export const checkout = async (req: Request | any, res: Response) => {
         
         let varPrice = 0;
         
-        // 🛡️ التعديل الجديد: جلب سعر الإضافة من الداتابيز مباشرة باستخدام optionId
         for (const v of vars) {
             if (v.optionId) {
-                // ⚠️ تأكد من اسم جدول `variationOptions` في الداتابيز عندك وعدله هنا لو مختلف
                 const [dbOption] = await db.select()
                     .from(variationOptions) 
                     .where(eq(variationOptions.id, v.optionId))
@@ -197,11 +202,9 @@ export const checkout = async (req: Request | any, res: Response) => {
                 if (dbOption) {
                     const dbOptionPrice = parseFloat((dbOption.additionalPrice || "0") as string);
                     varPrice += dbOptionPrice;
-                    // حقن السعر الحقيقي في الـ object عشان يتحفظ صح في الداتابيز ويظهر في الفاتورة
                     v.additionalPrice = dbOptionPrice.toString(); 
                 }
             } else {
-                // Fallback لو مفيش optionId مبعوت (حالة نادرة)
                 varPrice += parseFloat(v.additionalPrice || v.price || v.amount || "0");
             }
         }
@@ -225,7 +228,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     for (const data of itemsWithData) {
         const { cartItem, foodItem, originalBasePrice, varPrice, vars } = data;
 
-        const { price: discountedBasePrice, appliedDiscount } = applyPriorityDiscount(
+        const { price: discountedBasePrice } = applyPriorityDiscount(
             { id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value },
             originalBasePrice,
             initialSubtotal,
@@ -244,13 +247,17 @@ export const checkout = async (req: Request | any, res: Response) => {
             basePrice: discountedBasePrice.toString(),
             variationsPrice: varPrice.toString(),
             totalPrice: itemTotal.toString(),
-            variations: vars, // هيتم حفظها بالسعر الحقيقي اللي جبناه من الداتابيز
+            variations: vars,
             note: cartItem.note || null
         });
     }
 
+    // ==========================================
+    // ✅ 5.2 Calculate Fees & Commission based on Plan
+    // ==========================================
     const serviceFee = plan ? parseFloat(plan.serviceFee as string || "0") : 0;
-    let appCommission = orderSource === "food_aggregator" ? subtotal * (parseFloat(plan?.commissionRate as string || "0") / 100) : 0;
+    const commissionRate = plan ? parseFloat(plan.commissionRate as string || "0") : 0;
+    const appCommission = subtotal * (commissionRate / 100);
 
     // ==========================================
     // 5.5 Check Coupons 
@@ -260,7 +267,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     let appliedCoupon: any = null;
     let isFreeDelivery = false;
 
-    // 1. Check Coupon (couponCode)
     if (couponCode) {
         const [coupon] = await db.select().from(coupons).where(eq(coupons.code, couponCode)).limit(1);
         if (!coupon || !coupon.isActive) throw new BadRequest("Invalid or inactive coupon");
@@ -277,7 +283,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             if (!coupRest) throw new BadRequest("Coupon is not applicable to this restaurant");
         }
 
-        // Check per-user limit
         if (coupon.perUserLimit) {
             const usages = await db.select({ count: sql<number>`count(*)` }).from(couponUsages)
                 .where(and(eq(couponUsages.couponId, coupon.id), eq(couponUsages.userId, userId)));
@@ -302,7 +307,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     }
 
     // ==========================================
-    // 6. Smart Delivery Logic (Zone + Radius Hybrid)
+    // 6. Smart Delivery Logic
     // ==========================================
     let deliveryFee = 0;
 
@@ -406,7 +411,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             )
         );
 
-    // 🌟 هنا الرقم التسلسلي لليوم الحالي للشيفت
     const dailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
 
     //----------------------------------------//
@@ -433,7 +437,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             });
         }
 
-        // تسجيل بيانات الأوردر
         await tx.insert(orders).values({
             id: orderId,
             orderNumber,
@@ -458,11 +461,9 @@ export const checkout = async (req: Request | any, res: Response) => {
             dailyOrderNumber
         });
 
-        // تفريغ الكارت وتسجيل الأصناف
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(cartItems).where(eq(cartItems.userId, userId));
 
-        // تسجيل استخدام الكوبون والخصم
         if (appliedCoupon) {
             await tx.insert(couponUsages).values({
                 id: uuidv4(),
@@ -484,7 +485,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
         }
 
-        // تسويات محفظة المطعم
         if (!restaurantWallet) {
             await tx.insert(restaurantWallets).values({
                 id: uuidv4(),
