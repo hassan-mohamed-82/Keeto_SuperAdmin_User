@@ -34,7 +34,6 @@ const checkout = async (req, res) => {
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
-    // ✅ تم إضافة الـ pos
     const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest_1.BadRequest("Invalid order source");
@@ -73,8 +72,8 @@ const checkout = async (req, res) => {
         .from(schema_1.restaurantBusinessPlans)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.platformType, orderSource)))
         .limit(1);
-    // ✅ منع الأوردر لو المنصة بتفرض وجود خطة (زي الأجريجيتور) والمطعم مش مشترك
-    if (!plan && orderSource === "food_aggregator") {
+    // 🛑 التعديل هنا: منع الأوردر لأي مصدر (online_order أو غيره) لو ملوش خطة فعالة
+    if (!plan) {
         throw new BadRequest_1.BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
     }
     // ==========================================
@@ -210,8 +209,8 @@ const checkout = async (req, res) => {
     // ==========================================
     // ✅ 5.2 Calculate Fees & Commission based on Plan
     // ==========================================
-    const serviceFee = plan ? parseFloat(plan.serviceFee || "0") : 0;
-    const commissionRate = plan ? parseFloat(plan.commissionRate || "0") : 0;
+    const serviceFee = parseFloat(plan.serviceFee || "0");
+    const commissionRate = parseFloat(plan.commissionRate || "0");
     const appCommission = subtotal * (commissionRate / 100);
     // ==========================================
     // 5.5 Check Coupons 

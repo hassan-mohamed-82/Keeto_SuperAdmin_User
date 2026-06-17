@@ -48,7 +48,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 🛡️ 1. Validation (التحقق من المدخلات)
     // ==========================================
-    // ✅ تم إضافة الـ pos
     const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest("Invalid order source");
@@ -96,8 +95,8 @@ export const checkout = async (req: Request | any, res: Response) => {
         )
         .limit(1);
 
-    // ✅ منع الأوردر لو المنصة بتفرض وجود خطة (زي الأجريجيتور) والمطعم مش مشترك
-    if (!plan && orderSource === "food_aggregator") {
+    // 🛑 التعديل هنا: منع الأوردر لأي مصدر (online_order أو غيره) لو ملوش خطة فعالة
+    if (!plan) {
         throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
     }
 
@@ -255,8 +254,8 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // ✅ 5.2 Calculate Fees & Commission based on Plan
     // ==========================================
-    const serviceFee = plan ? parseFloat(plan.serviceFee as string || "0") : 0;
-    const commissionRate = plan ? parseFloat(plan.commissionRate as string || "0") : 0;
+    const serviceFee = parseFloat(plan.serviceFee as string || "0");
+    const commissionRate = parseFloat(plan.commissionRate as string || "0");
     const appCommission = subtotal * (commissionRate / 100);
 
     // ==========================================
