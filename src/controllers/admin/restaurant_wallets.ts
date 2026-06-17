@@ -35,7 +35,8 @@ export const getAllWallets = async (req: Request, res: Response) => {
 // ==========================================
 export const getRestaurantWallet = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const restaurantId = req.params.id;
+        // 👇 التعديل هنا: غيرنا id لـ restaurantId
+        const restaurantId = req.params.restaurantId;
 
         const wallet = await db
             .select()
@@ -45,12 +46,10 @@ export const getRestaurantWallet = async (req: Request, res: Response, next: Nex
 
         if (!wallet[0]) {
             throw new NotFound("Wallet not found"); 
-            // أو تقدر تعمل: return next(new NotFound("Wallet not found"));
         }
 
         return SuccessResponse(res, { data: wallet[0] });
     } catch (error) {
-        // تمرير الخطأ للـ Middleware الخاص بالـ Error Handling في Express
         next(error);
     }
 };

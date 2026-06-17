@@ -33,7 +33,8 @@ exports.getAllWallets = getAllWallets;
 // ==========================================
 const getRestaurantWallet = async (req, res, next) => {
     try {
-        const restaurantId = req.params.id;
+        // 👇 التعديل هنا: غيرنا id لـ restaurantId
+        const restaurantId = req.params.restaurantId;
         const wallet = await connection_1.db
             .select()
             .from(schema_1.restaurantWallets)
@@ -41,12 +42,10 @@ const getRestaurantWallet = async (req, res, next) => {
             .limit(1);
         if (!wallet[0]) {
             throw new NotFound_1.NotFound("Wallet not found");
-            // أو تقدر تعمل: return next(new NotFound("Wallet not found"));
         }
         return (0, response_1.SuccessResponse)(res, { data: wallet[0] });
     }
     catch (error) {
-        // تمرير الخطأ للـ Middleware الخاص بالـ Error Handling في Express
         next(error);
     }
 };
