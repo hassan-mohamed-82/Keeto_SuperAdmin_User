@@ -30,6 +30,6 @@ router.put("/:id", validate(updateDiscountSchema), hasPermission("Discounts", "E
 router.delete("/:id", hasPermission("Discounts", "Delete"), catchAsync(deleteDiscountByAdmin));
 
 // Toggle active status
-router.patch("/:id/toggle-status", hasPermission("Discounts", "Status"), catchAsync(toggleDiscountStatusByAdmin));
+router.put("/:id/toggle-status", hasPermission("Discounts", "Status"), catchAsync(toggleDiscountStatusByAdmin));
 
 export default router;
