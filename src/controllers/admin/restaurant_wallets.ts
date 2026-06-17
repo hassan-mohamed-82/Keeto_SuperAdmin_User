@@ -35,7 +35,6 @@ export const getAllWallets = async (req: Request, res: Response) => {
 // ==========================================
 export const getRestaurantWallet = async (req: Request, res: Response) => {
    const restaurantId = req.params.id;
-    if (!restaurantId) throw new BadRequest("Restaurant ID is required");
 
     const wallet = await db
         .select()
