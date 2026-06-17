@@ -33,7 +33,7 @@ exports.getAllWallets = getAllWallets;
 // ==========================================
 const getRestaurantWallet = async (req, res) => {
     // 👇 التعديل هنا: يقبل id أو restaurantId
-    const restaurantId = req.params.restaurantId || req.params.id;
+    const restaurantId = req.params.id;
     if (!restaurantId)
         throw new BadRequest_1.BadRequest("Restaurant ID is required");
     const wallet = await connection_1.db
