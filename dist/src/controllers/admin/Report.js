@@ -50,9 +50,8 @@ const uuid_1 = require("uuid");
 const getFinancialReport = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
-    const { restaurantId, startDate, endDate, status, paymentMethod, page = "1", limit = "10" } = req.query;
-    const pageNumber = parseInt(page) || 1;
-    const pageSize = parseInt(limit) || 10;
+    // 1. استقبال متغيرات الفلترة فقط (بدون page و limit)
+    const { restaurantId, startDate, endDate, status, paymentMethod } = req.query;
     const conditions = [];
     if (restaurantId)
         conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId));
@@ -67,53 +66,45 @@ const getFinancialReport = async (req, res) => {
         end.setHours(23, 59, 59, 999);
         conditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
     }
+    // 2. جلب الداتا الأساسية المطلوبة للعمليات الحسابية فقط
     const reportData = await connection_1.db
         .select({
-        orderId: schema_1.orders.id,
-        orderNumber: schema_1.orders.orderNumber,
         status: schema_1.orders.status,
         orderSource: schema_1.orders.orderSource,
-        paymentMethodName: schema_1.paymentMethods.name, // 👈 الربط السليم
-        orderType: schema_1.orders.orderType,
-        subtotal: schema_1.orders.subtotal,
+        paymentMethodName: schema_1.paymentMethods.name,
         deliveryFee: schema_1.orders.deliveryFee,
         serviceFee: schema_1.orders.serviceFee,
         appCommission: schema_1.orders.appCommission,
         totalAmount: schema_1.orders.totalAmount,
-        createdAt: schema_1.orders.createdAt,
-        restaurantId: schema_1.restaurants.id,
-        restaurantName: schema_1.restaurants.name,
         cancelReasonType: schema_1.selectReasons.type,
     })
         .from(schema_1.orders)
-        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
         .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
-        .where(conditions.length > 0 ? (0, drizzle_orm_1.and)(...conditions) : undefined)
-        .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
+        .where(conditions.length > 0 ? (0, drizzle_orm_1.and)(...conditions) : undefined);
     // ==========================================
-    // 📊 1. تجهيز الكيانات التحليلية (Analytics Entities)
+    // 📊 3. تجهيز الكيانات التحليلية (Analytics Entities)
     // ==========================================
     let grandTotalRevenue = 0;
     let grandTotalKeetoCommission = 0;
     let grandTotalServiceFees = 0;
     let grandTotalDeliveryFees = 0;
+    let validOrdersCount = 0;
     const breakdownByPayment = { cash: 0, visa: 0, wallet: 0 };
     const breakdownBySource = {};
     const breakdownByStatus = {};
-    const validOrders = [];
     for (const order of reportData) {
         const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
-        // 📈 تجميع الإحصائيات حسب الحالة (حتى الملغية عشان السوبر أدمن يعرف حجم الخسارة)
+        // 📈 تجميع الإحصائيات حسب الحالة
         const currentStatus = order.status;
         if (!breakdownByStatus[currentStatus])
             breakdownByStatus[currentStatus] = { orders: 0, revenue: 0 };
         breakdownByStatus[currentStatus].orders += 1;
         breakdownByStatus[currentStatus].revenue += parseFloat(order.totalAmount || "0");
-        // 🛑 استبعاد الأوردرات الملغية من اليوزر من الحسابات المالية الصافية
+        // 🛑 استبعاد الأوردرات الملغية من الحسابات المالية الصافية
         if (isCancelledByUser)
             continue;
-        validOrders.push(order);
+        validOrdersCount++;
         const amount = parseFloat(order.totalAmount || "0");
         const commission = parseFloat(order.appCommission || "0");
         const svcFee = parseFloat(order.serviceFee || "0");
@@ -142,17 +133,11 @@ const getFinancialReport = async (req, res) => {
         }
     }
     // ==========================================
-    // 📄 2. تطبيق الـ Pagination على الأوردرات
-    // ==========================================
-    const startIndex = (pageNumber - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    const paginatedOrders = validOrders.slice(startIndex, endIndex);
-    // ==========================================
-    // 🏗️ 3. بناء الـ Response النهائي
+    // 🏗️ 4. بناء الـ Response النهائي المالي
     // ==========================================
     const summary = {
         totalAttemptedOrders: reportData.length,
-        totalFinanciallyValidOrders: validOrders.length,
+        totalFinanciallyValidOrders: validOrdersCount,
         macroFinancials: {
             grandTotalSales: grandTotalRevenue.toFixed(2),
             keetoTotalCommission: grandTotalKeetoCommission.toFixed(2),
@@ -181,20 +166,9 @@ const getFinancialReport = async (req, res) => {
             potentialRevenue: stats.revenue.toFixed(2)
         }))
     };
-    const paginationInfo = {
-        totalRecords: validOrders.length,
-        currentPage: pageNumber,
-        totalPages: Math.ceil(validOrders.length / pageSize),
-        hasNextPage: endIndex < validOrders.length,
-        hasPrevPage: pageNumber > 1
-    };
     return (0, response_1.SuccessResponse)(res, {
         message: "Financial macro-report generated successfully",
-        data: {
-            dashboardSummary: summary,
-            pagination: paginationInfo,
-            recentOrdersLedger: paginatedOrders // 👈 هيرجع 10 أوردرات بس في المرة ببياناتهم الكاملة
-        }
+        data: summary
     });
 };
 exports.getFinancialReport = getFinancialReport;

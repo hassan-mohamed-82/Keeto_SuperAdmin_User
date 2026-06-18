@@ -17,11 +17,9 @@ type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
 export const getFinancialReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
-    const { restaurantId, startDate, endDate, status, paymentMethod, page = "1", limit = "10" } = req.query;
+    // 1. استقبال متغيرات الفلترة فقط (بدون page و limit)
+    const { restaurantId, startDate, endDate, status, paymentMethod } = req.query;
     
-    const pageNumber = parseInt(page as string) || 1;
-    const pageSize = parseInt(limit as string) || 10;
-
     const conditions = [];
 
     if (restaurantId) conditions.push(eq(orders.restaurantId, restaurantId as string));
@@ -35,58 +33,49 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         conditions.push(lte(orders.createdAt, end));
     }
 
+    // 2. جلب الداتا الأساسية المطلوبة للعمليات الحسابية فقط
     const reportData = await db
         .select({
-            orderId: orders.id,
-            orderNumber: orders.orderNumber,
             status: orders.status,
             orderSource: orders.orderSource,
-            paymentMethodName: paymentMethods.name, // 👈 الربط السليم
-            orderType: orders.orderType,
-            subtotal: orders.subtotal,
+            paymentMethodName: paymentMethods.name, 
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee,
             appCommission: orders.appCommission,
             totalAmount: orders.totalAmount,
-            createdAt: orders.createdAt,
-            restaurantId: restaurants.id,
-            restaurantName: restaurants.name,
             cancelReasonType: selectReasons.type, 
         })
         .from(orders)
-        .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .orderBy(desc(orders.createdAt));
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
 
     // ==========================================
-    // 📊 1. تجهيز الكيانات التحليلية (Analytics Entities)
+    // 📊 3. تجهيز الكيانات التحليلية (Analytics Entities)
     // ==========================================
     let grandTotalRevenue = 0; 
     let grandTotalKeetoCommission = 0; 
     let grandTotalServiceFees = 0;
     let grandTotalDeliveryFees = 0;
+    let validOrdersCount = 0;
     
     const breakdownByPayment = { cash: 0, visa: 0, wallet: 0 };
     const breakdownBySource: Record<string, { orders: number, revenue: number, commission: number }> = {};
     const breakdownByStatus: Record<string, { orders: number, revenue: number }> = {};
-    
-    const validOrders = [];
 
     for (const order of reportData) {
         const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
         
-        // 📈 تجميع الإحصائيات حسب الحالة (حتى الملغية عشان السوبر أدمن يعرف حجم الخسارة)
+        // 📈 تجميع الإحصائيات حسب الحالة
         const currentStatus = order.status as string;
         if (!breakdownByStatus[currentStatus]) breakdownByStatus[currentStatus] = { orders: 0, revenue: 0 };
         breakdownByStatus[currentStatus].orders += 1;
         breakdownByStatus[currentStatus].revenue += parseFloat(order.totalAmount as string || "0");
 
-        // 🛑 استبعاد الأوردرات الملغية من اليوزر من الحسابات المالية الصافية
+        // 🛑 استبعاد الأوردرات الملغية من الحسابات المالية الصافية
         if (isCancelledByUser) continue;
 
-        validOrders.push(order);
+        validOrdersCount++;
 
         const amount = parseFloat(order.totalAmount as string || "0");
         const commission = parseFloat(order.appCommission as string || "0");
@@ -117,18 +106,11 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
     }
 
     // ==========================================
-    // 📄 2. تطبيق الـ Pagination على الأوردرات
-    // ==========================================
-    const startIndex = (pageNumber - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    const paginatedOrders = validOrders.slice(startIndex, endIndex);
-
-    // ==========================================
-    // 🏗️ 3. بناء الـ Response النهائي
+    // 🏗️ 4. بناء الـ Response النهائي المالي
     // ==========================================
     const summary = {
         totalAttemptedOrders: reportData.length,
-        totalFinanciallyValidOrders: validOrders.length,
+        totalFinanciallyValidOrders: validOrdersCount,
         macroFinancials: {
             grandTotalSales: grandTotalRevenue.toFixed(2),
             keetoTotalCommission: grandTotalKeetoCommission.toFixed(2),
@@ -158,21 +140,9 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         }))
     };
 
-    const paginationInfo = {
-        totalRecords: validOrders.length,
-        currentPage: pageNumber,
-        totalPages: Math.ceil(validOrders.length / pageSize),
-        hasNextPage: endIndex < validOrders.length,
-        hasPrevPage: pageNumber > 1
-    };
-
     return SuccessResponse(res, {
         message: "Financial macro-report generated successfully",
-        data: { 
-            dashboardSummary: summary,
-            pagination: paginationInfo,
-            recentOrdersLedger: paginatedOrders // 👈 هيرجع 10 أوردرات بس في المرة ببياناتهم الكاملة
-        }
+        data: summary
     });
 };
 // ==========================================
