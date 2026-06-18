@@ -149,6 +149,9 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
 // API 2: تقرير تفصيلي حسب كل مطعم (All Restaurants Overview)
 // ==========================================
 
+// ==========================================
+// API 2: تقرير تفصيلي حسب كل مطعم (All Restaurants Overview)
+// ==========================================
 export const getDetailedRestaurantReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
@@ -169,8 +172,8 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             paymentMethodName: paymentMethods.name, 
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
-            serviceFee: orders.serviceFee,
-            appCommission: orders.appCommission,
+            serviceFee: orders.serviceFee, // 👈 دي الرسوم الثابتة بتاعة كيتو (الـ 5 جنيه)
+            appCommission: orders.appCommission, // 👈 دي العمولة المئوية بتاعة كيتو
             totalAmount: orders.totalAmount,
             restaurantId: restaurants.id,
             restaurantName: restaurants.name,
@@ -197,28 +200,25 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
                 restaurantName: order.restaurantName || "Unknown",
                 counts: { total: 0, cash: 0, digital: 0 },
                 sales: { totalRevenue: 0, cashCollected: 0, digitalCollected: 0 },
-                platformDues: { totalCommission: 0 }, // 👈 شيلنا الـ Service Fee من هنا
-                restaurantRevenueDetails: { serviceFees: 0, deliveryFees: 0 }, // 👈 حطيناها كأرباح للمطعم
-                settlementRaw: { cashCommission: 0, digitalCommission: 0 }
+                platformDues: { totalCommission: 0, totalServiceFee: 0 }, // 👈 رجعنا السيرفس فيز للمنصة
+                settlementRaw: { cashCommission: 0, cashServiceFee: 0, digitalCommission: 0, digitalServiceFee: 0 }
             };
         }
 
         const entry = restaurantMap[rId];
         const amount = parseFloat(order.totalAmount as string || "0");
         const commission = parseFloat(order.appCommission as string || "0");
-        const svcFee = parseFloat(order.serviceFee as string || "0");
-        const dlvFee = parseFloat(order.deliveryFee as string || "0");
+        const svcFee = parseFloat(order.serviceFee as string || "0"); // الـ 5 جنيه
 
         entry.counts.total += 1;
         entry.sales.totalRevenue += amount;
-        entry.platformDues.totalCommission += commission;
         
-        // دي فلوس المطعم
-        entry.restaurantRevenueDetails.serviceFees += svcFee;
-        entry.restaurantRevenueDetails.deliveryFees += dlvFee;
+        // دي فلوس المنصة (كيتو)
+        entry.platformDues.totalCommission += commission;
+        entry.platformDues.totalServiceFee += svcFee;
 
         grandTotalAmount += amount;
-        grandTotalPlatformCommission += commission; // 👈 كيتو بتاخد العمولة بس
+        grandTotalPlatformCommission += (commission + svcFee); 
 
         const payment = (order.paymentMethodName || "").toLowerCase();
         const isCash = payment.includes("cash") || payment.includes("استلام");
@@ -227,21 +227,23 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             entry.counts.cash += 1;
             entry.sales.cashCollected += amount;
             entry.settlementRaw.cashCommission += commission;
+            entry.settlementRaw.cashServiceFee += svcFee; // 👈 هنسجل إن الكاش ده عليه سيرفس فيز
         } else {
             entry.counts.digital += 1;
             entry.sales.digitalCollected += amount;
             entry.settlementRaw.digitalCommission += commission;
+            entry.settlementRaw.digitalServiceFee += svcFee;
         }
     }
 
     const restaurantReports = Object.values(restaurantMap).map(entry => {
-        // 💰 تصفية الحسابات (Settlement Logic) - معدلة 
-        // المطعم عليه كام؟ (عمولة أوردرات الكاش فقط)
-        const restaurantOwesToPlatform = entry.settlementRaw.cashCommission;
+        // 💰 تصفية الحسابات (Settlement Logic)
         
-        // المنصة عليها كام؟ (فلوس الفيزا كلها اللي دخلت البنك - العمولة بتاعت أوردرات الفيزا دي)
-        // لاحظ إن الـ Service Fee بتاعت الفيزا هتروح للمطعم عادي جوه الـ digitalCollected
-        const platformOwesToRestaurant = entry.sales.digitalCollected - entry.settlementRaw.digitalCommission;
+        // المطعم عليه كام؟ (عمولة الكاش + السيرفس فيز الثابتة بتاعت الكاش زي الـ 5 جنيه)
+        const restaurantOwesToPlatform = entry.settlementRaw.cashCommission + entry.settlementRaw.cashServiceFee;
+        
+        // المنصة عليها كام؟ (فلوس الفيزا كلها اللي دخلت البنك - العمولة المئوية - السيرفس فيز الثابتة)
+        const platformOwesToRestaurant = entry.sales.digitalCollected - (entry.settlementRaw.digitalCommission + entry.settlementRaw.digitalServiceFee);
         
         const netBalance = platformOwesToRestaurant - restaurantOwesToPlatform;
 
@@ -254,12 +256,9 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
                 cashInRestaurantDrawer: entry.sales.cashCollected.toFixed(2),
                 digitalInPlatformBank: entry.sales.digitalCollected.toFixed(2),
             },
-            restaurantRevenueBreakdown: {
-                totalServiceFeesOwnedByRestaurant: entry.restaurantRevenueDetails.serviceFees.toFixed(2),
-                totalDeliveryFeesOwnedByRestaurant: entry.restaurantRevenueDetails.deliveryFees.toFixed(2),
-            },
             platformDues: {
-                totalAppCommission: entry.platformDues.totalCommission.toFixed(2), // 👈 دي اللي هتتحط في "APP COMMISSION (KEETO)"
+                // هنجمع العمولة المئوية + الرسوم الثابتة عشان تظهر كلها في عمود App Commission في الفرونت إند
+                totalAppCommission: (entry.platformDues.totalCommission + entry.platformDues.totalServiceFee).toFixed(2), 
             },
             settlement: {
                 restaurantOwesPlatform: restaurantOwesToPlatform.toFixed(2),
@@ -269,7 +268,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
                     ? `⚠️ Platform MUST TRANSFER ${Math.abs(netBalance).toFixed(2)} EGP to the Restaurant`
                     : netBalance < 0 
                     ? `🚨 Platform MUST COLLECT ${Math.abs(netBalance).toFixed(2)} EGP from the Restaurant`
-                    : "✅ Accounts are settled (0.00 EGP)",
+                    : "✅ Settled",
             }
         };
     });
@@ -315,8 +314,8 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             paymentMethodName: paymentMethods.name, 
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
-            serviceFee: orders.serviceFee,
-            appCommission: orders.appCommission,
+            serviceFee: orders.serviceFee, // 👈 رسوم كيتو الثابتة (الـ 5 جنيه)
+            appCommission: orders.appCommission, // 👈 عمولة كيتو المئوية
             totalAmount: orders.totalAmount,
             status: orders.status,
             cancelReasonType: selectReasons.type,
@@ -327,13 +326,13 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         .where(and(...conditions));
 
     const sourceMap: Record<string, any> = {
-        online_order: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, digComm: 0 },
-        food_aggregator: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, digComm: 0 },
-        mykeeto: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, digComm: 0 },
-        pos: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, digComm: 0 },
+        online_order: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
+        food_aggregator: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
+        mykeeto: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
+        pos: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
     };
 
-    let grandTotal = { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, digComm: 0 };
+    let grandTotal = { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 };
 
     for (const order of ordersData) {
         const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
@@ -345,13 +344,16 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
 
         const amount = parseFloat(order.totalAmount as string || "0");
         const commission = parseFloat(order.appCommission as string || "0");
-        const serviceFee = parseFloat(order.serviceFee as string || "0");
+        const serviceFee = parseFloat(order.serviceFee as string || "0"); // 5 جنيه
         const deliveryFee = parseFloat(order.deliveryFee as string || "0");
 
         stats.orders += 1;
         stats.revenue += amount;
+        
+        // 💰 تجميع مستحقات المنصة
         stats.commission += commission;
-        stats.svcFee += serviceFee;
+        stats.svcFee += serviceFee; 
+        
         stats.dlvFee += deliveryFee;
 
         grandTotal.orders += 1;
@@ -366,21 +368,30 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         if (isCash) {
             stats.cash += amount;
             stats.cashComm += commission;
+            stats.cashSvc += serviceFee; // 👈 هنسجل إن الكاش ده عليه سيرفس فيز
+            
             grandTotal.cash += amount;
             grandTotal.cashComm += commission;
+            grandTotal.cashSvc += serviceFee;
         } else {
             stats.digital += amount;
             stats.digComm += commission;
+            stats.digSvc += serviceFee; // 👈 وهنسجل إن الديجيتال عليه سيرفس فيز يتخصم منه
+            
             grandTotal.digital += amount;
             grandTotal.digComm += commission;
+            grandTotal.digSvc += serviceFee;
         }
     }
 
     const buildSourceReport = (sourceName: string, stats: any) => {
-        // 💰 تصفية الحسابات - المطعم مدين بعمولة الكاش بس
-        const restOwes = stats.cashComm;
-        // المنصة مدينة للمطعم بفلوس الديجيتال ناقص عمولة الديجيتال بس
-        const platOwes = stats.digital - stats.digComm;
+        // 💰 تصفية الحسابات
+        // المطعم عليه كام؟ (عمولة الكاش + السيرفس فيز الثابتة بتاعت الكاش)
+        const restOwes = stats.cashComm + stats.cashSvc;
+        
+        // المنصة مدينة للمطعم بفلوس الديجيتال ناقص (العمولة المئوية للديجيتال + السيرفس فيز بتاعت الديجيتال)
+        const platOwes = stats.digital - (stats.digComm + stats.digSvc);
+        
         const net = platOwes - restOwes;
 
         return {
@@ -392,11 +403,12 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
                 digitalRevenue: stats.digital.toFixed(2),
             },
             restaurantExtraEarnings: {
-                totalServiceFees: stats.svcFee.toFixed(2),
+                // شيلنا الـ Service Fees من هنا خلاص لأنها بتاعت المنصة مش المطعم
                 totalDeliveryFees: stats.dlvFee.toFixed(2),
             },
             keetoDues: {
-                appCommission: stats.commission.toFixed(2), // 👈 هتاخد دي تحطها في UI السوبر أدمن
+                // جمعناهم عشان يظهروا رقم واحد في خانة الـ APP COMMISSION للفرونت إند
+                appCommission: (stats.commission + stats.svcFee).toFixed(2), 
             },
             settlement: {
                 restaurantOwesPlatform: restOwes.toFixed(2),
@@ -425,7 +437,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
                     ? `⚠️ Platform MUST TRANSFER ${Math.abs(parseFloat(finalReport.settlement.netBalance)).toFixed(2)} EGP to the Restaurant`
                     : parseFloat(finalReport.settlement.netBalance) < 0 
                     ? `🚨 Platform MUST COLLECT ${Math.abs(parseFloat(finalReport.settlement.netBalance)).toFixed(2)} EGP from the Restaurant`
-                    : "✅ Accounts are settled (0.00 EGP)"
+                    : "✅ Settled"
                 }
             }
         }
