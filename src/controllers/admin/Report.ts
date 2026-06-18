@@ -17,13 +17,16 @@ type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
 export const getFinancialReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
-    const { restaurantId, startDate, endDate, status, paymentMethod } = req.query;
+    const { restaurantId, startDate, endDate, status, paymentMethod, page = "1", limit = "10" } = req.query;
+    
+    const pageNumber = parseInt(page as string) || 1;
+    const pageSize = parseInt(limit as string) || 10;
+
     const conditions = [];
 
     if (restaurantId) conditions.push(eq(orders.restaurantId, restaurantId as string));
     if (status) conditions.push(eq(orders.status, status as OrderStatus));
-    // 💡 ملاحظة: paymentMethod بقت varchar
-    if (paymentMethod) conditions.push(eq(orders.paymentMethod, paymentMethod as string));
+    if (paymentMethod) conditions.push(eq(paymentMethods.name, paymentMethod as string));
 
     if (startDate) conditions.push(gte(orders.createdAt, new Date(startDate as string)));
     if (endDate) {
@@ -37,7 +40,8 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             orderId: orders.id,
             orderNumber: orders.orderNumber,
             status: orders.status,
-            paymentMethod: orders.paymentMethod, // من جدول orders مباشرة
+            orderSource: orders.orderSource,
+            paymentMethodName: paymentMethods.name, // 👈 الربط السليم
             orderType: orders.orderType,
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
@@ -47,57 +51,128 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             createdAt: orders.createdAt,
             restaurantId: restaurants.id,
             restaurantName: restaurants.name,
-            cancelReasonType: selectReasons.type, // 👈 نوع الإلغاء
+            cancelReasonType: selectReasons.type, 
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(orders.createdAt));
 
-    let totalRevenue = 0; 
-    let totalAppCommission = 0; 
-    let totalCashCollected = 0; 
-    let totalDigitalCollected = 0; 
-    let validOrdersCount = 0;
+    // ==========================================
+    // 📊 1. تجهيز الكيانات التحليلية (Analytics Entities)
+    // ==========================================
+    let grandTotalRevenue = 0; 
+    let grandTotalKeetoCommission = 0; 
+    let grandTotalServiceFees = 0;
+    let grandTotalDeliveryFees = 0;
+    
+    const breakdownByPayment = { cash: 0, visa: 0, wallet: 0 };
+    const breakdownBySource: Record<string, { orders: number, revenue: number, commission: number }> = {};
+    const breakdownByStatus: Record<string, { orders: number, revenue: number }> = {};
+    
+    const validOrders = [];
 
     for (const order of reportData) {
         const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
         
-        // لو اليوزر لغاه، مش هنحسبه خالص ماليًا
+        // 📈 تجميع الإحصائيات حسب الحالة (حتى الملغية عشان السوبر أدمن يعرف حجم الخسارة)
+        const currentStatus = order.status as string;
+        if (!breakdownByStatus[currentStatus]) breakdownByStatus[currentStatus] = { orders: 0, revenue: 0 };
+        breakdownByStatus[currentStatus].orders += 1;
+        breakdownByStatus[currentStatus].revenue += parseFloat(order.totalAmount as string || "0");
+
+        // 🛑 استبعاد الأوردرات الملغية من اليوزر من الحسابات المالية الصافية
         if (isCancelledByUser) continue;
 
-        validOrdersCount++;
+        validOrders.push(order);
+
         const amount = parseFloat(order.totalAmount as string || "0");
         const commission = parseFloat(order.appCommission as string || "0");
+        const svcFee = parseFloat(order.serviceFee as string || "0");
+        const dlvFee = parseFloat(order.deliveryFee as string || "0");
 
-        totalRevenue += amount;
-        totalAppCommission += commission;
+        grandTotalRevenue += amount;
+        grandTotalKeetoCommission += commission;
+        grandTotalServiceFees += svcFee;
+        grandTotalDeliveryFees += dlvFee;
 
-        const payment = (order.paymentMethod || "").toLowerCase();
-        const isCash = payment.includes("cash") || payment.includes("استلام");
+        // 📈 تجميع الإحصائيات حسب المصدر (Source)
+        const source = order.orderSource as string || "unknown";
+        if (!breakdownBySource[source]) breakdownBySource[source] = { orders: 0, revenue: 0, commission: 0 };
+        breakdownBySource[source].orders += 1;
+        breakdownBySource[source].revenue += amount;
+        breakdownBySource[source].commission += commission;
 
-        if (isCash) {
-            totalCashCollected += amount;
+        // 📈 تجميع الإحصائيات حسب طريقة الدفع
+        const payment = (order.paymentMethodName || "").toLowerCase();
+        if (payment.includes("cash") || payment.includes("استلام")) {
+            breakdownByPayment.cash += amount;
+        } else if (payment.includes("visa") || payment.includes("بطاقة")) {
+            breakdownByPayment.visa += amount;
         } else {
-            totalDigitalCollected += amount;
+            breakdownByPayment.wallet += amount;
         }
     }
 
+    // ==========================================
+    // 📄 2. تطبيق الـ Pagination على الأوردرات
+    // ==========================================
+    const startIndex = (pageNumber - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginatedOrders = validOrders.slice(startIndex, endIndex);
+
+    // ==========================================
+    // 🏗️ 3. بناء الـ Response النهائي
+    // ==========================================
     const summary = {
         totalAttemptedOrders: reportData.length,
-        totalFinanciallyValidOrders: validOrdersCount,
-        financials: {
-            totalRevenue: totalRevenue.toFixed(2),
-            totalAppCommission: totalAppCommission.toFixed(2),
-            totalCashCollected: totalCashCollected.toFixed(2),
-            totalDigitalCollected: totalDigitalCollected.toFixed(2),
-        }
+        totalFinanciallyValidOrders: validOrders.length,
+        macroFinancials: {
+            grandTotalSales: grandTotalRevenue.toFixed(2),
+            keetoTotalCommission: grandTotalKeetoCommission.toFixed(2),
+            restaurantsExtraEarnings: {
+                totalServiceFees: grandTotalServiceFees.toFixed(2),
+                totalDeliveryFees: grandTotalDeliveryFees.toFixed(2),
+            }
+        },
+        collectionBreakdown: {
+            cashCollectedByRestaurants: breakdownByPayment.cash.toFixed(2),
+            digitalCollectedByPlatform: (breakdownByPayment.visa + breakdownByPayment.wallet).toFixed(2),
+            digitalDetails: {
+                visa: breakdownByPayment.visa.toFixed(2),
+                wallet: breakdownByPayment.wallet.toFixed(2)
+            }
+        },
+        sourceBreakdown: Object.entries(breakdownBySource).map(([source, stats]) => ({
+            source,
+            ordersCount: stats.orders,
+            revenue: stats.revenue.toFixed(2),
+            keetoCommission: stats.commission.toFixed(2)
+        })),
+        statusBreakdown: Object.entries(breakdownByStatus).map(([status, stats]) => ({
+            status,
+            ordersCount: stats.orders,
+            potentialRevenue: stats.revenue.toFixed(2)
+        }))
+    };
+
+    const paginationInfo = {
+        totalRecords: validOrders.length,
+        currentPage: pageNumber,
+        totalPages: Math.ceil(validOrders.length / pageSize),
+        hasNextPage: endIndex < validOrders.length,
+        hasPrevPage: pageNumber > 1
     };
 
     return SuccessResponse(res, {
-        message: "Financial report generated successfully",
-        data: { summary }
+        message: "Financial macro-report generated successfully",
+        data: { 
+            dashboardSummary: summary,
+            pagination: paginationInfo,
+            recentOrdersLedger: paginatedOrders // 👈 هيرجع 10 أوردرات بس في المرة ببياناتهم الكاملة
+        }
     });
 };
 // ==========================================
