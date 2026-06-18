@@ -4,7 +4,7 @@ import { db } from "../../models/connection";
 import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons } from "../../models/schema";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { BadRequest, UnauthorizedError } from "../../Errors";
+import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import PDFDocument from "pdfkit";
 import { v4 as uuidv4 } from "uuid";
 // 1. تعريف الأنواع المسموحة للـ Enums
@@ -453,7 +453,6 @@ export const getRestaurantInvoices = async (req: Request | any, res: Response) =
     const { status } = req.query;
 
     if (!restaurantId) {
-        const { BadRequest } = await import("../../Errors/BadRequest");
         throw new BadRequest("Restaurant ID is required");
     }
 
@@ -478,17 +477,14 @@ export const getRestaurantInvoices = async (req: Request | any, res: Response) =
 };
 
 // ==========================================
-// API 4: Generate Restaurant Invoice PDF
+// API 2: Generate Restaurant Invoice PDF
 // ==========================================
 export const generateRestaurantInvoicePDF = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
     const { invoiceId } = req.params;
 
-    if (!invoiceId) {
-        const { BadRequest } = await import("../../Errors/BadRequest");
-        throw new BadRequest("Invoice ID is required");
-    }
+    if (!invoiceId) throw new BadRequest("Invoice ID is required");
 
     const invoice = await db
         .select()
@@ -496,10 +492,7 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
         .where(eq(invoices.id, invoiceId))
         .limit(1);
 
-    if (!invoice[0]) {
-        const { NotFound } = await import("../../Errors/NotFound");
-        throw new NotFound("Invoice not found");
-    }
+    if (!invoice[0]) throw new NotFound("Invoice not found");
 
     const restaurant = await db
         .select()
@@ -507,10 +500,7 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
         .where(eq(restaurants.id, invoice[0].restaurantId))
         .limit(1);
 
-    if (!restaurant[0]) {
-        const { NotFound } = await import("../../Errors/NotFound");
-        throw new NotFound("Restaurant not found");
-    }
+    if (!restaurant[0]) throw new NotFound("Restaurant not found");
 
     const invoiceData = invoice[0];
 
@@ -545,12 +535,12 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
 
     // Payment Breakdown
     doc.fontSize(14).text('Payment Breakdown', { underline: true });
-    doc.fontSize(12).text(`Cash Collected: ${invoiceData.totalCashCollected} EGP`);
-    doc.text(`Digital Collected: ${invoiceData.totalDigitalCollected} EGP`);
+    doc.fontSize(12).text(`Cash Collected by Restaurant: ${invoiceData.totalCashCollected} EGP`);
+    doc.text(`Digital Collected by Platform: ${invoiceData.totalDigitalCollected} EGP`);
     doc.moveDown();
 
     // Fees
-    doc.fontSize(14).text('Fees & Commissions', { underline: true });
+    doc.fontSize(14).text('Fees & Commissions (Keeto Dues)', { underline: true });
     doc.fontSize(12).text(`Total Commission: ${invoiceData.totalCommission} EGP`);
     doc.text(`Total Service Fee: ${invoiceData.totalServiceFee} EGP`);
     doc.moveDown();
@@ -559,7 +549,7 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
     doc.moveDown();
 
     // Cash Due Analysis
-    doc.fontSize(16).text('Cash Due Analysis', { underline: true });
+    doc.fontSize(16).text('Settlement / Cash Due Analysis', { underline: true });
     doc.fontSize(12).text(`Restaurant Owes Platform: ${invoiceData.restaurantOwesPlatform} EGP`);
     doc.text(`Platform Owes Restaurant: ${invoiceData.platformOwesRestaurant} EGP`);
     
@@ -569,9 +559,9 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
     const netBalance = parseFloat(invoiceData.netBalance as string);
     
     if (netBalance > 0) {
-        doc.fillColor('green').text(` Platform owes restaurant ${Math.abs(netBalance).toFixed(2)} EGP`);
+        doc.fillColor('green').text(` Platform MUST TRANSFER ${Math.abs(netBalance).toFixed(2)} EGP to Restaurant`);
     } else if (netBalance < 0) {
-        doc.fillColor('red').text(` Restaurant owes platform ${Math.abs(netBalance).toFixed(2)} EGP`);
+        doc.fillColor('red').text(` Platform MUST COLLECT ${Math.abs(netBalance).toFixed(2)} EGP from Restaurant`);
     } else {
         doc.fillColor('black').text(` No pending dues (Settled)`);
     }
@@ -579,6 +569,9 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
     doc.end();
 };
 
+// ==========================================
+// API 3: Generate & Save Invoice 
+// ==========================================
 export const generateAndSaveInvoice = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
@@ -591,18 +584,20 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
     end.setHours(23, 59, 59, 999);
     conditions.push(lte(orders.createdAt, end));
 
+    // 🛡️ التعديل الجذري هنا: جلب اسم طريقة الدفع 
     const ordersData = await db
         .select({
             id: orders.id,
             totalAmount: orders.totalAmount,
             appCommission: orders.appCommission,
             serviceFee: orders.serviceFee,
-            paymentMethod: orders.paymentMethod,
+            paymentMethodName: paymentMethods.name, // 👈 الربط السليم
             status: orders.status,
             cancelReasonType: selectReasons.type,
         })
         .from(orders)
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id)) // 👈 Join لجدول الدفع
         .where(and(...conditions));
     
     let totalCash = 0, totalDigital = 0, totalSales = 0;
@@ -620,7 +615,8 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
 
         totalSales += amount;
 
-        const payment = (order.paymentMethod || "").toLowerCase();
+        // 🛡️ فحص نوع الدفع من الاسم مش الـ UUID
+        const payment = (order.paymentMethodName || "").toLowerCase();
         const isCash = payment.includes("cash") || payment.includes("استلام");
 
         if (isCash) {
@@ -637,7 +633,7 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
     const totalComm = cashComm + digitalComm;
     const totalSvc = cashSvc + digitalSvc;
 
-    // 💰 حساب المديونية الموحد والدقيق
+    // 💰 حساب المديونية الموحد والدقيق (نفس اللوجيك بتاع التقارير)
     const restaurantOwes = cashComm + cashSvc;
     const platformOwes = totalDigital - (digitalComm + digitalSvc);
     const netBalance = platformOwes - restaurantOwes;
@@ -665,13 +661,18 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
 
     return SuccessResponse(res, { message: "Invoice generated and saved successfully", data: { invoiceId } });
 };
-// دالة عشان السوبر أدمن يغير حالة الفاتورة لـ Paid لما يتحاسبوا
+
+// ==========================================
+// API 4: Mark Invoice as Paid
+// ==========================================
 export const markInvoiceAsPaid = async (req: Request, res: Response) => {
     const { invoiceId } = req.params;
     
+    const [existing] = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
+    if (!existing) throw new NotFound("Invoice not found");
+
     await db.update(invoices).set({ status: "paid" }).where(eq(invoices.id, invoiceId));
     
-    return SuccessResponse(res, { message: "Invoice marked as paid" });
+    return SuccessResponse(res, { message: "Invoice marked as paid successfully" });
 };
-
 
