@@ -2,9 +2,10 @@ import { Router } from "express";
 import { catchAsync } from "../../utils/catchAsync";
 import { getFinancialReport, getDetailedRestaurantReport, getSingleRestaurantReport, generateRestaurantInvoicePDF,generateAndSaveInvoice,markInvoiceAsPaid, getRestaurantInvoices } from "../../controllers/admin/Report"
 import { hasPermission } from "../../middlewares/";
-
+import{getSuperAdminDashboard}from "../../controllers/admin/dashboard"
 const router = Router();
 
+router.get("/dashboard",  catchAsync(getSuperAdminDashboard))
 router.get("/", hasPermission("reports", "View"), catchAsync(getFinancialReport))
 router.get("/detailed", hasPermission("reports", "View"), catchAsync(getDetailedRestaurantReport))
 router.get("/restaurant/:restaurantId", hasPermission("reports", "View"), catchAsync(getSingleRestaurantReport))
