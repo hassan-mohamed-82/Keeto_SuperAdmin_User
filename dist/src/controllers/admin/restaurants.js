@@ -108,7 +108,8 @@ const createRestaurant = async (req, res) => {
             addressAr: clean(addressAr),
             addressFr: clean(addressFr),
             cuisineId: parsedCuisines,
-            zoneId: clean(zoneId),
+            // 👇 التعديل هنا: لو مفيش zoneId احفظه null
+            zoneId: zoneId ? clean(zoneId) : null,
             logo: logoUrl || '',
             cover: coverUrl || '',
             lat: lat || '',
@@ -290,10 +291,19 @@ const updateRestaurant = async (req, res) => {
         .from(schema_1.restrauntadmin)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.restaurantId, id), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")))
         .limit(1);
-    if (zoneId) {
-        const [existingZone] = await connection_1.db.select().from(schema_1.zones).where((0, drizzle_orm_1.eq)(schema_1.zones.id, zoneId)).limit(1);
-        if (!existingZone)
-            throw new BadRequest_1.BadRequest("Zone not found");
+    const restaurantUpdateData = { updatedAt: new Date() };
+    const ownerUpdateData = { updatedAt: new Date() };
+    // 👇 التعديل هنا: التعامل مع الـ zoneId بشكل اختياري
+    if (zoneId !== undefined) {
+        if (zoneId === "" || zoneId === null) {
+            restaurantUpdateData.zoneId = null; // السماح بإزالة الزون
+        }
+        else {
+            const [existingZone] = await connection_1.db.select().from(schema_1.zones).where((0, drizzle_orm_1.eq)(schema_1.zones.id, zoneId)).limit(1);
+            if (!existingZone)
+                throw new BadRequest_1.BadRequest("Zone not found");
+            restaurantUpdateData.zoneId = zoneId;
+        }
     }
     let parsedCuisines = undefined;
     if (cuisineId !== undefined) {
@@ -323,8 +333,6 @@ const updateRestaurant = async (req, res) => {
             throw new BadRequest_1.BadRequest("Password and confirm password do not match");
         }
     }
-    const restaurantUpdateData = { updatedAt: new Date() };
-    const ownerUpdateData = { updatedAt: new Date() };
     if (name)
         restaurantUpdateData.name = name;
     if (nameAr)
@@ -339,8 +347,6 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.addressFr = addressFr;
     if (parsedCuisines !== undefined)
         restaurantUpdateData.cuisineId = parsedCuisines;
-    if (zoneId)
-        restaurantUpdateData.zoneId = zoneId;
     if (lat !== undefined)
         restaurantUpdateData.lat = lat;
     if (lng !== undefined)

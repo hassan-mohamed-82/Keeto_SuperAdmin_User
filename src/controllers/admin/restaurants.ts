@@ -126,7 +126,9 @@ export const createRestaurant = async (req: Request, res: Response) => {
             addressAr: clean(addressAr),
             addressFr: clean(addressFr),
             cuisineId: parsedCuisines, 
-            zoneId: clean(zoneId),
+            
+            // 👇 التعديل هنا: لو مفيش zoneId احفظه null
+            zoneId: zoneId ? clean(zoneId) : null,
 
             logo: logoUrl || '',
             cover: coverUrl || '',
@@ -142,8 +144,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             ownerPhone: clean(ownerPhone),
 
             tags: parsedTags,
-
-            taxNumber: taxNumber ? clean(taxNumber) : null,
+            taxNumber: taxNumber ? clean(taxNumber)  : null,
             taxExpireDate: taxExpireDate || null,
             taxCertificate: typeof taxCertificate === 'string' ? clean(taxCertificate) : null,
             
@@ -355,9 +356,18 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         )
         .limit(1);
 
-    if (zoneId) {
-        const [existingZone] = await db.select().from(zones).where(eq(zones.id, zoneId)).limit(1);
-        if (!existingZone) throw new BadRequest("Zone not found");
+    const restaurantUpdateData: any = { updatedAt: new Date() };
+    const ownerUpdateData: any = { updatedAt: new Date() };
+
+    // 👇 التعديل هنا: التعامل مع الـ zoneId بشكل اختياري
+    if (zoneId !== undefined) {
+        if (zoneId === "" || zoneId === null) {
+            restaurantUpdateData.zoneId = null; // السماح بإزالة الزون
+        } else {
+            const [existingZone] = await db.select().from(zones).where(eq(zones.id, zoneId)).limit(1);
+            if (!existingZone) throw new BadRequest("Zone not found");
+            restaurantUpdateData.zoneId = zoneId;
+        }
     }
 
     let parsedCuisines: string[] | undefined = undefined;
@@ -394,9 +404,6 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         }
     }
 
-    const restaurantUpdateData: any = { updatedAt: new Date() };
-    const ownerUpdateData: any = { updatedAt: new Date() };
-
     if (name) restaurantUpdateData.name = name;
     if (nameAr) restaurantUpdateData.nameAr = nameAr;
     if (nameFr) restaurantUpdateData.nameFr = nameFr;
@@ -404,10 +411,11 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (addressAr) restaurantUpdateData.addressAr = addressAr;
     if (addressFr) restaurantUpdateData.addressFr = addressFr;
     if (parsedCuisines !== undefined) restaurantUpdateData.cuisineId = parsedCuisines;
-    if (zoneId) restaurantUpdateData.zoneId = zoneId;
+    
     if (lat !== undefined) restaurantUpdateData.lat = lat;
     if (lng !== undefined) restaurantUpdateData.lng = lng;
     if (deliveryRadiusKm !== undefined) restaurantUpdateData.deliveryRadiusKm = deliveryRadiusKm;
+    
     if (logo) {
         restaurantUpdateData.logo = await handleImageUpdate(req, existingRestaurant.logo, logo, "restaurants");
     }
