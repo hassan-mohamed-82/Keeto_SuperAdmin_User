@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurants, cuisines, zones, restaurantWallets, food, restrauntadmin } from "../../models/schema";
+import { restaurants, cuisines, zones, restaurantWallets, food, restrauntadmin, restaurantBusinessPlans } from "../../models/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -46,15 +46,15 @@ const decrementCuisineCount = async (cuisineId: string) => {
 // Helper: Safely parse arrays and extract valid UUIDs only
 const safeParseArray = (input: any): string[] => {
     if (!input) return [];
-    
+
     // تحويل المدخل إلى نص سواء كان Array أو Object
     const stringified = typeof input === "string" ? input : JSON.stringify(input);
-    
+
     // Regex لاستخراج الـ UUIDs النظيفة فقط وتجاهل أي أقواس أو علامات تنصيص زائدة
     const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
-    
+
     const matches = stringified.match(uuidRegex);
-    
+
     // إرجاع الـ IDs بدون تكرار
     return matches ? Array.from(new Set(matches)) : [];
 };
@@ -67,7 +67,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         zoneId, logo, cover, minDeliveryTime, maxDeliveryTime,
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
-        lat,lng,deliveryRadiusKm
+        lat, lng, deliveryRadiusKm, businessPlans
     } = req.body;
 
     let cuisineId = req.body.cuisineId;
@@ -106,16 +106,25 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
     // تشفير الباسورد الخاص بمالك المطعم
     const hashedPassword = await bcrypt.hash(password, 10);
-    const restaurantId = uuidv4(); 
-    const ownerUserId = uuidv4();  
+    const restaurantId = uuidv4();
+    const ownerUserId = uuidv4();
 
     // تجهيز الـ Tags والـ Cuisines
     const parsedTags: string[] = safeParseArray(tags);
     const parsedCuisines: string[] = safeParseArray(cuisineId);
 
+    let parsedBusinessPlans: any[] = [];
+    if (businessPlans) {
+        if (typeof businessPlans === "string") {
+            try { parsedBusinessPlans = JSON.parse(businessPlans); } catch (e) { parsedBusinessPlans = []; }
+        } else if (Array.isArray(businessPlans)) {
+            parsedBusinessPlans = businessPlans;
+        }
+    }
+
     // بدء الـ Transaction لحفظ البيانات
     await db.transaction(async (tx) => {
-        
+
         // 1. حفظ بيانات المطعم
         await tx.insert(restaurants).values({
             id: restaurantId,
@@ -125,16 +134,16 @@ export const createRestaurant = async (req: Request, res: Response) => {
             address: clean(address),
             addressAr: clean(addressAr),
             addressFr: clean(addressFr),
-            cuisineId: parsedCuisines, 
-            
+            cuisineId: parsedCuisines,
+
             // 👇 التعديل هنا: لو مفيش zoneId احفظه null
             zoneId: zoneId ? clean(zoneId) : null,
 
             logo: logoUrl || '',
             cover: coverUrl || '',
-            lat:lat || '',
-            lng:lng || '',
-            deliveryRadiusKm:deliveryRadiusKm ? clean(deliveryRadiusKm) : null,
+            lat: lat || '',
+            lng: lng || '',
+            deliveryRadiusKm: deliveryRadiusKm ? clean(deliveryRadiusKm) : null,
             minDeliveryTime: minDeliveryTime ? clean(minDeliveryTime) : null,
             maxDeliveryTime: maxDeliveryTime ? clean(maxDeliveryTime) : null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",
@@ -144,23 +153,23 @@ export const createRestaurant = async (req: Request, res: Response) => {
             ownerPhone: clean(ownerPhone),
 
             tags: parsedTags,
-            taxNumber: taxNumber ? clean(taxNumber)  : null,
+            taxNumber: taxNumber ? clean(taxNumber) : null,
             taxExpireDate: taxExpireDate || null,
             taxCertificate: typeof taxCertificate === 'string' ? clean(taxCertificate) : null,
-            
+
             status: status || "active",
         });
 
         // 2. إنشاء حساب المالك
         await tx.insert(restrauntadmin).values({
             id: ownerUserId,
-            restaurantId: restaurantId, 
-            branchId: null,             
+            restaurantId: restaurantId,
+            branchId: null,
             name: `${clean(ownerFirstName)} ${clean(ownerLastName)}`,
             email: clean(email),
             password: hashedPassword,
             phoneNumber: clean(ownerPhone),
-            type: "owner",              
+            type: "owner",
             status: "active",
         });
 
@@ -174,6 +183,26 @@ export const createRestaurant = async (req: Request, res: Response) => {
             totalWithdrawn: "0.00",
             totalEarning: "0.00",
         });
+
+        // 4. إنشاء الـ Business Plans
+        if (parsedBusinessPlans.length > 0) {
+            for (const plan of parsedBusinessPlans) {
+                if (!plan.platformType) continue;
+                await tx.insert(restaurantBusinessPlans).values({
+                    id: uuidv4(),
+                    restaurantId: restaurantId,
+                    platformType: plan.platformType,
+                    isMonthlyActive: plan.isMonthlyActive === true || plan.isMonthlyActive === "true",
+                    monthlyAmount: plan.monthlyAmount ? String(plan.monthlyAmount) : "0.00",
+                    isQuarterlyActive: plan.isQuarterlyActive === true || plan.isQuarterlyActive === "true",
+                    quarterlyAmount: plan.quarterlyAmount ? String(plan.quarterlyAmount) : "0.00",
+                    isAnnuallyActive: plan.isAnnuallyActive === true || plan.isAnnuallyActive === "true",
+                    annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
+                    commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
+                    serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
+                });
+            }
+        }
     });
 
     // زيادة عداد المطبخ للمطابخ المختارة
@@ -183,7 +212,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, {
         message: "Restaurant and Owner account created successfully",
-        data: { 
+        data: {
             restaurantId,
             ownerUserId
         }
@@ -206,19 +235,19 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         cover: restaurants.cover,
         status: restaurants.status,
         cuisineIds: restaurants.cuisineId,
-        email: restrauntadmin.email, 
+        email: restrauntadmin.email,
         zone_id: zones.id,
         zone_name: zones.name,
     })
-    .from(restaurants)
-    .leftJoin(zones, eq(restaurants.zoneId, zones.id))
-    .leftJoin(
-        restrauntadmin, 
-        and(
-            eq(restaurants.id, restrauntadmin.restaurantId), 
-            eq(restrauntadmin.type, "owner")
-        )
-    );
+        .from(restaurants)
+        .leftJoin(zones, eq(restaurants.zoneId, zones.id))
+        .leftJoin(
+            restrauntadmin,
+            and(
+                eq(restaurants.id, restrauntadmin.restaurantId),
+                eq(restrauntadmin.type, "owner")
+            )
+        );
 
     // تحديد الـ 4 حقول فقط للـ cuisines
     const allCuisinesList = await db.select({
@@ -244,7 +273,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             logo: r.logo,
             cover: r.cover,
             status: r.status,
-            email: r.email || null, 
+            email: r.email || null,
             deliveryRadiusKm: r.deliveryRadiusKm,
             lat: r.lat,
             lng: r.lng,
@@ -287,7 +316,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
     }
 
     const row = rawRestaurants[0];
-    
+
     let parsedCuisines = safeParseArray(row.restaurantObj.cuisineId);
 
     let restaurantCuisines: any[] = [];
@@ -306,28 +335,28 @@ export const getRestaurantById = async (req: Request, res: Response) => {
 
     const formattedRestaurant = {
         ...row.restaurantObj,
-        email: row.ownerEmail || null, 
+        email: row.ownerEmail || null,
         cuisines: restaurantCuisines,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
     };
-    
+
     // إزالة حقل الـ IDs الخام حتى لا يظهر في الـ JSON النهائي
     delete (formattedRestaurant as any).cuisineId;
 
-    return SuccessResponse(res, { 
-        message: "Get restaurant by id success", 
-        data: formattedRestaurant 
+    return SuccessResponse(res, {
+        message: "Get restaurant by id success",
+        data: formattedRestaurant
     });
 };
 
 export const updateRestaurant = async (req: Request, res: Response) => {
-    const { id } = req.params; 
+    const { id } = req.params;
     const {
         name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover,
         minDeliveryTime, maxDeliveryTime, deliveryTimeUnit,
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
-        email, password, confirmPassword, status,deliveryRadiusKm
+        email, password, confirmPassword, status, deliveryRadiusKm
     } = req.body;
 
     let cuisineId = req.body.cuisineId;
@@ -359,12 +388,12 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     const restaurantUpdateData: any = { updatedAt: new Date() };
     const ownerUpdateData: any = { updatedAt: new Date() };
 
-   
+
 
     let parsedCuisines: string[] | undefined = undefined;
     if (cuisineId !== undefined) {
         parsedCuisines = safeParseArray(cuisineId);
-        
+
         if (parsedCuisines && parsedCuisines.length > 0) {
             const existingCuisines = await db
                 .select()
@@ -402,11 +431,11 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (addressAr) restaurantUpdateData.addressAr = addressAr;
     if (addressFr) restaurantUpdateData.addressFr = addressFr;
     if (parsedCuisines !== undefined) restaurantUpdateData.cuisineId = parsedCuisines;
-    
+
     if (lat !== undefined) restaurantUpdateData.lat = lat;
     if (lng !== undefined) restaurantUpdateData.lng = lng;
     if (deliveryRadiusKm !== undefined) restaurantUpdateData.deliveryRadiusKm = deliveryRadiusKm;
-    
+
     if (logo) {
         restaurantUpdateData.logo = await handleImageUpdate(req, existingRestaurant.logo, logo, "restaurants");
     }
@@ -417,15 +446,15 @@ export const updateRestaurant = async (req: Request, res: Response) => {
             restaurantUpdateData.cover = await handleImageUpdate(req, existingRestaurant.cover, cover, "restaurants_cover");
         }
     }
-    
+
     if (minDeliveryTime !== undefined) restaurantUpdateData.minDeliveryTime = minDeliveryTime;
     if (maxDeliveryTime !== undefined) restaurantUpdateData.maxDeliveryTime = maxDeliveryTime;
     if (deliveryTimeUnit) restaurantUpdateData.deliveryTimeUnit = deliveryTimeUnit;
-    
+
     if (ownerFirstName) restaurantUpdateData.ownerFirstName = ownerFirstName;
     if (ownerLastName) restaurantUpdateData.ownerLastName = ownerLastName;
     if (ownerPhone) restaurantUpdateData.ownerPhone = ownerPhone;
-    
+
     if (tags !== undefined) restaurantUpdateData.tags = safeParseArray(tags);
     if (taxNumber !== undefined) restaurantUpdateData.taxNumber = taxNumber;
     if (taxExpireDate !== undefined) restaurantUpdateData.taxExpireDate = taxExpireDate;
@@ -434,8 +463,8 @@ export const updateRestaurant = async (req: Request, res: Response) => {
 
     if (email) ownerUpdateData.email = email.trim();
     if (password) ownerUpdateData.password = await bcrypt.hash(password, 10);
-    if (status) ownerUpdateData.status = status; 
-    
+    if (status) ownerUpdateData.status = status;
+
     if (ownerFirstName || ownerLastName) {
         const fName = ownerFirstName || existingRestaurant.ownerFirstName;
         const lName = ownerLastName || existingRestaurant.ownerLastName;
@@ -508,11 +537,11 @@ export const getallcousinesandzones = async (req: Request, res: Response) => {
         id: cuisines.id,
         name: cuisines.name,
     }).from(cuisines)
-      .where(eq(cuisines.status, "active"));
+        .where(eq(cuisines.status, "active"));
     const allZones = await db.select({
         id: zones.id,
         name: zones.name,
     }).from(zones)
-      .where(eq(zones.status, "active"));
+        .where(eq(zones.status, "active"));
     return SuccessResponse(res, { message: "Get all cuisines and zones success", data: { allCuisines, allZones } });
 }

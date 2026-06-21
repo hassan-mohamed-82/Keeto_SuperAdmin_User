@@ -57,7 +57,7 @@ const safeParseArray = (input) => {
 };
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
-    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans } = req.body;
     let cuisineId = req.body.cuisineId;
     if (cuisineId === undefined)
         cuisineId = req.body['cuisineId[]'];
@@ -96,6 +96,20 @@ const createRestaurant = async (req, res) => {
     // تجهيز الـ Tags والـ Cuisines
     const parsedTags = safeParseArray(tags);
     const parsedCuisines = safeParseArray(cuisineId);
+    let parsedBusinessPlans = [];
+    if (businessPlans) {
+        if (typeof businessPlans === "string") {
+            try {
+                parsedBusinessPlans = JSON.parse(businessPlans);
+            }
+            catch (e) {
+                parsedBusinessPlans = [];
+            }
+        }
+        else if (Array.isArray(businessPlans)) {
+            parsedBusinessPlans = businessPlans;
+        }
+    }
     // بدء الـ Transaction لحفظ البيانات
     await connection_1.db.transaction(async (tx) => {
         // 1. حفظ بيانات المطعم
@@ -149,6 +163,26 @@ const createRestaurant = async (req, res) => {
             totalWithdrawn: "0.00",
             totalEarning: "0.00",
         });
+        // 4. إنشاء الـ Business Plans
+        if (parsedBusinessPlans.length > 0) {
+            for (const plan of parsedBusinessPlans) {
+                if (!plan.platformType)
+                    continue;
+                await tx.insert(schema_1.restaurantBusinessPlans).values({
+                    id: (0, uuid_1.v4)(),
+                    restaurantId: restaurantId,
+                    platformType: plan.platformType,
+                    isMonthlyActive: plan.isMonthlyActive === true || plan.isMonthlyActive === "true",
+                    monthlyAmount: plan.monthlyAmount ? String(plan.monthlyAmount) : "0.00",
+                    isQuarterlyActive: plan.isQuarterlyActive === true || plan.isQuarterlyActive === "true",
+                    quarterlyAmount: plan.quarterlyAmount ? String(plan.quarterlyAmount) : "0.00",
+                    isAnnuallyActive: plan.isAnnuallyActive === true || plan.isAnnuallyActive === "true",
+                    annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
+                    commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
+                    serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
+                });
+            }
+        }
     });
     // زيادة عداد المطبخ للمطابخ المختارة
     for (const cid of parsedCuisines) {
