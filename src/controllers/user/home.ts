@@ -308,6 +308,8 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                     descriptionAr: row.descriptionAr,
                     descriptionFr: row.descriptionFr,
                     price: Number(row.price),
+                    discountType: row.foodDiscountType ?? null,
+                    discountValue: row.foodDiscountValue !== null ? Number(row.foodDiscountValue) : null,
                     discountPrice: calculatedDiscountPrice,
                     discountNote,
                     image: row.image,
