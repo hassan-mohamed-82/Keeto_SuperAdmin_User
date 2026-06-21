@@ -270,7 +270,7 @@ const getRestaurantById = async (req, res) => {
 exports.getRestaurantById = getRestaurantById;
 const updateRestaurant = async (req, res) => {
     const { id } = req.params;
-    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm } = req.body;
     let cuisineId = req.body.cuisineId;
     if (cuisineId === undefined)
         cuisineId = req.body['cuisineId[]'];
@@ -293,18 +293,6 @@ const updateRestaurant = async (req, res) => {
         .limit(1);
     const restaurantUpdateData = { updatedAt: new Date() };
     const ownerUpdateData = { updatedAt: new Date() };
-    // 👇 التعديل هنا: التعامل مع الـ zoneId بشكل اختياري
-    if (zoneId !== undefined) {
-        if (zoneId === "" || zoneId === null) {
-            restaurantUpdateData.zoneId = null; // السماح بإزالة الزون
-        }
-        else {
-            const [existingZone] = await connection_1.db.select().from(schema_1.zones).where((0, drizzle_orm_1.eq)(schema_1.zones.id, zoneId)).limit(1);
-            if (!existingZone)
-                throw new BadRequest_1.BadRequest("Zone not found");
-            restaurantUpdateData.zoneId = zoneId;
-        }
-    }
     let parsedCuisines = undefined;
     if (cuisineId !== undefined) {
         parsedCuisines = safeParseArray(cuisineId);

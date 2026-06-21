@@ -323,7 +323,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
 export const updateRestaurant = async (req: Request, res: Response) => {
     const { id } = req.params; 
     const {
-        name, nameAr, nameFr, address, addressAr, addressFr, zoneId, lat, lng, logo, cover,
+        name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover,
         minDeliveryTime, maxDeliveryTime, deliveryTimeUnit,
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
@@ -359,16 +359,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     const restaurantUpdateData: any = { updatedAt: new Date() };
     const ownerUpdateData: any = { updatedAt: new Date() };
 
-    // 👇 التعديل هنا: التعامل مع الـ zoneId بشكل اختياري
-    if (zoneId !== undefined) {
-        if (zoneId === "" || zoneId === null) {
-            restaurantUpdateData.zoneId = null; // السماح بإزالة الزون
-        } else {
-            const [existingZone] = await db.select().from(zones).where(eq(zones.id, zoneId)).limit(1);
-            if (!existingZone) throw new BadRequest("Zone not found");
-            restaurantUpdateData.zoneId = zoneId;
-        }
-    }
+   
 
     let parsedCuisines: string[] | undefined = undefined;
     if (cuisineId !== undefined) {
