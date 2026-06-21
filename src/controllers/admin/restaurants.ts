@@ -259,6 +259,13 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
 
     const cuisineMap = new Map(allCuisinesList.map(c => [String(c.id).toLowerCase(), c]));
 
+    const allBusinessPlansList = await db.select().from(restaurantBusinessPlans);
+    const plansMap = new Map();
+    for (const plan of allBusinessPlansList) {
+        if (!plansMap.has(plan.restaurantId)) plansMap.set(plan.restaurantId, []);
+        plansMap.get(plan.restaurantId).push(plan);
+    }
+
     const formatted = raw.map(r => {
         let parsedCuisines = safeParseArray(r.cuisineIds);
 
@@ -278,6 +285,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             lat: r.lat,
             lng: r.lng,
             cuisines: parsedCuisines.map((id: string) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
+            businessPlans: plansMap.get(r.id) || [],
             zone: r.zone_id
                 ? { id: r.zone_id, name: r.zone_name }
                 : null,
@@ -333,10 +341,16 @@ export const getRestaurantById = async (req: Request, res: Response) => {
             .where(inArray(cuisines.id, parsedCuisines));
     }
 
+    const restaurantPlans = await db
+        .select()
+        .from(restaurantBusinessPlans)
+        .where(eq(restaurantBusinessPlans.restaurantId, id));
+
     const formattedRestaurant = {
         ...row.restaurantObj,
         email: row.ownerEmail || null,
         cuisines: restaurantCuisines,
+        businessPlans: restaurantPlans,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
     };
 

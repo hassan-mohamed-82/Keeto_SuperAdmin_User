@@ -228,6 +228,13 @@ const getAllRestaurants = async (req, res) => {
         nameFr: schema_1.cuisines.nameFr
     }).from(schema_1.cuisines);
     const cuisineMap = new Map(allCuisinesList.map(c => [String(c.id).toLowerCase(), c]));
+    const allBusinessPlansList = await connection_1.db.select().from(schema_1.restaurantBusinessPlans);
+    const plansMap = new Map();
+    for (const plan of allBusinessPlansList) {
+        if (!plansMap.has(plan.restaurantId))
+            plansMap.set(plan.restaurantId, []);
+        plansMap.get(plan.restaurantId).push(plan);
+    }
     const formatted = raw.map(r => {
         let parsedCuisines = safeParseArray(r.cuisineIds);
         return {
@@ -246,6 +253,7 @@ const getAllRestaurants = async (req, res) => {
             lat: r.lat,
             lng: r.lng,
             cuisines: parsedCuisines.map((id) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
+            businessPlans: plansMap.get(r.id) || [],
             zone: r.zone_id
                 ? { id: r.zone_id, name: r.zone_name }
                 : null,
@@ -288,10 +296,15 @@ const getRestaurantById = async (req, res) => {
             .from(schema_1.cuisines)
             .where((0, drizzle_orm_1.inArray)(schema_1.cuisines.id, parsedCuisines));
     }
+    const restaurantPlans = await connection_1.db
+        .select()
+        .from(schema_1.restaurantBusinessPlans)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, id));
     const formattedRestaurant = {
         ...row.restaurantObj,
         email: row.ownerEmail || null,
         cuisines: restaurantCuisines,
+        businessPlans: restaurantPlans,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
     };
     // إزالة حقل الـ IDs الخام حتى لا يظهر في الـ JSON النهائي
