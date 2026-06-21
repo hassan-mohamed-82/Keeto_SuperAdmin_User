@@ -47,53 +47,38 @@ const decrementCuisineCount = async (cuisineId) => {
 const safeParseArray = (input) => {
     if (!input)
         return [];
-    // تحويل المدخل إلى نص سواء كان Array أو Object
     const stringified = typeof input === "string" ? input : JSON.stringify(input);
-    // Regex لاستخراج الـ UUIDs النظيفة فقط وتجاهل أي أقواس أو علامات تنصيص زائدة
     const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
     const matches = stringified.match(uuidRegex);
-    // إرجاع الـ IDs بدون تكرار
     return matches ? Array.from(new Set(matches)) : [];
 };
+// ==========================================
+// 1. CREATE RESTAURANT
+// ==========================================
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
-    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans } = req.body;
-    let cuisineId = req.body.cuisineId;
-    if (cuisineId === undefined)
-        cuisineId = req.body['cuisineId[]'];
-    if (cuisineId === undefined)
-        cuisineId = req.body.cuisines;
-    if (cuisineId === undefined)
-        cuisineId = req.body['cuisines[]'];
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans, type, salesId // 👈 استلام الحقول الجديدة
+     } = req.body;
+    let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
     if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
     }
-    // التحقق من تكرار الإيميل في جدول حسابات مديري المطاعم
     const existingUser = await connection_1.db
         .select()
         .from(schema_1.restrauntadmin)
         .where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.email, clean(email)))
         .limit(1);
-    if (existingUser[0]) {
+    if (existingUser[0])
         throw new BadRequest_1.BadRequest("Email already exists for a restaurant user");
-    }
-    // حماية الـ Logo وحفظ الصورة
     let logoUrl = undefined;
-    if (logo) {
-        const result = await (0, handleImages_1.saveBase64Image)(req, logo, "restaurants");
-        logoUrl = result.url;
-    }
-    // حماية الـ Cover وحفظ الصورة
+    if (logo)
+        logoUrl = (await (0, handleImages_1.saveBase64Image)(req, logo, "restaurants")).url;
     let coverUrl = undefined;
-    if (cover) {
-        const result = await (0, handleImages_1.saveBase64Image)(req, cover, "restaurants_cover");
-        coverUrl = result.url;
-    }
-    // تشفير الباسورد الخاص بمالك المطعم
+    if (cover)
+        coverUrl = (await (0, handleImages_1.saveBase64Image)(req, cover, "restaurants_cover")).url;
     const hashedPassword = await bcrypt_1.default.hash(password, 10);
     const restaurantId = (0, uuid_1.v4)();
     const ownerUserId = (0, uuid_1.v4)();
-    // تجهيز الـ Tags والـ Cuisines
     const parsedTags = safeParseArray(tags);
     const parsedCuisines = safeParseArray(cuisineId);
     let parsedBusinessPlans = [];
@@ -110,9 +95,9 @@ const createRestaurant = async (req, res) => {
             parsedBusinessPlans = businessPlans;
         }
     }
-    // بدء الـ Transaction لحفظ البيانات
+    const plansToReturn = []; // 👈 مصفوفة لتجميع الخطط وإرجاعها
     await connection_1.db.transaction(async (tx) => {
-        // 1. حفظ بيانات المطعم
+        // 1. إنشاء المطعم
         await tx.insert(schema_1.restaurants).values({
             id: restaurantId,
             name: clean(name),
@@ -122,8 +107,9 @@ const createRestaurant = async (req, res) => {
             addressAr: clean(addressAr),
             addressFr: clean(addressFr),
             cuisineId: parsedCuisines,
-            // 👇 التعديل هنا: لو مفيش zoneId احفظه null
             zoneId: zoneId ? clean(zoneId) : null,
+            type: type ? clean(type) : "C", // 👈 حفظ نوع المطعم (Default C)
+            salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
             logo: logoUrl || '',
             cover: coverUrl || '',
             lat: lat || '',
@@ -141,11 +127,10 @@ const createRestaurant = async (req, res) => {
             taxCertificate: typeof taxCertificate === 'string' ? clean(taxCertificate) : null,
             status: status || "active",
         });
-        // 2. إنشاء حساب المالك
+        // 2. إنشاء المالك
         await tx.insert(schema_1.restrauntadmin).values({
             id: ownerUserId,
             restaurantId: restaurantId,
-            branchId: null,
             name: `${clean(ownerFirstName)} ${clean(ownerLastName)}`,
             email: clean(email),
             password: hashedPassword,
@@ -153,7 +138,7 @@ const createRestaurant = async (req, res) => {
             type: "owner",
             status: "active",
         });
-        // 3. إنشاء محفظة المطعم
+        // 3. محفظة المطعم
         await tx.insert(schema_1.restaurantWallets).values({
             id: (0, uuid_1.v4)(),
             restaurantId: restaurantId,
@@ -163,12 +148,12 @@ const createRestaurant = async (req, res) => {
             totalWithdrawn: "0.00",
             totalEarning: "0.00",
         });
-        // 4. إنشاء الـ Business Plans
+        // 4. الـ Business Plans
         if (parsedBusinessPlans.length > 0) {
             for (const plan of parsedBusinessPlans) {
                 if (!plan.platformType)
                     continue;
-                await tx.insert(schema_1.restaurantBusinessPlans).values({
+                const newPlan = {
                     id: (0, uuid_1.v4)(),
                     restaurantId: restaurantId,
                     platformType: plan.platformType,
@@ -180,23 +165,29 @@ const createRestaurant = async (req, res) => {
                     annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
                     commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
                     serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
-                });
+                };
+                await tx.insert(schema_1.restaurantBusinessPlans).values(newPlan);
+                plansToReturn.push(newPlan); // إضافة الخطة للمصفوفة الراجعة
             }
         }
     });
-    // زيادة عداد المطبخ للمطابخ المختارة
-    for (const cid of parsedCuisines) {
+    for (const cid of parsedCuisines)
         await incrementCuisineCount(cid);
-    }
     return (0, response_1.SuccessResponse)(res, {
-        message: "Restaurant and Owner account created successfully",
+        message: "Restaurant, Owner account, and Business Plans created successfully",
         data: {
             restaurantId,
-            ownerUserId
+            ownerUserId,
+            type: type || "C",
+            salesId: salesId || null,
+            businessPlans: plansToReturn // 👈 إرجاع الخطط
         }
     }, 201);
 };
 exports.createRestaurant = createRestaurant;
+// ==========================================
+// 2. GET ALL RESTAURANTS
+// ==========================================
 const getAllRestaurants = async (req, res) => {
     const raw = await connection_1.db.select({
         id: schema_1.restaurants.id,
@@ -212,6 +203,8 @@ const getAllRestaurants = async (req, res) => {
         lng: schema_1.restaurants.lng,
         cover: schema_1.restaurants.cover,
         status: schema_1.restaurants.status,
+        type: schema_1.restaurants.type, // 👈 استرجاع النوع
+        salesId: schema_1.restaurants.salesId, // 👈 استرجاع المندوب
         cuisineIds: schema_1.restaurants.cuisineId,
         email: schema_1.restrauntadmin.email,
         zone_id: schema_1.zones.id,
@@ -220,7 +213,6 @@ const getAllRestaurants = async (req, res) => {
         .from(schema_1.restaurants)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurants.zoneId, schema_1.zones.id))
         .leftJoin(schema_1.restrauntadmin, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restrauntadmin.restaurantId), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")));
-    // تحديد الـ 4 حقول فقط للـ cuisines
     const allCuisinesList = await connection_1.db.select({
         id: schema_1.cuisines.id,
         name: schema_1.cuisines.name,
@@ -248,23 +240,23 @@ const getAllRestaurants = async (req, res) => {
             logo: r.logo,
             cover: r.cover,
             status: r.status,
+            type: r.type,
+            salesId: r.salesId,
             email: r.email || null,
             deliveryRadiusKm: r.deliveryRadiusKm,
             lat: r.lat,
             lng: r.lng,
             cuisines: parsedCuisines.map((id) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
             businessPlans: plansMap.get(r.id) || [],
-            zone: r.zone_id
-                ? { id: r.zone_id, name: r.zone_name }
-                : null,
+            zone: r.zone_id ? { id: r.zone_id, name: r.zone_name } : null,
         };
     });
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Get all restaurants success",
-        data: formatted
-    });
+    return (0, response_1.SuccessResponse)(res, { message: "Get all restaurants success", data: formatted });
 };
 exports.getAllRestaurants = getAllRestaurants;
+// ==========================================
+// 3. GET RESTAURANT BY ID
+// ==========================================
 const getRestaurantById = async (req, res) => {
     const { id } = req.params;
     const rawRestaurants = await connection_1.db
@@ -278,21 +270,14 @@ const getRestaurantById = async (req, res) => {
         .leftJoin(schema_1.restrauntadmin, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restrauntadmin.restaurantId), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")))
         .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id))
         .limit(1);
-    if (!rawRestaurants[0]) {
+    if (!rawRestaurants[0])
         throw new NotFound_1.NotFound("Restaurant not found");
-    }
     const row = rawRestaurants[0];
     let parsedCuisines = safeParseArray(row.restaurantObj.cuisineId);
     let restaurantCuisines = [];
-    if (parsedCuisines && parsedCuisines.length > 0) {
-        // تحديد الـ 4 حقول فقط للـ cuisines
+    if (parsedCuisines.length > 0) {
         restaurantCuisines = await connection_1.db
-            .select({
-            id: schema_1.cuisines.id,
-            name: schema_1.cuisines.name,
-            nameAr: schema_1.cuisines.nameAr,
-            nameFr: schema_1.cuisines.nameFr
-        })
+            .select({ id: schema_1.cuisines.id, name: schema_1.cuisines.name, nameAr: schema_1.cuisines.nameAr, nameFr: schema_1.cuisines.nameFr })
             .from(schema_1.cuisines)
             .where((0, drizzle_orm_1.inArray)(schema_1.cuisines.id, parsedCuisines));
     }
@@ -307,67 +292,54 @@ const getRestaurantById = async (req, res) => {
         businessPlans: restaurantPlans,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
     };
-    // إزالة حقل الـ IDs الخام حتى لا يظهر في الـ JSON النهائي
     delete formattedRestaurant.cuisineId;
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Get restaurant by id success",
-        data: formattedRestaurant
-    });
+    return (0, response_1.SuccessResponse)(res, { message: "Get restaurant by id success", data: formattedRestaurant });
 };
 exports.getRestaurantById = getRestaurantById;
+// ==========================================
+// 4. UPDATE RESTAURANT
+// ==========================================
 const updateRestaurant = async (req, res) => {
     const { id } = req.params;
-    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm } = req.body;
-    let cuisineId = req.body.cuisineId;
-    if (cuisineId === undefined)
-        cuisineId = req.body['cuisineId[]'];
-    if (cuisineId === undefined)
-        cuisineId = req.body.cuisines;
-    if (cuisineId === undefined)
-        cuisineId = req.body['cuisines[]'];
-    const [existingRestaurant] = await connection_1.db
-        .select()
-        .from(schema_1.restaurants)
-        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id))
-        .limit(1);
-    if (!existingRestaurant) {
+    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm, type, salesId, businessPlans // 👈 استلام الحقول الجديدة في الـ Update
+     } = req.body;
+    let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
+    const [existingRestaurant] = await connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id)).limit(1);
+    if (!existingRestaurant)
         throw new NotFound_1.NotFound("Restaurant not found");
-    }
-    const [existingOwner] = await connection_1.db
-        .select()
-        .from(schema_1.restrauntadmin)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.restaurantId, id), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")))
-        .limit(1);
+    const [existingOwner] = await connection_1.db.select().from(schema_1.restrauntadmin).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.restaurantId, id), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner"))).limit(1);
     const restaurantUpdateData = { updatedAt: new Date() };
     const ownerUpdateData = { updatedAt: new Date() };
     let parsedCuisines = undefined;
     if (cuisineId !== undefined) {
         parsedCuisines = safeParseArray(cuisineId);
         if (parsedCuisines && parsedCuisines.length > 0) {
-            const existingCuisines = await connection_1.db
-                .select()
-                .from(schema_1.cuisines)
-                .where((0, drizzle_orm_1.inArray)(schema_1.cuisines.id, parsedCuisines));
-            if (existingCuisines.length !== parsedCuisines.length) {
+            const existingCuisines = await connection_1.db.select().from(schema_1.cuisines).where((0, drizzle_orm_1.inArray)(schema_1.cuisines.id, parsedCuisines));
+            if (existingCuisines.length !== parsedCuisines.length)
                 throw new BadRequest_1.BadRequest("One or more Cuisines not found");
+        }
+    }
+    let parsedBusinessPlans = undefined;
+    if (businessPlans !== undefined) {
+        if (typeof businessPlans === "string") {
+            try {
+                parsedBusinessPlans = JSON.parse(businessPlans);
             }
+            catch (e) {
+                parsedBusinessPlans = [];
+            }
+        }
+        else if (Array.isArray(businessPlans)) {
+            parsedBusinessPlans = businessPlans;
         }
     }
     if (email && existingOwner && email !== existingOwner.email) {
-        const [emailExists] = await connection_1.db
-            .select()
-            .from(schema_1.restrauntadmin)
-            .where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.email, email.trim()))
-            .limit(1);
-        if (emailExists) {
+        const [emailExists] = await connection_1.db.select().from(schema_1.restrauntadmin).where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.email, email.trim())).limit(1);
+        if (emailExists)
             throw new BadRequest_1.BadRequest("Email already exists for another user");
-        }
     }
-    if (password) {
-        if (password !== confirmPassword) {
-            throw new BadRequest_1.BadRequest("Password and confirm password do not match");
-        }
-    }
+    if (password && password !== confirmPassword)
+        throw new BadRequest_1.BadRequest("Password and confirm password do not match");
     if (name)
         restaurantUpdateData.name = name;
     if (nameAr)
@@ -388,16 +360,14 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.lng = lng;
     if (deliveryRadiusKm !== undefined)
         restaurantUpdateData.deliveryRadiusKm = deliveryRadiusKm;
-    if (logo) {
+    if (type)
+        restaurantUpdateData.type = type; // 👈 تحديث النوع
+    if (salesId !== undefined)
+        restaurantUpdateData.salesId = (salesId === "" || salesId === null) ? null : salesId; // 👈 تحديث المندوب
+    if (logo)
         restaurantUpdateData.logo = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant.logo, logo, "restaurants");
-    }
     if (cover !== undefined) {
-        if (cover === "" || cover === null) {
-            restaurantUpdateData.cover = "";
-        }
-        else {
-            restaurantUpdateData.cover = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant.cover, cover, "restaurants_cover");
-        }
+        restaurantUpdateData.cover = (cover === "" || cover === null) ? "" : await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant.cover, cover, "restaurants_cover");
     }
     if (minDeliveryTime !== undefined)
         restaurantUpdateData.minDeliveryTime = minDeliveryTime;
@@ -439,62 +409,72 @@ const updateRestaurant = async (req, res) => {
             await tx.update(schema_1.restaurants).set(restaurantUpdateData).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id));
         }
         if (existingOwner && Object.keys(ownerUpdateData).length > 1) {
-            await tx.update(schema_1.restrauntadmin)
-                .set(ownerUpdateData)
-                .where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.id, existingOwner.id));
+            await tx.update(schema_1.restrauntadmin).set(ownerUpdateData).where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.id, existingOwner.id));
+        }
+        // 👈 تحديث خطط البيزنس (مسح القديم وإدخال الجديد لتجنب التعقيد)
+        if (parsedBusinessPlans !== undefined) {
+            await tx.delete(schema_1.restaurantBusinessPlans).where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, id));
+            if (parsedBusinessPlans.length > 0) {
+                for (const plan of parsedBusinessPlans) {
+                    if (!plan.platformType)
+                        continue;
+                    await tx.insert(schema_1.restaurantBusinessPlans).values({
+                        id: (0, uuid_1.v4)(),
+                        restaurantId: id,
+                        platformType: plan.platformType,
+                        isMonthlyActive: plan.isMonthlyActive === true || plan.isMonthlyActive === "true",
+                        monthlyAmount: plan.monthlyAmount ? String(plan.monthlyAmount) : "0.00",
+                        isQuarterlyActive: plan.isQuarterlyActive === true || plan.isQuarterlyActive === "true",
+                        quarterlyAmount: plan.quarterlyAmount ? String(plan.quarterlyAmount) : "0.00",
+                        isAnnuallyActive: plan.isAnnuallyActive === true || plan.isAnnuallyActive === "true",
+                        annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
+                        commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
+                        serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
+                    });
+                }
+            }
         }
     });
     if (parsedCuisines !== undefined) {
         const oldCuisines = safeParseArray(existingRestaurant.cuisineId);
         const newCuisines = parsedCuisines || [];
-        for (const cid of oldCuisines) {
-            if (!newCuisines.includes(cid)) {
+        for (const cid of oldCuisines)
+            if (!newCuisines.includes(cid))
                 await decrementCuisineCount(cid);
-            }
-        }
-        for (const cid of newCuisines) {
-            if (!oldCuisines.includes(cid)) {
+        for (const cid of newCuisines)
+            if (!oldCuisines.includes(cid))
                 await incrementCuisineCount(cid);
-            }
-        }
     }
-    return (0, response_1.SuccessResponse)(res, { message: "Update restaurant and owner account success" });
+    return (0, response_1.SuccessResponse)(res, { message: "Update restaurant, owner account, and plans success" });
 };
 exports.updateRestaurant = updateRestaurant;
+// ==========================================
+// 5. DELETE RESTAURANT
+// ==========================================
 const deleteRestaurant = async (req, res) => {
     const { id } = req.params;
-    const existingRestaurant = await connection_1.db
-        .select()
-        .from(schema_1.restaurants)
-        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id))
-        .limit(1);
-    if (!existingRestaurant[0]) {
+    const existingRestaurant = await connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id)).limit(1);
+    if (!existingRestaurant[0])
         throw new NotFound_1.NotFound("Restaurant not found");
-    }
     const oldCuisines = safeParseArray(existingRestaurant[0].cuisineId);
-    for (const cid of oldCuisines) {
+    for (const cid of oldCuisines)
         await decrementCuisineCount(cid);
-    }
     await connection_1.db.transaction(async (tx) => {
         await tx.delete(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, id));
+        await tx.delete(schema_1.restaurantBusinessPlans).where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, id)); // 👈 حذف الخطط
         await tx.delete(schema_1.restaurantWallets).where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, id));
         await tx.delete(schema_1.restrauntadmin).where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.restaurantId, id));
         await tx.delete(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id));
     });
-    return (0, response_1.SuccessResponse)(res, { message: "Delete restaurant and all related users/wallets success" });
+    return (0, response_1.SuccessResponse)(res, { message: "Delete restaurant and all related data success" });
 };
 exports.deleteRestaurant = deleteRestaurant;
+// ==========================================
+// 6. GET CUISINES AND ZONES
+// ==========================================
 const getallcousinesandzones = async (req, res) => {
-    const allCuisines = await connection_1.db.select({
-        id: schema_1.cuisines.id,
-        name: schema_1.cuisines.name,
-    }).from(schema_1.cuisines)
-        .where((0, drizzle_orm_1.eq)(schema_1.cuisines.status, "active"));
-    const allZones = await connection_1.db.select({
-        id: schema_1.zones.id,
-        name: schema_1.zones.name,
-    }).from(schema_1.zones)
-        .where((0, drizzle_orm_1.eq)(schema_1.zones.status, "active"));
+    const allCuisines = await connection_1.db.select({ id: schema_1.cuisines.id, name: schema_1.cuisines.name }).from(schema_1.cuisines).where((0, drizzle_orm_1.eq)(schema_1.cuisines.status, "active"));
+    const allZones = await connection_1.db.select({ id: schema_1.zones.id, name: schema_1.zones.name }).from(schema_1.zones).where((0, drizzle_orm_1.eq)(schema_1.zones.status, "active"));
     return (0, response_1.SuccessResponse)(res, { message: "Get all cuisines and zones success", data: { allCuisines, allZones } });
 };
 exports.getallcousinesandzones = getallcousinesandzones;

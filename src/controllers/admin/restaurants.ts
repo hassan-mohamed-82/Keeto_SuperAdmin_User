@@ -46,19 +46,15 @@ const decrementCuisineCount = async (cuisineId: string) => {
 // Helper: Safely parse arrays and extract valid UUIDs only
 const safeParseArray = (input: any): string[] => {
     if (!input) return [];
-
-    // تحويل المدخل إلى نص سواء كان Array أو Object
     const stringified = typeof input === "string" ? input : JSON.stringify(input);
-
-    // Regex لاستخراج الـ UUIDs النظيفة فقط وتجاهل أي أقواس أو علامات تنصيص زائدة
     const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
-
     const matches = stringified.match(uuidRegex);
-
-    // إرجاع الـ IDs بدون تكرار
     return matches ? Array.from(new Set(matches)) : [];
 };
 
+// ==========================================
+// 1. CREATE RESTAURANT
+// ==========================================
 export const createRestaurant = async (req: Request, res: Response) => {
     const clean = (v: any) => (typeof v === "string" ? v.trim() : v);
 
@@ -67,49 +63,34 @@ export const createRestaurant = async (req: Request, res: Response) => {
         zoneId, logo, cover, minDeliveryTime, maxDeliveryTime,
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
-        lat, lng, deliveryRadiusKm, businessPlans
+        lat, lng, deliveryRadiusKm, businessPlans, 
+        type, salesId // 👈 استلام الحقول الجديدة
     } = req.body;
 
-    let cuisineId = req.body.cuisineId;
-    if (cuisineId === undefined) cuisineId = req.body['cuisineId[]'];
-    if (cuisineId === undefined) cuisineId = req.body.cuisines;
-    if (cuisineId === undefined) cuisineId = req.body['cuisines[]'];
+    let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
 
     if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest("Missing required fields");
     }
 
-    // التحقق من تكرار الإيميل في جدول حسابات مديري المطاعم
     const existingUser = await db
         .select()
         .from(restrauntadmin)
         .where(eq(restrauntadmin.email, clean(email)))
         .limit(1);
 
-    if (existingUser[0]) {
-        throw new BadRequest("Email already exists for a restaurant user");
-    }
+    if (existingUser[0]) throw new BadRequest("Email already exists for a restaurant user");
 
-    // حماية الـ Logo وحفظ الصورة
     let logoUrl: string | undefined = undefined;
-    if (logo) {
-        const result = await saveBase64Image(req, logo, "restaurants");
-        logoUrl = result.url;
-    }
+    if (logo) logoUrl = (await saveBase64Image(req, logo, "restaurants")).url;
 
-    // حماية الـ Cover وحفظ الصورة
     let coverUrl: string | undefined = undefined;
-    if (cover) {
-        const result = await saveBase64Image(req, cover, "restaurants_cover");
-        coverUrl = result.url;
-    }
+    if (cover) coverUrl = (await saveBase64Image(req, cover, "restaurants_cover")).url;
 
-    // تشفير الباسورد الخاص بمالك المطعم
     const hashedPassword = await bcrypt.hash(password, 10);
     const restaurantId = uuidv4();
     const ownerUserId = uuidv4();
 
-    // تجهيز الـ Tags والـ Cuisines
     const parsedTags: string[] = safeParseArray(tags);
     const parsedCuisines: string[] = safeParseArray(cuisineId);
 
@@ -122,10 +103,10 @@ export const createRestaurant = async (req: Request, res: Response) => {
         }
     }
 
-    // بدء الـ Transaction لحفظ البيانات
-    await db.transaction(async (tx) => {
+    const plansToReturn: any[] = []; // 👈 مصفوفة لتجميع الخطط وإرجاعها
 
-        // 1. حفظ بيانات المطعم
+    await db.transaction(async (tx) => {
+        // 1. إنشاء المطعم
         await tx.insert(restaurants).values({
             id: restaurantId,
             name: clean(name),
@@ -135,10 +116,11 @@ export const createRestaurant = async (req: Request, res: Response) => {
             addressAr: clean(addressAr),
             addressFr: clean(addressFr),
             cuisineId: parsedCuisines,
-
-            // 👇 التعديل هنا: لو مفيش zoneId احفظه null
             zoneId: zoneId ? clean(zoneId) : null,
-
+            
+            type: type ? clean(type) : "C", // 👈 حفظ نوع المطعم (Default C)
+            salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
+            
             logo: logoUrl || '',
             cover: coverUrl || '',
             lat: lat || '',
@@ -147,24 +129,20 @@ export const createRestaurant = async (req: Request, res: Response) => {
             minDeliveryTime: minDeliveryTime ? clean(minDeliveryTime) : null,
             maxDeliveryTime: maxDeliveryTime ? clean(maxDeliveryTime) : null,
             deliveryTimeUnit: deliveryTimeUnit || "Minutes",
-
             ownerFirstName: clean(ownerFirstName),
             ownerLastName: clean(ownerLastName),
             ownerPhone: clean(ownerPhone),
-
             tags: parsedTags,
             taxNumber: taxNumber ? clean(taxNumber) : null,
             taxExpireDate: taxExpireDate || null,
             taxCertificate: typeof taxCertificate === 'string' ? clean(taxCertificate) : null,
-
             status: status || "active",
         });
 
-        // 2. إنشاء حساب المالك
+        // 2. إنشاء المالك
         await tx.insert(restrauntadmin).values({
             id: ownerUserId,
             restaurantId: restaurantId,
-            branchId: null,
             name: `${clean(ownerFirstName)} ${clean(ownerLastName)}`,
             email: clean(email),
             password: hashedPassword,
@@ -173,7 +151,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             status: "active",
         });
 
-        // 3. إنشاء محفظة المطعم
+        // 3. محفظة المطعم
         await tx.insert(restaurantWallets).values({
             id: uuidv4(),
             restaurantId: restaurantId,
@@ -184,11 +162,12 @@ export const createRestaurant = async (req: Request, res: Response) => {
             totalEarning: "0.00",
         });
 
-        // 4. إنشاء الـ Business Plans
+        // 4. الـ Business Plans
         if (parsedBusinessPlans.length > 0) {
             for (const plan of parsedBusinessPlans) {
                 if (!plan.platformType) continue;
-                await tx.insert(restaurantBusinessPlans).values({
+                
+                const newPlan = {
                     id: uuidv4(),
                     restaurantId: restaurantId,
                     platformType: plan.platformType,
@@ -200,25 +179,31 @@ export const createRestaurant = async (req: Request, res: Response) => {
                     annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
                     commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
                     serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
-                });
+                };
+                
+                await tx.insert(restaurantBusinessPlans).values(newPlan);
+                plansToReturn.push(newPlan); // إضافة الخطة للمصفوفة الراجعة
             }
         }
     });
 
-    // زيادة عداد المطبخ للمطابخ المختارة
-    for (const cid of parsedCuisines) {
-        await incrementCuisineCount(cid);
-    }
+    for (const cid of parsedCuisines) await incrementCuisineCount(cid);
 
     return SuccessResponse(res, {
-        message: "Restaurant and Owner account created successfully",
+        message: "Restaurant, Owner account, and Business Plans created successfully",
         data: {
             restaurantId,
-            ownerUserId
+            ownerUserId,
+            type: type || "C",
+            salesId: salesId || null,
+            businessPlans: plansToReturn // 👈 إرجاع الخطط
         }
     }, 201);
 };
 
+// ==========================================
+// 2. GET ALL RESTAURANTS
+// ==========================================
 export const getAllRestaurants = async (req: Request, res: Response) => {
     const raw = await db.select({
         id: restaurants.id,
@@ -234,6 +219,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         lng: restaurants.lng,
         cover: restaurants.cover,
         status: restaurants.status,
+        type: restaurants.type, // 👈 استرجاع النوع
+        salesId: restaurants.salesId, // 👈 استرجاع المندوب
         cuisineIds: restaurants.cuisineId,
         email: restrauntadmin.email,
         zone_id: zones.id,
@@ -249,14 +236,12 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             )
         );
 
-    // تحديد الـ 4 حقول فقط للـ cuisines
     const allCuisinesList = await db.select({
         id: cuisines.id,
         name: cuisines.name,
         nameAr: cuisines.nameAr,
         nameFr: cuisines.nameFr
     }).from(cuisines);
-
     const cuisineMap = new Map(allCuisinesList.map(c => [String(c.id).toLowerCase(), c]));
 
     const allBusinessPlansList = await db.select().from(restaurantBusinessPlans);
@@ -268,7 +253,6 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
 
     const formatted = raw.map(r => {
         let parsedCuisines = safeParseArray(r.cuisineIds);
-
         return {
             id: r.id,
             name: r.name,
@@ -280,24 +264,24 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             logo: r.logo,
             cover: r.cover,
             status: r.status,
+            type: r.type,
+            salesId: r.salesId,
             email: r.email || null,
             deliveryRadiusKm: r.deliveryRadiusKm,
             lat: r.lat,
             lng: r.lng,
             cuisines: parsedCuisines.map((id: string) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
             businessPlans: plansMap.get(r.id) || [],
-            zone: r.zone_id
-                ? { id: r.zone_id, name: r.zone_name }
-                : null,
+            zone: r.zone_id ? { id: r.zone_id, name: r.zone_name } : null,
         };
     });
 
-    return SuccessResponse(res, {
-        message: "Get all restaurants success",
-        data: formatted
-    });
+    return SuccessResponse(res, { message: "Get all restaurants success", data: formatted });
 };
 
+// ==========================================
+// 3. GET RESTAURANT BY ID
+// ==========================================
 export const getRestaurantById = async (req: Request, res: Response) => {
     const { id } = req.params;
 
@@ -311,32 +295,20 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         .leftJoin(zones, eq(restaurants.zoneId, zones.id))
         .leftJoin(
             restrauntadmin,
-            and(
-                eq(restaurants.id, restrauntadmin.restaurantId),
-                eq(restrauntadmin.type, "owner")
-            )
+            and(eq(restaurants.id, restrauntadmin.restaurantId), eq(restrauntadmin.type, "owner"))
         )
         .where(eq(restaurants.id, id))
         .limit(1);
 
-    if (!rawRestaurants[0]) {
-        throw new NotFound("Restaurant not found");
-    }
+    if (!rawRestaurants[0]) throw new NotFound("Restaurant not found");
 
     const row = rawRestaurants[0];
-
     let parsedCuisines = safeParseArray(row.restaurantObj.cuisineId);
 
     let restaurantCuisines: any[] = [];
-    if (parsedCuisines && parsedCuisines.length > 0) {
-        // تحديد الـ 4 حقول فقط للـ cuisines
+    if (parsedCuisines.length > 0) {
         restaurantCuisines = await db
-            .select({
-                id: cuisines.id,
-                name: cuisines.name,
-                nameAr: cuisines.nameAr,
-                nameFr: cuisines.nameFr
-            })
+            .select({ id: cuisines.id, name: cuisines.name, nameAr: cuisines.nameAr, nameFr: cuisines.nameFr })
             .from(cuisines)
             .where(inArray(cuisines.id, parsedCuisines));
     }
@@ -353,16 +325,14 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         businessPlans: restaurantPlans,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
     };
-
-    // إزالة حقل الـ IDs الخام حتى لا يظهر في الـ JSON النهائي
     delete (formattedRestaurant as any).cuisineId;
 
-    return SuccessResponse(res, {
-        message: "Get restaurant by id success",
-        data: formattedRestaurant
-    });
+    return SuccessResponse(res, { message: "Get restaurant by id success", data: formattedRestaurant });
 };
 
+// ==========================================
+// 4. UPDATE RESTAURANT
+// ==========================================
 export const updateRestaurant = async (req: Request, res: Response) => {
     const { id } = req.params;
     const {
@@ -370,73 +340,44 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         minDeliveryTime, maxDeliveryTime, deliveryTimeUnit,
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
-        email, password, confirmPassword, status, deliveryRadiusKm
+        email, password, confirmPassword, status, deliveryRadiusKm,
+        type, salesId, businessPlans // 👈 استلام الحقول الجديدة في الـ Update
     } = req.body;
 
-    let cuisineId = req.body.cuisineId;
-    if (cuisineId === undefined) cuisineId = req.body['cuisineId[]'];
-    if (cuisineId === undefined) cuisineId = req.body.cuisines;
-    if (cuisineId === undefined) cuisineId = req.body['cuisines[]'];
+    let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
 
-    const [existingRestaurant] = await db
-        .select()
-        .from(restaurants)
-        .where(eq(restaurants.id, id))
-        .limit(1);
+    const [existingRestaurant] = await db.select().from(restaurants).where(eq(restaurants.id, id)).limit(1);
+    if (!existingRestaurant) throw new NotFound("Restaurant not found");
 
-    if (!existingRestaurant) {
-        throw new NotFound("Restaurant not found");
-    }
-
-    const [existingOwner] = await db
-        .select()
-        .from(restrauntadmin)
-        .where(
-            and(
-                eq(restrauntadmin.restaurantId, id),
-                eq(restrauntadmin.type, "owner")
-            )
-        )
-        .limit(1);
+    const [existingOwner] = await db.select().from(restrauntadmin).where(and(eq(restrauntadmin.restaurantId, id), eq(restrauntadmin.type, "owner"))).limit(1);
 
     const restaurantUpdateData: any = { updatedAt: new Date() };
     const ownerUpdateData: any = { updatedAt: new Date() };
 
-
-
     let parsedCuisines: string[] | undefined = undefined;
     if (cuisineId !== undefined) {
         parsedCuisines = safeParseArray(cuisineId);
-
         if (parsedCuisines && parsedCuisines.length > 0) {
-            const existingCuisines = await db
-                .select()
-                .from(cuisines)
-                .where(inArray(cuisines.id, parsedCuisines));
+            const existingCuisines = await db.select().from(cuisines).where(inArray(cuisines.id, parsedCuisines));
+            if (existingCuisines.length !== parsedCuisines.length) throw new BadRequest("One or more Cuisines not found");
+        }
+    }
 
-            if (existingCuisines.length !== parsedCuisines.length) {
-                throw new BadRequest("One or more Cuisines not found");
-            }
+    let parsedBusinessPlans: any[] | undefined = undefined;
+    if (businessPlans !== undefined) {
+        if (typeof businessPlans === "string") {
+            try { parsedBusinessPlans = JSON.parse(businessPlans); } catch (e) { parsedBusinessPlans = []; }
+        } else if (Array.isArray(businessPlans)) {
+            parsedBusinessPlans = businessPlans;
         }
     }
 
     if (email && existingOwner && email !== existingOwner.email) {
-        const [emailExists] = await db
-            .select()
-            .from(restrauntadmin)
-            .where(eq(restrauntadmin.email, email.trim()))
-            .limit(1);
-
-        if (emailExists) {
-            throw new BadRequest("Email already exists for another user");
-        }
+        const [emailExists] = await db.select().from(restrauntadmin).where(eq(restrauntadmin.email, email.trim())).limit(1);
+        if (emailExists) throw new BadRequest("Email already exists for another user");
     }
 
-    if (password) {
-        if (password !== confirmPassword) {
-            throw new BadRequest("Password and confirm password do not match");
-        }
-    }
+    if (password && password !== confirmPassword) throw new BadRequest("Password and confirm password do not match");
 
     if (name) restaurantUpdateData.name = name;
     if (nameAr) restaurantUpdateData.nameAr = nameAr;
@@ -449,16 +390,13 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (lat !== undefined) restaurantUpdateData.lat = lat;
     if (lng !== undefined) restaurantUpdateData.lng = lng;
     if (deliveryRadiusKm !== undefined) restaurantUpdateData.deliveryRadiusKm = deliveryRadiusKm;
+    
+    if (type) restaurantUpdateData.type = type; // 👈 تحديث النوع
+    if (salesId !== undefined) restaurantUpdateData.salesId = (salesId === "" || salesId === null) ? null : salesId; // 👈 تحديث المندوب
 
-    if (logo) {
-        restaurantUpdateData.logo = await handleImageUpdate(req, existingRestaurant.logo, logo, "restaurants");
-    }
+    if (logo) restaurantUpdateData.logo = await handleImageUpdate(req, existingRestaurant.logo, logo, "restaurants");
     if (cover !== undefined) {
-        if (cover === "" || cover === null) {
-            restaurantUpdateData.cover = "";
-        } else {
-            restaurantUpdateData.cover = await handleImageUpdate(req, existingRestaurant.cover, cover, "restaurants_cover");
-        }
+        restaurantUpdateData.cover = (cover === "" || cover === null) ? "" : await handleImageUpdate(req, existingRestaurant.cover, cover, "restaurants_cover");
     }
 
     if (minDeliveryTime !== undefined) restaurantUpdateData.minDeliveryTime = minDeliveryTime;
@@ -492,70 +430,72 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         }
 
         if (existingOwner && Object.keys(ownerUpdateData).length > 1) {
-            await tx.update(restrauntadmin)
-                .set(ownerUpdateData)
-                .where(eq(restrauntadmin.id, existingOwner.id));
+            await tx.update(restrauntadmin).set(ownerUpdateData).where(eq(restrauntadmin.id, existingOwner.id));
+        }
+
+        // 👈 تحديث خطط البيزنس (مسح القديم وإدخال الجديد لتجنب التعقيد)
+        if (parsedBusinessPlans !== undefined) {
+            await tx.delete(restaurantBusinessPlans).where(eq(restaurantBusinessPlans.restaurantId, id));
+            
+            if (parsedBusinessPlans.length > 0) {
+                for (const plan of parsedBusinessPlans) {
+                    if (!plan.platformType) continue;
+                    await tx.insert(restaurantBusinessPlans).values({
+                        id: uuidv4(),
+                        restaurantId: id,
+                        platformType: plan.platformType,
+                        isMonthlyActive: plan.isMonthlyActive === true || plan.isMonthlyActive === "true",
+                        monthlyAmount: plan.monthlyAmount ? String(plan.monthlyAmount) : "0.00",
+                        isQuarterlyActive: plan.isQuarterlyActive === true || plan.isQuarterlyActive === "true",
+                        quarterlyAmount: plan.quarterlyAmount ? String(plan.quarterlyAmount) : "0.00",
+                        isAnnuallyActive: plan.isAnnuallyActive === true || plan.isAnnuallyActive === "true",
+                        annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
+                        commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
+                        serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
+                    });
+                }
+            }
         }
     });
 
     if (parsedCuisines !== undefined) {
         const oldCuisines = safeParseArray(existingRestaurant.cuisineId);
         const newCuisines = parsedCuisines || [];
-
-        for (const cid of oldCuisines) {
-            if (!newCuisines.includes(cid)) {
-                await decrementCuisineCount(cid);
-            }
-        }
-
-        for (const cid of newCuisines) {
-            if (!oldCuisines.includes(cid)) {
-                await incrementCuisineCount(cid);
-            }
-        }
+        for (const cid of oldCuisines) if (!newCuisines.includes(cid)) await decrementCuisineCount(cid);
+        for (const cid of newCuisines) if (!oldCuisines.includes(cid)) await incrementCuisineCount(cid);
     }
 
-    return SuccessResponse(res, { message: "Update restaurant and owner account success" });
+    return SuccessResponse(res, { message: "Update restaurant, owner account, and plans success" });
 };
 
+// ==========================================
+// 5. DELETE RESTAURANT
+// ==========================================
 export const deleteRestaurant = async (req: Request, res: Response) => {
     const { id } = req.params;
 
-    const existingRestaurant = await db
-        .select()
-        .from(restaurants)
-        .where(eq(restaurants.id, id))
-        .limit(1);
-
-    if (!existingRestaurant[0]) {
-        throw new NotFound("Restaurant not found");
-    }
+    const existingRestaurant = await db.select().from(restaurants).where(eq(restaurants.id, id)).limit(1);
+    if (!existingRestaurant[0]) throw new NotFound("Restaurant not found");
 
     const oldCuisines = safeParseArray(existingRestaurant[0].cuisineId);
-    for (const cid of oldCuisines) {
-        await decrementCuisineCount(cid);
-    }
+    for (const cid of oldCuisines) await decrementCuisineCount(cid);
 
     await db.transaction(async (tx) => {
         await tx.delete(food).where(eq(food.restaurantid, id));
+        await tx.delete(restaurantBusinessPlans).where(eq(restaurantBusinessPlans.restaurantId, id)); // 👈 حذف الخطط
         await tx.delete(restaurantWallets).where(eq(restaurantWallets.restaurantId, id));
         await tx.delete(restrauntadmin).where(eq(restrauntadmin.restaurantId, id));
         await tx.delete(restaurants).where(eq(restaurants.id, id));
     });
 
-    return SuccessResponse(res, { message: "Delete restaurant and all related users/wallets success" });
+    return SuccessResponse(res, { message: "Delete restaurant and all related data success" });
 };
 
+// ==========================================
+// 6. GET CUISINES AND ZONES
+// ==========================================
 export const getallcousinesandzones = async (req: Request, res: Response) => {
-    const allCuisines = await db.select({
-        id: cuisines.id,
-        name: cuisines.name,
-    }).from(cuisines)
-        .where(eq(cuisines.status, "active"));
-    const allZones = await db.select({
-        id: zones.id,
-        name: zones.name,
-    }).from(zones)
-        .where(eq(zones.status, "active"));
+    const allCuisines = await db.select({ id: cuisines.id, name: cuisines.name }).from(cuisines).where(eq(cuisines.status, "active"));
+    const allZones = await db.select({ id: zones.id, name: zones.name }).from(zones).where(eq(zones.status, "active"));
     return SuccessResponse(res, { message: "Get all cuisines and zones success", data: { allCuisines, allZones } });
 }
