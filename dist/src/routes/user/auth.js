@@ -5,6 +5,7 @@ const catchAsync_1 = require("../../utils/catchAsync");
 const auth_1 = require("../../controllers/user/auth");
 const facebook_1 = require("../../config/facebook");
 const passport_1 = require("../../config/passport");
+const verifyAppleToken_1 = require("../../config/verifyAppleToken");
 const router = (0, express_1.Router)();
 router.post("/signup", (0, catchAsync_1.catchAsync)(auth_1.signup));
 router.get("/verify-email", (0, catchAsync_1.catchAsync)(auth_1.verifyEmail));
@@ -14,4 +15,5 @@ router.post("/verify-reset-code", (0, catchAsync_1.catchAsync)(auth_1.verifyRese
 router.post("/reset-password", (0, catchAsync_1.catchAsync)(auth_1.resetPassword));
 router.post("/google", (0, catchAsync_1.catchAsync)(passport_1.verifyGoogleToken));
 router.post("/facebook", (0, catchAsync_1.catchAsync)(facebook_1.facebookLoginOrSignup));
+router.post("/apple", (0, catchAsync_1.catchAsync)(verifyAppleToken_1.verifyAppleToken));
 exports.default = router;

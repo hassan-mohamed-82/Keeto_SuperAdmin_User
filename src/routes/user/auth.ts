@@ -10,6 +10,7 @@ import {
 } from "../../controllers/user/auth";
 import { facebookLoginOrSignup } from "../../config/facebook";
 import { verifyGoogleToken } from "../../config/passport";
+import {verifyAppleToken} from "../../config/verifyAppleToken"
 
 const router = Router();
 
@@ -22,5 +23,5 @@ router.post("/reset-password", catchAsync(resetPassword));
 
 router.post("/google", catchAsync(verifyGoogleToken));
 router.post("/facebook", catchAsync(facebookLoginOrSignup));
-
+router.post("/apple",catchAsync(verifyAppleToken))
 export default router;

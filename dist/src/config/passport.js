@@ -58,7 +58,8 @@ const verifyGoogleToken = async (req, res) => {
                 isVerified: true,
                 status: "active",
                 createdAt: new Date(),
-                facebookId: null
+                facebookId: null,
+                appleId: null
             };
         }
         else {

@@ -6,6 +6,7 @@ import { users, restaurant_users } from "../models/schema";
 import { db } from "../models/connection";
 import { eq, or, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { nan } from "zod";
 
 dotenv.config();
 
@@ -63,7 +64,8 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         isVerified: true, 
         status: "active", 
         createdAt: new Date(), 
-        facebookId: null 
+        facebookId: null, 
+        appleId:null
       };
     } else {
       // 👤 Login (existing user)

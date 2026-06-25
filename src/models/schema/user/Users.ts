@@ -19,7 +19,8 @@ export const users = mysqlTable("users", {
     
     // ⚠️ التعديل هنا: شيلنا notNull() لأن تسجيل الفيس بوك ملوش باسورد
     password: varchar("password", { length: 255 }), 
-    
+    // أضف هذا السطر في تعريف جدول users في ملف schema.ts
+    appleId: varchar("apple_id", { length: 255 }),
     // ✅ الحقل الجديد الخاص بالفيس بوك
     facebookId: varchar("facebook_id", { length: 255 }).unique(),
 

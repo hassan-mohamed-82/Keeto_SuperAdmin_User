@@ -254,6 +254,8 @@ const getRestaurantDetails = async (req, res) => {
                     descriptionAr: row.descriptionAr,
                     descriptionFr: row.descriptionFr,
                     price: Number(row.price),
+                    discountType: row.foodDiscountType ?? null,
+                    discountValue: row.foodDiscountValue !== null ? Number(row.foodDiscountValue) : null,
                     discountPrice: calculatedDiscountPrice,
                     discountNote,
                     image: row.image,

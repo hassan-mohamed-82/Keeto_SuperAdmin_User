@@ -14,6 +14,8 @@ exports.users = (0, mysql_core_1.mysqlTable)("users", {
     fcmToken: (0, mysql_core_1.text)("fcm_token"),
     // ⚠️ التعديل هنا: شيلنا notNull() لأن تسجيل الفيس بوك ملوش باسورد
     password: (0, mysql_core_1.varchar)("password", { length: 255 }),
+    // أضف هذا السطر في تعريف جدول users في ملف schema.ts
+    appleId: (0, mysql_core_1.varchar)("apple_id", { length: 255 }),
     // ✅ الحقل الجديد الخاص بالفيس بوك
     facebookId: (0, mysql_core_1.varchar)("facebook_id", { length: 255 }).unique(),
     googleId: (0, mysql_core_1.varchar)("google_id", { length: 255 }).unique(),
