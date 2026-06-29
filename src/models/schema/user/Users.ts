@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { countries } from "../admin/country";
 import { cities } from "../admin/city";
 import { zones } from "../admin/zone";
+import { restaurants } from "../admin/restaurants";
 
 export const users = mysqlTable("users", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -25,7 +26,6 @@ export const users = mysqlTable("users", {
     facebookId: varchar("facebook_id", { length: 255 }).unique(),
 
     googleId: varchar("google_id", { length: 255 }).unique(),
-    
     isVerified: boolean("is_verified").default(false),
     status: mysqlEnum("status", ["active", "blocked"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),

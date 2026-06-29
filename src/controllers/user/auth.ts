@@ -23,7 +23,7 @@ const generateOTP = (length: number = 6): string => {
 // 1. Signup
 // ===================================
 export const signup = async (req: Request, res: Response) => {
-    const { name, email, phone, password ,photo} = req.body;
+    const { name, email, phone, password ,photo, restaurantId} = req.body;
 
     if (!name || !email || !phone || !password ) {
         throw new BadRequest("Please provide all required fields");
@@ -76,6 +76,15 @@ const verifyLink = `${baseUrl}/api/user/auth/verify-email?token=${token}`;
                 photo,
                 isVerified: false
             });
+        }
+
+        if (restaurantId) {
+            const [existingLink] = await tx.select().from(restaurant_users)
+                .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, userId)))
+                .limit(1);
+            if (!existingLink) {
+                await tx.insert(restaurant_users).values({ restaurantId, userId });
+            }
         }
 
         const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
@@ -210,7 +219,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
 // 3. Login
 // ===================================
 export const login = async (req: Request, res: Response) => {
-    const { email, password, restaurantId } = req.body;
+    const { email, password } = req.body;
 
     if (!email || !password) throw new BadRequest("Email and password are required");
 
@@ -229,14 +238,7 @@ export const login = async (req: Request, res: Response) => {
         throw new BadRequest("Your account has been blocked. Please contact support.");
     }
 
-    if (restaurantId) {
-        const [existingLink] = await db.select().from(restaurant_users)
-            .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, user.id)))
-            .limit(1);
-        if (!existingLink) {
-            await db.insert(restaurant_users).values({ restaurantId, userId: user.id });
-        }
-    }
+
 
     const token = generateUserToken({ id: user.id, name: user.name });
 

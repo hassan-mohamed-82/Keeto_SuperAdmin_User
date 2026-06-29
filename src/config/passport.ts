@@ -41,8 +41,10 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
       .limit(1);
 
     let user = existingUsers[0];
+    let isNewUser = false;
 
     if (!user) {
+      isNewUser = true;
       // ➕ Signup (new user)
       const newId = uuidv4();
       await db.insert(users).values({
@@ -82,7 +84,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
     }
 
     // 🔗 Link to restaurant if restaurantId is provided
-    if (restaurantId) {
+    if (restaurantId && isNewUser) {
       const existingLink = await db.select().from(restaurant_users)
         .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, user.id)))
         .limit(1);

@@ -25,7 +25,7 @@ const generateOTP = (length = 6) => {
 // 1. Signup
 // ===================================
 const signup = async (req, res) => {
-    const { name, email, phone, password, photo } = req.body;
+    const { name, email, phone, password, photo, restaurantId } = req.body;
     if (!name || !email || !phone || !password) {
         throw new BadRequest_1.BadRequest("Please provide all required fields");
     }
@@ -62,6 +62,14 @@ const signup = async (req, res) => {
                 photo,
                 isVerified: false
             });
+        }
+        if (restaurantId) {
+            const [existingLink] = await tx.select().from(schema_1.restaurant_users)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurant_users.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurant_users.userId, userId)))
+                .limit(1);
+            if (!existingLink) {
+                await tx.insert(schema_1.restaurant_users).values({ restaurantId, userId });
+            }
         }
         const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
         await tx.insert(schema_1.emailVerifications).values({
@@ -181,7 +189,7 @@ exports.verifyEmail = verifyEmail;
 // 3. Login
 // ===================================
 const login = async (req, res) => {
-    const { email, password, restaurantId } = req.body;
+    const { email, password } = req.body;
     if (!email || !password)
         throw new BadRequest_1.BadRequest("Email and password are required");
     const [user] = await connection_1.db.select().from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.email, email)).limit(1);
@@ -196,14 +204,6 @@ const login = async (req, res) => {
         throw new BadRequest_1.BadRequest("Invalid credentials");
     if (user.status === "blocked") {
         throw new BadRequest_1.BadRequest("Your account has been blocked. Please contact support.");
-    }
-    if (restaurantId) {
-        const [existingLink] = await connection_1.db.select().from(schema_1.restaurant_users)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurant_users.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurant_users.userId, user.id)))
-            .limit(1);
-        if (!existingLink) {
-            await connection_1.db.insert(schema_1.restaurant_users).values({ restaurantId, userId: user.id });
-        }
     }
     const token = (0, jwt_1.generateUserToken)({ id: user.id, name: user.name });
     return (0, response_1.SuccessResponse)(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email } } });

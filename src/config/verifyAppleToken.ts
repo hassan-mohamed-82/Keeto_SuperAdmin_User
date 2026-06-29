@@ -37,9 +37,11 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
       .limit(1);
 
     let user = existingUsers[0];
+    let isNewUser = false;
 
     // 3️⃣ إنشاء مستخدم جديد إذا لم يكن موجوداً
     if (!user) {
+      isNewUser = true;
       const newId = uuidv4();
       // إذا لم يرسل الـ Frontend اسماً، نستخدم أول جزء من الإيميل كحل بديل
       const finalName = fullName || email.split("@")[0];
@@ -74,7 +76,7 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
     }
 
     // 6️⃣ ربط المستخدم بالمطعم في نظام الـ Multi-tenant
-    if (restaurantId) {
+    if (restaurantId && isNewUser) {
       const existingLink = await db.select().from(restaurant_users)
         .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, user.id)))
         .limit(1);

@@ -36,7 +36,9 @@ const verifyGoogleToken = async (req, res) => {
             .where((0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.users.googleId, googleId), (0, drizzle_orm_1.eq)(schema_1.users.email, email)))
             .limit(1);
         let user = existingUsers[0];
+        let isNewUser = false;
         if (!user) {
+            isNewUser = true;
             // ➕ Signup (new user)
             const newId = (0, uuid_1.v4)();
             await connection_1.db.insert(schema_1.users).values({
@@ -75,7 +77,7 @@ const verifyGoogleToken = async (req, res) => {
             return res.status(403).json({ success: false, message: "Your account has been blocked. Please contact support." });
         }
         // 🔗 Link to restaurant if restaurantId is provided
-        if (restaurantId) {
+        if (restaurantId && isNewUser) {
             const existingLink = await connection_1.db.select().from(schema_1.restaurant_users)
                 .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurant_users.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurant_users.userId, user.id)))
                 .limit(1);
