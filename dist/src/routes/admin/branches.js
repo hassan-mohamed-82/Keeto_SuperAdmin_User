@@ -5,7 +5,7 @@ const branches_1 = require("../../controllers/admin/branches");
 const catchAsync_1 = require("../../utils/catchAsync");
 const router = (0, express_1.Router)();
 router.post("/", (0, catchAsync_1.catchAsync)(branches_1.createBranch));
-router.get("/", (0, catchAsync_1.catchAsync)(branches_1.getMyBranches));
+router.get("/:restaurantId", (0, catchAsync_1.catchAsync)(branches_1.getMyBranches));
 router.get("/:restaurantId/:id", (0, catchAsync_1.catchAsync)(branches_1.getBranchById));
 router.put("/:restaurantId/:id", (0, catchAsync_1.catchAsync)(branches_1.updateBranch));
 router.delete("/:restaurantId/:id", (0, catchAsync_1.catchAsync)(branches_1.deleteBranch));

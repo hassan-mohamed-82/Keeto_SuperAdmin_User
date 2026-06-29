@@ -4,7 +4,7 @@ import { catchAsync } from "../../utils/catchAsync";
 const router = Router();
 
 router.post("/", catchAsync(createBranch));
-router.get("/", catchAsync(getMyBranches));
+router.get("/:restaurantId", catchAsync(getMyBranches));
 router.get("/:restaurantId/:id", catchAsync(getBranchById));
 router.put("/:restaurantId/:id", catchAsync(updateBranch));
 router.delete("/:restaurantId/:id", catchAsync(deleteBranch));
