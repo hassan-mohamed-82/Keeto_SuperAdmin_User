@@ -13,6 +13,7 @@ import AddonRouter from "./addon";
 import RestaurantRouter from "./restaurants";
 import FoodRouter from "./food";
 import policyRouter from "./policy";
+import BranchRouter from "./branches";
 import BasiccampaignRouter from "./Basiccampaign";
 import walletsRouter from "./restaurant_wallets"
 import BussinessplanRouter from "./BusinessPlans";
@@ -48,6 +49,7 @@ router.use("/cuisines", CuisineRouter);
 router.use("/categories", CategoryRouter);
 router.use("/subcategories", SubcategoryRouter);
 router.use("/order", OrderRouter);
+router.use("/branches", BranchRouter);
 //router.use("/image", imageRouter);
 router.use("/policy", policyRouter);
 router.use("/adonescategory", AdonecategoryRouter);
