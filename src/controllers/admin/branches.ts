@@ -202,6 +202,11 @@ export const updateBranchStatus = async (req: Request, res: Response) => {
 
 export const getallrestraunt = async (req: Request, res: Response) => {
     
-    const restaurant = await db.select().from(restaurants);
+    const restaurant = await db.select({
+        id: restaurants.id,
+        name: restaurants.name,
+        nameAr: restaurants.nameAr,
+        nameFr: restaurants.nameFr
+    }).from(restaurants);
     return SuccessResponse(res, { message: "Get restaurants success", data: restaurant });
 };
