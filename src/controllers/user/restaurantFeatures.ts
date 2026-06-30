@@ -187,11 +187,26 @@ export const getResturantSchedules = async (req: Request, res: Response) => {
 // 🛠️ الفانكشن الذكية لحساب حالة المطعم (تستخدم للـ API وللـ Validation)
 // =========================================================================
 export function calculateCurrentStatus(settings: any, schedules: any[]) {
-    // القيم الافتراضية في حال غياب الإعدادات
-    const defaultStatus = { isOpenNow: true, canDeliveryNow: true, canTakeawayNow: true, reason: "Open by default" };
+    // 🛑 1. الحماية الافتراضية (Secure by Default): لو مفيش إعدادات، المطعم مقفول
+    const defaultStatus = { 
+        isOpenNow: false, 
+        canDeliveryNow: false, 
+        canTakeawayNow: false, 
+        reason: "Restaurant configurations are incomplete" 
+    };
     if (!settings) return defaultStatus;
 
-    // 1. حساب وقت وتاريخ القاهرة الحالي
+    // 🚨 2. فحص الإغلاق المؤقت (الزحمة أو الطوارئ) فوراً - Fail-Fast
+    if (settings.isTemporarilyClosed) {
+        return { 
+            isOpenNow: false, 
+            canDeliveryNow: false, 
+            canTakeawayNow: false, 
+            reason: "Restaurant is temporarily not accepting orders due to high volume" 
+        };
+    }
+
+    // 3. حساب وقت وتاريخ القاهرة الحالي
     const now = new Date();
     const cairoFormatter = new Intl.DateTimeFormat("en-US", {
         timeZone: "Africa/Cairo",
@@ -207,7 +222,7 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
 
     let isOpenBySchedule = false;
 
-    // 2. التحقق من جدول المواعيد إذا لم يكن المطعم (Always Open)
+    // 4. التحقق من جدول المواعيد إذا لم يكن المطعم (Always Open)
     if (settings.isAlwaysOpen) {
         isOpenBySchedule = true;
     } else {
@@ -223,19 +238,19 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
                 const closeTime = todaySchedule.closingTime.slice(0, 5);
 
                 if (closeTime > openTime) {
-                    // شفت طبيعي ينتهي في نفس اليوم (مثال: 09:00 إلى 23:00)
+                    // شفت طبيعي ينتهي في نفس اليوم
                     if (currentTimeStr >= openTime && currentTimeStr <= closeTime) {
                         isOpenBySchedule = true;
                     }
                 } else {
-                    // شفت يعبر منتصف الليل (مثال: 13:00 إلى 02:00 الفجر)
+                    // شفت يعبر منتصف الليل
                     if (currentTimeStr >= openTime || currentTimeStr <= closeTime) {
                         isOpenBySchedule = true;
                     }
                 }
             }
         } else {
-            // لو مفيش جدول مسجل للمطعم، نعتبره مغلق تأميناً للسيستم
+            // لو مفيش جدول مسجل للمطعم، نعتبره مغلق
             return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "No schedule registered for today" };
         }
     }
@@ -243,16 +258,8 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
     if (!isOpenBySchedule) {
         return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "Restaurant is currently closed" };
     }
-    if (settings.isTemporarilyClosed) {
-    return { 
-        isOpenNow: false, 
-        canDeliveryNow: false, 
-        canTakeawayNow: false, 
-        reason: "Restaurant is temporarily not accepting orders due to high volume" 
-    };
-}
 
-    // 3. دمج المواعيد مع إعدادات التوصيل والاستلام العامة للمطعم
+    // 5. دمج المواعيد مع إعدادات التوصيل والاستلام العامة للمطعم
     return {
         isOpenNow: true,
         canDeliveryNow: Boolean(settings.homeDelivery || settings.selfDelivery),
