@@ -57,7 +57,8 @@ const getMyBranches = async (req, res) => {
             name: schema_1.zones.name,
             nameAr: schema_1.zones.nameAr,
             nameFr: schema_1.zones.nameFr,
-        }
+        },
+        restaurantName: schema_1.restaurants.name,
     })
         .from(schema_1.branches)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, schema_1.zones.id))
@@ -85,7 +86,8 @@ const getBranchById = async (req, res) => {
             name: schema_1.zones.name,
             nameAr: schema_1.zones.nameAr,
             nameFr: schema_1.zones.nameFr,
-        }
+        },
+        restaurantName: schema_1.restaurants.name,
     })
         .from(schema_1.branches)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, schema_1.zones.id))

@@ -24,8 +24,7 @@ export const branches = mysqlTable("branches", {
     addressFr: text("address_fr"),
     phoneNumber: varchar("phone_number", { length: 50 }),
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id).notNull(), // عشان منطقة توصيل الفرع ده
-        deliveryRadiusKm: int("delivery_radius_km").default(0),
-lat:varchar("lat", { length: 255 }),
+deliveryRadiusKm: decimal("delivery_radius_km", { precision: 6, scale: 2 }).default("0"),lat:varchar("lat", { length: 255 }),
     lng:varchar("lng", { length: 255 }),
         status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),

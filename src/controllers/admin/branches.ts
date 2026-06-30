@@ -62,7 +62,8 @@ export const getMyBranches = async (req: Request, res: Response) => {
             name: zones.name,
             nameAr: zones.nameAr,
             nameFr: zones.nameFr,
-        }
+        },
+        restaurantName: restaurants.name,
     })
     .from(branches)
     .leftJoin(zones, eq(branches.zoneId, zones.id))
@@ -90,7 +91,8 @@ export const getBranchById = async (req: Request, res: Response) => {
             name: zones.name,
             nameAr: zones.nameAr,
             nameFr: zones.nameFr,
-        }
+        },
+        restaurantName: restaurants.name,
     })
     .from(branches)
     .leftJoin(zones, eq(branches.zoneId, zones.id))
