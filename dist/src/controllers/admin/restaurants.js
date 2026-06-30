@@ -263,10 +263,12 @@ const getRestaurantById = async (req, res) => {
         .select({
         restaurantObj: schema_1.restaurants,
         zoneObj: schema_1.zones,
+        salesObj: schema_1.sales,
         ownerEmail: schema_1.restrauntadmin.email,
     })
         .from(schema_1.restaurants)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurants.zoneId, schema_1.zones.id))
+        .leftJoin(schema_1.sales, (0, drizzle_orm_1.eq)(schema_1.restaurants.salesId, schema_1.sales.id))
         .leftJoin(schema_1.restrauntadmin, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restrauntadmin.restaurantId), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")))
         .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id))
         .limit(1);
@@ -287,6 +289,8 @@ const getRestaurantById = async (req, res) => {
         .where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, id));
     const formattedRestaurant = {
         ...row.restaurantObj,
+        type: row.restaurantObj.type,
+        sales: row.salesObj ? { id: row.salesObj.id, name: row.salesObj.name } : null,
         email: row.ownerEmail || null,
         cuisines: restaurantCuisines,
         businessPlans: restaurantPlans,

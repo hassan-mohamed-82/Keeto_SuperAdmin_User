@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurants, cuisines, zones, restaurantWallets, food, restrauntadmin, restaurantBusinessPlans } from "../../models/schema";
+import { restaurants, cuisines, zones, restaurantWallets, food, restrauntadmin, restaurantBusinessPlans, sales } from "../../models/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -289,10 +289,12 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         .select({
             restaurantObj: restaurants,
             zoneObj: zones,
+            salesObj: sales,
             ownerEmail: restrauntadmin.email,
         })
         .from(restaurants)
         .leftJoin(zones, eq(restaurants.zoneId, zones.id))
+        .leftJoin(sales, eq(restaurants.salesId, sales.id))
         .leftJoin(
             restrauntadmin,
             and(eq(restaurants.id, restrauntadmin.restaurantId), eq(restrauntadmin.type, "owner"))
@@ -320,6 +322,8 @@ export const getRestaurantById = async (req: Request, res: Response) => {
 
     const formattedRestaurant = {
         ...row.restaurantObj,
+        type: row.restaurantObj.type,
+        sales: row.salesObj ? { id: row.salesObj.id, name: row.salesObj.name } : null,
         email: row.ownerEmail || null,
         cuisines: restaurantCuisines,
         businessPlans: restaurantPlans,
