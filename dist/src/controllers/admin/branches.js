@@ -181,7 +181,12 @@ const updateBranchStatus = async (req, res) => {
 };
 exports.updateBranchStatus = updateBranchStatus;
 const getallrestraunt = async (req, res) => {
-    const restaurant = await connection_1.db.select().from(schema_1.restaurants);
+    const restaurant = await connection_1.db.select({
+        id: schema_1.restaurants.id,
+        name: schema_1.restaurants.name,
+        nameAr: schema_1.restaurants.nameAr,
+        nameFr: schema_1.restaurants.nameFr
+    }).from(schema_1.restaurants);
     return (0, response_1.SuccessResponse)(res, { message: "Get restaurants success", data: restaurant });
 };
 exports.getallrestraunt = getallrestraunt;
