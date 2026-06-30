@@ -39,7 +39,6 @@ const createBranch = async (req, res) => {
 };
 exports.createBranch = createBranch;
 const getMyBranches = async (req, res) => {
-    const { restaurantId } = req.params;
     const myBranches = await connection_1.db.select({
         id: schema_1.branches.id,
         name: schema_1.branches.name,
@@ -62,12 +61,12 @@ const getMyBranches = async (req, res) => {
     })
         .from(schema_1.branches)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, schema_1.zones.id))
-        .where((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId));
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, schema_1.restaurants.id));
     return (0, response_1.SuccessResponse)(res, { message: "Get branches success", data: myBranches });
 };
 exports.getMyBranches = getMyBranches;
 const getBranchById = async (req, res) => {
-    const { restaurantId, id } = req.params;
+    const { id } = req.params;
     const branch = await connection_1.db.select({
         id: schema_1.branches.id,
         name: schema_1.branches.name,
@@ -90,10 +89,9 @@ const getBranchById = async (req, res) => {
     })
         .from(schema_1.branches)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, schema_1.zones.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.id, id), (0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId)))
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, schema_1.restaurants.id))
+        .where((0, drizzle_orm_1.eq)(schema_1.branches.id, id))
         .limit(1);
-    if (!branch[0])
-        throw new NotFound_1.NotFound("Branch not found or does not belong to your restaurant");
     return (0, response_1.SuccessResponse)(res, { message: "Get branch by id success", data: branch[0] });
 };
 exports.getBranchById = getBranchById;

@@ -43,7 +43,6 @@ export const createBranch = async (req: Request, res: Response) => {
 };
 
 export const getMyBranches = async (req: Request, res: Response) => {
-    const { restaurantId } = req.params;
 
     const myBranches = await db.select({
         id: branches.id,
@@ -67,13 +66,12 @@ export const getMyBranches = async (req: Request, res: Response) => {
     })
     .from(branches)
     .leftJoin(zones, eq(branches.zoneId, zones.id))
-    .where(eq(branches.restaurantId, restaurantId));
-
+    .leftJoin(restaurants, eq(branches.restaurantId, restaurants.id))
     return SuccessResponse(res, { message: "Get branches success", data: myBranches });
 };
 
 export const getBranchById = async (req: Request, res: Response) => {
-    const { restaurantId,id } = req.params;
+    const { id } = req.params;
     const branch = await db.select({
         id: branches.id,
         name: branches.name,
@@ -96,15 +94,10 @@ export const getBranchById = async (req: Request, res: Response) => {
     })
     .from(branches)
     .leftJoin(zones, eq(branches.zoneId, zones.id))
-    .where(
-        and(
-            eq(branches.id, id),
-            eq(branches.restaurantId, restaurantId)
-        )
-    )
+    .leftJoin(restaurants, eq(branches.restaurantId, restaurants.id))
+    .where(eq(branches.id, id))
     .limit(1);
 
-    if (!branch[0]) throw new NotFound("Branch not found or does not belong to your restaurant");
 
     return SuccessResponse(res, { message: "Get branch by id success", data: branch[0] });
 };

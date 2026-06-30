@@ -1,17 +1,19 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSuperAdminDashboard = void 0;
+exports.upsertDashboardTargets = exports.getDashboardTargets = exports.getSuperAdminDashboard = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
+const BadRequest_1 = require("../../Errors/BadRequest");
+// =============================================
+// 1. SuperAdmin Dashboard Analytics
+// GET /dashboard/analytics?startDate=&endDate=
+// =============================================
 const getSuperAdminDashboard = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
-    // ==========================================
-    // 1. فلترة التاريخ (Date Filter)
-    // ==========================================
     const { startDate, endDate } = req.query;
     const orderConditions = [];
     if (startDate)
@@ -22,26 +24,18 @@ const getSuperAdminDashboard = async (req, res) => {
         orderConditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
     }
     const orderWhere = orderConditions.length > 0 ? (0, drizzle_orm_1.and)(...orderConditions) : undefined;
-    // ==========================================
-    // 2. تنفيذ كل الاستعلامات في نفس اللحظة (Parallel Execution) لسرعة خرافية 🚀
-    // ==========================================
-    const [totalRestaurantsData, walletsData, totalCustomersData, totalsData, trendData, restPerfData, acqData, cancelData, sourceData, locData] = await Promise.all([
-        // 1. المطاعم (النشطة والإجمالي)
+    const [totalRestaurantsData, walletsData, totalCustomersData, totalsData, trendData, restPerfData, acqData, cancelData, sourceData, locData, targetsData] = await Promise.all([
         connection_1.db.select({
             id: schema_1.restaurants.id,
             status: schema_1.restaurants.status
         }).from(schema_1.restaurants),
-        // 2. المحافظ (Payable & Receivable)
         connection_1.db.select({ balance: schema_1.restaurantWallets.balance }).from(schema_1.restaurantWallets),
-        // 3. إجمالي العملاء في المنصة
         connection_1.db.select({ count: (0, drizzle_orm_1.sql) `count(${schema_1.users.id})` }).from(schema_1.users),
-        // 4. إجمالي الطلبات والمبيعات
         connection_1.db.select({
             orders: (0, drizzle_orm_1.sql) `count(${schema_1.orders.id})`,
             deliveredOrders: (0, drizzle_orm_1.sql) `SUM(CASE WHEN ${schema_1.orders.status} = 'delivered' THEN 1 ELSE 0 END)`,
             revenue: (0, drizzle_orm_1.sql) `SUM(CASE WHEN ${schema_1.orders.status} = 'delivered' THEN ${schema_1.orders.totalAmount} ELSE 0 END)`
         }).from(schema_1.orders).where(orderWhere),
-        // 5. تريند المبيعات الشهري (Line Chart)
         connection_1.db.select({
             month: (0, drizzle_orm_1.sql) `DATE_FORMAT(${schema_1.orders.createdAt}, '%Y-%m')`,
             revenue: (0, drizzle_orm_1.sql) `SUM(CASE WHEN ${schema_1.orders.status} = 'delivered' THEN ${schema_1.orders.totalAmount} ELSE 0 END)`
@@ -50,7 +44,6 @@ const getSuperAdminDashboard = async (req, res) => {
             .where(orderWhere)
             .groupBy((0, drizzle_orm_1.sql) `DATE_FORMAT(${schema_1.orders.createdAt}, '%Y-%m')`)
             .orderBy((0, drizzle_orm_1.sql) `DATE_FORMAT(${schema_1.orders.createdAt}, '%Y-%m')`),
-        // 6. أداء كل مطعم (Revenue & Orders) للرانكينج والماتريكس
         connection_1.db.select({
             restaurantId: schema_1.restaurants.id,
             restaurantName: schema_1.restaurants.name,
@@ -61,7 +54,6 @@ const getSuperAdminDashboard = async (req, res) => {
             .from(schema_1.restaurants)
             .leftJoin(schema_1.orders, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
             .groupBy(schema_1.restaurants.id),
-        // 7. الاستحواذ على العملاء (Top 5 User Acquisition)
         connection_1.db.select({
             restaurantId: schema_1.restaurant_users.restaurantId,
             restaurantName: schema_1.restaurants.name,
@@ -97,11 +89,10 @@ const getSuperAdminDashboard = async (req, res) => {
             .innerJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.addresses.zoneId, schema_1.zones.id))
             .innerJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.zones.cityId, schema_1.cities.id))
             .where(orderWhere)
-            .groupBy(schema_1.cities.id, schema_1.zones.id)
+            .groupBy(schema_1.cities.id, schema_1.zones.id),
+        // 11. Dashboard Targets
+        connection_1.db.select().from(schema_1.dashboardTargets).limit(1)
     ]);
-    // ==========================================
-    // 3. معالجة الداتا للحصول على المؤشرات المطلوبة (Data Processing)
-    // ==========================================
     // --- Cards Calculations ---
     const totalRestaurants = totalRestaurantsData.length;
     const activeRestaurants = totalRestaurantsData.filter(r => r.status === 'active').length;
@@ -173,11 +164,31 @@ const getSuperAdminDashboard = async (req, res) => {
         else
             cancellationRate.system += Number(c.count);
     });
-    // --- Gauge Score (Platform Health Metric 0-100) ---
-    // 60% weight on Delivery Success Rate + 40% weight on Active Restaurants Ratio
-    const deliveryRate = totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0;
-    const activeRatio = totalRestaurants > 0 ? (activeRestaurants / totalRestaurants) * 100 : 0;
-    const gaugeScore = (deliveryRate * 0.6) + (activeRatio * 0.4);
+    // --- Gauge Data (مقارنة الأرقام الفعلية بالتارجت اللي الأدمن دخله) ---
+    const target = targetsData.length > 0 ? targetsData[0] : null;
+    const gaugeData = {
+        orders: {
+            current: totalOrders,
+            target: target?.totalOrdersTarget || 0,
+            percentage: target?.totalOrdersTarget && target.totalOrdersTarget > 0
+                ? Math.min(((totalOrders / target.totalOrdersTarget) * 100), 100).toFixed(1)
+                : "0.0"
+        },
+        customers: {
+            current: totalCustomers,
+            target: target?.totalCustomersTarget || 0,
+            percentage: target?.totalCustomersTarget && target.totalCustomersTarget > 0
+                ? Math.min(((totalCustomers / target.totalCustomersTarget) * 100), 100).toFixed(1)
+                : "0.0"
+        },
+        restaurants: {
+            current: totalRestaurants,
+            target: target?.totalRestaurantsTarget || 0,
+            percentage: target?.totalRestaurantsTarget && target.totalRestaurantsTarget > 0
+                ? Math.min(((totalRestaurants / target.totalRestaurantsTarget) * 100), 100).toFixed(1)
+                : "0.0"
+        }
+    };
     // ==========================================
     // 4. بناء الـ Response النهائي للـ Frontend
     // ==========================================
@@ -210,14 +221,81 @@ const getSuperAdminDashboard = async (req, res) => {
                 ordersBySource: sourceData.map(s => ({ source: s.source, orders: Number(s.count) })),
                 // Location Chart (Map or Bar)
                 ordersByLocation: locData.map(l => ({ city: l.cityName, zone: l.zoneName, orders: Number(l.ordersCount) })),
-                // Gauge Chart Score
-                platformHealthScore: gaugeScore.toFixed(1),
+                // Gauge Chart (مبني على التارجت)
+                gaugeData,
                 // Vertical Bar Chart
                 userAcquisitionTop5: acqData.map(a => ({ restaurantName: a.restaurantName, usersAcquired: Number(a.usersCount) })),
                 // Bubble Chart (4-Quadrant Matrix)
                 performanceMatrix
-            }
+            },
+            // الأرقام المستهدفة
+            targets: target ? {
+                totalOrdersTarget: target.totalOrdersTarget,
+                totalCustomersTarget: target.totalCustomersTarget,
+                totalRestaurantsTarget: target.totalRestaurantsTarget,
+            } : null
         }
     });
 };
 exports.getSuperAdminDashboard = getSuperAdminDashboard;
+// =============================================
+// 2. Get Dashboard Targets
+// GET /dashboard/targets
+// =============================================
+const getDashboardTargets = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const targets = await connection_1.db.select().from(schema_1.dashboardTargets).limit(1);
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Dashboard targets fetched successfully",
+        data: targets.length > 0 ? targets[0] : null,
+    });
+};
+exports.getDashboardTargets = getDashboardTargets;
+// =============================================
+// 3. Create / Update Dashboard Targets (Upsert)
+// PUT /dashboard/targets
+// Body: { totalOrdersTarget, totalCustomersTarget, totalRestaurantsTarget }
+// =============================================
+const upsertDashboardTargets = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const { totalOrdersTarget, totalCustomersTarget, totalRestaurantsTarget } = req.body;
+    if (totalOrdersTarget === undefined && totalCustomersTarget === undefined && totalRestaurantsTarget === undefined) {
+        throw new BadRequest_1.BadRequest("At least one target value is required");
+    }
+    // شوف لو فيه Row موجودة بالفعل
+    const existing = await connection_1.db.select().from(schema_1.dashboardTargets).limit(1);
+    if (existing.length > 0) {
+        // Update
+        const updateData = { updatedAt: new Date() };
+        if (totalOrdersTarget !== undefined)
+            updateData.totalOrdersTarget = totalOrdersTarget;
+        if (totalCustomersTarget !== undefined)
+            updateData.totalCustomersTarget = totalCustomersTarget;
+        if (totalRestaurantsTarget !== undefined)
+            updateData.totalRestaurantsTarget = totalRestaurantsTarget;
+        await connection_1.db.update(schema_1.dashboardTargets)
+            .set(updateData)
+            .where((0, drizzle_orm_1.eq)(schema_1.dashboardTargets.id, existing[0].id));
+        const [updated] = await connection_1.db.select().from(schema_1.dashboardTargets).where((0, drizzle_orm_1.eq)(schema_1.dashboardTargets.id, existing[0].id));
+        return (0, response_1.SuccessResponse)(res, {
+            message: "Dashboard targets updated successfully",
+            data: updated,
+        });
+    }
+    else {
+        // Insert
+        await connection_1.db.insert(schema_1.dashboardTargets).values({
+            totalOrdersTarget: totalOrdersTarget || 0,
+            totalCustomersTarget: totalCustomersTarget || 0,
+            totalRestaurantsTarget: totalRestaurantsTarget || 0,
+        });
+        const [created] = await connection_1.db.select().from(schema_1.dashboardTargets).limit(1);
+        return (0, response_1.SuccessResponse)(res, {
+            message: "Dashboard targets created successfully",
+            data: created,
+        }, 201);
+    }
+};
+exports.upsertDashboardTargets = upsertDashboardTargets;
