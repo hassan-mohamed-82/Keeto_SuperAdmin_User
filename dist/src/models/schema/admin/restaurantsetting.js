@@ -5,7 +5,7 @@ const mysql_core_1 = require("drizzle-orm/mysql-core");
 // 1. جدول الإعدادات العامة
 exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings", {
     id: (0, mysql_core_1.int)("id").autoincrement().primaryKey(),
-    restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 }).notNull().unique(), // مرتبط بمطعم واحد
+    restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 }).notNull().unique(),
     foodManagement: (0, mysql_core_1.boolean)("food_management").default(true),
     scheduledDelivery: (0, mysql_core_1.boolean)("scheduled_delivery").default(false),
     reviewsSection: (0, mysql_core_1.boolean)("reviews_section").default(true),
@@ -24,6 +24,7 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     maxDeliveryTime: (0, mysql_core_1.int)("max_delivery_time").default(25),
     isAlwaysOpen: (0, mysql_core_1.boolean)("is_always_open").default(false),
     isSameTimeEveryDay: (0, mysql_core_1.boolean)("is_same_time_every_day").default(false),
+    isTemporarilyClosed: (0, mysql_core_1.boolean)("is_temporarily_closed").default(false),
 });
 // 2. جدول مواعيد العمل (يدعم الفترات المتعددة)
 exports.restaurantSchedules = (0, mysql_core_1.mysqlTable)("restaurant_schedules", {

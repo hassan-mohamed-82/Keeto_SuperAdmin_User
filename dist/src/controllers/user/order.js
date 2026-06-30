@@ -11,6 +11,7 @@ const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
 const notifications_1 = require("../../utils/notifications");
 const discount_1 = require("../../utils/discount");
+const restaurantFeatures_1 = require("./restaurantFeatures");
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date) => {
     return new Intl.DateTimeFormat("ar-EG", {
@@ -96,53 +97,14 @@ const checkout = async (req, res) => {
     const cairoMinute = getP("minute");
     const currentTimeStr = `${cairoHour === "24" ? "00" : cairoHour}:${cairoMinute}`;
     const cairoDayOfWeek = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T12:00:00`).getDay();
-    let isOpenNow = false;
-    let canDeliveryNow = true;
-    let canTakeawayNow = true;
-    let closeReason = "Restaurant is currently closed";
-    if (settings) {
-        if (settings.isAlwaysOpen) {
-            isOpenNow = true;
-        }
-        else {
-            const todaySchedule = schedulesList.find(s => s.dayOfWeek === cairoDayOfWeek);
-            if (todaySchedule) {
-                if (todaySchedule.isOffDay) {
-                    isOpenNow = false;
-                    closeReason = "Today is an off day for this restaurant";
-                }
-                else if (todaySchedule.openingTime && todaySchedule.closingTime) {
-                    const openT = todaySchedule.openingTime.slice(0, 5);
-                    const closeT = todaySchedule.closingTime.slice(0, 5);
-                    if (closeT > openT) {
-                        if (currentTimeStr >= openT && currentTimeStr <= closeT)
-                            isOpenNow = true;
-                    }
-                    else {
-                        if (currentTimeStr >= openT || currentTimeStr <= closeT)
-                            isOpenNow = true;
-                    }
-                }
-            }
-            else {
-                isOpenNow = false;
-                closeReason = "No active schedule found for today";
-            }
-        }
-        canDeliveryNow = Boolean(settings.homeDelivery || settings.selfDelivery);
-        canTakeawayNow = Boolean(settings.takeaway);
+    const status = (0, restaurantFeatures_1.calculateCurrentStatus)(settings, schedulesList);
+    if (!status.isOpenNow) {
+        throw new BadRequest_1.BadRequest(`Order failed. ${status.reason}`);
     }
-    else {
-        isOpenNow = false;
-        closeReason = "Restaurant configurations are incomplete";
-    }
-    if (!isOpenNow) {
-        throw new BadRequest_1.BadRequest(`Order failed. ${closeReason}`);
-    }
-    if (resolvedOrderType === "delivery" && !canDeliveryNow) {
+    if (resolvedOrderType === "delivery" && !status.canDeliveryNow) {
         throw new BadRequest_1.BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     }
-    if (resolvedOrderType === "takeaway" && !canTakeawayNow) {
+    if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) {
         throw new BadRequest_1.BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
     }
     // ==========================================

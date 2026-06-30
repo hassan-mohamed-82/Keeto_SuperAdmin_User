@@ -186,7 +186,7 @@ export const getResturantSchedules = async (req: Request, res: Response) => {
 // =========================================================================
 // 🛠️ الفانكشن الذكية لحساب حالة المطعم (تستخدم للـ API وللـ Validation)
 // =========================================================================
-function calculateCurrentStatus(settings: any, schedules: any[]) {
+export function calculateCurrentStatus(settings: any, schedules: any[]) {
     // القيم الافتراضية في حال غياب الإعدادات
     const defaultStatus = { isOpenNow: true, canDeliveryNow: true, canTakeawayNow: true, reason: "Open by default" };
     if (!settings) return defaultStatus;
@@ -243,6 +243,14 @@ function calculateCurrentStatus(settings: any, schedules: any[]) {
     if (!isOpenBySchedule) {
         return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "Restaurant is currently closed" };
     }
+    if (settings.isTemporarilyClosed) {
+    return { 
+        isOpenNow: false, 
+        canDeliveryNow: false, 
+        canTakeawayNow: false, 
+        reason: "Restaurant is temporarily not accepting orders due to high volume" 
+    };
+}
 
     // 3. دمج المواعيد مع إعدادات التوصيل والاستلام العامة للمطعم
     return {

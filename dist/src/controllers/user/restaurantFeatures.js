@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getResturantSchedules = exports.getHomeRestaurants = exports.removeFromHome = exports.toggleAddHome = exports.searchRestaurants = void 0;
+exports.calculateCurrentStatus = calculateCurrentStatus;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -198,6 +199,14 @@ function calculateCurrentStatus(settings, schedules) {
     }
     if (!isOpenBySchedule) {
         return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "Restaurant is currently closed" };
+    }
+    if (settings.isTemporarilyClosed) {
+        return {
+            isOpenNow: false,
+            canDeliveryNow: false,
+            canTakeawayNow: false,
+            reason: "Restaurant is temporarily not accepting orders due to high volume"
+        };
     }
     // 3. دمج المواعيد مع إعدادات التوصيل والاستلام العامة للمطعم
     return {

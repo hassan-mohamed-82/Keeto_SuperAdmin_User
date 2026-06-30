@@ -11,7 +11,7 @@ import {
 // 1. جدول الإعدادات العامة
 export const restaurantSettings = mysqlTable("restaurant_settings", {
   id: int("id").autoincrement().primaryKey(),
-  restaurantId: char("restaurant_id", { length: 36 }).notNull().unique(), // مرتبط بمطعم واحد
+  restaurantId: char("restaurant_id", { length: 36 }).notNull().unique(), 
   
   foodManagement: boolean("food_management").default(true),
   scheduledDelivery: boolean("scheduled_delivery").default(false),
@@ -34,7 +34,10 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
 
   isAlwaysOpen: boolean("is_always_open").default(false),
   isSameTimeEveryDay: boolean("is_same_time_every_day").default(false),
+
+  isTemporarilyClosed: boolean("is_temporarily_closed").default(false),
 });
+
 
 // 2. جدول مواعيد العمل (يدعم الفترات المتعددة)
 export const restaurantSchedules = mysqlTable("restaurant_schedules", {

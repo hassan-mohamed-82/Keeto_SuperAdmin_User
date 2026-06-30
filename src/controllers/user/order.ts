@@ -22,6 +22,7 @@ import { UnauthorizedError } from "../../Errors";
 import { sendPushNotification } from "../../utils/notifications";
 import { calculateDistance } from "../../utils/geo";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
+import { calculateCurrentStatus } from "./restaurantFeatures";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -124,52 +125,17 @@ export const checkout = async (req: Request | any, res: Response) => {
     const currentTimeStr = `${cairoHour === "24" ? "00" : cairoHour}:${cairoMinute}`;
     const cairoDayOfWeek = new Date(`${cairoYear}-${cairoMonth}-${cairoDay}T12:00:00`).getDay();
 
-    let isOpenNow = false;
-    let canDeliveryNow = true;
-    let canTakeawayNow = true;
-    let closeReason = "Restaurant is currently closed";
+    const status = calculateCurrentStatus(settings, schedulesList);
 
-    if (settings) {
-        if (settings.isAlwaysOpen) {
-            isOpenNow = true;
-        } else {
-            const todaySchedule = schedulesList.find(s => s.dayOfWeek === cairoDayOfWeek);
-            if (todaySchedule) {
-                if (todaySchedule.isOffDay) {
-                    isOpenNow = false;
-                    closeReason = "Today is an off day for this restaurant";
-                } else if (todaySchedule.openingTime && todaySchedule.closingTime) {
-                    const openT = todaySchedule.openingTime.slice(0, 5);
-                    const closeT = todaySchedule.closingTime.slice(0, 5);
-
-                    if (closeT > openT) {
-                        if (currentTimeStr >= openT && currentTimeStr <= closeT) isOpenNow = true;
-                    } else {
-                        if (currentTimeStr >= openT || currentTimeStr <= closeT) isOpenNow = true;
-                    }
-                }
-            } else {
-                isOpenNow = false;
-                closeReason = "No active schedule found for today";
-            }
-        }
-
-        canDeliveryNow = Boolean(settings.homeDelivery || settings.selfDelivery);
-        canTakeawayNow = Boolean(settings.takeaway);
-    } else {
-        isOpenNow = false;
-        closeReason = "Restaurant configurations are incomplete";
+    if (!status.isOpenNow) {
+        throw new BadRequest(`Order failed. ${status.reason}`);
     }
 
-    if (!isOpenNow) {
-        throw new BadRequest(`Order failed. ${closeReason}`);
-    }
-
-    if (resolvedOrderType === "delivery" && !canDeliveryNow) {
+    if (resolvedOrderType === "delivery" && !status.canDeliveryNow) {
         throw new BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     }
 
-    if (resolvedOrderType === "takeaway" && !canTakeawayNow) {
+    if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) {
         throw new BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
     }
 
