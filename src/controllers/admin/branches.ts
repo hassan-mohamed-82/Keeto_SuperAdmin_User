@@ -208,5 +208,12 @@ export const getallrestraunt = async (req: Request, res: Response) => {
         nameAr: restaurants.nameAr,
         nameFr: restaurants.nameFr
     }).from(restaurants);
-    return SuccessResponse(res, { message: "Get restaurants success", data: restaurant });
+
+    const zone= await db.select({
+        id: zones.id,
+        name: zones.name,
+        nameAr: zones.nameAr,
+        nameFr: zones.nameFr
+    }).from(zones);
+    return SuccessResponse(res, { message: "Get restaurants success", data: {restaurant,zone} });
 };

@@ -187,6 +187,12 @@ const getallrestraunt = async (req, res) => {
         nameAr: schema_1.restaurants.nameAr,
         nameFr: schema_1.restaurants.nameFr
     }).from(schema_1.restaurants);
-    return (0, response_1.SuccessResponse)(res, { message: "Get restaurants success", data: restaurant });
+    const zone = await connection_1.db.select({
+        id: schema_1.zones.id,
+        name: schema_1.zones.name,
+        nameAr: schema_1.zones.nameAr,
+        nameFr: schema_1.zones.nameFr
+    }).from(schema_1.zones);
+    return (0, response_1.SuccessResponse)(res, { message: "Get restaurants success", data: { restaurant, zone } });
 };
 exports.getallrestraunt = getallrestraunt;
