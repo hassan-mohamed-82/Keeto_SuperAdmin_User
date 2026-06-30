@@ -19,6 +19,7 @@ const sendPushNotification = async (params) => {
         title,
         body,
         data: data || {},
+        createdAt: new Date()
     });
     try {
         // 2. Look up the FCM token for the recipient

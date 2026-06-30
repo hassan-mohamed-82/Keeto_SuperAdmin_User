@@ -24,6 +24,7 @@ export const sendPushNotification = async (params: {
         title,
         body,
         data: data || {},
+        createdAt: new Date()
     });
 
     try {

@@ -538,7 +538,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 11. Send Notification to Restaurant
     // ==========================================
-    const cairoTimeFormatted = new Date(now).toLocaleTimeString("en-US", { timeZone: "Africa/Cairo" });
+    const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", { timeZone: "Africa/Cairo", hour: "numeric", minute: "numeric", hour12: true }).format(now);
 
     await sendPushNotification({
         recipientType: "restaurant",
