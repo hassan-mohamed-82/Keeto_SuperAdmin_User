@@ -676,3 +676,81 @@ export const markInvoiceAsPaid = async (req: Request, res: Response) => {
     return SuccessResponse(res, { message: "Invoice marked as paid successfully" });
 };
 
+// ==========================================
+// API 5: تقرير أعداد الطلبات والمطاعم (Restaurant Orders Count Report)
+// ==========================================
+export const getRestaurantOrdersReport = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+
+    console.log(req.query);
+
+    const { startDate, endDate, type } = req.query;
+
+    const orderConditions = [];
+    if (startDate) orderConditions.push(gte(orders.createdAt, new Date(startDate as string)));
+    if (endDate) {
+        const end = new Date(endDate as string);
+        end.setHours(23, 59, 59, 999);
+        orderConditions.push(lte(orders.createdAt, end));
+    }
+
+    // 1. Fetch all restaurants
+    const allRestaurants = await db.select().from(restaurants);
+
+    let totalRestaurants = allRestaurants.length;
+    let restaurantsByType: Record<string, number> = {};
+
+    allRestaurants.forEach((r) => {
+        const rType = r.type || "Unknown";
+        restaurantsByType[rType] = (restaurantsByType[rType] || 0) + 1;
+    });
+
+    // 2. Fetch orders within date range
+    const ordersData = await db
+        .select({
+            restaurantId: orders.restaurantId,
+        })
+        .from(orders)
+        .where(orderConditions.length > 0 ? and(...orderConditions) : undefined);
+
+    let totalOrders = ordersData.length;
+
+    // Group orders by restaurantId
+    const ordersCountByRestaurant: Record<string, number> = {};
+    ordersData.forEach((o) => {
+        if (o.restaurantId) {
+            ordersCountByRestaurant[o.restaurantId] = (ordersCountByRestaurant[o.restaurantId] || 0) + 1;
+        }
+    });
+
+    // 3. Filter restaurants based on 'type' if provided
+    let filteredRestaurants = allRestaurants;
+    if (type) {
+        filteredRestaurants = allRestaurants.filter((r) => r.type === type);
+    }
+
+    // 4. Map to final result
+    const restaurantDetails = filteredRestaurants.map((r) => ({
+        restaurantDetails: r,
+        ordersCount: ordersCountByRestaurant[r.id] || 0,
+    }));
+
+    const hasFilters = startDate || endDate || type;
+
+    const responseData: any = {
+        summary: {
+            totalOrders,
+            totalRestaurants,
+            restaurantsByType,
+        }
+    };
+
+    if (hasFilters) {
+        responseData.restaurants = restaurantDetails;
+    }
+
+    return SuccessResponse(res, {
+        message: "Restaurant orders report generated successfully",
+        data: responseData,
+    });
+};

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { catchAsync } from "../../utils/catchAsync";
-import { getFinancialReport, getDetailedRestaurantReport, getSingleRestaurantReport, generateRestaurantInvoicePDF,generateAndSaveInvoice,markInvoiceAsPaid, getRestaurantInvoices } from "../../controllers/admin/Report"
+import { getFinancialReport, getDetailedRestaurantReport, getSingleRestaurantReport, generateRestaurantInvoicePDF,generateAndSaveInvoice,markInvoiceAsPaid, getRestaurantInvoices, getRestaurantOrdersReport } from "../../controllers/admin/Report"
 import { hasPermission } from "../../middlewares/";
 import{getSuperAdminDashboard}from "../../controllers/admin/dashboard"
 const router = Router();
@@ -13,5 +13,7 @@ router.get("/restaurant/:restaurantId/invoices", hasPermission("reports", "View"
 router.get("/invoice/:invoiceId/pdf", hasPermission("reports", "View"), catchAsync(generateRestaurantInvoicePDF))
 router.post("/restaurant/invoice", hasPermission("reports", "View"), catchAsync(generateAndSaveInvoice))
 router.put("/invoice/:invoiceId/mark-paid", hasPermission("reports", "Edit"), catchAsync(markInvoiceAsPaid))
+
+router.get("/restaurant-orders", hasPermission("reports", "View"), catchAsync(getRestaurantOrdersReport));
 
 export default router;
