@@ -782,9 +782,14 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     const ordersStatsByRestaurant: Record<string, { count: number, commission: number, validCount: number, canceledCount: number, canceledByUser: number, canceledByRestaurant: number }> = {};
     ordersData.forEach((o) => {
         const comm = parseFloat(o.appCommission as any) || 0;
-        total_commission += comm;
-
         const isCanceled = o.status === "cancelled";
+        const isCanceledByRestaurant = isCanceled && o.cancelReasonType === "restaurant";
+
+        // Add commission if valid, or if canceled by restaurant
+        if (!isCanceled || isCanceledByRestaurant) {
+            total_commission += comm;
+        }
+
         if (isCanceled) {
             totalCanceledOrders += 1;
             if (o.cancelReasonType === "user") totalCanceledByUser += 1;
@@ -798,7 +803,11 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
                 ordersStatsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
             }
             ordersStatsByRestaurant[o.restaurantId].count += 1;
-            ordersStatsByRestaurant[o.restaurantId].commission += comm;
+            
+            if (!isCanceled || isCanceledByRestaurant) {
+                ordersStatsByRestaurant[o.restaurantId].commission += comm;
+            }
+
             if (isCanceled) {
                 ordersStatsByRestaurant[o.restaurantId].canceledCount += 1;
                 if (o.cancelReasonType === "user") ordersStatsByRestaurant[o.restaurantId].canceledByUser += 1;
