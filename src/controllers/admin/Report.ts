@@ -695,7 +695,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     }
 
     // 1. Fetch all restaurants
-    const allRestaurants = await db.select().from(restaurants);
+    const allRestaurants = await db.select().from(restaurants).where(eq(restaurants.status, "active"));
 
     let totalRestaurants = allRestaurants.length;
     let restaurantsByType: Record<string, number> = {};
@@ -726,7 +726,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     // 3. Filter restaurants based on 'type' if provided
     let filteredRestaurants = allRestaurants;
     if (type) {
-        filteredRestaurants = allRestaurants.filter((r) => r.type === type);
+        filteredRestaurants = allRestaurants.filter((r) => (r.type || "Unknown") === type);
     }
 
     // 4. Map to final result
