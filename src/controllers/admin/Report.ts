@@ -84,7 +84,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         breakdownByStatus[currentStatus].revenue += parseFloat(order.totalAmount as string || "0");
 
         // 🛑 استبعاد الأوردرات الملغية من الحسابات المالية الصافية
-        if (!isCancelledByUser || !isCancelledByRestaurant) continue;
+        if (order.status === "cancelled") continue;
 
         validOrdersCount++;
 
