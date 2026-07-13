@@ -64,7 +64,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans, 
-        type, salesId, likes // 👈 استلام الحقول الجديدة
+        type, salesId, ownerposition, likes // 👈 استلام الحقول الجديدة
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -120,6 +120,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             
             type: type ? clean(type) : "C", // 👈 حفظ نوع المطعم (Default C)
             salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
+            ownerposition: ownerposition ? clean(ownerposition) : null, // 👈 حفظ منصب المالك
             
             logo: logoUrl || '',
             cover: coverUrl || '',
@@ -197,6 +198,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             ownerUserId,
             type: type || "C",
             salesId: salesId || null,
+            ownerposition: ownerposition || null,
             businessPlans: plansToReturn // 👈 إرجاع الخطط
         }
     }, 201);
@@ -222,6 +224,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         status: restaurants.status,
         type: restaurants.type, // 👈 استرجاع النوع
         salesId: restaurants.salesId, // 👈 استرجاع المندوب
+        ownerposition: restaurants.ownerposition, // 👈 استرجاع منصب المالك
         cuisineIds: restaurants.cuisineId,
         email: restrauntadmin.email,
         zone_id: zones.id,
@@ -268,6 +271,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             status: r.status,
             type: r.type,
             salesId: r.salesId,
+            ownerposition: r.ownerposition,
             email: r.email || null,
             deliveryRadiusKm: r.deliveryRadiusKm,
             lat: r.lat,
@@ -275,6 +279,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             cuisines: parsedCuisines.map((id: string) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
             businessPlans: plansMap.get(r.id) || [],
             zone: r.zone_id ? { id: r.zone_id, name: r.zone_name } : null,
+            likes: r.likes,
         };
     });
 
@@ -325,6 +330,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
     const formattedRestaurant = {
         ...row.restaurantObj,
         type: row.restaurantObj.type,
+        ownerposition: row.restaurantObj.ownerposition,
         sales: row.salesObj ? { id: row.salesObj.id, name: row.salesObj.name } : null,
         email: row.ownerEmail || null,
         cuisines: restaurantCuisines,
@@ -347,7 +353,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
-        type, salesId, businessPlans, likes // 👈 استلام الحقول الجديدة في الـ Update
+        type, salesId, ownerposition, businessPlans, likes // 👈 استلام الحقول الجديدة في الـ Update
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -399,6 +405,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     
     if (type) restaurantUpdateData.type = type; // 👈 تحديث النوع
     if (salesId !== undefined) restaurantUpdateData.salesId = (salesId === "" || salesId === null) ? null : salesId; // 👈 تحديث المندوب
+    if (ownerposition !== undefined) restaurantUpdateData.ownerposition = (ownerposition === "" || ownerposition === null) ? null : ownerposition; // 👈 تحديث منصب المالك
 
     if (logo) restaurantUpdateData.logo = await handleImageUpdate(req, existingRestaurant.logo, logo, "restaurants");
     if (cover !== undefined) {
@@ -506,3 +513,15 @@ export const getallcousinesandzones = async (req: Request, res: Response) => {
     const allZones = await db.select({ id: zones.id, name: zones.name }).from(zones).where(eq(zones.status, "active"));
     return SuccessResponse(res, { message: "Get all cuisines and zones success", data: { allCuisines, allZones } });
 }
+
+// ==========================================
+// 7. GET ALL ACTIVE SALES
+// ==========================================
+export const getActiveSales = async (req: Request, res: Response) => {
+    const activeSales = await db
+        .select({ id: sales.id, name: sales.name })
+        .from(sales)
+        .where(eq(sales.status, "active"));
+    
+    return SuccessResponse(res, { message: "Get all active sales success", data: activeSales });
+};

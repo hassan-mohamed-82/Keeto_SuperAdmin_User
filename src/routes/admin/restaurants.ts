@@ -7,12 +7,14 @@ import {
   updateRestaurant,
   deleteRestaurant,
   getallcousinesandzones,
+  getActiveSales,
 } from "../../controllers/admin/restaurants";
 import { validate } from "../../middlewares/validation";
 import { createRestaurantSchema, updateRestaurantSchema } from "../../validation/admin/restaurants";
 import { hasPermission } from "../../middlewares/";
 const router = Router();
 router.get("/select", catchAsync(getallcousinesandzones));
+router.get("/sales/active", catchAsync(getActiveSales));
 router.post("/", hasPermission("Restaurants", "Add"), 
 // validate(createRestaurantSchema),
  catchAsync(createRestaurant));

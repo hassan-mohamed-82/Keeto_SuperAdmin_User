@@ -1,7 +1,7 @@
 // controllers/admin/FinancialReportController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons } from "../../models/schema";
+import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales } from "../../models/schema";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
@@ -737,7 +737,19 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     }
 
     // 1. Fetch all restaurants
-    const allRestaurants = await db.select().from(restaurants).where(eq(restaurants.status, "active"));
+    const allRestaurantsRaw = await db
+        .select({
+            restaurant: restaurants,
+            sales: sales,
+        })
+        .from(restaurants)
+        .leftJoin(sales, eq(restaurants.salesId, sales.id))
+        .where(eq(restaurants.status, "active"));
+
+    const allRestaurants = allRestaurantsRaw.map(r => ({
+        ...r.restaurant,
+        salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null
+    }));
 
     let totalRestaurants = allRestaurants.length;
     let restaurantsByType: Record<string, number> = {
