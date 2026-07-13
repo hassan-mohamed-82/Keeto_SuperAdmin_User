@@ -84,7 +84,17 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         breakdownByStatus[currentStatus].revenue += parseFloat(order.totalAmount as string || "0");
 
         // 🛑 استبعاد الأوردرات الملغية من الحسابات المالية الصافية
-        if (order.status === "cancelled") continue;
+        if (order.status === "cancelled") {
+            if (order.cancelReasonType === "restaurant") {
+                const commission = parseFloat(order.appCommission as string || "0");
+                grandTotalKeetoCommission += commission;
+                
+                const source = order.orderSource as string || "unknown";
+                if (!breakdownBySource[source]) breakdownBySource[source] = { orders: 0, revenue: 0, commission: 0 };
+                breakdownBySource[source].commission += commission;
+            }
+            continue;
+        }
 
         validOrdersCount++;
 
@@ -205,9 +215,6 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
     let grandTotalAmount = 0, grandTotalPlatformCommission = 0;
 
     for (const order of ordersData) {
-        const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
-        if (isCancelledByUser) continue;
-
         const rId = order.restaurantId || "unknown";
         if (!restaurantMap[rId]) {
             restaurantMap[rId] = {
@@ -221,6 +228,17 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         }
 
         const entry = restaurantMap[rId];
+
+        if (order.status === "cancelled") {
+            if (order.cancelReasonType === "restaurant") {
+                const commission = parseFloat(order.appCommission as string || "0");
+                entry.platformDues.totalCommission += commission;
+                grandTotalPlatformCommission += commission;
+                entry.settlementRaw.cashCommission += commission;
+            }
+            continue;
+        }
+
         const amount = parseFloat(order.totalAmount as string || "0");
         const commission = parseFloat(order.appCommission as string || "0");
         const svcFee = parseFloat(order.serviceFee as string || "0"); // الـ 5 جنيه
@@ -350,12 +368,21 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     let grandTotal = { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 };
 
     for (const order of ordersData) {
-        const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
-        if (isCancelledByUser) continue;
-
         const source = order.orderSource as string;
         const stats = sourceMap[source];
         if (!stats) continue;
+
+        if (order.status === "cancelled") {
+            if (order.cancelReasonType === "restaurant") {
+                const commission = parseFloat(order.appCommission as string || "0");
+                stats.commission += commission;
+                stats.cashComm += commission;
+                
+                grandTotal.commission += commission;
+                grandTotal.cashComm += commission;
+            }
+            continue;
+        }
 
         const amount = parseFloat(order.totalAmount as string || "0");
         const commission = parseFloat(order.appCommission as string || "0");
