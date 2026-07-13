@@ -58,6 +58,8 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
     let grandTotalServiceFees = 0;
     let grandTotalDeliveryFees = 0;
     let validOrdersCount = 0;
+    let totalCanceledByUser = 0;
+    let totalCanceledByRestaurant = 0;
     
     const breakdownByPayment = { cash: 0, visa: 0, wallet: 0 };
     const breakdownBySource: Record<string, { orders: number, revenue: number, commission: number }> = {};
@@ -65,6 +67,15 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
 
     for (const order of reportData) {
         const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
+        const isCancelledByRestaurant = order.status === "cancelled" && order.cancelReasonType === "restaurant";
+        
+        if (order.status === "cancelled") {
+            if (order.cancelReasonType === "user") {
+                totalCanceledByUser++;
+            } else if (order.cancelReasonType === "restaurant") {
+                totalCanceledByRestaurant++;
+            }
+        }
         
         // 📈 تجميع الإحصائيات حسب الحالة
         const currentStatus = order.status as string;
@@ -73,7 +84,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         breakdownByStatus[currentStatus].revenue += parseFloat(order.totalAmount as string || "0");
 
         // 🛑 استبعاد الأوردرات الملغية من الحسابات المالية الصافية
-        if (isCancelledByUser) continue;
+        if (isCancelledByUser || isCancelledByRestaurant) continue;
 
         validOrdersCount++;
 
@@ -118,6 +129,10 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
                 totalServiceFees: grandTotalServiceFees.toFixed(2),
                 totalDeliveryFees: grandTotalDeliveryFees.toFixed(2),
             }
+        },
+        cancelBreakdown: {
+            user: totalCanceledByUser,
+            restaurant: totalCanceledByRestaurant
         },
         collectionBreakdown: {
             cashCollectedByRestaurants: breakdownByPayment.cash.toFixed(2),
@@ -723,17 +738,21 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             restaurantId: orders.restaurantId,
             appCommission: orders.appCommission,
             status: orders.status,
+            cancelReasonType: selectReasons.type,
         })
         .from(orders)
+        .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .where(orderConditions.length > 0 ? and(...orderConditions) : undefined);
 
     let totalOrders = ordersData.length;
     let total_commission = 0;
     let totalValidOrders = 0;
     let totalCanceledOrders = 0;
+    let totalCanceledByUser = 0;
+    let totalCanceledByRestaurant = 0;
 
     // Group orders by restaurantId
-    const ordersStatsByRestaurant: Record<string, { count: number, commission: number, validCount: number, canceledCount: number }> = {};
+    const ordersStatsByRestaurant: Record<string, { count: number, commission: number, validCount: number, canceledCount: number, canceledByUser: number, canceledByRestaurant: number }> = {};
     ordersData.forEach((o) => {
         const comm = parseFloat(o.appCommission as any) || 0;
         total_commission += comm;
@@ -741,18 +760,22 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         const isCanceled = o.status === "cancelled";
         if (isCanceled) {
             totalCanceledOrders += 1;
+            if (o.cancelReasonType === "user") totalCanceledByUser += 1;
+            if (o.cancelReasonType === "restaurant") totalCanceledByRestaurant += 1;
         } else {
             totalValidOrders += 1;
         }
 
         if (o.restaurantId) {
             if (!ordersStatsByRestaurant[o.restaurantId]) {
-                ordersStatsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0 };
+                ordersStatsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
             }
             ordersStatsByRestaurant[o.restaurantId].count += 1;
             ordersStatsByRestaurant[o.restaurantId].commission += comm;
             if (isCanceled) {
                 ordersStatsByRestaurant[o.restaurantId].canceledCount += 1;
+                if (o.cancelReasonType === "user") ordersStatsByRestaurant[o.restaurantId].canceledByUser += 1;
+                if (o.cancelReasonType === "restaurant") ordersStatsByRestaurant[o.restaurantId].canceledByRestaurant += 1;
             } else {
                 ordersStatsByRestaurant[o.restaurantId].validCount += 1;
             }
@@ -767,12 +790,14 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
 
     // 4. Map to final result
     const restaurantDetails = filteredRestaurants.map((r) => {
-        const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0 };
+        const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
         return {
             restaurantDetails: r,
             ordersCount: stats.count,
             validOrders: stats.validCount,
             canceledOrders: stats.canceledCount,
+            canceledByUser: stats.canceledByUser,
+            canceledByRestaurant: stats.canceledByRestaurant,
             total_commission: stats.commission,
         };
     });
@@ -782,6 +807,10 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             totalOrders,
             validOrders: totalValidOrders,
             canceledOrders: totalCanceledOrders,
+            canceledBreakdown: {
+                user: totalCanceledByUser,
+                restaurant: totalCanceledByRestaurant
+            },
             totalRestaurants,
             total_commission,
             restaurantsByType,
