@@ -64,7 +64,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans, 
-        type, salesId // 👈 استلام الحقول الجديدة
+        type, salesId, likes // 👈 استلام الحقول الجديدة
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -137,6 +137,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             taxExpireDate: taxExpireDate || null,
             taxCertificate: typeof taxCertificate === 'string' ? clean(taxCertificate) : null,
             status: status || "active",
+            likes: likes || 0,
         });
 
         // 2. إنشاء المالك
@@ -225,6 +226,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         email: restrauntadmin.email,
         zone_id: zones.id,
         zone_name: zones.name,
+        likes: restaurants.likes,
     })
         .from(restaurants)
         .leftJoin(zones, eq(restaurants.zoneId, zones.id))
@@ -345,7 +347,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
-        type, salesId, businessPlans // 👈 استلام الحقول الجديدة في الـ Update
+        type, salesId, businessPlans, likes // 👈 استلام الحقول الجديدة في الـ Update
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -416,6 +418,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (taxExpireDate !== undefined) restaurantUpdateData.taxExpireDate = taxExpireDate;
     if (taxCertificate !== undefined) restaurantUpdateData.taxCertificate = taxCertificate;
     if (status) restaurantUpdateData.status = status;
+    if (likes !== undefined) restaurantUpdateData.likes = Number(likes);
 
     if (email) ownerUpdateData.email = email.trim();
     if (password) ownerUpdateData.password = await bcrypt.hash(password, 10);

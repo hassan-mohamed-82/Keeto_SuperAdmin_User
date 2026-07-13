@@ -19,8 +19,9 @@ export const restaurants = mysqlTable("restaurants", {
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id),
 
     // 👇 التعديلات الجديدة هنا
-    type: mysqlEnum("type", ["mega", "super", "A", "B", "C", "C-"]).default("C"), // نوع المطعم
+    type: mysqlEnum("type", ["mega", "super", "A", "B", "C", "C-", "test"]).default("C"), // نوع المطعم
     salesId: char("sales_id", { length: 36 }).references(() => sales.id), // المندوب اللي جاب المطعم
+    likes: int("likes").default(0),    
     // 👆
 
     logo: varchar("logo", { length: 500 }).notNull(),

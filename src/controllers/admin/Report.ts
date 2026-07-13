@@ -698,28 +698,64 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     const allRestaurants = await db.select().from(restaurants).where(eq(restaurants.status, "active"));
 
     let totalRestaurants = allRestaurants.length;
-    let restaurantsByType: Record<string, number> = {};
+    let restaurantsByType: Record<string, number> = {
+        "mega": 0,
+        "super": 0,
+        "A": 0,
+        "B": 0,
+        "C": 0,
+        "C-": 0,
+        "test": 0
+    };
 
     allRestaurants.forEach((r) => {
         const rType = r.type || "Unknown";
-        restaurantsByType[rType] = (restaurantsByType[rType] || 0) + 1;
+        if (restaurantsByType[rType] !== undefined) {
+            restaurantsByType[rType] += 1;
+        } else {
+            restaurantsByType[rType] = 1;
+        }
     });
 
     // 2. Fetch orders within date range
     const ordersData = await db
         .select({
             restaurantId: orders.restaurantId,
+            appCommission: orders.appCommission,
+            status: orders.status,
         })
         .from(orders)
         .where(orderConditions.length > 0 ? and(...orderConditions) : undefined);
 
     let totalOrders = ordersData.length;
+    let total_commission = 0;
+    let totalValidOrders = 0;
+    let totalCanceledOrders = 0;
 
     // Group orders by restaurantId
-    const ordersCountByRestaurant: Record<string, number> = {};
+    const ordersStatsByRestaurant: Record<string, { count: number, commission: number, validCount: number, canceledCount: number }> = {};
     ordersData.forEach((o) => {
+        const comm = parseFloat(o.appCommission as any) || 0;
+        total_commission += comm;
+
+        const isCanceled = o.status === "cancelled";
+        if (isCanceled) {
+            totalCanceledOrders += 1;
+        } else {
+            totalValidOrders += 1;
+        }
+
         if (o.restaurantId) {
-            ordersCountByRestaurant[o.restaurantId] = (ordersCountByRestaurant[o.restaurantId] || 0) + 1;
+            if (!ordersStatsByRestaurant[o.restaurantId]) {
+                ordersStatsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0 };
+            }
+            ordersStatsByRestaurant[o.restaurantId].count += 1;
+            ordersStatsByRestaurant[o.restaurantId].commission += comm;
+            if (isCanceled) {
+                ordersStatsByRestaurant[o.restaurantId].canceledCount += 1;
+            } else {
+                ordersStatsByRestaurant[o.restaurantId].validCount += 1;
+            }
         }
     });
 
@@ -730,24 +766,28 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     }
 
     // 4. Map to final result
-    const restaurantDetails = filteredRestaurants.map((r) => ({
-        restaurantDetails: r,
-        ordersCount: ordersCountByRestaurant[r.id] || 0,
-    }));
-
-    const hasFilters = startDate || endDate || type;
+    const restaurantDetails = filteredRestaurants.map((r) => {
+        const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0 };
+        return {
+            restaurantDetails: r,
+            ordersCount: stats.count,
+            validOrders: stats.validCount,
+            canceledOrders: stats.canceledCount,
+            total_commission: stats.commission,
+        };
+    });
 
     const responseData: any = {
         summary: {
             totalOrders,
+            validOrders: totalValidOrders,
+            canceledOrders: totalCanceledOrders,
             totalRestaurants,
+            total_commission,
             restaurantsByType,
-        }
+        },
+        restaurants: restaurantDetails,
     };
-
-    if (hasFilters) {
-        responseData.restaurants = restaurantDetails;
-    }
 
     return SuccessResponse(res, {
         message: "Restaurant orders report generated successfully",
