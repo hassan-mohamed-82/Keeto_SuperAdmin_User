@@ -21,7 +21,9 @@ export const restaurants = mysqlTable("restaurants", {
     // 👇 التعديلات الجديدة هنا
     type: mysqlEnum("type", ["mega", "super", "A", "B", "C", "C-", "test"]).default("C"), // نوع المطعم
     salesId: char("sales_id", { length: 36 }).references(() => sales.id), // المندوب اللي جاب المطعم
-    likes: int("likes").default(0),    
+    likes: int("likes").default(0),
+    facebookLink: varchar("facebook_link", { length: 500 }),
+    orderLink: varchar("order_link", { length: 500 }),
     // 👆
 
     logo: varchar("logo", { length: 500 }).notNull(),

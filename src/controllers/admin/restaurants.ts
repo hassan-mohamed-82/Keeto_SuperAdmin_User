@@ -63,8 +63,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
         zoneId, logo, cover, minDeliveryTime, maxDeliveryTime,
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
-        lat, lng, deliveryRadiusKm, businessPlans, 
-        type, salesId, ownerposition, likes // 👈 استلام الحقول الجديدة
+        lat, lng, deliveryRadiusKm, businessPlans,
+        type, salesId, ownerposition, likes, facebookLink, orderLink // 👈 استلام الحقول الجديدة
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -139,6 +139,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
             taxCertificate: typeof taxCertificate === 'string' ? clean(taxCertificate) : null,
             status: status || "active",
             likes: likes || 0,
+            facebookLink: facebookLink ? facebookLink.trim() : null,
+            orderLink: orderLink ? orderLink.trim() : null,
         });
 
         // 2. إنشاء المالك
@@ -230,6 +232,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         zone_id: zones.id,
         zone_name: zones.name,
         likes: restaurants.likes,
+        facebookLink: restaurants.facebookLink,
+        orderLink: restaurants.orderLink,
     })
         .from(restaurants)
         .leftJoin(zones, eq(restaurants.zoneId, zones.id))
@@ -280,6 +284,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             businessPlans: plansMap.get(r.id) || [],
             zone: r.zone_id ? { id: r.zone_id, name: r.zone_name } : null,
             likes: r.likes,
+            facebookLink: r.facebookLink || null,
+            orderLink: r.orderLink || null,
         };
     });
 
@@ -353,7 +359,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
-        type, salesId, ownerposition, businessPlans, likes // 👈 استلام الحقول الجديدة في الـ Update
+        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink // 👈 استلام الحقول الجديدة في الـ Update
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -426,6 +432,8 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (taxCertificate !== undefined) restaurantUpdateData.taxCertificate = taxCertificate;
     if (status) restaurantUpdateData.status = status;
     if (likes !== undefined) restaurantUpdateData.likes = Number(likes);
+    if (facebookLink !== undefined) restaurantUpdateData.facebookLink = (facebookLink === "" || facebookLink === null) ? null : facebookLink.trim();
+    if (orderLink !== undefined) restaurantUpdateData.orderLink = (orderLink === "" || orderLink === null) ? null : orderLink.trim();
 
     if (email) ownerUpdateData.email = email.trim();
     if (password) ownerUpdateData.password = await bcrypt.hash(password, 10);
