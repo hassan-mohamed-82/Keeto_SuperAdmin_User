@@ -2,7 +2,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales } from "../../models/schema";
-import { eq, and, desc, gte, lte } from "drizzle-orm";
+import { eq, and, desc, gte, lte, inArray } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import PDFDocument from "pdfkit";
@@ -771,7 +771,14 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         }
     });
 
-    // 2. Fetch orders within date range
+    // 2. Fetch orders within date range — only for active restaurants
+    const activeRestaurantIds = allRestaurants.map((r) => r.id);
+
+    const allOrderConditions = [...orderConditions];
+    if (activeRestaurantIds.length > 0) {
+        allOrderConditions.push(inArray(orders.restaurantId, activeRestaurantIds));
+    }
+
     const ordersData = await db
         .select({
             restaurantId: orders.restaurantId,
@@ -781,7 +788,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         })
         .from(orders)
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
-        .where(orderConditions.length > 0 ? and(...orderConditions) : undefined);
+        .where(allOrderConditions.length > 0 ? and(...allOrderConditions) : undefined);
 
     let totalOrders = ordersData.length;
     let total_commission = 0;
