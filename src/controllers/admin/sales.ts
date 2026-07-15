@@ -16,7 +16,7 @@ export const createSales = async (req: Request, res: Response) => {
     const { name, phone, email, password, points, status } = req.body;
 
     if (!name) throw new BadRequest("Sales name is required");
-    if (!password) throw new BadRequest("Password is required");
+    // if (!password) throw new BadRequest("Password is required");
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
