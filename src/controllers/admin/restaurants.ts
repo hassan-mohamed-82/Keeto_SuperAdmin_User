@@ -52,6 +52,37 @@ const safeParseArray = (input: any): string[] => {
     return matches ? Array.from(new Set(matches)) : [];
 };
 
+// Helper: map restaurant type to sales points
+const getRestaurantTypePoints = (restaurantType?: string | null): number => {
+    const normalized = String(restaurantType ?? "").trim().toLowerCase();
+    const pointsMap: Record<string, number> = {
+        mega: 50,
+        super: 25,
+        a: 10,
+        b: 5,
+        c: 2,
+        "c-": 1,
+    };
+
+    return pointsMap[normalized] ?? 0;
+};
+
+// Helper: adjust sales representative points inside a transaction
+const adjustSalesRepPoints = async (tx: any, salesId: string | null | undefined, delta: number) => {
+    if (!salesId || delta === 0) return;
+
+    const [rep] = await tx
+        .select({ points: sales.points })
+        .from(sales)
+        .where(eq(sales.id, salesId))
+        .limit(1);
+
+    if (!rep) return;
+
+    const nextPoints = Math.max(0, Number(rep.points ?? 0) + delta);
+    await tx.update(sales).set({ points: nextPoints }).where(eq(sales.id, salesId));
+};
+
 // ==========================================
 // 1. CREATE RESTAURANT
 // ==========================================
@@ -72,6 +103,9 @@ export const createRestaurant = async (req: Request, res: Response) => {
     if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerLastName || !ownerPhone || !email || !password) {
         throw new BadRequest("Missing required fields");
     }
+
+    const restaurantType = (type && clean(type)) ? clean(type) : "C";
+    const pointsToAward = getRestaurantTypePoints(restaurantType);
 
     const existingUser = await db
         .select()
@@ -117,11 +151,11 @@ export const createRestaurant = async (req: Request, res: Response) => {
             addressFr: clean(addressFr),
             cuisineId: parsedCuisines,
             zoneId: zoneId ? clean(zoneId) : null,
-            
-            type: type ? clean(type) : "C", // 👈 حفظ نوع المطعم (Default C)
+
+            type: restaurantType, // 👈 حفظ نوع المطعم (Default C)
             salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
             ownerposition: ownerposition ? clean(ownerposition) : null, // 👈 حفظ منصب المالك
-            
+
             logo: logoUrl || '',
             cover: coverUrl || '',
             lat: lat || '',
@@ -170,7 +204,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         if (parsedBusinessPlans.length > 0) {
             for (const plan of parsedBusinessPlans) {
                 if (!plan.platformType) continue;
-                
+
                 const newPlan = {
                     id: uuidv4(),
                     restaurantId: restaurantId,
@@ -184,11 +218,13 @@ export const createRestaurant = async (req: Request, res: Response) => {
                     commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
                     serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
                 };
-                
+
                 await tx.insert(restaurantBusinessPlans).values(newPlan);
                 plansToReturn.push(newPlan); // إضافة الخطة للمصفوفة الراجعة
             }
         }
+
+        await adjustSalesRepPoints(tx, salesId ? clean(salesId) : null, pointsToAward);
     });
 
     for (const cid of parsedCuisines) await incrementCuisineCount(cid);
@@ -198,10 +234,10 @@ export const createRestaurant = async (req: Request, res: Response) => {
         data: {
             restaurantId,
             ownerUserId,
-            type: type || "C",
+            type: restaurantType,
             salesId: salesId || null,
             ownerposition: ownerposition || null,
-            businessPlans: plansToReturn // 👈 إرجاع الخطط
+            businessPlans: plansToReturn
         }
     }, 201);
 };
@@ -352,6 +388,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
 // 4. UPDATE RESTAURANT
 // ==========================================
 export const updateRestaurant = async (req: Request, res: Response) => {
+    const clean = (v: any) => (typeof v === "string" ? v.trim() : v);
     const { id } = req.params;
     const {
         name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover,
@@ -368,6 +405,12 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (!existingRestaurant) throw new NotFound("Restaurant not found");
 
     const [existingOwner] = await db.select().from(restrauntadmin).where(and(eq(restrauntadmin.restaurantId, id), eq(restrauntadmin.type, "owner"))).limit(1);
+
+    const resolvedType = type !== undefined ? (clean(type) || "C") : (existingRestaurant.type || "C");
+    const resolvedSalesId = salesId !== undefined ? (salesId === "" || salesId === null ? null : clean(salesId)) : existingRestaurant.salesId;
+    const previousType = existingRestaurant.type || "C";
+    const previousSalesId = existingRestaurant.salesId || null;
+    const shouldAdjustSalesPoints = previousSalesId !== resolvedSalesId || previousType !== resolvedType;
 
     const restaurantUpdateData: any = { updatedAt: new Date() };
     const ownerUpdateData: any = { updatedAt: new Date() };
@@ -408,9 +451,9 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (lat !== undefined) restaurantUpdateData.lat = lat;
     if (lng !== undefined) restaurantUpdateData.lng = lng;
     if (deliveryRadiusKm !== undefined) restaurantUpdateData.deliveryRadiusKm = deliveryRadiusKm;
-    
-    if (type) restaurantUpdateData.type = type; // 👈 تحديث النوع
-    if (salesId !== undefined) restaurantUpdateData.salesId = (salesId === "" || salesId === null) ? null : salesId; // 👈 تحديث المندوب
+
+    if (type !== undefined) restaurantUpdateData.type = resolvedType; // 👈 تحديث النوع
+    if (salesId !== undefined) restaurantUpdateData.salesId = resolvedSalesId; // 👈 تحديث المندوب
     if (ownerposition !== undefined) restaurantUpdateData.ownerposition = (ownerposition === "" || ownerposition === null) ? null : ownerposition; // 👈 تحديث منصب المالك
 
     if (logo) restaurantUpdateData.logo = await handleImageUpdate(req, existingRestaurant.logo, logo, "restaurants");
@@ -458,7 +501,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         // 👈 تحديث خطط البيزنس (مسح القديم وإدخال الجديد لتجنب التعقيد)
         if (parsedBusinessPlans !== undefined) {
             await tx.delete(restaurantBusinessPlans).where(eq(restaurantBusinessPlans.restaurantId, id));
-            
+
             if (parsedBusinessPlans.length > 0) {
                 for (const plan of parsedBusinessPlans) {
                     if (!plan.platformType) continue;
@@ -476,6 +519,19 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                         serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
                     });
                 }
+            }
+        }
+
+        if (shouldAdjustSalesPoints) {
+            const previousPoints = getRestaurantTypePoints(previousType);
+            const nextPoints = getRestaurantTypePoints(resolvedType);
+
+            if (previousSalesId && previousPoints > 0) {
+                await adjustSalesRepPoints(tx, previousSalesId, -previousPoints);
+            }
+
+            if (resolvedSalesId && nextPoints > 0) {
+                await adjustSalesRepPoints(tx, resolvedSalesId, nextPoints);
             }
         }
     });
@@ -530,6 +586,6 @@ export const getActiveSales = async (req: Request, res: Response) => {
         .select({ id: sales.id, name: sales.name })
         .from(sales)
         .where(eq(sales.status, "active"));
-    
+
     return SuccessResponse(res, { message: "Get all active sales success", data: activeSales });
 };
