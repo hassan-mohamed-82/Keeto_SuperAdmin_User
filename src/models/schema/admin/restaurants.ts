@@ -48,7 +48,8 @@ export const restaurants = mysqlTable("restaurants", {
     addhome: boolean("addhome").default(false),
     deliveryRadiusKm: int("delivery_radius_km").default(0),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
-    
+    deliverystatus: mysqlEnum("delivery_status", ["delivered", "not_delivered"]).default("not_delivered"),
+
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

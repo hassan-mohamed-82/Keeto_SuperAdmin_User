@@ -19,7 +19,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
 
     // 1. استقبال متغيرات الفلترة فقط (بدون page و limit)
     const { restaurantId, startDate, endDate, status, paymentMethod } = req.query;
-    
+
     const conditions = [];
 
     if (restaurantId) conditions.push(eq(orders.restaurantId, restaurantId as string));
@@ -38,12 +38,12 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         .select({
             status: orders.status,
             orderSource: orders.orderSource,
-            paymentMethodName: paymentMethods.name, 
+            paymentMethodName: paymentMethods.name,
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee,
             appCommission: orders.appCommission,
             totalAmount: orders.totalAmount,
-            cancelReasonType: selectReasons.type, 
+            cancelReasonType: selectReasons.type,
         })
         .from(orders)
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
@@ -53,14 +53,14 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
     // ==========================================
     // 📊 3. تجهيز الكيانات التحليلية (Analytics Entities)
     // ==========================================
-    let grandTotalRevenue = 0; 
-    let grandTotalKeetoCommission = 0; 
+    let grandTotalRevenue = 0;
+    let grandTotalKeetoCommission = 0;
     let grandTotalServiceFees = 0;
     let grandTotalDeliveryFees = 0;
     let validOrdersCount = 0;
     let totalCanceledByUser = 0;
     let totalCanceledByRestaurant = 0;
-    
+
     const breakdownByPayment = { cash: 0, visa: 0, wallet: 0 };
     const breakdownBySource: Record<string, { orders: number, revenue: number, commission: number }> = {};
     const breakdownByStatus: Record<string, { orders: number, revenue: number }> = {};
@@ -68,7 +68,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
     for (const order of reportData) {
         const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
         const isCancelledByRestaurant = order.status === "cancelled" && order.cancelReasonType === "restaurant";
-        
+
         if (order.status === "cancelled") {
             if (order.cancelReasonType === "user") {
                 totalCanceledByUser++;
@@ -76,7 +76,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
                 totalCanceledByRestaurant++;
             }
         }
-        
+
         // 📈 تجميع الإحصائيات حسب الحالة
         const currentStatus = order.status as string;
         if (!breakdownByStatus[currentStatus]) breakdownByStatus[currentStatus] = { orders: 0, revenue: 0 };
@@ -88,7 +88,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             if (order.cancelReasonType === "restaurant") {
                 const commission = parseFloat(order.appCommission as string || "0");
                 grandTotalKeetoCommission += commission;
-                
+
                 const source = order.orderSource as string || "unknown";
                 if (!breakdownBySource[source]) breakdownBySource[source] = { orders: 0, revenue: 0, commission: 0 };
                 breakdownBySource[source].commission += commission;
@@ -194,7 +194,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         .select({
             orderId: orders.id,
             orderSource: orders.orderSource,
-            paymentMethodName: paymentMethods.name, 
+            paymentMethodName: paymentMethods.name,
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee, // 👈 دي الرسوم الثابتة بتاعة كيتو (الـ 5 جنيه)
@@ -208,7 +208,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
-        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id)) 
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined);
 
     const restaurantMap: Record<string, any> = {};
@@ -245,13 +245,13 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
 
         entry.counts.total += 1;
         entry.sales.totalRevenue += amount;
-        
+
         // دي فلوس المنصة (كيتو)
         entry.platformDues.totalCommission += commission;
         entry.platformDues.totalServiceFee += svcFee;
 
         grandTotalAmount += amount;
-        grandTotalPlatformCommission += (commission + svcFee); 
+        grandTotalPlatformCommission += (commission + svcFee);
 
         const payment = (order.paymentMethodName || "").toLowerCase();
         const isCash = payment.includes("cash") || payment.includes("استلام");
@@ -271,13 +271,13 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
 
     const restaurantReports = Object.values(restaurantMap).map(entry => {
         // 💰 تصفية الحسابات (Settlement Logic)
-        
+
         // المطعم عليه كام؟ (عمولة الكاش + السيرفس فيز الثابتة بتاعت الكاش زي الـ 5 جنيه)
         const restaurantOwesToPlatform = entry.settlementRaw.cashCommission + entry.settlementRaw.cashServiceFee;
-        
+
         // المنصة عليها كام؟ (فلوس الفيزا كلها اللي دخلت البنك - العمولة المئوية - السيرفس فيز الثابتة)
         const platformOwesToRestaurant = entry.sales.digitalCollected - (entry.settlementRaw.digitalCommission + entry.settlementRaw.digitalServiceFee);
-        
+
         const netBalance = platformOwesToRestaurant - restaurantOwesToPlatform;
 
         return {
@@ -291,17 +291,17 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             },
             platformDues: {
                 // هنجمع العمولة المئوية + الرسوم الثابتة عشان تظهر كلها في عمود App Commission في الفرونت إند
-                totalAppCommission: (entry.platformDues.totalCommission + entry.platformDues.totalServiceFee).toFixed(2), 
+                totalAppCommission: (entry.platformDues.totalCommission + entry.platformDues.totalServiceFee).toFixed(2),
             },
             settlement: {
                 restaurantOwesPlatform: restaurantOwesToPlatform.toFixed(2),
                 platformOwesRestaurant: platformOwesToRestaurant.toFixed(2),
                 netBalance: netBalance.toFixed(2),
-                actionRequired: netBalance > 0 
+                actionRequired: netBalance > 0
                     ? `⚠️ Platform MUST TRANSFER ${Math.abs(netBalance).toFixed(2)} EGP to the Restaurant`
-                    : netBalance < 0 
-                    ? `🚨 Platform MUST COLLECT ${Math.abs(netBalance).toFixed(2)} EGP from the Restaurant`
-                    : "✅ Settled",
+                    : netBalance < 0
+                        ? `🚨 Platform MUST COLLECT ${Math.abs(netBalance).toFixed(2)} EGP from the Restaurant`
+                        : "✅ Settled",
             }
         };
     });
@@ -344,7 +344,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         .select({
             orderId: orders.id,
             orderSource: orders.orderSource,
-            paymentMethodName: paymentMethods.name, 
+            paymentMethodName: paymentMethods.name,
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee, // 👈 رسوم كيتو الثابتة (الـ 5 جنيه)
@@ -377,7 +377,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
                 const commission = parseFloat(order.appCommission as string || "0");
                 stats.commission += commission;
                 stats.cashComm += commission;
-                
+
                 grandTotal.commission += commission;
                 grandTotal.cashComm += commission;
             }
@@ -391,11 +391,11 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
 
         stats.orders += 1;
         stats.revenue += amount;
-        
+
         // 💰 تجميع مستحقات المنصة
         stats.commission += commission;
-        stats.svcFee += serviceFee; 
-        
+        stats.svcFee += serviceFee;
+
         stats.dlvFee += deliveryFee;
 
         grandTotal.orders += 1;
@@ -411,7 +411,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             stats.cash += amount;
             stats.cashComm += commission;
             stats.cashSvc += serviceFee; // 👈 هنسجل إن الكاش ده عليه سيرفس فيز
-            
+
             grandTotal.cash += amount;
             grandTotal.cashComm += commission;
             grandTotal.cashSvc += serviceFee;
@@ -419,7 +419,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             stats.digital += amount;
             stats.digComm += commission;
             stats.digSvc += serviceFee; // 👈 وهنسجل إن الديجيتال عليه سيرفس فيز يتخصم منه
-            
+
             grandTotal.digital += amount;
             grandTotal.digComm += commission;
             grandTotal.digSvc += serviceFee;
@@ -430,10 +430,10 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         // 💰 تصفية الحسابات
         // المطعم عليه كام؟ (عمولة الكاش + السيرفس فيز الثابتة بتاعت الكاش)
         const restOwes = stats.cashComm + stats.cashSvc;
-        
+
         // المنصة مدينة للمطعم بفلوس الديجيتال ناقص (العمولة المئوية للديجيتال + السيرفس فيز بتاعت الديجيتال)
         const platOwes = stats.digital - (stats.digComm + stats.digSvc);
-        
+
         const net = platOwes - restOwes;
 
         return {
@@ -450,7 +450,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             },
             keetoDues: {
                 // جمعناهم عشان يظهروا رقم واحد في خانة الـ APP COMMISSION للفرونت إند
-                appCommission: (stats.commission + stats.svcFee).toFixed(2), 
+                appCommission: (stats.commission + stats.svcFee).toFixed(2),
             },
             settlement: {
                 restaurantOwesPlatform: restOwes.toFixed(2),
@@ -475,11 +475,11 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
                 keetoDues: finalReport.keetoDues,
                 settlement: {
                     ...finalReport.settlement,
-                    actionRequired: parseFloat(finalReport.settlement.netBalance) > 0 
-                    ? `⚠️ Platform MUST TRANSFER ${Math.abs(parseFloat(finalReport.settlement.netBalance)).toFixed(2)} EGP to the Restaurant`
-                    : parseFloat(finalReport.settlement.netBalance) < 0 
-                    ? `🚨 Platform MUST COLLECT ${Math.abs(parseFloat(finalReport.settlement.netBalance)).toFixed(2)} EGP from the Restaurant`
-                    : "✅ Settled"
+                    actionRequired: parseFloat(finalReport.settlement.netBalance) > 0
+                        ? `⚠️ Platform MUST TRANSFER ${Math.abs(parseFloat(finalReport.settlement.netBalance)).toFixed(2)} EGP to the Restaurant`
+                        : parseFloat(finalReport.settlement.netBalance) < 0
+                            ? `🚨 Platform MUST COLLECT ${Math.abs(parseFloat(finalReport.settlement.netBalance)).toFixed(2)} EGP from the Restaurant`
+                            : "✅ Settled"
                 }
             }
         }
@@ -548,16 +548,16 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
 
     // Build PDF
     const doc = new PDFDocument({ margin: 50 });
-    
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="invoice_${restaurant[0].name.replace(/\s+/g, '_')}_${invoiceData.invoiceNumber}.pdf"`);
-    
+
     doc.pipe(res);
-    
+
     // Header
     doc.fontSize(20).text('Keeto Restaurant Invoice', { align: 'center' });
     doc.moveDown();
-    
+
     // Restaurant Details
     doc.fontSize(14).fillColor('black').text(`Restaurant: ${restaurant[0].name} / ${restaurant[0].nameAr || ''}`);
     doc.fontSize(12).text(`Invoice Number: ${invoiceData.invoiceNumber}`);
@@ -565,7 +565,7 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
     doc.text(`Generated At: ${new Date(invoiceData.createdAt || Date.now()).toLocaleString()}`);
     doc.text(`Status: ${invoiceData.status?.toUpperCase() || 'UNPAID'}`);
     doc.moveDown();
-    
+
     doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
     doc.moveDown();
 
@@ -594,12 +594,12 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
     doc.fontSize(16).text('Settlement / Cash Due Analysis', { underline: true });
     doc.fontSize(12).text(`Restaurant Owes Platform: ${invoiceData.restaurantOwesPlatform} EGP`);
     doc.text(`Platform Owes Restaurant: ${invoiceData.platformOwesRestaurant} EGP`);
-    
+
     doc.moveDown();
     doc.fontSize(14).text('Final Balance:', { continued: true });
-    
+
     const netBalance = parseFloat(invoiceData.netBalance as string);
-    
+
     if (netBalance > 0) {
         doc.fillColor('green').text(` Platform MUST TRANSFER ${Math.abs(netBalance).toFixed(2)} EGP to Restaurant`);
     } else if (netBalance < 0) {
@@ -607,7 +607,7 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
     } else {
         doc.fillColor('black').text(` No pending dues (Settled)`);
     }
-    
+
     doc.end();
 };
 
@@ -617,7 +617,7 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
 export const generateAndSaveInvoice = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
-    const { restaurantId, startDate, endDate } = req.body; 
+    const { restaurantId, startDate, endDate } = req.body;
     if (!restaurantId || !startDate || !endDate) throw new BadRequest("Restaurant ID, Start Date, and End Date are required");
 
     const conditions = [eq(orders.restaurantId, restaurantId)];
@@ -641,11 +641,11 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id)) // 👈 Join لجدول الدفع
         .where(and(...conditions));
-    
+
     let totalCash = 0, totalDigital = 0, totalSales = 0;
     let cashComm = 0, cashSvc = 0, digitalComm = 0, digitalSvc = 0;
     let validOrdersCount = 0;
-    
+
     for (const order of ordersData) {
         const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
         if (isCancelledByUser) continue;
@@ -709,12 +709,12 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
 // ==========================================
 export const markInvoiceAsPaid = async (req: Request, res: Response) => {
     const { invoiceId } = req.params;
-    
+
     const [existing] = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
     if (!existing) throw new NotFound("Invoice not found");
 
     await db.update(invoices).set({ status: "paid" }).where(eq(invoices.id, invoiceId));
-    
+
     return SuccessResponse(res, { message: "Invoice marked as paid successfully" });
 };
 
@@ -723,8 +723,6 @@ export const markInvoiceAsPaid = async (req: Request, res: Response) => {
 // ==========================================
 export const getRestaurantOrdersReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
-
-    console.log(req.query);
 
     const { startDate, endDate, type } = req.query;
 
@@ -822,7 +820,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
                 ordersStatsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
             }
             ordersStatsByRestaurant[o.restaurantId].count += 1;
-            
+
             if (!isCanceled || isCanceledByRestaurant) {
                 ordersStatsByRestaurant[o.restaurantId].commission += comm;
             }
@@ -876,5 +874,173 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     return SuccessResponse(res, {
         message: "Restaurant orders report generated successfully",
         data: responseData,
+    });
+};
+
+export const getSalesReport = async (req: Request, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+
+    const { startDate, endDate, salesId, type } = req.query;
+
+    const salesConditions = [];
+    if (startDate) {
+        salesConditions.push(gte(sales.createdAt, new Date(startDate as string)));
+    }
+    if (endDate) {
+        const end = new Date(endDate as string);
+        end.setHours(23, 59, 59, 999);
+        salesConditions.push(lte(sales.createdAt, end));
+    }
+    if (salesId) {
+        salesConditions.push(eq(sales.id, salesId as string));
+    }
+
+    const restaurantConditions = [];
+    if (type) {
+        restaurantConditions.push(eq(restaurants.type, type as any));
+    }
+
+    const allSalesRaw = await db
+        .select({
+            sales: sales,
+            restaurant: restaurants,
+        })
+        .from(sales)
+        .leftJoin(
+            restaurants, 
+            eq(sales.id, restaurants.salesId)
+        )
+        .where(
+            and(
+                salesConditions.length > 0 ? and(...salesConditions) : undefined,
+                restaurantConditions.length > 0 ? and(...restaurantConditions) : undefined
+            )
+        );
+
+    const salesMap = new Map<string, {
+        id: string;
+        name: string;
+        phone: string | null;
+        email: string | null;
+        points: number;
+        status: string;
+        activeRestaurantsCount: number;
+        inactiveRestaurantsCount: number;
+        typeGroups: { 
+            [type: string]: { 
+                total: number;
+                active: number; 
+                inactive: number; 
+                list: any[] 
+            } 
+        };
+    }>();
+
+    let totalActiveSalesPoints = 0;
+    let totalActiveRestaurantsCount = 0;
+
+    for (const row of allSalesRaw) {
+        const currentSales = row.sales;
+        const currentRest = row.restaurant;
+
+        if (currentSales.status !== "active") {
+            continue;
+        }
+
+        if (!salesMap.has(currentSales.id)) {
+            salesMap.set(currentSales.id, {
+                id: currentSales.id,
+                name: currentSales.name,
+                phone: currentSales.phone,
+                email: currentSales.email,
+                points: currentSales.points || 0,
+                status: currentSales.status,
+                activeRestaurantsCount: 0,
+                inactiveRestaurantsCount: 0,
+                typeGroups: {}
+            });
+
+            totalActiveSalesPoints += currentSales.points || 0;
+        }
+
+        const salesGroup = salesMap.get(currentSales.id)!;
+
+        if (currentRest) {
+            const isRestActive = currentRest.status === "active";
+            const restType = currentRest.type || "C";
+
+            if (isRestActive) {
+                salesGroup.activeRestaurantsCount += 1;
+                totalActiveRestaurantsCount += 1; 
+            } else {
+                salesGroup.inactiveRestaurantsCount += 1;
+            }
+
+            if (salesId) {
+                if (!salesGroup.typeGroups[restType]) {
+                    salesGroup.typeGroups[restType] = {
+                        total: 0,
+                        active: 0,
+                        inactive: 0,
+                        list: []
+                    };
+                }
+
+                const group = salesGroup.typeGroups[restType];
+                group.total += 1;
+                if (isRestActive) {
+                    group.active += 1;
+                } else {
+                    group.inactive += 1;
+                }
+
+                group.list.push({
+                    id: currentRest.id,
+                    name: currentRest.name,
+                    nameAr: currentRest.nameAr,
+                    status: currentRest.status,
+                    createdAt: currentRest.createdAt
+                });
+            }
+        }
+    }
+
+    const salesList = Array.from(salesMap.values()).map(item => {
+        // نتحقق من وجود الـ salesId؛ فإذا كان موجوداً نقوم بتضمين الـ groupedByType، وإلا فلن تظهر في الـ Object نهائياً
+        const responseData: any = {
+            id: item.id,
+            name: item.name,
+            phone: item.phone,
+            email: item.email,
+            status: item.status,
+            totalPoints: item.points,
+            restaurantSummary: {
+                totalRestaurants: item.activeRestaurantsCount + item.inactiveRestaurantsCount,
+                activeCount: item.activeRestaurantsCount,
+                inactiveCount: item.inactiveRestaurantsCount
+            }
+        };
+
+        if (salesId) {
+            responseData.groupedByType = Object.keys(item.typeGroups).map(typeKey => ({
+                type: typeKey,
+                totalRestaurants: item.typeGroups[typeKey].total,
+                activeCount: item.typeGroups[typeKey].active,
+                inactiveCount: item.typeGroups[typeKey].inactive,
+                restaurants: item.typeGroups[typeKey].list
+            }));
+        }
+
+        return responseData;
+    });
+
+    return SuccessResponse(res, {
+        message: "Sales report fetched successfully",
+        summary: {
+            totalActiveSalesPoints,
+            totalActiveRestaurants: totalActiveRestaurantsCount,
+            totalActiveSales: salesList.length
+        },
+        salesList: salesList
     });
 };

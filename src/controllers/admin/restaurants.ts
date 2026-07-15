@@ -95,7 +95,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans,
-        type, salesId, ownerposition, likes, facebookLink, orderLink // 👈 استلام الحقول الجديدة
+        type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus // 👈 استلام الحقول الجديدة
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -175,6 +175,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             likes: likes || 0,
             facebookLink: facebookLink ? facebookLink.trim() : null,
             orderLink: orderLink ? orderLink.trim() : null,
+            deliverystatus: deliverystatus || "not_delivered",
         });
 
         // 2. إنشاء المالك
@@ -270,6 +271,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         likes: restaurants.likes,
         facebookLink: restaurants.facebookLink,
         orderLink: restaurants.orderLink,
+        deliverystatus: restaurants.deliverystatus,
     })
         .from(restaurants)
         .leftJoin(zones, eq(restaurants.zoneId, zones.id))
@@ -322,6 +324,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             likes: r.likes,
             facebookLink: r.facebookLink || null,
             orderLink: r.orderLink || null,
+            deliverystatus: r.deliverystatus,
         };
     });
 
@@ -396,7 +399,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
-        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink // 👈 استلام الحقول الجديدة في الـ Update
+        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus // 👈 استلام الحقول الجديدة في الـ Update
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -481,13 +484,15 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (email) ownerUpdateData.email = email.trim();
     if (password) ownerUpdateData.password = await bcrypt.hash(password, 10);
     if (status) ownerUpdateData.status = status;
+    if (deliverystatus) restaurantUpdateData.deliverystatus = deliverystatus;
 
     if (ownerFirstName || ownerLastName) {
         const fName = ownerFirstName || existingRestaurant.ownerFirstName;
         const lName = ownerLastName || existingRestaurant.ownerLastName;
         ownerUpdateData.name = `${fName} ${lName}`;
     }
-    if (ownerPhone) ownerUpdateData.phoneNumber = ownerPhone;
+    if (ownerPhone) ownerUpdateData.phoneNumber = ownerPhone;  
+    
 
     await db.transaction(async (tx) => {
         if (Object.keys(restaurantUpdateData).length > 1) {
