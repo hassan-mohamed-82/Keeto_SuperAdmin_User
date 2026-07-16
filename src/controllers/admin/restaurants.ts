@@ -594,3 +594,26 @@ export const getActiveSales = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, { message: "Get all active sales success", data: activeSales });
 };
+
+// ==========================================
+// 8. CHANGE DELIVERY STATUS
+// ==========================================
+export const changeDeliveryStatus = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { deliverystatus } = req.body;
+
+    if (deliverystatus === undefined) {
+        throw new BadRequest("deliverystatus is required");
+    }
+
+    if (deliverystatus !== "delivered" && deliverystatus !== "not_delivered") {
+        throw new BadRequest("deliverystatus must be either 'delivered' or 'not_delivered'");
+    }
+
+    const [existingRestaurant] = await db.select().from(restaurants).where(eq(restaurants.id, id)).limit(1);
+    if (!existingRestaurant) throw new NotFound("Restaurant not found");
+
+    await db.update(restaurants).set({ deliverystatus, updatedAt: new Date() }).where(eq(restaurants.id, id));
+
+    return SuccessResponse(res, { message: "Delivery status updated successfully" });
+};

@@ -8,6 +8,7 @@ import {
   deleteRestaurant,
   getallcousinesandzones,
   getActiveSales,
+  changeDeliveryStatus,
 } from "../../controllers/admin/restaurants";
 import { validate } from "../../middlewares/validation";
 import { createRestaurantSchema, updateRestaurantSchema } from "../../validation/admin/restaurants";
@@ -23,6 +24,7 @@ router.get("/:id", hasPermission("Restaurants", "View"), catchAsync(getRestauran
 router.put("/:id", hasPermission("Restaurants", "Edit"),
 //  validate(updateRestaurantSchema), 
  catchAsync(updateRestaurant));
+router.put("/:id/delivery-status", hasPermission("Restaurants", "Edit"), catchAsync(changeDeliveryStatus));
 router.delete("/:id", hasPermission("Restaurants", "Delete"), catchAsync(deleteRestaurant));
 
 export default router;
