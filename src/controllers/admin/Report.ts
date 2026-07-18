@@ -877,6 +877,8 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     });
 };
 
+const ALL_RESTAURANT_TYPES = ["mega", "super", "A", "B", "C", "C-", "test"] as const;
+
 export const getSalesReport = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
@@ -907,7 +909,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
         })
         .from(sales)
         .leftJoin(
-            restaurants, 
+            restaurants,
             eq(sales.id, restaurants.salesId)
         )
         .where(
@@ -926,13 +928,13 @@ export const getSalesReport = async (req: Request, res: Response) => {
         status: string;
         activeRestaurantsCount: number;
         inactiveRestaurantsCount: number;
-        typeGroups: { 
-            [type: string]: { 
+        typeGroups: {
+            [type: string]: {
                 total: number;
-                active: number; 
-                inactive: number; 
-                list: any[] 
-            } 
+                active: number;
+                inactive: number;
+                list: any[]
+            }
         };
     }>();
 
@@ -971,7 +973,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
 
             if (isRestActive) {
                 salesGroup.activeRestaurantsCount += 1;
-                totalActiveRestaurantsCount += 1; 
+                totalActiveRestaurantsCount += 1;
             } else {
                 salesGroup.inactiveRestaurantsCount += 1;
             }
@@ -1021,13 +1023,23 @@ export const getSalesReport = async (req: Request, res: Response) => {
             }
         };
 
+        //  if (salesId) {
+        //     responseData.groupedByType = Object.keys(item.typeGroups).map(typeKey => ({
+        //         type: typeKey,
+        //         totalRestaurants: item.typeGroups[typeKey].total,
+        //         activeCount: item.typeGroups[typeKey].active,
+        //         inactiveCount: item.typeGroups[typeKey].inactive,
+        //         restaurants: item.typeGroups[typeKey].list
+        //     }));
+        // }
+
         if (salesId) {
-            responseData.groupedByType = Object.keys(item.typeGroups).map(typeKey => ({
+            responseData.groupedByType = ALL_RESTAURANT_TYPES.map(typeKey => ({
                 type: typeKey,
-                totalRestaurants: item.typeGroups[typeKey].total,
-                activeCount: item.typeGroups[typeKey].active,
-                inactiveCount: item.typeGroups[typeKey].inactive,
-                restaurants: item.typeGroups[typeKey].list
+                totalRestaurants: item.typeGroups[typeKey]?.total ?? 0,
+                activeCount: item.typeGroups[typeKey]?.active ?? 0,
+                inactiveCount: item.typeGroups[typeKey]?.inactive ?? 0,
+                restaurants: item.typeGroups[typeKey]?.list ?? []
             }));
         }
 
