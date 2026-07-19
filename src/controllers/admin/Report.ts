@@ -882,7 +882,7 @@ const ALL_RESTAURANT_TYPES = ["mega", "super", "A", "B", "C", "C-", "test"] as c
 export const getSalesReport = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
-    const { startDate, endDate, salesId, type } = req.query;
+    const { startDate, endDate, salesId, type, restaurantId } = req.query;
 
     const salesConditions = [];
     if (startDate) {
@@ -900,6 +900,9 @@ export const getSalesReport = async (req: Request, res: Response) => {
     const restaurantConditions = [];
     if (type) {
         restaurantConditions.push(eq(restaurants.type, type as any));
+    }
+    if (restaurantId) {
+        restaurantConditions.push(eq(restaurants.id, restaurantId as string));
     }
 
     const allSalesRaw = await db
@@ -928,6 +931,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
         status: string;
         activeRestaurantsCount: number;
         inactiveRestaurantsCount: number;
+        restaurants: any[];
         typeGroups: {
             [type: string]: {
                 total: number;
@@ -959,6 +963,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
                 status: currentSales.status,
                 activeRestaurantsCount: 0,
                 inactiveRestaurantsCount: 0,
+                restaurants: [],
                 typeGroups: {}
             });
 
@@ -976,6 +981,16 @@ export const getSalesReport = async (req: Request, res: Response) => {
                 totalActiveRestaurantsCount += 1;
             } else {
                 salesGroup.inactiveRestaurantsCount += 1;
+            }
+
+            if (restaurantId) {
+                salesGroup.restaurants.push(currentRest);
+            } else {
+                salesGroup.restaurants.push({
+                    id: currentRest.id,
+                    name: currentRest.name,
+                    nameAr: currentRest.nameAr
+                });
             }
 
             if (salesId) {
@@ -1020,7 +1035,8 @@ export const getSalesReport = async (req: Request, res: Response) => {
                 totalRestaurants: item.activeRestaurantsCount + item.inactiveRestaurantsCount,
                 activeCount: item.activeRestaurantsCount,
                 inactiveCount: item.inactiveRestaurantsCount
-            }
+            },
+            restaurants: item.restaurants
         };
 
         //  if (salesId) {
