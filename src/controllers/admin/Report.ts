@@ -858,9 +858,10 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     const restaurantDetails = filteredRestaurants.map((r) => {
         const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
         // If a specific restaurantId is requested, return full restaurant details; otherwise return slim info
-        const restaurantInfo = restaurantId
-            ? r
-            : { id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status };
+        const restaurantInfo = r
+        // const restaurantInfo = restaurantId
+        //     ? r
+        //     : { id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status };
         return {
             restaurantDetails: restaurantInfo,
             ordersCount: stats.count,
