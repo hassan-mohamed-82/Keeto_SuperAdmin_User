@@ -877,7 +877,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     });
 };
 
-const ALL_RESTAURANT_TYPES = ["mega", "super", "A", "B", "C", "C-", "test"] as const;
+const ALL_RESTAURANT_TYPES = ["mega", "super", "A", "B", "C", "C-"] as const;
 
 export const getSalesReport = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
