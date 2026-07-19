@@ -34,7 +34,7 @@ export const restaurants = mysqlTable("restaurants", {
     deliveryTimeUnit: varchar("delivery_time_unit", { length: 50 }).default("Minutes"),
 
     ownerFirstName: varchar("owner_first_name", { length: 255 }).notNull(),
-    ownerLastName: varchar("owner_last_name", { length: 255 }).notNull(),
+    ownerLastName: varchar("owner_last_name", { length: 255 }),
     ownerPhone: varchar("owner_phone", { length: 50 }).notNull(),
     ownerposition: varchar("owner_position", { length: 255 }), // منصب المالك
 

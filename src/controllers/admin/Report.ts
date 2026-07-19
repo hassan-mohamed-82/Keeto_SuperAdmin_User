@@ -724,7 +724,7 @@ export const markInvoiceAsPaid = async (req: Request, res: Response) => {
 export const getRestaurantOrdersReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
-    const { startDate, endDate, type } = req.query;
+    const { startDate, endDate, type, restaurantId, restaurantsWithOrders, restaurantsWithoutOrders } = req.query;
 
     const orderConditions = [];
     if (startDate) orderConditions.push(gte(orders.createdAt, new Date(startDate as string)));
@@ -835,17 +835,34 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         }
     });
 
-    // 3. Filter restaurants based on 'type' if provided
+    // 3. Filter restaurants based on 'type' and/or 'restaurantId' if provided
     let filteredRestaurants = allRestaurants;
     if (type) {
-        filteredRestaurants = allRestaurants.filter((r) => (r.type || "Unknown") === type);
+        filteredRestaurants = filteredRestaurants.filter((r) => (r.type || "Unknown") === type);
+    }
+    if (restaurantId) {
+        filteredRestaurants = filteredRestaurants.filter((r) => r.id === (restaurantId as string));
     }
 
-    // 4. Map to final result
+    // 4. Build with/without orders lists from the full active list
+    const withOrdersList = allRestaurants.filter((r) => {
+        const stats = ordersStatsByRestaurant[r.id];
+        return stats && stats.validCount > 0;
+    });
+    const withoutOrdersList = allRestaurants.filter((r) => {
+        const stats = ordersStatsByRestaurant[r.id];
+        return !stats || stats.validCount === 0;
+    });
+
+    // 5. Map full filtered restaurants to detailed result
     const restaurantDetails = filteredRestaurants.map((r) => {
         const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
+        // If a specific restaurantId is requested, return full restaurant details; otherwise return slim info
+        const restaurantInfo = restaurantId
+            ? r
+            : { id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status };
         return {
-            restaurantDetails: r,
+            restaurantDetails: restaurantInfo,
             ordersCount: stats.count,
             validOrders: stats.validCount,
             canceledOrders: stats.canceledCount,
@@ -854,6 +871,16 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             total_commission: stats.commission,
         };
     });
+
+    // 6. Decide which list to return in 'restaurants' key
+    let restaurantsResult: any[];
+    if (restaurantsWithOrders === "true") {
+        restaurantsResult = withOrdersList.map((r) => ({ id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status }));
+    } else if (restaurantsWithoutOrders === "true") {
+        restaurantsResult = withoutOrdersList.map((r) => ({ id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status }));
+    } else {
+        restaurantsResult = restaurantDetails;
+    }
 
     const responseData: any = {
         summary: {
@@ -865,10 +892,12 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
                 restaurant: totalCanceledByRestaurant
             },
             totalRestaurants,
+            restaurantsWithOrders: withOrdersList.length,
+            restaurantsWithoutOrders: withoutOrdersList.length,
             total_commission,
             restaurantsByType,
         },
-        restaurants: restaurantDetails,
+        restaurants: restaurantsResult,
     };
 
     return SuccessResponse(res, {
