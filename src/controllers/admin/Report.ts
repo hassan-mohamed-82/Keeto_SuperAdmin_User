@@ -1,8 +1,8 @@
 // controllers/admin/FinancialReportController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales } from "../../models/schema";
-import { eq, and, desc, gte, lte, inArray } from "drizzle-orm";
+import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales, restaurant_users, users } from "../../models/schema";
+import { eq, and, desc, gte, lte, inArray, count, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import PDFDocument from "pdfkit";
@@ -870,17 +870,53 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             canceledByUser: stats.canceledByUser,
             canceledByRestaurant: stats.canceledByRestaurant,
             total_commission: stats.commission,
+            signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
         };
     });
+
+    // ─── Signup Users ────────────────────────────────────────────────────────
+    // 1. Total number of users who signed up
+    const [{ totalSignupUsers }] = await db
+        .select({ totalSignupUsers: count(users.id) })
+        .from(users);
+
+    // 2. Number of signup users per restaurant
+    const signupPerRestaurantRaw = await db
+        .select({
+            restaurantId: restaurant_users.restaurantId,
+            signupCount: count(restaurant_users.userId),
+        })
+        .from(restaurant_users)
+        .groupBy(restaurant_users.restaurantId);
+
+    // Build a quick lookup map: restaurantId -> signupCount
+    const signupByRestaurantMap: Record<string, number> = {};
+    for (const row of signupPerRestaurantRaw) {
+        signupByRestaurantMap[row.restaurantId] = Number(row.signupCount);
+    }
 
     // 6. Decide which list to return in 'restaurants' key
     let restaurantsResult: any[];
     if (restaurantsWithOrders === "true") {
-        restaurantsResult = withOrdersList.map((r) => ({ id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status }));
+        restaurantsResult = withOrdersList.map((r) => ({
+            id: r.id,
+            name: r.name,
+            nameAr: r.nameAr,
+            type: r.type,
+            status: r.status,
+            signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
+        }));
     } else if (restaurantsWithoutOrders === "true") {
-        restaurantsResult = withoutOrdersList.map((r) => ({ id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status }));
+        restaurantsResult = withoutOrdersList.map((r) => ({
+            id: r.id,
+            name: r.name,
+            nameAr: r.nameAr,
+            type: r.type,
+            status: r.status,
+            signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
+        }));
     } else {
-        restaurantsResult = restaurantDetails;
+        restaurantsResult = restaurantDetails; // already has signupUsersCount
     }
 
     const responseData: any = {
@@ -897,6 +933,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             restaurantsWithoutOrders: withoutOrdersList.length,
             total_commission,
             restaurantsByType,
+            totalSignupUsers,
         },
         restaurants: restaurantsResult,
     };
