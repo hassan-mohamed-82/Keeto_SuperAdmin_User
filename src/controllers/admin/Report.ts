@@ -854,26 +854,6 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         return !stats || stats.validCount === 0;
     });
 
-    // 5. Map full filtered restaurants to detailed result
-    const restaurantDetails = filteredRestaurants.map((r) => {
-        const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
-        // If a specific restaurantId is requested, return full restaurant details; otherwise return slim info
-        const restaurantInfo = r
-        // const restaurantInfo = restaurantId
-        //     ? r
-        //     : { id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status };
-        return {
-            restaurantDetails: restaurantInfo,
-            ordersCount: stats.count,
-            validOrders: stats.validCount,
-            canceledOrders: stats.canceledCount,
-            canceledByUser: stats.canceledByUser,
-            canceledByRestaurant: stats.canceledByRestaurant,
-            total_commission: stats.commission,
-            signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
-        };
-    });
-
     // ─── Signup Users ────────────────────────────────────────────────────────
     // 1. Total number of users who signed up
     const [{ totalSignupUsers }] = await db
@@ -894,6 +874,26 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     for (const row of signupPerRestaurantRaw) {
         signupByRestaurantMap[row.restaurantId] = Number(row.signupCount);
     }
+
+    // 5. Map full filtered restaurants to detailed result
+    const restaurantDetails = filteredRestaurants.map((r) => {
+        const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
+        // If a specific restaurantId is requested, return full restaurant details; otherwise return slim info
+        const restaurantInfo = r
+        // const restaurantInfo = restaurantId
+        //     ? r
+        //     : { id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status };
+        return {
+            restaurantDetails: restaurantInfo,
+            ordersCount: stats.count,
+            validOrders: stats.validCount,
+            canceledOrders: stats.canceledCount,
+            canceledByUser: stats.canceledByUser,
+            canceledByRestaurant: stats.canceledByRestaurant,
+            total_commission: stats.commission,
+            signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
+        };
+    });
 
     // 6. Decide which list to return in 'restaurants' key
     let restaurantsResult: any[];
