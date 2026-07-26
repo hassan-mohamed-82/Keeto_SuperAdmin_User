@@ -617,3 +617,11 @@ export const changeDeliveryStatus = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, { message: "Delivery status updated successfully" });
 };
+
+// ==========================================
+// 9. Get Restaurant Select Data
+// ==========================================
+export const getRestaurantSelectData = async (req: Request, res: Response) => {
+    const restaurantSelectData = await db.select({ id: restaurants.id, name: restaurants.name }).from(restaurants).where(eq(restaurants.status, "active"));
+    return SuccessResponse(res, { message: "Get all restaurants select data successfully", data: restaurantSelectData });
+}
