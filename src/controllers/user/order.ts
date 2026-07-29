@@ -682,15 +682,38 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     }
 
     // جلب البيانات المطلوبة من الداتا بيز
-    const [userAddresses, restaurantBranches] = await Promise.all([
+    const [userAddresses, restaurantBranches, zoneFees] = await Promise.all([
         // أ) عناوين اليوزر 
         db.select().from(addresses).where(eq(addresses.userId, userId)),
 
         // ب) فروع المطعم
         db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
+
+        // ج) رسوم توصيل المناطق الخاصة بالمطعم
+        db.select().from(restaurantZoneDeliveryFees).where(
+            and(
+                eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
+                eq(restaurantZoneDeliveryFees.status, "active")
+            )
+        ),
     ]);
 
-    // ج) طرق الدفع 
+    // دمج معلومات التوصيل والرسوم مع كل عنوان
+    const zoneFeeMap = new Map<string, number>();
+    zoneFees.forEach((fee) => {
+        zoneFeeMap.set(fee.zoneId, parseFloat((fee.deliveryFee || "0") as string));
+    });
+
+    const addressesWithDeliveryInfo = userAddresses.map((addr) => {
+        const isDeliverable = zoneFeeMap.has(addr.zoneId);
+        return {
+            ...addr,
+            isDeliverable,
+            deliveryFee: isDeliverable ? zoneFeeMap.get(addr.zoneId)! : null,
+        };
+    });
+
+    // د) طرق الدفع 
     const activePaymentMethods = await db.select({
         id: paymentMethods.id,
         name: paymentMethods.name,
@@ -702,7 +725,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     // تجميع الداتا وإرسالها
     return SuccessResponse(res, {
         data: {
-            addresses: userAddresses,
+            addresses: addressesWithDeliveryInfo,
             branches: restaurantBranches,
             paymentMethods: activePaymentMethods,
             reasons: getCancelReasons
