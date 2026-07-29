@@ -2,7 +2,7 @@
 
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { branches, restaurants, zones } from "../../models/schema";
+import { branches, restaurants, zones, cities } from "../../models/schema";
 import { eq, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -10,7 +10,7 @@ import { NotFound } from "../../Errors/NotFound";
 import { v4 as uuidv4 } from "uuid";
 
 export const createBranch = async (req: Request, res: Response) => {
-    const { restaurantId, name, address, phoneNumber, zoneId, nameAr, nameFr, addressAr, addressFr,deliveryRadiusKm,lat,lng } = req.body;
+    const { restaurantId, name, address, phoneNumber, zoneId, cityId,nameAr, nameFr, addressAr, addressFr,deliveryRadiusKm,lat,lng } = req.body;
 
     if (!name || !address || !zoneId) {
         throw new BadRequest("Missing required fields (name, address, zoneId)");
@@ -36,6 +36,7 @@ export const createBranch = async (req: Request, res: Response) => {
         lng,
         phoneNumber: phoneNumber || null,
         zoneId,
+        cityId,
         status: "active"
     });
 
@@ -63,10 +64,17 @@ export const getMyBranches = async (req: Request, res: Response) => {
             nameAr: zones.nameAr,
             nameFr: zones.nameFr,
         },
+        city: {
+            id: cities.id,
+            name: cities.name,
+            nameAr: cities.nameAr,
+            nameFr: cities.nameFr
+        },
         restaurantName: restaurants.name,
     })
     .from(branches)
     .leftJoin(zones, eq(branches.zoneId, zones.id))
+    .leftJoin(cities, eq(branches.cityId, cities.id))
     .leftJoin(restaurants, eq(branches.restaurantId, restaurants.id))
     return SuccessResponse(res, { message: "Get branches success", data: myBranches });
 };
@@ -92,10 +100,17 @@ export const getBranchById = async (req: Request, res: Response) => {
             nameAr: zones.nameAr,
             nameFr: zones.nameFr,
         },
+        city: {
+            id: cities.id,
+            name: cities.name,
+            nameAr: cities.nameAr,
+            nameFr: cities.nameFr
+        },
         restaurantName: restaurants.name,
     })
     .from(branches)
     .leftJoin(zones, eq(branches.zoneId, zones.id))
+    .leftJoin(cities, eq(branches.cityId, cities.id))
     .leftJoin(restaurants, eq(branches.restaurantId, restaurants.id))
     .where(eq(branches.id, id))
     .limit(1);
@@ -106,7 +121,7 @@ export const getBranchById = async (req: Request, res: Response) => {
 
 export const updateBranch = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { restaurantId,name, address, phoneNumber, zoneId, status, nameAr, nameFr, addressAr, addressFr ,deliveryRadiusKm,lat,lng} = req.body;
+    const { restaurantId,name, address, phoneNumber, zoneId,cityId, status, nameAr, nameFr, addressAr, addressFr ,deliveryRadiusKm,lat,lng} = req.body;
 
     const existingBranch = await db
         .select()
@@ -137,6 +152,11 @@ export const updateBranch = async (req: Request, res: Response) => {
         const zoneExists = await db.select().from(zones).where(eq(zones.id, zoneId)).limit(1);
         if (!zoneExists[0]) throw new BadRequest("Zone not found");
         updateData.zoneId = zoneId;
+    }
+    if (cityId) {
+        const cityExists = await db.select().from(cities).where(eq(cities.id, cityId)).limit(1);
+        if (!cityExists[0]) throw new BadRequest("City not found");
+        updateData.cityId = cityId;
     }
     if (status) updateData.status = status;
 
@@ -213,7 +233,22 @@ export const getallrestraunt = async (req: Request, res: Response) => {
         id: zones.id,
         name: zones.name,
         nameAr: zones.nameAr,
-        nameFr: zones.nameFr
-    }).from(zones);
-    return SuccessResponse(res, { message: "Get restaurants success", data: {restaurant,zone} });
+        nameFr: zones.nameFr,
+        cityId: zones.cityId,
+        city: {
+            id: cities.id,
+            name: cities.name,
+            nameAr: cities.nameAr,
+            nameFr: cities.nameFr
+        }
+    }).from(zones).leftJoin(cities, eq(zones.cityId, cities.id));
+
+    const city = await db.select({
+        id: cities.id,
+        name: cities.name,
+        nameAr: cities.nameAr,
+        nameFr: cities.nameFr
+    }).from(cities);
+
+    return SuccessResponse(res, { message: "Get restaurants success", data: {restaurant,zone,city} });
 };

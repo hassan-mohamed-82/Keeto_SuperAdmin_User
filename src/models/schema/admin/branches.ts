@@ -9,7 +9,7 @@ import {
     time
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
-import { food, restaurants, zones } from "../../schema";
+import { food, restaurants, zones, cities } from "../../schema";
 export const branches = mysqlTable("branches", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     
@@ -24,7 +24,8 @@ export const branches = mysqlTable("branches", {
     addressFr: text("address_fr"),
     phoneNumber: varchar("phone_number", { length: 50 }),
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id).notNull(), // عشان منطقة توصيل الفرع ده
-deliveryRadiusKm: decimal("delivery_radius_km", { precision: 6, scale: 2 }).default("0"),lat:varchar("lat", { length: 255 }),
+    cityId: char("city_id", { length: 36 }).references(() => cities.id),
+    deliveryRadiusKm: decimal("delivery_radius_km", { precision: 6, scale: 2 }).default("0"),lat:varchar("lat", { length: 255 }),
     lng:varchar("lng", { length: 255 }),
         status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),
