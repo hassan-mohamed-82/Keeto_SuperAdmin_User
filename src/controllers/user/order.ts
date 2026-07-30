@@ -621,7 +621,12 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             orderNumber: orders.orderNumber,
             status: orders.status,
             createdAt: orders.createdAt,
-            paymentMethod: orders.paymentMethod, // 👈 تم التعديل هنا (كانت orderItems بالخطأ)
+            paymentMethod: orders.paymentMethod,
+            paymentMethodDetails:{
+                id: paymentMethods.id,
+                name: paymentMethods.name,
+                nameAr: paymentMethods.nameAr,
+            },
             orderType: orders.orderType,
 
             subtotal: orders.subtotal,
@@ -638,6 +643,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(eq(orders.id, orderId))
         .limit(1);
 
