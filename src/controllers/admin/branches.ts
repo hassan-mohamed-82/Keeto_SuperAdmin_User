@@ -169,8 +169,8 @@ export const updateBranch = async (req: Request, res: Response) => {
 };
 
 export const deleteBranch = async (req: Request, res: Response) => {
-    const { id ,restaurantId} = req.params;
-    if (!restaurantId) throw new BadRequest("Restaurant ID missing");
+    const { id } = req.params;
+    // if (!restaurantId) throw new BadRequest("Restaurant ID missing");
 
     const existingBranch = await db
         .select()
@@ -178,12 +178,12 @@ export const deleteBranch = async (req: Request, res: Response) => {
         .where(
             and(
                 eq(branches.id, id),
-                eq(branches.restaurantId, restaurantId)
+                // eq(branches.restaurantId, restaurantId)
             )
         )
         .limit(1);
 
-    if (!existingBranch[0]) throw new NotFound("Branch not found or you don't have permission to delete it");
+    if (!existingBranch[0]) throw new NotFound("Branch not found");
 
     await db.delete(branches).where(eq(branches.id, id));
 
