@@ -842,3 +842,14 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
 
     return SuccessResponse(res, { message: "Order cancelled successfully" });
 };
+
+// ==========================================
+// 7. Get Cancel Reasons
+// ==========================================
+export const getCancelReasons = async (req: Request | any, res: Response) => {
+    const cancelReasons = await db
+        .select()
+        .from(selectReasons)
+        .where(eq(selectReasons.type, "user"));
+    return SuccessResponse(res, { data: cancelReasons });
+};
