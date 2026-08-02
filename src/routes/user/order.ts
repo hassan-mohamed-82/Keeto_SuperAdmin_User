@@ -5,7 +5,7 @@ import { checkout, getOrderDetails, getActiveOrders,getOrderHistory
 } from "../../controllers/user/order";
 const router = Router();
 router.put("/:orderId/cancel", catchAsync(cancelOrder));
-router.put("/:orderId/rate", catchAsync(rateOrder));
+router.post("/:orderId/rate", catchAsync(rateOrder));
 router.get("/select", catchAsync(getOrderPrerequisites));
 router.get("/cancel-reasons" , catchAsync(getCancelReasons))
 router.post("/checkout", catchAsync(checkout));
