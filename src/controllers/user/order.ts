@@ -780,14 +780,14 @@ export const checkout = async (req: Request | any, res: Response) => {
 
     if (resolvedOrderType === "delivery") {
         if (!addressId) throw new BadRequest("Delivery address is required");
-        if (!branchId) throw new BadRequest("Branch is required for delivery orders");
+        // if (!branchId) throw new BadRequest("Branch is required for delivery orders");
 
         const [userAddress] = await db.select().from(addresses)
             .where(and(eq(addresses.id, addressId), eq(addresses.userId, userId))).limit(1);
         if (!userAddress) throw new BadRequest("Invalid delivery address");
 
-        const [branch] = await db.select().from(branches).where(eq(branches.id, branchId)).limit(1);
-        if (!branch) throw new BadRequest("Invalid branch selected");
+        // const [branch] = await db.select().from(branches).where(eq(branches.id, branchId)).limit(1);
+        // if (!branch) throw new BadRequest("Invalid branch selected");
 
         const resolvedZoneId = userZoneId || userAddress.zoneId;
 
