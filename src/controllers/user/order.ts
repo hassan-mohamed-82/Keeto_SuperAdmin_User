@@ -1067,6 +1067,8 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             totalAmount: orders.totalAmount,
             status: orders.status,
             createdAt: orders.createdAt,
+            rating: orders.rating,
+            ratingComment: orders.ratingComment,
             itemsCount: sql<number>`(SELECT COUNT(*) FROM order_items WHERE order_items.order_id = ${orders.id})`
         })
         .from(orders)
@@ -1114,6 +1116,8 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             totalAmount: orders.totalAmount,
 
             note: orders.note,
+            rating: orders.rating,
+            ratingComment: orders.ratingComment,
 
             restaurantName: restaurants.name,
             restaurantImage: restaurants.logo
@@ -1336,3 +1340,54 @@ export const getCancelReasons = async (req: Request | any, res: Response) => {
         .where(eq(selectReasons.type, "user"));
     return SuccessResponse(res, { data: cancelReasons });
 };
+
+// ==========================================
+// 8. Rate Order (User)
+// ==========================================
+export const rateOrder = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user.id;
+    const { orderId } = req.params;
+    const { rating, comment } = req.body;
+
+    if (!rating) {
+        throw new BadRequest("Rating is required");
+    }
+
+    if (typeof rating !== "number" || rating < 1 || rating > 5 || !Number.isInteger(rating)) {
+        throw new BadRequest("Rating must be an integer between 1 and 5");
+    }
+
+    const [order] = await db
+        .select()
+        .from(orders)
+        .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
+        .limit(1);
+
+    if (!order) {
+        throw new NotFound("Order not found");
+    }
+
+    if (order.status !== "delivered") {
+        throw new BadRequest("Only delivered orders can be rated");
+    }
+
+    await db
+        .update(orders)
+        .set({
+            rating,
+            ratingComment: comment ?? null,
+            updatedAt: new Date()
+        })
+        .where(eq(orders.id, orderId));
+
+    return SuccessResponse(res, {
+        message: "Order rated successfully",
+        data: {
+            orderId,
+            rating,
+            ratingComment: comment ?? null,
+        }
+    });
+};
+

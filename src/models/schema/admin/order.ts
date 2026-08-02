@@ -58,6 +58,9 @@ export const orders = mysqlTable("orders", {
     note: text("note"),
     dailyOrderNumber: int("daily_order_number").default(1),
 
+    rating: int("rating"),
+    ratingComment: text("rating_comment"),
+
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),
