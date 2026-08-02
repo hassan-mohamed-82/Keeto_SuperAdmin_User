@@ -11,9 +11,10 @@ import {
     orders,
     restaurants,
     orderItems,
-    restaurantBusinessPlans, food, 
-    variationOptions} from "../../models/schema";
-import { eq, and, inArray, sql, desc ,gte } from "drizzle-orm";
+    restaurantBusinessPlans, food,
+    variationOptions
+} from "../../models/schema";
+import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
@@ -141,19 +142,19 @@ const formatToEgyptTime = (date: Date) => {
 //     // ==========================================
 //     let subtotal = 0;
 //     const itemsToInsert: any[] = [];
-    
+
 //     let initialSubtotal = 0;
 //     const itemsWithData = [];
 //     for (const item of userCart) {
 //         const [foodItem] = await db.select().from(food).where(eq(food.id, item.foodId)).limit(1);
 //         const originalBasePrice = parseFloat(foodItem.price as string || "0");
-        
+
 //         let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
 //         if (typeof safeVars === 'string') safeVars = JSON.parse(safeVars);
 //         const vars = Array.isArray(safeVars) ? safeVars : [];
-        
+
 //         let varPrice = 0;
-        
+
 //         for (const v of vars) {
 //             if (v.optionId) {
 //                 const [dbOption] = await db.select()
@@ -179,7 +180,7 @@ const formatToEgyptTime = (date: Date) => {
 //                 initialDiscountPrice = Math.max(0, originalBasePrice - Number(foodItem.discount_value));
 //             }
 //         }
-        
+
 //         initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
 //         itemsWithData.push({ cartItem: item, foodItem, originalBasePrice, varPrice, vars });
 //     }
@@ -619,7 +620,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ⚡ 5. Batch Fetching (حل مشكلة N+1 Queries)
     // ==========================================
     const foodIds = [...new Set(userCart.map(item => item.foodId))];
-    
+
     // استخراج جميع الـ optionIds الموجودة بالخيارات
     const allOptionIds: string[] = [];
     userCart.forEach(item => {
@@ -632,7 +633,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     // جلب البيانات دفعة واحدة بدلاً من اللوب
     const [foodList, optionsList] = await Promise.all([
         db.select().from(food).where(inArray(food.id, foodIds)),
-        allOptionIds.length > 0 
+        allOptionIds.length > 0
             ? db.select().from(variationOptions).where(inArray(variationOptions.id, [...new Set(allOptionIds)]))
             : []
     ]);
@@ -816,7 +817,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 10. Execute Order (Transaction)
     // ==========================================
     const now = new Date();
-    
+
     // 🟢 إنشاء كائن منفصل لبداية اليوم لمنع تعديل متغير now الأصلي
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
@@ -976,11 +977,11 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 11. Send Notification to Restaurant
     // ==========================================
     // 🟢 تنسيق الوقت بتوقيت القاهرة المحلي (Africa/Cairo)
-    const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", { 
-        timeZone: "Africa/Cairo", 
-        hour: "numeric", 
-        minute: "numeric", 
-        hour12: true 
+    const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
+        timeZone: "Africa/Cairo",
+        hour: "numeric",
+        minute: "numeric",
+        hour12: true
     }).format(now);
 
     await sendPushNotification({
@@ -988,10 +989,10 @@ export const checkout = async (req: Request | any, res: Response) => {
         recipientId: restaurantId,
         title: "طلب جديد! 🛒",
         body: `تم استلام طلب جديد #${orderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
-        data: { 
+        data: {
             orderId,
-            orderNumber, 
-            type: "new_order", 
+            orderNumber,
+            type: "new_order",
             createdAt: now.toISOString(),
             dailyOrderNumber: createdDailyOrderNumber
         }
@@ -1101,7 +1102,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             status: orders.status,
             createdAt: orders.createdAt,
             paymentMethod: orders.paymentMethod,
-            paymentMethodDetails:{
+            paymentMethodDetails: {
                 id: paymentMethods.id,
                 name: paymentMethods.name,
                 nameAr: paymentMethods.nameAr,
@@ -1161,8 +1162,15 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     if (!req.user) {
         throw new UnauthorizedError("Unauthenticated: Token is missing or invalid");
     }
+    
     const userId = req.user.id;
     const restaurantId = req.query.restaurantId as string;
+    const orderSource = req.query.orderSource as string;
+
+        const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
+    if (!validOrderSources.includes(orderSource)) {
+        throw new BadRequest("Invalid order source");
+    }
 
     if (!restaurantId) {
         throw new BadRequest("restaurantId is required");
@@ -1209,13 +1217,31 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
 
     const getCancelReasons = await db.select().from(selectReasons).where(eq(selectReasons.type, "user"));
 
+    const [plan] = await db.select({serviceFee: restaurantBusinessPlans.serviceFee})
+        .from(restaurantBusinessPlans)
+        .where(
+            and(
+                eq(restaurantBusinessPlans.restaurantId, restaurantId),
+                eq(restaurantBusinessPlans.platformType, orderSource as any)
+            )
+        )
+        .limit(1);
+
+    if (!plan) {
+        throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
+    }
+
+    const serviceFee = parseFloat(plan.serviceFee as string || "0");
+
+
     // تجميع الداتا وإرسالها
     return SuccessResponse(res, {
         data: {
             addresses: addressesWithDeliveryInfo,
             branches: restaurantBranches,
             paymentMethods: activePaymentMethods,
-            reasons: getCancelReasons
+            reasons: getCancelReasons,
+            serviceFee: serviceFee.toFixed(2),
         }
     });
 };
