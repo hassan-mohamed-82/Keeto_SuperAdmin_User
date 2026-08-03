@@ -271,7 +271,6 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
     ));
 
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
-    const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
 
     const groupedMenuObj = rawMenu.reduce((acc: any, row) => {
         const catId = row.categoryId || "uncategorized";
@@ -290,6 +289,8 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         // 2. تجميع الأكل داخل الكاتيجوري مع حساب الخصم المباشر
         if (row.foodId) {
             if (!acc[catId].foods[row.foodId]) {
+                const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+                
                 const { price: calculatedDiscountPrice, discountNote } = applyPriorityDiscount(
                     { id: row.foodId, discountType: row.foodDiscountType, discountValue: row.foodDiscountValue },
                     Number(row.price),
@@ -542,6 +543,8 @@ export const getUserFavorites = async (req: Request, res: Response) => {
             nameFr: food.nameFr,
             price: food.price,
             image: food.image,
+            discountType: food.discount_type,
+            discountValue: food.discount_value,
         }
     })
     .from(favorites)
@@ -575,7 +578,9 @@ export const getUserFavorites = async (req: Request, res: Response) => {
             return {
                 ...foodObj,
                 discountPrice: finalDiscountPrice,
-                discountNote
+                discountNote,
+                discountType: foodObj.discountType,
+                discountValue: foodObj.discountValue
             };
         })
     };
@@ -830,11 +835,12 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
     const formattedData = Array.from(restaurantsMap.values()).map((restaurant: any) => {
         const availableDiscounts = discountsByRestaurant.get(restaurant.id) || [];
-        const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
 
         return {
             ...restaurant,
             food: Array.from(restaurant.food.values()).map((foodItem: any) => {
+                const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+                
                 const { price: finalDiscountPrice, discountNote } = applyPriorityDiscount(
                     { id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value },
                     Number(foodItem.price),

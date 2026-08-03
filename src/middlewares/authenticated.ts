@@ -39,3 +39,35 @@ export const authenticated = (
 
     next();
 };
+
+export const optionalAuth = (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader?.startsWith("Bearer ")) {
+        return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    try {
+        const decoded = verifyToken(token);
+        if (decoded?.id && decoded?.role) {
+            req.user = {
+                id: decoded.id,
+                name: decoded.name,
+                role: decoded.role,
+                type: decoded.type as AppUser["type"],
+                restaurantId: decoded.restaurantId,
+                branchId: decoded.branchId,
+            };
+        }
+    } catch (err) {
+        // Ignore token errors for optional auth
+    }
+
+    next();
+};
