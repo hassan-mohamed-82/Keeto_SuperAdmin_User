@@ -14,7 +14,7 @@ export const restaurants = mysqlTable("restaurants", {
     address: text("address"),
     addressAr: text("address_ar").default(''),
     addressFr: text("address_fr").default(''),
-    
+
     cuisineId: json("cuisine_id").$type<string[]>().default([]),
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id),
 
@@ -43,12 +43,14 @@ export const restaurants = mysqlTable("restaurants", {
     lng: varchar("lng", { length: 255 }),
 
     taxNumber: varchar("tax_number", { length: 255 }),
-    taxExpireDate: date("tax_expire_date"), 
-    taxCertificate: varchar("tax_certificate", { length: 255 }), 
+    taxExpireDate: date("tax_expire_date"),
+    taxCertificate: varchar("tax_certificate", { length: 255 }),
     addhome: boolean("addhome").default(false),
     deliveryRadiusKm: int("delivery_radius_km").default(0),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     deliverystatus: mysqlEnum("delivery_status", ["delivered", "not_delivered"]).default("not_delivered"),
+
+    appBundleId: varchar("app_bundle_id", { length: 255 }).unique(),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
