@@ -46,7 +46,7 @@ export const discounts = mysqlTable("discounts", {
     // الفلاج الجديد لتحديد إذا كان الخصم عاماً لكل المطاعم في حال عدم اختيار مطعم محدد
     isGlobal: boolean("is_global").default(false),
 
-    logo: varchar("logo", { length: 255 }),
+    logo: varchar("logo", { length: 500 }),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
