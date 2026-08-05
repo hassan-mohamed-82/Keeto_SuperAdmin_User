@@ -67,7 +67,9 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         status: "active", 
         createdAt: new Date(), 
         facebookId: null, 
-        appleId:null
+        appleId:null,
+        isDeleted: false,
+        deletedAt: null
       };
     } else {
       // 👤 Login (existing user)
