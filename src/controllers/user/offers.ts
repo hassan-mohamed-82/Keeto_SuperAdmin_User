@@ -19,6 +19,7 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                 discountName: discounts.name,
                 discountType: discounts.discountType,
                 discountValue: discounts.discountValue,
+                logo:discounts.logo,
             })
             .from(discountFoods)
             .innerJoin(discounts, eq(discountFoods.discountId, discounts.id))
@@ -65,6 +66,7 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 discountType: discounts.discountType,
                 discountValue: discounts.discountValue,
                 isGlobal: discounts.isGlobal,
+                logo:discounts.logo,
 
                 // تفاصيل المطعم (مجمعة في Object)
                 restaurant: {
