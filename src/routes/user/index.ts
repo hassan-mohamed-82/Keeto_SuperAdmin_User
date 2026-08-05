@@ -16,6 +16,7 @@ import SocialMediaRouter from "./SocialMedia";
 import sliderRouter from "./slider";
 import imageRouter from "./image";
 import offersRouter from "./offers";
+import landingPageRouter from "./landingPage";
 
 const router = Router();
 router.use("/home", homeRouter);
@@ -24,6 +25,7 @@ router.use("/socialmedia", SocialMediaRouter);
 router.use("/slider", sliderRouter);
 router.use("/image", imageRouter);
 router.use("/rating", ratingRouter);
+router.use("/landing-page" , landingPageRouter)
 
 router.use(authenticated,authorizeRoles("user"));
 router.use("/profile", profileRouter);
