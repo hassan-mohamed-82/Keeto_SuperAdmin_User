@@ -11,8 +11,10 @@ import {
     orders,
     restaurants,
     orderItems,
+    notifications,
     restaurantBusinessPlans, food,
-    variationOptions
+    variationOptions,
+    userRestaurantPoints
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -687,6 +689,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
     const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
     const itemsToInsert: any[] = [];
+    let totalPointsEarned = 0;
 
     for (const data of itemsWithData) {
         const { cartItem, foodItem, originalBasePrice, varPrice, vars } = data;
@@ -713,6 +716,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             variations: vars,
             note: cartItem.note || null
         });
+
+        totalPointsEarned += (foodItem.points || 0) * cartItem.quantity;
     }
 
     subtotal = roundMoney(subtotal);
@@ -896,6 +901,40 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(cartItems).where(eq(cartItems.userId, userId));
+
+        // إرسال إشعار للـ superadmin
+        // await tx.insert(notifications).values({
+        //     recipientType: "admin",
+        //     recipientId: "superadmin_dashboard",
+        //     title: "New Order",
+        //     body: `Order #${orderNumber} has been placed.`,
+        //     data: { orderId, orderNumber }
+        // });
+
+        // ✅ إضافة نقاط المستخدم للمطعم
+        if (totalPointsEarned > 0) {
+            const [userPointsRecord] = await tx.select()
+                .from(userRestaurantPoints)
+                .where(and(
+                    eq(userRestaurantPoints.userId, userId),
+                    eq(userRestaurantPoints.restaurantId, restaurantId)
+                ))
+                .for("update");
+
+            if (userPointsRecord) {
+                await tx.update(userRestaurantPoints)
+                    .set({ points: userPointsRecord.points + totalPointsEarned })
+                    .where(eq(userRestaurantPoints.id, userPointsRecord.id));
+            } else {
+                await tx.insert(userRestaurantPoints).values({
+                    id: uuidv4(),
+                    userId,
+                    restaurantId,
+                    points: totalPointsEarned,
+                    createdAt: now
+                });
+            }
+        }
 
         // 4. إدارات الكوبونات والتخفيضات
         if (appliedCoupon) {

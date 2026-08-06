@@ -44,3 +44,4 @@ export * from "./schema/user/slider"
 export * from "./schema/admin/restraurant_user";
 export * from "./schema/admin/sales";
 export * from "./schema/admin/dashboardTargets";
+export * from "./schema/user/userRestaurantPoints";

@@ -1,8 +1,8 @@
 // controllers/user/ProfileController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { cities, countries, orders, users, userWallets, zones, } from "../../models/schema";
-import { eq, sql } from "drizzle-orm";
+import { cities, countries, orders, users, userWallets, zones, userRestaurantPoints, restaurants } from "../../models/schema";
+import { eq, sql, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import bcrypt from "bcrypt";
@@ -36,6 +36,15 @@ export const getProfile = async (req: Request | any, res: Response) => {
         .from(userWallets)
         .where(eq(userWallets.userId, userId))
         .limit(1);
+    // const userPoints = await db
+    //     .select({
+    //         restaurantId: userRestaurantPoints.restaurantId,
+    //         restaurantName: restaurants.name,
+    //         points: userRestaurantPoints.points
+    //     })
+    //     .from(userRestaurantPoints)
+    //     .leftJoin(restaurants, eq(restaurants.id, userRestaurantPoints.restaurantId))
+    //     .where(eq(userRestaurantPoints.userId, userId));
 
     return SuccessResponse(res, {
         data: {
@@ -53,6 +62,44 @@ export const getProfile = async (req: Request | any, res: Response) => {
             },
             walletBalance: wallet?.balance || "0.00",
             ordersCount: ordersCount?.count || 0,
+            // restaurantPoints: userPoints
+        }
+    });
+};
+
+// ==========================================
+// Get User Points for a Specific Restaurant
+// ==========================================
+export const getRestaurantPoints = async (req: Request | any, res: Response) => {
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
+    const { restaurantId } = req.params;
+
+    if (!restaurantId) throw new BadRequest("restaurantId is required");
+
+    const [pointsRecord] = await db
+        .select({
+            restaurantId: userRestaurantPoints.restaurantId,
+            restaurantName: restaurants.name,
+            points: userRestaurantPoints.points,
+            updatedAt: userRestaurantPoints.updatedAt,
+        })
+        .from(userRestaurantPoints)
+        .leftJoin(restaurants, eq(restaurants.id, userRestaurantPoints.restaurantId))
+        .where(
+            and(
+                eq(userRestaurantPoints.userId, userId),
+                eq(userRestaurantPoints.restaurantId, restaurantId)
+            )
+        )
+        .limit(1);
+
+    return SuccessResponse(res, {
+        data: {
+            restaurantId,
+            restaurantName: pointsRecord?.restaurantName || null,
+            points: pointsRecord?.points || 0,
+            updatedAt: pointsRecord?.updatedAt || null,
         }
     });
 };
