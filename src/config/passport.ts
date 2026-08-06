@@ -61,6 +61,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         googleId, 
         phone: null, 
         photo: null, 
+        alternatePhone: null,
         fcmToken: null, 
         password: null, 
         isVerified: true, 
