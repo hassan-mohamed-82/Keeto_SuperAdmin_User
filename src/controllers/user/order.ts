@@ -40,7 +40,21 @@ const formatToEgyptTime = (date: Date) => {
     }).format(date);
 };
 
-// export const checkout = async (req: Request | any, res: Response) => {
+// 🗓️ Helper لتحويل التاريخ لصيغة مقروءة وواضحة
+const formatDate = (date: Date | null | undefined): string | null => {
+    if (!date) return null;
+    return new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Africa/Cairo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+    }).format(new Date(date));
+};
+
 //     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 //     const userId = req.user.id;
 
@@ -1068,26 +1082,52 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
         .select({
             orderId: orders.id,
             orderNumber: orders.orderNumber,
+            dailyOrderNumber: orders.dailyOrderNumber,
+            orderType: orders.orderType,
             restaurantName: restaurants.name,
             restaurantImage: restaurants.logo,
             totalAmount: orders.totalAmount,
             status: orders.status,
             createdAt: orders.createdAt,
-            itemsCount: sql<number>`(SELECT COUNT(*) FROM order_items WHERE order_items.order_id = ${orders.id})`
+            itemsCount: sql<number>`(SELECT COUNT(*) FROM order_items WHERE order_items.order_id = ${orders.id})`,
+            // Branch info (for takeaway / dine_in)
+            branchName: branches.name,
+            // Address info (for delivery)
+            addressTitle: addresses.title,
+            addressStreet: addresses.street,
+            addressLandmark: addresses.landmark,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(branches, eq(orders.branchId, branches.id))
+        .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .where(
             and(
                 eq(orders.userId, userId),
                 restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
-                // 🔥 تجلب فقط الطلبات التي لم تنتهِ بعد
                 inArray(orders.status, ["pending", "accepted", "preparing", "out_for_delivery"])
             )
         )
         .orderBy(desc(orders.createdAt));
 
-    return SuccessResponse(res, { data: activeOrders });
+    // Return branch name or address depending on orderType
+    const formatted = activeOrders.map(o => ({
+        orderId: o.orderId,
+        orderNumber: o.orderNumber,
+        dailyOrderNumber: o.dailyOrderNumber,
+        orderType: o.orderType,
+        restaurantName: o.restaurantName,
+        restaurantImage: o.restaurantImage,
+        totalAmount: o.totalAmount,
+        status: o.status,
+        createdAt: formatDate(o.createdAt),
+        itemsCount: o.itemsCount,
+        location: o.orderType === "delivery"
+            ? { type: "address", title: o.addressTitle, street: o.addressStreet, landmark: o.addressLandmark }
+            : { type: "branch", name: o.branchName },
+    }));
+
+    return SuccessResponse(res, { data: formatted });
 };
 
 // ==========================================
@@ -1102,6 +1142,8 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
         .select({
             orderId: orders.id,
             orderNumber: orders.orderNumber,
+            dailyOrderNumber: orders.dailyOrderNumber,
+            orderType: orders.orderType,
             restaurantName: restaurants.name,
             restaurantImage: restaurants.logo,
             totalAmount: orders.totalAmount,
@@ -1109,21 +1151,47 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             createdAt: orders.createdAt,
             rating: orders.rating,
             ratingComment: orders.ratingComment,
-            itemsCount: sql<number>`(SELECT COUNT(*) FROM order_items WHERE order_items.order_id = ${orders.id})`
+            itemsCount: sql<number>`(SELECT COUNT(*) FROM order_items WHERE order_items.order_id = ${orders.id})`,
+            // Branch info (for takeaway / dine_in)
+            branchName: branches.name,
+            // Address info (for delivery)
+            addressTitle: addresses.title,
+            addressStreet: addresses.street,
+            addressLandmark: addresses.landmark,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(branches, eq(orders.branchId, branches.id))
+        .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .where(
             and(
                 eq(orders.userId, userId),
                 restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
-                // 🔥 تجلب فقط الطلبات التي انتهت (تم إضافة المسترجع والملغى)
                 inArray(orders.status, ["delivered", "cancelled", "refund"])
             )
         )
         .orderBy(desc(orders.createdAt));
 
-    return SuccessResponse(res, { data: historyOrders });
+    // Return branch name or address depending on orderType
+    const formatted = historyOrders.map(o => ({
+        orderId: o.orderId,
+        orderNumber: o.orderNumber,
+        dailyOrderNumber: o.dailyOrderNumber,
+        orderType: o.orderType,
+        restaurantName: o.restaurantName,
+        restaurantImage: o.restaurantImage,
+        totalAmount: o.totalAmount,
+        status: o.status,
+        createdAt: formatDate(o.createdAt),
+        rating: o.rating,
+        ratingComment: o.ratingComment,
+        itemsCount: o.itemsCount,
+        location: o.orderType === "delivery"
+            ? { type: "address", title: o.addressTitle, street: o.addressStreet, landmark: o.addressLandmark }
+            : { type: "branch", name: o.branchName },
+    }));
+
+    return SuccessResponse(res, { data: formatted });
 };
 
 // ==========================================
@@ -1138,6 +1206,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
         .select({
             orderId: orders.id,
             orderNumber: orders.orderNumber,
+            dailyOrderNumber: orders.dailyOrderNumber,
             status: orders.status,
             createdAt: orders.createdAt,
             paymentMethod: orders.paymentMethod,
@@ -1160,17 +1229,32 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             ratingComment: orders.ratingComment,
 
             restaurantName: restaurants.name,
-            restaurantImage: restaurants.logo
+            restaurantImage: restaurants.logo,
+
+            // Branch (takeaway / dine_in)
+            branchId: branches.id,
+            branchName: branches.name,
+            branchAddress: branches.address,
+
+            // Address (delivery)
+            addressId: addresses.id,
+            addressTitle: addresses.title,
+            addressStreet: addresses.street,
+            addressLandmark: addresses.landmark,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
+        .leftJoin(branches, eq(orders.branchId, branches.id))
+        .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .where(eq(orders.id, orderId))
         .limit(1);
 
     if (!orderInfo.length) {
         throw new NotFound("Order not found");
     }
+
+    const o = orderInfo[0];
 
     const items = await db
         .select({
@@ -1188,7 +1272,39 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
 
     return SuccessResponse(res, {
         data: {
-            ...orderInfo[0],
+            orderId: o.orderId,
+            orderNumber: o.orderNumber,
+            dailyOrderNumber: o.dailyOrderNumber,
+            status: o.status,
+            orderType: o.orderType,
+            createdAt: formatDate(o.createdAt),
+            paymentMethod: o.paymentMethod,
+            paymentMethodDetails: o.paymentMethodDetails,
+            subtotal: o.subtotal,
+            deliveryFee: o.deliveryFee,
+            serviceFee: o.serviceFee,
+            discountAmount: o.discountAmount,
+            couponCode: o.couponCode,
+            totalAmount: o.totalAmount,
+            note: o.note,
+            rating: o.rating,
+            ratingComment: o.ratingComment,
+            restaurantName: o.restaurantName,
+            restaurantImage: o.restaurantImage,
+            location: o.orderType === "delivery"
+                ? {
+                    type: "address",
+                    id: o.addressId,
+                    title: o.addressTitle,
+                    street: o.addressStreet,
+                    landmark: o.addressLandmark,
+                }
+                : {
+                    type: "branch",
+                    id: o.branchId,
+                    name: o.branchName,
+                    address: o.branchAddress,
+                },
             items
         }
     });

@@ -17,6 +17,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
             name: users.name,
             email: users.email,
             phone: users.phone,
+            alternatePhone: users.alternatePhone,
             photo: users.photo,
             isVerified: users.isVerified,
             createdAt: users.createdAt,
@@ -103,13 +104,14 @@ export const getRestaurantPoints = async (req: Request | any, res: Response) => 
         }
     });
 };
+
 export const updateProfile = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
-    const { name, phone, photo } = req.body;
+    const { name, phone, photo, alternatePhone } = req.body;
 
     await db.update(users)
-        .set({ name, phone, photo })
+        .set({ name, phone, photo, alternatePhone })
         .where(eq(users.id, userId));
 
     return SuccessResponse(res, { message: "Profile updated successfully" });

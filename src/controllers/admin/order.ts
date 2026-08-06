@@ -1,5 +1,5 @@
 import { eq, desc, and } from "drizzle-orm";
-import { addresses, orders, users } from "../../models/schema";
+import { addresses, orders, restaurants, users } from "../../models/schema";
 import { SuccessResponse } from "../../utils/response";
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
@@ -36,8 +36,6 @@ export const getOrdersByRestaurant = async (req: Request, res: Response) => {
         data: result
     });
 };
-
-
 
 export const getOrderDetails = async (req: Request, res: Response) => {
     // 👈 هنجيب الـ orderId والـ restaurantId من الـ params
@@ -90,3 +88,37 @@ export const getOrderDetails = async (req: Request, res: Response) => {
         data: result[0]
     });
 };
+
+export const getAllOrders = async (req: Request, res: Response) => {
+    const result = await db.select({
+        orderId: orders.orderNumber,
+        internalId: orders.id,
+        orderDate: orders.createdAt,
+        totalAmount: orders.totalAmount,
+        orderStatus: orders.status,
+        customerName: users.name,
+        customerPhone: users.phone,
+        restaurantName: restaurants.name,
+        restaurantId: restaurants.id,
+        paymentMethod: orders.paymentMethod,
+        orderType: orders.orderType,
+        deliveryFee: orders.deliveryFee,
+        serviceFee: orders.serviceFee,
+        appCommission: orders.appCommission,
+        discountAmount: orders.discountAmount,
+        rating: orders.rating,
+        ratingComment: orders.ratingComment,
+        cancelReason: orders.cancelReason,
+        cancelReasonId: orders.cancelReasonId,
+        note: orders.note,
+        dailyOrderNumber: orders.dailyOrderNumber,
+    })
+    .from(orders)
+    .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+    .leftJoin(users, eq(orders.userId, users.id))
+    .orderBy(desc(orders.createdAt));
+    return SuccessResponse(res, {
+        message: "All orders fetched successfully",
+        data: result
+    });
+}

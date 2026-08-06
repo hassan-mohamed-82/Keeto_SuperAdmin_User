@@ -20,4 +20,5 @@ export const addresses = mysqlTable("addresses", {
     street: varchar("street", { length: 255 }).notNull(),
     number: varchar("number", { length: 20 }).notNull(),
     floor: varchar("floor", { length: 20 }),
+    landmark: varchar("landmark", { length: 500 }),
 });

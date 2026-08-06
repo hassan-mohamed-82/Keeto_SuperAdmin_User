@@ -19,7 +19,7 @@ export const addUserAddress = async (req: Request, res: Response) => {
     try {
         if (!req.user) throw new UnauthorizedError("Unauthenticated");
         const userId = req.user.id;
-        const { lat, lng, type, title, street, number, floor, zoneId } = req.body;
+        const { lat, lng, type, title, street, number, floor, zoneId, landmark  } = req.body;
 
         const newAddress = await db.insert(addresses).values({
             id: uuidv4(),
@@ -32,6 +32,7 @@ export const addUserAddress = async (req: Request, res: Response) => {
             number,
             zoneId,
             floor,
+            landmark: landmark || null,
         });
 
         return SuccessResponse(res, { message: "Address added successfully", data: newAddress });
@@ -61,7 +62,7 @@ export const updateUserAddress = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
     const { addressId } = req.params;
-    const { lat, lng, type, title, street, number, floor, zoneId } = req.body;
+    const { lat, lng, type, title, street, number, floor, zoneId, landmark } = req.body;
 
     const existingAddress = await db.select().from(addresses).where(eq(addresses.id, addressId)).limit(1);
     if (!existingAddress[0]) {
@@ -70,7 +71,7 @@ export const updateUserAddress = async (req: Request, res: Response) => {
 
     await db
         .update(addresses)
-        .set({ lat, lng, type, title, street, number, floor, zoneId })
+        .set({ lat, lng, type, title, street, number, floor, zoneId, landmark: landmark ?? null })
         .where(eq(addresses.id, addressId));
 
     return SuccessResponse(res, { message: "Address updated successfully" });
