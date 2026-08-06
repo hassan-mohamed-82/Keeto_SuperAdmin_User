@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from "uuid";
  * Utility to send a push notification via Firebase and save it to the DB.
  */
 export const sendPushNotification = async (params: {
-    recipientType: "user" | "restaurant";
+    recipientType: "user" | "restaurant" | "admin";
     recipientId: string;
     title: string;
     body: string;
@@ -38,13 +38,16 @@ export const sendPushNotification = async (params: {
                 .where(eq(users.id, recipientId))
                 .limit(1);
             fcmToken = user?.fcmToken || null;
-        } else {
+        } else if (recipientType === "restaurant") {
             const [restaurant] = await db
                 .select({ fcmToken: restaurants.fcmToken })
                 .from(restaurants)
                 .where(eq(restaurants.id, recipientId))
                 .limit(1);
             fcmToken = restaurant?.fcmToken || null;
+        } else if (recipientType === "admin") {
+            // Admins currently don't use FCM tokens (e.g. they use web dashboard)
+            fcmToken = null;
         }
 
         // 3. Send via Firebase if token exists
