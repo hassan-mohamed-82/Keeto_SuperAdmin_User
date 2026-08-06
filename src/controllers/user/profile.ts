@@ -55,9 +55,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
                 email: userInfo.email,
                 phone: userInfo.phone,
                 photo: userInfo.photo,
-
-
-
+                alternatePhone: userInfo.alternatePhone,
                 isVerified: userInfo.isVerified,
                 createdAt: userInfo.createdAt,
             },
