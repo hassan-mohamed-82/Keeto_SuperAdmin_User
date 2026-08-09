@@ -13,7 +13,8 @@ import {
     orderItems,
     notifications,
     restaurantBusinessPlans, food,
-    variationOptions
+    variationOptions,
+    addons
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -631,33 +632,57 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (resolvedOrderType === "delivery" && !status.canDeliveryNow) throw new BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) throw new BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
 
-    // ==========================================
-    // ⚡ 5. Batch Fetching (حل مشكلة N+1 Queries)
+  // ==========================================
+    // ⚡ 5. Batch Fetching (Resolved N+1 Queries & DB Validation)
     // ==========================================
     const foodIds = [...new Set(userCart.map(item => item.foodId))];
 
-    // استخراج جميع الـ optionIds الموجودة بالخيارات
     const allOptionIds: string[] = [];
+    const allAddonIds: string[] = [];
+
     userCart.forEach(item => {
+        // Parse variations & addons safely
         let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
         if (typeof safeVars === 'string') safeVars = JSON.parse(safeVars);
-        const vars = Array.isArray(safeVars) ? safeVars : [];
-        vars.forEach((v: any) => { if (v.optionId) allOptionIds.push(v.optionId); });
+
+        let parsedVars: any[] = [];
+        let parsedAddons: any[] = [];
+
+        if (Array.isArray(safeVars)) {
+            parsedVars = safeVars;
+        } else if (safeVars && typeof safeVars === 'object') {
+            parsedVars = Array.isArray(safeVars.variations) ? safeVars.variations : [];
+            parsedAddons = Array.isArray(safeVars.addons) ? safeVars.addons : [];
+        }
+
+        // Dedicated cart `addons` column fallback
+        let safeAddons = typeof item.addons === 'string' ? JSON.parse(item.addons) : item.addons;
+        if (typeof safeAddons === 'string') safeAddons = JSON.parse(safeAddons);
+        if (Array.isArray(safeAddons)) {
+            parsedAddons = [...parsedAddons, ...safeAddons];
+        }
+
+        parsedVars.forEach((v: any) => { if (v.optionId) allOptionIds.push(v.optionId); });
+        parsedAddons.forEach((a: any) => { if (a.addonId || a.id) allAddonIds.push(a.addonId || a.id); });
     });
 
-    // جلب البيانات دفعة واحدة بدلاً من اللوب
-    const [foodList, optionsList] = await Promise.all([
+    // Batch fetch Food, Variation Options, and Addons from DB
+    const [foodList, optionsList, addonsListDb] = await Promise.all([
         db.select().from(food).where(inArray(food.id, foodIds)),
         allOptionIds.length > 0
             ? db.select().from(variationOptions).where(inArray(variationOptions.id, [...new Set(allOptionIds)]))
+            : [],
+        allAddonIds.length > 0
+            ? db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)])) // Replace `addonsTable` with your Drizzle schema table for addons
             : []
     ]);
 
     const foodMap = new Map(foodList.map(f => [f.id, f]));
     const optionsMap = new Map(optionsList.map(o => [o.id, o]));
+    const addonsMap = new Map(addonsListDb.map(a => [a.id, a]));
 
     // ==========================================
-    // 5.1 Calculate Subtotal & Variations
+    // 5.1 Calculate Subtotal, Variations & Addons
     // ==========================================
     let subtotal = 0;
     let initialSubtotal = 0;
@@ -668,12 +693,30 @@ export const checkout = async (req: Request | any, res: Response) => {
         if (!foodItem) throw new BadRequest(`Food item with ID ${item.foodId} not found`);
 
         const originalBasePrice = parseFloat(foodItem.price as string || "0");
+        
         let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
         if (typeof safeVars === 'string') safeVars = JSON.parse(safeVars);
-        const vars = Array.isArray(safeVars) ? safeVars : [];
+
+        let parsedVariations: any[] = [];
+        let parsedAddons: any[] = [];
+
+        if (Array.isArray(safeVars)) {
+            parsedVariations = safeVars;
+        } else if (safeVars && typeof safeVars === 'object') {
+            parsedVariations = Array.isArray(safeVars.variations) ? safeVars.variations : [];
+            parsedAddons = Array.isArray(safeVars.addons) ? safeVars.addons : [];
+        }
+
+        let safeAddons = typeof item.addons === 'string' ? JSON.parse(item.addons) : item.addons;
+        if (typeof safeAddons === 'string') safeAddons = JSON.parse(safeAddons);
+        if (Array.isArray(safeAddons)) {
+            parsedAddons = [...parsedAddons, ...safeAddons];
+        }
 
         let varPrice = 0;
-        for (const v of vars) {
+        
+        // Calculate variations from DB
+        for (const v of parsedVariations) {
             if (v.optionId) {
                 const dbOption = optionsMap.get(v.optionId);
                 if (dbOption) {
@@ -683,6 +726,20 @@ export const checkout = async (req: Request | any, res: Response) => {
                 }
             } else {
                 varPrice += parseFloat(v.additionalPrice || v.price || v.amount || "0");
+            }
+        }
+
+        // Calculate addons securely from DB
+        for (const a of parsedAddons) {
+            const addonId = a.addonId || a.id;
+            const dbAddon = addonsMap.get(addonId);
+            if (dbAddon) {
+                const dbAddonPrice = parseFloat((dbAddon.price || "0") as string);
+                varPrice += dbAddonPrice;
+                a.price = dbAddonPrice.toString(); // Update snapshot with valid DB price
+            } else {
+                // Fallback to client snapshot if DB record is absent (optional based on your design)
+                varPrice += parseFloat(a.price || "0");
             }
         }
 
@@ -696,9 +753,9 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
 
         initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
-        itemsWithData.push({ cartItem: item, foodItem, originalBasePrice, varPrice, vars });
+        itemsWithData.push({ cartItem: item, foodItem, originalBasePrice, varPrice, vars: parsedVariations, addonsList: parsedAddons });
     }
-
+    
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
     const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
     const itemsToInsert: any[] = [];

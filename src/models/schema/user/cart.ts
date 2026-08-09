@@ -26,8 +26,9 @@ export const cartItems = mysqlTable("cart_items", {
     // 🔥 السعر الإجمالي (unitPrice * quantity)
     totalPrice: varchar("total_price", { length: 50 }).notNull(),
 
-    // 🔥 variations محفوظة بشكل snapshot
     variations: json("variations"),
+
+    addons: json("addons"),
 
     note: varchar("note", { length: 500 }),
 
