@@ -133,11 +133,13 @@ export const addToCart = async (req: Request | any, res: Response) => {
     // 3. التحقق من صحة الـ Addons المرسلة وحساب سعرها
     let addonSnapshot: { addonId: string; name: string; nameAr: string; price: string }[] = [];
     if (safeAddons.length > 0) {
-        // التحقق من أن الـ addons مسموح بها لهذه الأكلة
+        // التحقق من أن الـ addons مسموح بها لهذه الأكلة (فقط إذا كانت القائمة المسموح بها غير فارغة)
         const allowedAddonIds: string[] = Array.isArray(itemFood.addonsId) ? itemFood.addonsId : [];
-        for (const a of safeAddons) {
-            if (!allowedAddonIds.includes(a.addonId)) {
-                throw new BadRequest(`Addon ${a.addonId} is not available for this food item`);
+        if (allowedAddonIds.length > 0) {
+            for (const a of safeAddons) {
+                if (!allowedAddonIds.includes(a.addonId)) {
+                    throw new BadRequest(`Addon ${a.addonId} is not available for this food item`);
+                }
             }
         }
 
@@ -427,9 +429,11 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     let addonSnapshot: { addonId: string; name: string; nameAr: string; price: string }[] = [];
     if (safeAddons.length > 0) {
         const allowedAddonIds: string[] = Array.isArray(itemFood.addonsId) ? itemFood.addonsId : [];
-        for (const a of safeAddons) {
-            if (!allowedAddonIds.includes(a.addonId)) {
-                throw new BadRequest(`Addon ${a.addonId} is not available for this food item`);
+        if (allowedAddonIds.length > 0) {
+            for (const a of safeAddons) {
+                if (!allowedAddonIds.includes(a.addonId)) {
+                    throw new BadRequest(`Addon ${a.addonId} is not available for this food item`);
+                }
             }
         }
 
