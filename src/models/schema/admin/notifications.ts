@@ -6,9 +6,9 @@ import { restaurants } from "./restaurants";
 export const notifications = mysqlTable("notifications", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
-    recipientType: mysqlEnum("recipient_type", ["user", "restaurant", "admin"]).notNull(),
+    recipientType: mysqlEnum("recipient_type", ["user", "restaurant", "superadmin"]).notNull(),
 
-    // ID of the user OR the restaurant OR the admin (e.g., 'superadmin_dashboard'), depending on recipientType
+    // ID of the user OR the restaurant OR the superadmin (e.g., 'superadmin'), depending on recipientType
     recipientId: char("recipient_id", { length: 36 }).notNull(),
 
     title: varchar("title", { length: 255 }).notNull(),

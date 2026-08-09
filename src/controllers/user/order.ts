@@ -913,13 +913,13 @@ export const checkout = async (req: Request | any, res: Response) => {
         await tx.delete(cartItems).where(eq(cartItems.userId, userId));
 
         // إرسال إشعار للـ superadmin
-        // await tx.insert(notifications).values({
-        //     recipientType: "admin",
-        //     recipientId: "superadmin_dashboard",
-        //     title: "New Order",
-        //     body: `Order #${orderNumber} has been placed.`,
-        //     data: { orderId, orderNumber }
-        // });
+        await tx.insert(notifications).values({
+            recipientType: "superadmin",
+            recipientId: "superadmin",
+            title: "New Order",
+            body: `Order #${orderNumber} has been placed.`,
+            data: { orderId, orderNumber }
+        });
 
 
         // 4. إدارات الكوبونات والتخفيضات

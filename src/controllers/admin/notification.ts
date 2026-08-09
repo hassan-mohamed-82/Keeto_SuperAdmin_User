@@ -21,8 +21,8 @@ export const getMyNotifications = async (req: Request | any, res: Response) => {
         .select()
         .from(notifications)
         .where(and(
-            eq(notifications.recipientType, "admin"),
-            eq(notifications.recipientId, "superadmin_dashboard")
+            eq(notifications.recipientType, "superadmin"),
+            eq(notifications.recipientId, "superadmin")
         ))
         .orderBy(desc(notifications.createdAt))
         .limit(limit)
@@ -48,7 +48,7 @@ export const markNotificationAsRead = async (req: Request | any, res: Response) 
         .from(notifications)
         .where(and(
             eq(notifications.id, id),
-            eq(notifications.recipientType, "admin")
+            eq(notifications.recipientType, "superadmin")
         ))
         .limit(1);
 
@@ -70,8 +70,8 @@ export const markAllNotificationsAsRead = async (req: Request | any, res: Respon
     await db.update(notifications)
         .set({ isRead: true })
         .where(and(
-            eq(notifications.recipientType, "admin"),
-            eq(notifications.recipientId, "superadmin_dashboard"),
+            eq(notifications.recipientType, "superadmin"),
+            eq(notifications.recipientId, "superadmin"),
             eq(notifications.isRead, false)
         ));
 
