@@ -1,8 +1,7 @@
-// models/schema/restaurants.ts
 import { mysqlTable, varchar, timestamp, json, char, text, date, mysqlEnum, boolean, int } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { zones } from "./zone";
-import { sales } from "./sales"; // 👈 استدعاء جدول السيلز
+import { sales } from "./sales";
 
 export const restaurants = mysqlTable("restaurants", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -18,13 +17,14 @@ export const restaurants = mysqlTable("restaurants", {
     cuisineId: json("cuisine_id").$type<string[]>().default([]),
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id),
 
-    // 👇 التعديلات الجديدة هنا
-    type: mysqlEnum("type", ["mega", "super", "A", "B", "C", "C-", "test"]).default("C"), // نوع المطعم
-    salesId: char("sales_id", { length: 36 }).references(() => sales.id), // المندوب اللي جاب المطعم
+    type: mysqlEnum("type", ["mega", "super", "A", "B", "C", "C-", "test"]).default("C"),
+    salesId: char("sales_id", { length: 36 }).references(() => sales.id),
     likes: int("likes").default(0),
     facebookLink: varchar("facebook_link", { length: 500 }),
     orderLink: varchar("order_link", { length: 500 }),
-    // 👆
+    
+    iosApp: varchar("ios_app", { length: 500 }),     
+    androidApp: varchar("android_app", { length: 500 }),
 
     logo: varchar("logo", { length: 500 }).notNull(),
     cover: varchar("cover", { length: 500 }),
@@ -36,7 +36,7 @@ export const restaurants = mysqlTable("restaurants", {
     ownerFirstName: varchar("owner_first_name", { length: 255 }).notNull(),
     ownerLastName: varchar("owner_last_name", { length: 255 }),
     ownerPhone: varchar("owner_phone", { length: 50 }).notNull(),
-    ownerposition: varchar("owner_position", { length: 255 }), // منصب المالك
+    ownerposition: varchar("owner_position", { length: 255 }),
 
     tags: json("tags").$type<string[]>().default([]),
     lat: varchar("lat", { length: 255 }),
