@@ -17,6 +17,7 @@ import sliderRouter from "./slider";
 import imageRouter from "./image";
 import offersRouter from "./offers";
 import landingPageRouter from "./landingPage";
+import pointsRouter from "./userPoints";
 
 const router = Router();
 router.use("/home", homeRouter);
@@ -37,4 +38,5 @@ router.use("/cart", cartRouter);
 router.use("/favlist", favlistRouter);
 router.use("/notifications", notificationRouter);
 router.use("/offers", offersRouter);
+router.use("/points", pointsRouter);
 export default router;

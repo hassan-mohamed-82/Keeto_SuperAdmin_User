@@ -45,3 +45,4 @@ export * from "./schema/admin/restraurant_user";
 export * from "./schema/admin/sales";
 export * from "./schema/admin/dashboardTargets";
 export * from "./schema/user/userRestaurantPoints";
+export * from "./schema/admin/pointsProducts";

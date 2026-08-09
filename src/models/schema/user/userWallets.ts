@@ -1,4 +1,5 @@
-import { mysqlTable, varchar, timestamp, decimal, mysqlEnum, char, int , longtext } from "drizzle-orm/mysql-core";
+// models/schema/userWallets.ts
+import { mysqlTable, varchar, timestamp, decimal, mysqlEnum, char, int, index } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { users } from "./Users";
 import { paymentMethods } from "../../schema";
@@ -10,13 +11,13 @@ export const userWallets = mysqlTable("user_wallets", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
     userId: char("user_id", { length: 36 })
-        .references(() => users.id)
+        .references(() => users.id, { onDelete: "cascade" })
         .notNull()
         .unique(),
 
-    balance: decimal("balance", { precision: 10, scale: 2 }).default("0.00"),
+    balance: decimal("balance", { precision: 10, scale: 2 }).default("0.00").notNull(),
 
-    loyaltyPoints: int("loyalty_points").default(0),
+    loyaltyPoints: int("loyalty_points").default(0).notNull(),
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
@@ -28,11 +29,11 @@ export const userWalletTransactions = mysqlTable("user_wallet_transactions", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
     userId: char("user_id", { length: 36 })
-        .references(() => users.id)
+        .references(() => users.id, { onDelete: "cascade" })
         .notNull(),
 
     paymentMethodId: char("payment_method_id", { length: 36 })
-        .references(() => paymentMethods.id),
+        .references(() => paymentMethods.id, { onDelete: "set null" }),
 
     type: mysqlEnum("type", ["credit", "debit"]).notNull(),
 
@@ -51,10 +52,13 @@ export const userWalletTransactions = mysqlTable("user_wallet_transactions", {
 
     reference: varchar("reference", { length: 255 }),
 
-    receiptImage: varchar("receipt_image", { length: 500 }), // 🔥 مهم للـ manual
+    receiptImage: varchar("receipt_image", { length: 500 }),
 
     status: mysqlEnum("status", ["pending", "approved", "rejected"])
-        .default("approved"), // automatic = approved
+        .default("approved").notNull(),
 
     createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+    userIdx: index("user_wallet_tx_user_idx").on(table.userId),
+    refIdx: index("user_wallet_tx_ref_idx").on(table.reference),
+}));
