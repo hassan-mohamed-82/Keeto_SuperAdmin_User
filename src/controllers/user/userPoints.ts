@@ -200,36 +200,41 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
         createdDailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
 
         // D. Create Order
-        await tx.insert(orders).values({
-            id: newOrderId,
-            orderNumber,
-            idempotencyKey: null,
-            userId,
-            restaurantId,
-            branchId,
-            addressId: null,
-            orderSource: "online_order",
-            paymentMethod: "POINTS",
-            orderType: "takeaway",
-            subtotal: "0.00",
-            deliveryFee: "0.00",
-            serviceFee: "0.00",
-            appCommission: "0.00",
-            discountAmount: "0.00",
-            couponCode: null,
-            totalAmount: "0.00",
-            status: "pending",
-            isPointsRedeemed: true,
-            redeemCode,
-            cancelReasonId: null,
-            cancelReason: null,
-            note: null,
-            dailyOrderNumber: createdDailyOrderNumber,
-            rating: null,
-            ratingComment: null,
-            createdAt: now,
-            updatedAt: now,
-        });
+        try {
+            await tx.insert(orders).values({
+                id: newOrderId,
+                orderNumber,
+                idempotencyKey: null,
+                userId,
+                restaurantId,
+                branchId,
+                addressId: null,
+                orderSource: "online_order",
+                paymentMethod: "POINTS",
+                orderType: "takeaway",
+                subtotal: "0.00",
+                deliveryFee: "0.00",
+                serviceFee: "0.00",
+                appCommission: "0.00",
+                discountAmount: "0.00",
+                couponCode: null,
+                totalAmount: "0.00",
+                status: "pending",
+                isPointsRedeemed: true,
+                redeemCode,
+                cancelReasonId: null,
+                cancelReason: null,
+                note: null,
+                dailyOrderNumber: createdDailyOrderNumber,
+                rating: null,
+                ratingComment: null,
+                createdAt: now,
+                updatedAt: now,
+            })
+        } catch (dbError: any) {
+            console.error("🔴 MySQL Error Message:", dbError.sqlMessage || dbError.message);
+            throw dbError;
+        }
 
         // E. Create Order Item
         await tx.insert(orderItems).values({
