@@ -210,7 +210,7 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
                 branchId,
                 addressId: null,
                 orderSource: "online_order",
-                paymentMethod: "POINTS",
+                paymentMethod: null,
                 orderType: "takeaway",
                 subtotal: "0.00",
                 deliveryFee: "0.00",

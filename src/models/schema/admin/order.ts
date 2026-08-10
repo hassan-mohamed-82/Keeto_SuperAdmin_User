@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
 import { food } from "./food";
 import { users } from "../user/Users";
-import { branches } from "../../schema";
+import { branches, paymentMethods } from "../../schema";
 import { addresses } from "../user/address";
 import { selectReasons } from "./selectReasons";
 
@@ -29,8 +29,7 @@ export const orders = mysqlTable("orders", {
 
     orderSource: mysqlEnum("order_source", ["online_order", "food_aggregator","my_keeto"]).notNull(),
 
-    // ✅ التعديل هنا: رجعناها لـ varchar عشان تقبل الـ ID (UUID) اللي مبعوت من الـ Body
-    paymentMethod: varchar("payment_method", { length: 100 }).notNull(),
+    paymentMethod: char("payment_method", { length: 36 }),
 
     orderType: mysqlEnum("order_type", ["delivery", "takeaway", "dine_in"]).default("delivery"),
 
