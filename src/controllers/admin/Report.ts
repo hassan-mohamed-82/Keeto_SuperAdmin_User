@@ -944,15 +944,9 @@ export const getSalesReport = async (req: Request, res: Response) => {
 
     const { startDate, endDate, salesId, type, restaurantId } = req.query;
 
+    // salesConditions: only filter by salesId / restaurantId / type — NOT by date.
+    // The date range applies to which RESTAURANTS had orders in that period, not when the sales person was created.
     const salesConditions = [];
-    if (startDate) {
-        salesConditions.push(gte(sales.createdAt, new Date(startDate as string)));
-    }
-    if (endDate) {
-        const end = new Date(endDate as string);
-        end.setHours(23, 59, 59, 999);
-        salesConditions.push(lte(sales.createdAt, end));
-    }
     if (salesId) {
         salesConditions.push(eq(sales.id, salesId as string));
     }
@@ -1082,8 +1076,75 @@ export const getSalesReport = async (req: Request, res: Response) => {
         }
     }
 
+    // ── Find restaurants that had orders within the given date range ──
+    // Collect every restaurant ID that belongs to any active sales in our map
+    const allRestaurantIds: string[] = [];
+    const salesRestaurantMap = new Map<string, Set<string>>(); // salesId → Set of restaurantIds
+
+    for (const [sid, salesEntry] of salesMap.entries()) {
+        const restIds = new Set<string>();
+        for (const rest of salesEntry.restaurants) {
+            if (rest.id) {
+                allRestaurantIds.push(rest.id);
+                restIds.add(rest.id);
+            }
+        }
+        salesRestaurantMap.set(sid, restIds);
+    }
+
+    // Map: restaurantId → salesId (reverse lookup)
+    const restaurantToSalesId = new Map<string, string>();
+    for (const [sid, restSet] of salesRestaurantMap.entries()) {
+        for (const rid of restSet) {
+            restaurantToSalesId.set(rid, sid);
+        }
+    }
+
+    // Per-sales map: salesId → Set of restaurantIds that had orders in range
+    const salesActiveRestaurantsInRange = new Map<string, Set<string>>();
+    for (const sid of salesMap.keys()) {
+        salesActiveRestaurantsInRange.set(sid, new Set());
+    }
+
+    if (allRestaurantIds.length > 0 && (startDate || endDate)) {
+        const orderDateConditions = [];
+        if (startDate) {
+            orderDateConditions.push(gte(orders.createdAt, new Date(startDate as string)));
+        }
+        if (endDate) {
+            const end = new Date(endDate as string);
+            end.setHours(23, 59, 59, 999);
+            orderDateConditions.push(lte(orders.createdAt, end));
+        }
+
+        const ordersInRange = await db
+            .selectDistinct({ restaurantId: orders.restaurantId })
+            .from(orders)
+            .where(
+                and(
+                    inArray(orders.restaurantId, allRestaurantIds),
+                    ...orderDateConditions
+                )
+            );
+
+        for (const row of ordersInRange) {
+            const rid = row.restaurantId;
+            const sid = restaurantToSalesId.get(rid);
+            if (sid && salesActiveRestaurantsInRange.has(sid)) {
+                salesActiveRestaurantsInRange.get(sid)!.add(rid);
+            }
+        }
+    }
+
     const salesList = Array.from(salesMap.values()).map(item => {
-        // نتحقق من وجود الـ salesId؛ فإذا كان موجوداً نقوم بتضمين الـ groupedByType، وإلا فلن تظهر في الـ Object نهائياً
+        // If a date range is given, restaurants = only those with orders in range.
+        // Otherwise, restaurants = all restaurants for this sales person.
+        let filteredRestaurants = item.restaurants;
+        if (startDate || endDate) {
+            const activeRestIds = salesActiveRestaurantsInRange.get(item.id) ?? new Set();
+            filteredRestaurants = item.restaurants.filter((r: any) => activeRestIds.has(r.id));
+        }
+
         const responseData: any = {
             id: item.id,
             name: item.name,
@@ -1096,18 +1157,8 @@ export const getSalesReport = async (req: Request, res: Response) => {
                 activeCount: item.activeRestaurantsCount,
                 inactiveCount: item.inactiveRestaurantsCount
             },
-            restaurants: item.restaurants
+            restaurants: filteredRestaurants
         };
-
-        //  if (salesId) {
-        //     responseData.groupedByType = Object.keys(item.typeGroups).map(typeKey => ({
-        //         type: typeKey,
-        //         totalRestaurants: item.typeGroups[typeKey].total,
-        //         activeCount: item.typeGroups[typeKey].active,
-        //         inactiveCount: item.typeGroups[typeKey].inactive,
-        //         restaurants: item.typeGroups[typeKey].list
-        //     }));
-        // }
 
         if (salesId) {
             responseData.groupedByType = ALL_RESTAURANT_TYPES.map(typeKey => ({
