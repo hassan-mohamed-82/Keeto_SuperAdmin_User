@@ -227,7 +227,8 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             dailyOrderNumber: createdDailyOrderNumber,
             rating: null,
             ratingComment: null,
-            createdAt: now
+            createdAt: now,
+            updatedAt: now,
         });
 
         // E. Create Order Item
