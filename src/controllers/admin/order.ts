@@ -147,8 +147,13 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     const [existingOrder] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
     if (!existingOrder) throw new NotFound("Order not found");
 
-    if (existingOrder.restaurantId !== adminRestaurantId) throw new BadRequest("Unauthorized");
-    if (adminBranchId && existingOrder.branchId !== adminBranchId) throw new BadRequest("Unauthorized");
+    // Only restaurant admins are restricted to their own restaurant/branch.
+    // SuperAdmins (type === "super_admin") can update any order.
+    const isSuperAdmin = req.user?.type === "super_admin";
+    if (!isSuperAdmin) {
+        if (existingOrder.restaurantId !== adminRestaurantId) throw new BadRequest("Unauthorized");
+        if (adminBranchId && existingOrder.branchId !== adminBranchId) throw new BadRequest("Unauthorized");
+    }
 
     const currentStatus = existingOrder.status as string;
 
