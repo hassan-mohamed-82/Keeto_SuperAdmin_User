@@ -7,7 +7,7 @@ import {
 
 const router = Router();
 
-router.get("/products", catchAsync(getRedeemableProducts));
-router.post("/redeem", catchAsync(generateRedeemCode));
+router.get("/products/:restaurantId", catchAsync(getRedeemableProducts));
+router.post("/redeem/:restaurantId", catchAsync(generateRedeemCode));
 
 export default router;

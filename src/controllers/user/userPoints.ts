@@ -14,15 +14,15 @@ import { NotFound, UnauthorizedError, BadRequest } from "../../Errors";
 import { v4 as uuidv4 } from "uuid";
 
 export const getRedeemableProducts = async (req: Request, res: Response) => {
-    const { restaurantId } = req.query;
+    const { restaurantId } = req.params;
     const userId = req.user?.id;
 
     if (!userId) {
         throw new UnauthorizedError("User is not found");
     }
 
-    if (!restaurantId || typeof restaurantId !== "string") {
-        throw new BadRequest("restaurantId query parameter is required");
+    if (!restaurantId) {
+        throw new BadRequest("restaurantId is required");
     }
 
     // 1. جلب رصيد نقاط العميل في هذا المطعم
@@ -88,14 +88,19 @@ const generateOrderNumber = (): string => {
 
 export const generateRedeemCode = async (req: Request, res: Response) => {
     const userId = req.user?.id;
-    const { foodId, restaurantId, branchId } = req.body;
+    const { restaurantId } = req.params;
+    const { foodId, branchId } = req.body;
 
     if (!userId) {
         throw new UnauthorizedError("User is not found");
     }
 
-    if (!foodId || !restaurantId || !branchId) {
-        throw new BadRequest("foodId, restaurantId, and branchId are required");
+    if (!restaurantId) {
+        throw new BadRequest("restaurantId is required");
+    }
+
+    if (!foodId || !branchId) {
+        throw new BadRequest("foodId and branchId are required");
     }
 
     // 1. Verify product is enrolled and active in the points program
