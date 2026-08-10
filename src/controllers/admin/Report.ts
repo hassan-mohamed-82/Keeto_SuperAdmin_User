@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from "uuid";
 // 1. تعريف الأنواع المسموحة للـ Enums
 type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" | "refund";
 type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
+const ALL_RESTAURANT_TYPES = ["mega", "super", "A", "B", "C", "C-"] as const;
 
 // ==========================================
 // API 1: التقرير المالي العام 
@@ -170,10 +171,6 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
         data: summary
     });
 };
-// ==========================================
-// API 2: تقرير تفصيلي حسب كل مطعم (All Restaurants Overview)
-// ==========================================
-
 // ==========================================
 // API 2: تقرير تفصيلي حسب كل مطعم (All Restaurants Overview)
 // ==========================================
@@ -486,7 +483,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     });
 };
 // ==========================================
-// API 3.5: Get All Invoices for a Restaurant
+// API 4: Get All Invoices for a Restaurant
 // ==========================================
 export const getRestaurantInvoices = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -517,9 +514,8 @@ export const getRestaurantInvoices = async (req: Request | any, res: Response) =
         data: restaurantInvoices
     });
 };
-
 // ==========================================
-// API 2: Generate Restaurant Invoice PDF
+// API 5: Generate Restaurant Invoice PDF
 // ==========================================
 export const generateRestaurantInvoicePDF = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -610,9 +606,8 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
 
     doc.end();
 };
-
 // ==========================================
-// API 3: Generate & Save Invoice 
+// API 6: Generate & Save Invoice 
 // ==========================================
 export const generateAndSaveInvoice = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -703,9 +698,8 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
 
     return SuccessResponse(res, { message: "Invoice generated and saved successfully", data: { invoiceId } });
 };
-
 // ==========================================
-// API 4: Mark Invoice as Paid
+// API 7: Mark Invoice as Paid
 // ==========================================
 export const markInvoiceAsPaid = async (req: Request, res: Response) => {
     const { invoiceId } = req.params;
@@ -717,9 +711,8 @@ export const markInvoiceAsPaid = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, { message: "Invoice marked as paid successfully" });
 };
-
 // ==========================================
-// API 5: تقرير أعداد الطلبات والمطاعم (Restaurant Orders Count Report)
+// API 8: تقرير أعداد الطلبات والمطاعم (Restaurant Orders Count Report)
 // ==========================================
 export const getRestaurantOrdersReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -943,9 +936,9 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         data: responseData,
     });
 };
-
-const ALL_RESTAURANT_TYPES = ["mega", "super", "A", "B", "C", "C-"] as const;
-
+// ==========================================
+// API 9: تقرير المبيعات (Sales Report)
+// ==========================================
 export const getSalesReport = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
