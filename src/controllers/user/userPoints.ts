@@ -97,9 +97,9 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
     if (!restaurantId) throw new BadRequest("restaurantId is required");
     if (!foodId || !branchId) throw new BadRequest("foodId and branchId are required");
 
-    // 🟢 1. تعديل: التأكد أن الفرع موجود ومملوك لنفس المطعم
+    // 🟢 1. التأكد أن الفرع موجود ومملوك لنفس المطعم
     const [branch] = await db
-        .select()
+        .select({ id: branches.id })
         .from(branches)
         .where(
             and(
@@ -109,9 +109,11 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
         )
         .limit(1);
 
-    if (!branch) throw new BadRequest("Invalid branch selected or does not belong to this restaurant");
+    if (!branch) {
+        throw new BadRequest("Invalid branch selected or does not belong to this restaurant");
+    }
 
-    // 1.1 Verify product is enrolled and active in points program
+    // 1.1 التأكد من أن المنتج مسجل ونشط في برنامج النقاط
     const [pointsProd] = await db
         .select({
             id: pointsProducts.id,
@@ -140,9 +142,12 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
         throw new BadRequest("This product does not have a valid redemption points value set");
     }
 
-    // Fetch User Info for Response
-    const [userInfo] = await db.select({ id: users.id, name: users.name, phone: users.phone, email: users.email })
-        .from(users).where(eq(users.id, userId)).limit(1);
+    // جلب بيانات المستخدم للإرجاع في الاستجابة
+    const [userInfo] = await db
+        .select({ id: users.id, name: users.name, phone: users.phone, email: users.email })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
 
     // ==========================================
     // 🛡️ 2. Execute Order (Transaction)
@@ -151,13 +156,12 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
 
-    let createdDailyOrderNumber = 1;
     const newOrderId = uuidv4();
     const redeemCode = generate6DigitCode();
     const orderNumber = `ORD-${Date.now()}`;
 
     const result = await db.transaction(async (tx) => {
-        // 🟢 2. تعديل: إضافة .for("update") لمنع الـ Race Condition وقفل الصف
+        // A. قفل صف النقاط للعميل لمنع الـ Race Condition
         const [userPointsRecord] = await tx
             .select()
             .from(userRestaurantPoints)
@@ -180,13 +184,13 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
 
         const balanceAfter = currentBalance - pointsNeeded;
 
-        // B. Deduct user points
+        // B. خصم النقاط من رصيد المستخدم
         await tx
             .update(userRestaurantPoints)
             .set({ points: balanceAfter, updatedAt: now })
             .where(eq(userRestaurantPoints.id, userPointsRecord.id));
 
-        // 🔒 C. Calculate Daily Order Number
+        // C. حساب رقم الطلب اليومي للمطعم
         const [ordersCountResult] = await tx
             .select({ count: sql<number>`count(${orders.id})` })
             .from(orders)
@@ -197,46 +201,33 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
                 )
             );
 
-        createdDailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
+        const createdDailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
 
-        // D. Create Order
-        try {
-            await tx.insert(orders).values({
-                id: newOrderId,
-                orderNumber,
-                idempotencyKey: null,
-                userId,
-                restaurantId,
-                branchId,
-                addressId: null,
-                orderSource: "online_order",
-                paymentMethod: null,
-                orderType: "takeaway",
-                subtotal: "0.00",
-                deliveryFee: "0.00",
-                serviceFee: "0.00",
-                appCommission: "0.00",
-                discountAmount: "0.00",
-                couponCode: null,
-                totalAmount: "0.00",
-                status: "pending",
-                isPointsRedeemed: true,
-                redeemCode,
-                cancelReasonId: null,
-                cancelReason: null,
-                note: null,
-                dailyOrderNumber: createdDailyOrderNumber,
-                rating: null,
-                ratingComment: null,
-                createdAt: now,
-                updatedAt: now,
-            })
-        } catch (dbError: any) {
-            console.error("🔴 MySQL Error Message:", dbError.sqlMessage || dbError.message);
-            throw dbError;
-        }
+        // D. إنشاء الطلب الرئيسي (مع جعل paymentMethod null)
+        await tx.insert(orders).values({
+            id: newOrderId,
+            orderNumber,
+            userId,
+            restaurantId,
+            branchId,
+            orderSource: "online_order",
+            paymentMethod: null,
+            orderType: "takeaway",
+            subtotal: "0.00",
+            deliveryFee: "0.00",
+            serviceFee: "0.00",
+            appCommission: "0.00",
+            discountAmount: "0.00",
+            totalAmount: "0.00",
+            status: "pending",
+            isPointsRedeemed: true,
+            redeemCode,
+            dailyOrderNumber: createdDailyOrderNumber,
+            createdAt: now,
+            updatedAt: now,
+        });
 
-        // E. Create Order Item
+        // E. إنشاء عنصر الطلب (Order Item)
         await tx.insert(orderItems).values({
             id: uuidv4(),
             orderId: newOrderId,
@@ -245,11 +236,9 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             basePrice: "0.00",
             variationsPrice: "0.00",
             totalPrice: "0.00",
-            variations: null,
-            note: null
         });
 
-        // F. Record Points Audit Transaction
+        // F. تسجيل المعاملة في سجل النقاط (Audit Log)
         await tx.insert(userPointsTransactions).values({
             id: uuidv4(),
             userId,
@@ -257,20 +246,11 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             type: "redeem",
             points: pointsNeeded,
             balanceBefore: currentBalance,
-            balanceAfter: balanceAfter,
+            balanceAfter,
             orderId: newOrderId,
             note: `Redeemed points for item: ${pointsProd.foodName} (Code: ${redeemCode})`,
-            createdAt: now
+            createdAt: now,
         });
-
-        // G. Send Notification to SuperAdmin
-        // await tx.insert(notifications).values({
-        //     recipientType: "superadmin",
-        //     recipientId: "superadmin",
-        //     title: "New Points Redemption Order 🎁",
-        //     body: `Order #${orderNumber} generated via points redemption.`,
-        //     data: { orderId: newOrderId, orderNumber }
-        // });
 
         return {
             orderId: newOrderId,
@@ -278,33 +258,10 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             redeemCode,
             pointsDeducted: pointsNeeded,
             remainingPoints: balanceAfter,
-            productName: pointsProd.foodName
+            productName: pointsProd.foodName,
+            dailyOrderNumber: createdDailyOrderNumber,
         };
     });
-
-    // ==========================================
-    // 🔔 3. Send Notification to Restaurant
-    // ==========================================
-    const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
-        timeZone: "Africa/Cairo",
-        hour: "numeric",
-        minute: "numeric",
-        hour12: true
-    }).format(now);
-
-    // await sendPushNotification({
-    //     recipientType: "restaurant",
-    //     recipientId: restaurantId,
-    //     title: "طلب استبدال نقاط جديد! 🎁",
-    //     body: `تم استلام طلب جديد #${orderNumber} (استبدال نقاط) لـ ${pointsProd.foodName} الساعة ${cairoTimeFormatted}.`,
-    //     data: {
-    //         orderId: newOrderId,
-    //         orderNumber,
-    //         type: "points_redemption",
-    //         createdAt: now.toISOString(),
-    //         dailyOrderNumber: createdDailyOrderNumber
-    //     }
-    // });
 
     return SuccessResponse(res, {
         message: "Redemption order created successfully",
@@ -317,9 +274,9 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
                 remainingPoints: result.remainingPoints,
                 productName: result.productName,
                 createdAt: now.toISOString(),
-                dailyOrderNumber: createdDailyOrderNumber
+                dailyOrderNumber: result.dailyOrderNumber,
             },
-            customerDetails: userInfo
-        }
+            customerDetails: userInfo,
+        },
     });
 };
