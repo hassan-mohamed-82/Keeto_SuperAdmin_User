@@ -944,13 +944,13 @@ export const getSalesReport = async (req: Request, res: Response) => {
 
     const { startDate, endDate, salesId, type, restaurantId } = req.query;
 
-    // salesConditions: only filter by salesId / restaurantId / type — NOT by date.
-    // The date range applies to which RESTAURANTS had orders in that period, not when the sales person was created.
+    // 1. شروط فلترة السيلز
     const salesConditions = [];
     if (salesId) {
         salesConditions.push(eq(sales.id, salesId as string));
     }
 
+    // 2. شروط فلترة المطاعم (نوع المطعم، معرّف المطعم، وتاريخ التسجيل)
     const restaurantConditions = [];
     if (type) {
         restaurantConditions.push(eq(restaurants.type, type as any));
@@ -959,6 +959,17 @@ export const getSalesReport = async (req: Request, res: Response) => {
         restaurantConditions.push(eq(restaurants.id, restaurantId as string));
     }
 
+    // 💡 التعديل هنا: فلترة المطاعم بناءً على تاريخ إنشائها/تسجيلها
+    if (startDate) {
+        restaurantConditions.push(gte(restaurants.createdAt, new Date(startDate as string)));
+    }
+    if (endDate) {
+        const end = new Date(endDate as string);
+        end.setHours(23, 59, 59, 999);
+        restaurantConditions.push(lte(restaurants.createdAt, end));
+    }
+
+    // جلب بيانات السيلز والمطاعم المسجلة
     const allSalesRaw = await db
         .select({
             sales: sales,
@@ -967,13 +978,13 @@ export const getSalesReport = async (req: Request, res: Response) => {
         .from(sales)
         .leftJoin(
             restaurants,
-            eq(sales.id, restaurants.salesId)
-        )
-        .where(
             and(
-                salesConditions.length > 0 ? and(...salesConditions) : undefined,
+                eq(sales.id, restaurants.salesId),
                 restaurantConditions.length > 0 ? and(...restaurantConditions) : undefined
             )
+        )
+        .where(
+            salesConditions.length > 0 ? and(...salesConditions) : undefined
         );
 
     const salesMap = new Map<string, {
@@ -1026,6 +1037,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
 
         const salesGroup = salesMap.get(currentSales.id)!;
 
+        // إذا كان هناك مطعم مسجل للسيلز ده وضمن الفترة المحددة
         if (currentRest) {
             const isRestActive = currentRest.status === "active";
             const restType = currentRest.type || "C";
@@ -1043,7 +1055,8 @@ export const getSalesReport = async (req: Request, res: Response) => {
                 salesGroup.restaurants.push({
                     id: currentRest.id,
                     name: currentRest.name,
-                    nameAr: currentRest.nameAr
+                    nameAr: currentRest.nameAr,
+                    createdAt: currentRest.createdAt
                 });
             }
 
@@ -1076,75 +1089,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
         }
     }
 
-    // ── Find restaurants that had orders within the given date range ──
-    // Collect every restaurant ID that belongs to any active sales in our map
-    const allRestaurantIds: string[] = [];
-    const salesRestaurantMap = new Map<string, Set<string>>(); // salesId → Set of restaurantIds
-
-    for (const [sid, salesEntry] of salesMap.entries()) {
-        const restIds = new Set<string>();
-        for (const rest of salesEntry.restaurants) {
-            if (rest.id) {
-                allRestaurantIds.push(rest.id);
-                restIds.add(rest.id);
-            }
-        }
-        salesRestaurantMap.set(sid, restIds);
-    }
-
-    // Map: restaurantId → salesId (reverse lookup)
-    const restaurantToSalesId = new Map<string, string>();
-    for (const [sid, restSet] of salesRestaurantMap.entries()) {
-        for (const rid of restSet) {
-            restaurantToSalesId.set(rid, sid);
-        }
-    }
-
-    // Per-sales map: salesId → Set of restaurantIds that had orders in range
-    const salesActiveRestaurantsInRange = new Map<string, Set<string>>();
-    for (const sid of salesMap.keys()) {
-        salesActiveRestaurantsInRange.set(sid, new Set());
-    }
-
-    if (allRestaurantIds.length > 0 && (startDate || endDate)) {
-        const orderDateConditions = [];
-        if (startDate) {
-            orderDateConditions.push(gte(orders.createdAt, new Date(startDate as string)));
-        }
-        if (endDate) {
-            const end = new Date(endDate as string);
-            end.setHours(23, 59, 59, 999);
-            orderDateConditions.push(lte(orders.createdAt, end));
-        }
-
-        const ordersInRange = await db
-            .selectDistinct({ restaurantId: orders.restaurantId })
-            .from(orders)
-            .where(
-                and(
-                    inArray(orders.restaurantId, allRestaurantIds),
-                    ...orderDateConditions
-                )
-            );
-
-        for (const row of ordersInRange) {
-            const rid = row.restaurantId;
-            const sid = restaurantToSalesId.get(rid);
-            if (sid && salesActiveRestaurantsInRange.has(sid)) {
-                salesActiveRestaurantsInRange.get(sid)!.add(rid);
-            }
-        }
-    }
-
     const salesList = Array.from(salesMap.values()).map(item => {
-        // If a date range is given, restaurants = only those with orders in range.
-        // Otherwise, restaurants = all restaurants for this sales person.
-        let filteredRestaurants = item.restaurants;
-        if (startDate || endDate) {
-            const activeRestIds = salesActiveRestaurantsInRange.get(item.id) ?? new Set();
-            filteredRestaurants = item.restaurants.filter((r: any) => activeRestIds.has(r.id));
-        }
-
         const responseData: any = {
             id: item.id,
             name: item.name,
@@ -1157,7 +1102,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
                 activeCount: item.activeRestaurantsCount,
                 inactiveCount: item.inactiveRestaurantsCount
             },
-            restaurants: filteredRestaurants
+            restaurants: item.restaurants
         };
 
         if (salesId) {
