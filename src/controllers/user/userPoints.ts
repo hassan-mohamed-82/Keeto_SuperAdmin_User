@@ -6,12 +6,16 @@ import {
     userRestaurantPoints,
     userPointsTransactions,
     orders,
-    orderItems
+    orderItems,
+    branches,
+    users,
+    notifications
 } from "../../models/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, UnauthorizedError, BadRequest } from "../../Errors";
 import { v4 as uuidv4 } from "uuid";
+import { sendPushNotification } from "../../utils/notifications";
 
 export const getRedeemableProducts = async (req: Request, res: Response) => {
     const { restaurantId } = req.params;
@@ -81,29 +85,33 @@ const generate6DigitCode = (): string => {
     return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-const generateOrderNumber = (): string => {
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    return `ORD-${Date.now().toString().slice(-6)}-${randomSuffix}`;
-};
-
 export const generateRedeemCode = async (req: Request, res: Response) => {
-    const userId = req.user?.id;
+    if (!req.user) throw new UnauthorizedError("Unauthenticated");
+    const userId = req.user.id;
     const { restaurantId } = req.params;
     const { foodId, branchId } = req.body;
 
-    if (!userId) {
-        throw new UnauthorizedError("User is not found");
-    }
+    // ==========================================
+    // 🛡️ 1. Validation
+    // ==========================================
+    if (!restaurantId) throw new BadRequest("restaurantId is required");
+    if (!foodId || !branchId) throw new BadRequest("foodId and branchId are required");
 
-    if (!restaurantId) {
-        throw new BadRequest("restaurantId is required");
-    }
+    // 🟢 1. تعديل: التأكد أن الفرع موجود ومملوك لنفس المطعم
+    const [branch] = await db
+        .select()
+        .from(branches)
+        .where(
+            and(
+                eq(branches.id, branchId),
+                eq(branches.restaurantId, restaurantId)
+            )
+        )
+        .limit(1);
 
-    if (!foodId || !branchId) {
-        throw new BadRequest("foodId and branchId are required");
-    }
+    if (!branch) throw new BadRequest("Invalid branch selected or does not belong to this restaurant");
 
-    // 1. Verify product is enrolled and active in the points program
+    // 1.1 Verify product is enrolled and active in points program
     const [pointsProd] = await db
         .select({
             id: pointsProducts.id,
@@ -132,9 +140,24 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
         throw new BadRequest("This product does not have a valid redemption points value set");
     }
 
-    // 2. Execute Redemption inside DB Transaction
+    // Fetch User Info for Response
+    const [userInfo] = await db.select({ id: users.id, name: users.name, phone: users.phone, email: users.email })
+        .from(users).where(eq(users.id, userId)).limit(1);
+
+    // ==========================================
+    // 🛡️ 2. Execute Order (Transaction)
+    // ==========================================
+    const now = new Date();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+
+    let createdDailyOrderNumber = 1;
+    const newOrderId = uuidv4();
+    const redeemCode = generate6DigitCode();
+    const orderNumber = `ORD-${Date.now()}`;
+
     const result = await db.transaction(async (tx) => {
-        // Fetch user points record
+        // 🟢 2. تعديل: إضافة .for("update") لمنع الـ Race Condition وقفل الصف
         const [userPointsRecord] = await tx
             .select()
             .from(userRestaurantPoints)
@@ -144,46 +167,70 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
                     eq(userRestaurantPoints.restaurantId, restaurantId)
                 )
             )
+            .for("update")
             .limit(1);
 
         const currentBalance = userPointsRecord?.points ?? 0;
 
-        if (currentBalance < pointsNeeded) {
+        if (!userPointsRecord || currentBalance < pointsNeeded) {
             throw new BadRequest(
                 `Insufficient points balance. You have ${currentBalance} points, but need ${pointsNeeded}`
             );
         }
 
         const balanceAfter = currentBalance - pointsNeeded;
-        const newOrderId = uuidv4();
-        const redeemCode = generate6DigitCode();
-        const orderNumber = generateOrderNumber();
 
-        // A. Deduct user points
+        // B. Deduct user points
         await tx
             .update(userRestaurantPoints)
-            .set({ points: balanceAfter, updatedAt: new Date() })
+            .set({ points: balanceAfter, updatedAt: now })
             .where(eq(userRestaurantPoints.id, userPointsRecord.id));
 
-        // B. Create Order matching all required schema fields
+        // 🔒 C. Calculate Daily Order Number
+        const [ordersCountResult] = await tx
+            .select({ count: sql<number>`count(${orders.id})` })
+            .from(orders)
+            .where(
+                and(
+                    eq(orders.restaurantId, restaurantId),
+                    gte(orders.createdAt, startOfToday)
+                )
+            );
+
+        createdDailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
+
+        // D. Create Order
         await tx.insert(orders).values({
             id: newOrderId,
             orderNumber,
+            idempotencyKey: null,
             userId,
             restaurantId,
             branchId,
+            addressId: null,
             orderSource: "online_order",
             paymentMethod: "POINTS",
             orderType: "takeaway",
             subtotal: "0.00",
+            deliveryFee: "0.00",
+            serviceFee: "0.00",
+            appCommission: "0.00",
+            discountAmount: "0.00",
+            couponCode: null,
             totalAmount: "0.00",
             status: "pending",
             isPointsRedeemed: true,
             redeemCode,
-            createdAt: new Date()
+            cancelReasonId: null,
+            cancelReason: null,
+            note: null,
+            dailyOrderNumber: createdDailyOrderNumber,
+            rating: null,
+            ratingComment: null,
+            createdAt: now
         });
 
-        // C. Create Order Item matching all required schema fields
+        // E. Create Order Item
         await tx.insert(orderItems).values({
             id: uuidv4(),
             orderId: newOrderId,
@@ -191,10 +238,12 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             quantity: 1,
             basePrice: "0.00",
             variationsPrice: "0.00",
-            totalPrice: "0.00"
+            totalPrice: "0.00",
+            variations: null,
+            note: null
         });
 
-        // D. Record Points Audit Transaction
+        // F. Record Points Audit Transaction
         await tx.insert(userPointsTransactions).values({
             id: uuidv4(),
             userId,
@@ -205,8 +254,17 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             balanceAfter: balanceAfter,
             orderId: newOrderId,
             note: `Redeemed points for item: ${pointsProd.foodName} (Code: ${redeemCode})`,
-            createdAt: new Date()
+            createdAt: now
         });
+
+        // G. Send Notification to SuperAdmin
+        // await tx.insert(notifications).values({
+        //     recipientType: "superadmin",
+        //     recipientId: "superadmin",
+        //     title: "New Points Redemption Order 🎁",
+        //     body: `Order #${orderNumber} generated via points redemption.`,
+        //     data: { orderId: newOrderId, orderNumber }
+        // });
 
         return {
             orderId: newOrderId,
@@ -218,8 +276,44 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
         };
     });
 
+    // ==========================================
+    // 🔔 3. Send Notification to Restaurant
+    // ==========================================
+    const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
+        timeZone: "Africa/Cairo",
+        hour: "numeric",
+        minute: "numeric",
+        hour12: true
+    }).format(now);
+
+    // await sendPushNotification({
+    //     recipientType: "restaurant",
+    //     recipientId: restaurantId,
+    //     title: "طلب استبدال نقاط جديد! 🎁",
+    //     body: `تم استلام طلب جديد #${orderNumber} (استبدال نقاط) لـ ${pointsProd.foodName} الساعة ${cairoTimeFormatted}.`,
+    //     data: {
+    //         orderId: newOrderId,
+    //         orderNumber,
+    //         type: "points_redemption",
+    //         createdAt: now.toISOString(),
+    //         dailyOrderNumber: createdDailyOrderNumber
+    //     }
+    // });
+
     return SuccessResponse(res, {
-        message: "Redemption code generated successfully",
-        data: result
+        message: "Redemption order created successfully",
+        order_level: {
+            orderDetails: {
+                orderId: result.orderId,
+                orderNumber: result.orderNumber,
+                redeemCode: result.redeemCode,
+                pointsDeducted: result.pointsDeducted,
+                remainingPoints: result.remainingPoints,
+                productName: result.productName,
+                createdAt: now.toISOString(),
+                dailyOrderNumber: createdDailyOrderNumber
+            },
+            customerDetails: userInfo
+        }
     });
 };
