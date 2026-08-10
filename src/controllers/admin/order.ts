@@ -115,10 +115,10 @@ export const getAllOrders = async (req: Request, res: Response) => {
         note: orders.note,
         dailyOrderNumber: orders.dailyOrderNumber,
     })
-    .from(orders)
-    .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
-    .leftJoin(users, eq(orders.userId, users.id))
-    .orderBy(desc(orders.createdAt));
+        .from(orders)
+        .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(users, eq(orders.userId, users.id))
+        .orderBy(desc(orders.createdAt));
     return SuccessResponse(res, {
         message: "All orders fetched successfully",
         data: result
@@ -248,7 +248,15 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
             // ==========================================
             // 💰 3. التسوية العكسية لمحفظة المطعم (Restaurant Wallet Reversal)
             // ==========================================
-            const [payment] = await tx.select().from(paymentMethods).where(eq(paymentMethods.id, existingOrder.paymentMethod)).limit(1);
+            let payment = null;
+
+            if (existingOrder.paymentMethod) {
+                [payment] = await tx
+                    .select()
+                    .from(paymentMethods)
+                    .where(eq(paymentMethods.id, existingOrder.paymentMethod))
+                    .limit(1);
+            }
             const pmName = (payment?.name || "").toLowerCase();
             const isCashPayment = pmName.includes("cash") || pmName.includes("استلام");
 
