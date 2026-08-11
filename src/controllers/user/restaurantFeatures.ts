@@ -176,6 +176,7 @@ export const getResturantSchedules = async (req: Request, res: Response) => {
             isOpenNow: status.isOpenNow,
             canDeliveryNow: status.canDeliveryNow,
             canTakeawayNow: status.canTakeawayNow,
+            canDineInNow: status.canDineInNow,
             reason: status.reason,
             // settings: settings || null,
             // schedules: schedules
@@ -192,6 +193,7 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
         isOpenNow: false, 
         canDeliveryNow: false, 
         canTakeawayNow: false, 
+        canDineInNow: false,
         reason: "Restaurant configurations are incomplete" 
     };
     if (!settings) return defaultStatus;
@@ -202,6 +204,7 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
             isOpenNow: false, 
             canDeliveryNow: false, 
             canTakeawayNow: false, 
+            canDineInNow: false,
             reason: "Restaurant is temporarily not accepting orders due to high volume" 
         };
     }
@@ -230,7 +233,7 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
         
         if (todaySchedule) {
             if (todaySchedule.isOffDay) {
-                return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "Today is an off day" };
+                return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, canDineInNow: false, reason: "Today is an off day" };
             }
             
             if (todaySchedule.openingTime && todaySchedule.closingTime) {
@@ -251,12 +254,12 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
             }
         } else {
             // لو مفيش جدول مسجل للمطعم، نعتبره مغلق
-            return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "No schedule registered for today" };
+            return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, canDineInNow: false, reason: "No schedule registered for today" };
         }
     }
 
     if (!isOpenBySchedule) {
-        return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, reason: "Restaurant is currently closed" };
+        return { isOpenNow: false, canDeliveryNow: false, canTakeawayNow: false, canDineInNow: false, reason: "Restaurant is currently closed" };
     }
 
     // 5. دمج المواعيد مع إعدادات التوصيل والاستلام العامة للمطعم
@@ -264,6 +267,7 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
         isOpenNow: true,
         canDeliveryNow: Boolean(settings.homeDelivery || settings.selfDelivery),
         canTakeawayNow: Boolean(settings.takeaway),
+        canDineInNow: Boolean(settings.dineIn),
         reason: "Restaurant is open and active"
     };
 }
