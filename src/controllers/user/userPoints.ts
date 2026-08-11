@@ -273,9 +273,7 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
                 orderId: result.orderId,
                 orderNumber: result.orderNumber,
                 redeemCode: result.redeemCode,
-                // 👈 Formatted as mm:ss (e.g., "09:08")
-                redeemCodeExpiresAt: `${String(result.redeemCodeExpiresAt.getMinutes()).padStart(2, "0")}:${String(result.redeemCodeExpiresAt.getSeconds()).padStart(2, "0")}`,
-                pointsDeducted: result.pointsDeducted,
+                redeemCodeExpiresAt: result.redeemCodeExpiresAt.toISOString(),                pointsDeducted: result.pointsDeducted,
                 remainingPoints: result.remainingPoints,
                 productName: result.productName,
                 createdAt: now.toISOString(),
