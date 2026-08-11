@@ -24,6 +24,8 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   instantOrder: boolean("instant_order").default(false),
   halalTagStatus: boolean("halal_tag_status").default(false),
   dineIn: boolean("dine_in").default(false),
+  firstColor: varchar("first_color", { length: 20 }),
+  secondColor: varchar("second_color", { length: 20 }),
 
   vegType: mysqlEnum("veg_type", ["VEG", "NON_VEG", "BOTH"]).default("BOTH"),
   canEditOrder: boolean("can_edit_order").default(false),

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurants, cuisines, zones, restaurantWallets, food, restrauntadmin, restaurantBusinessPlans, sales } from "../../models/schema";
+import { restaurants, cuisines, zones, restaurantWallets, food, restrauntadmin, restaurantBusinessPlans, sales, restaurantSettings } from "../../models/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -95,7 +95,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans,
-        type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp
+        type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -226,6 +226,12 @@ export const createRestaurant = async (req: Request, res: Response) => {
                 plansToReturn.push(newPlan); // إضافة الخطة للمصفوفة الراجعة
             }
         }
+
+        await tx.insert(restaurantSettings).values({
+            restaurantId,
+            firstColor: firstColor ? clean(firstColor) : null,
+            secondColor: secondColor ? clean(secondColor) : null,
+        });
 
         await adjustSalesRepPoints(tx, salesId ? clean(salesId) : null, pointsToAward);
     });
@@ -405,7 +411,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
-        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp // 👈 استلام الحقول الجديدة في الـ Update
+        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor // 👈 استلام الحقول الجديدة في الـ Update
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -510,6 +516,21 @@ export const updateRestaurant = async (req: Request, res: Response) => {
 
         if (existingOwner && Object.keys(ownerUpdateData).length > 1) {
             await tx.update(restrauntadmin).set(ownerUpdateData).where(eq(restrauntadmin.id, existingOwner.id));
+        }
+
+        if (firstColor !== undefined || secondColor !== undefined) {
+            const settingsUpdateData: any = {};
+            if (firstColor !== undefined) settingsUpdateData.firstColor = (firstColor === "" || firstColor === null) ? null : clean(firstColor);
+            if (secondColor !== undefined) settingsUpdateData.secondColor = (secondColor === "" || secondColor === null) ? null : clean(secondColor);
+            
+            if (Object.keys(settingsUpdateData).length > 0) {
+                const existingSettings = await tx.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, id)).limit(1);
+                if (existingSettings.length > 0) {
+                    await tx.update(restaurantSettings).set(settingsUpdateData).where(eq(restaurantSettings.restaurantId, id));
+                } else {
+                    await tx.insert(restaurantSettings).values({ ...settingsUpdateData, restaurantId: id });
+                }
+            }
         }
 
         // 👈 تحديث خطط البيزنس (مسح القديم وإدخال الجديد لتجنب التعقيد)

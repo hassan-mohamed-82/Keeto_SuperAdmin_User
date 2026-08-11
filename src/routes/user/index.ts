@@ -18,6 +18,7 @@ import imageRouter from "./image";
 import offersRouter from "./offers";
 import landingPageRouter from "./landingPage";
 import pointsRouter from "./userPoints";
+import restaurantSettingsRouter from "./restaurantSettings";
 
 const router = Router();
 router.use("/home", homeRouter);
@@ -27,6 +28,7 @@ router.use("/slider", sliderRouter);
 router.use("/image", imageRouter);
 router.use("/rating", ratingRouter);
 router.use("/landing-page" , landingPageRouter)
+router.use("/settings",restaurantSettingsRouter)
 
 router.use(authenticated,authorizeRoles("user"));
 router.use("/profile", profileRouter);
