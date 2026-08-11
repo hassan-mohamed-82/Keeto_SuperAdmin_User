@@ -158,6 +158,7 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
 
     const newOrderId = uuidv4();
     const redeemCode = generate6DigitCode();
+    const redeemExpiresAt = new Date(now.getTime() + 3 * 60 * 1000);
     const orderNumber = `ORD-${Date.now()}`;
 
     const result = await db.transaction(async (tx) => {
@@ -222,6 +223,7 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             status: "pending",
             isPointsRedeemed: true,
             redeemCode,
+            redeemCodeExpiresAt: redeemExpiresAt,
             dailyOrderNumber: createdDailyOrderNumber,
             createdAt: now,
             updatedAt: now,
@@ -260,6 +262,7 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             remainingPoints: balanceAfter,
             productName: pointsProd.foodName,
             dailyOrderNumber: createdDailyOrderNumber,
+            redeemCodeExpiresAt: redeemExpiresAt,
         };
     });
 
@@ -270,6 +273,7 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
                 orderId: result.orderId,
                 orderNumber: result.orderNumber,
                 redeemCode: result.redeemCode,
+                redeemCodeExpiresAt: result.redeemCodeExpiresAt.toISOString(),
                 pointsDeducted: result.pointsDeducted,
                 remainingPoints: result.remainingPoints,
                 productName: result.productName,

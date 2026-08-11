@@ -53,6 +53,7 @@ export const orders = mysqlTable("orders", {
 
     isPointsRedeemed: boolean("is_points_redeemed").default(false),
     redeemCode: varchar("redeem_code", { length: 10 }),
+    redeemCodeExpiresAt: timestamp("redeem_code_expires_at"),
 
     cancelReasonId: char("cancel_reason_id", { length: 36 })
         .references(() => selectReasons.id),
