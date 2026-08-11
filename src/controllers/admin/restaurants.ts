@@ -355,6 +355,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
             zoneObj: zones,
             salesObj: sales,
             ownerEmail: restrauntadmin.email,
+            settingsObj: restaurantSettings,
         })
         .from(restaurants)
         .leftJoin(zones, eq(restaurants.zoneId, zones.id))
@@ -363,6 +364,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
             restrauntadmin,
             and(eq(restaurants.id, restrauntadmin.restaurantId), eq(restrauntadmin.type, "owner"))
         )
+        .leftJoin(restaurantSettings, eq(restaurants.id, restaurantSettings.restaurantId))
         .where(eq(restaurants.id, id))
         .limit(1);
 
@@ -393,6 +395,8 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         cuisines: restaurantCuisines,
         businessPlans: restaurantPlans,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
+        firstColor: row.settingsObj?.firstColor || null,
+        secondColor: row.settingsObj?.secondColor || null,
     };
     delete (formattedRestaurant as any).cuisineId;
 
