@@ -104,17 +104,28 @@ export const getBusinessPlansByRestaurant = async (req: Request, res: Response) 
 export const getBusinessPlanById = async (req: Request, res: Response) => {
     const { id } = req.params;
 
-    const plan = await db
-        .select()
+    const planDetails = await db
+        .select({
+            plan : restaurantBusinessPlans,
+            restaurant: restaurants,
+        })
         .from(restaurantBusinessPlans)
+        .innerJoin(restaurants, eq(restaurantBusinessPlans.restaurantId, restaurants.id))
         .where(eq(restaurantBusinessPlans.id, id))
         .limit(1);
 
-    if (!plan[0]) {
+    if (!planDetails[0]) {
         throw new NotFound("there is no plan with this id");
     }
 
-    return SuccessResponse(res, { message: "fetched business plan successfully", data: plan[0] });
+    const formattedPlans = planDetails.map((item)=>{
+        return {
+            ...item.plan,
+            restaurantDetails: item.restaurant 
+        }
+    })
+
+    return SuccessResponse(res, { message: "fetched business plan successfully", data: formattedPlans });
 };
 
 // ==========================================
