@@ -204,7 +204,7 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
 
         const createdDailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
 
-        // D. إنشاء الطلب الرئيسي (مع جعل paymentMethod null)
+        // D. إنشاء الطلب الرئيسي
         await tx.insert(orders).values({
             id: newOrderId,
             orderNumber,
@@ -240,7 +240,7 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             totalPrice: "0.00",
         });
 
-        // F. تسجيل المعاملة في سجل النقاط (Audit Log)
+        // F. تسجيل المعاملة في سجل النقاط
         await tx.insert(userPointsTransactions).values({
             id: uuidv4(),
             userId,
@@ -273,7 +273,8 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
                 orderId: result.orderId,
                 orderNumber: result.orderNumber,
                 redeemCode: result.redeemCode,
-                redeemCodeExpiresAt: result.redeemCodeExpiresAt.toISOString(),
+                // 👈 Formatted as mm:ss (e.g., "09:08")
+                redeemCodeExpiresAt: `${String(result.redeemCodeExpiresAt.getMinutes()).padStart(2, "0")}:${String(result.redeemCodeExpiresAt.getSeconds()).padStart(2, "0")}`,
                 pointsDeducted: result.pointsDeducted,
                 remainingPoints: result.remainingPoints,
                 productName: result.productName,
