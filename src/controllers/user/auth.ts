@@ -161,8 +161,12 @@ const verifyLink = `${baseUrl}/api/user/auth/verify-email?token=${token}`;
         });
     });
 
+    const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
     return SuccessResponse(res, {
-        message: "Account created successfully. Please check your email."
+        message: "Account created successfully. Please check your email.",
+        data: {
+            isProfileComplete
+        }
     }, 201);
 };
 // ===================================
@@ -241,8 +245,9 @@ export const login = async (req: Request, res: Response) => {
 
 
     const token = generateUserToken({ id: user.id, name: user.name });
+    const isProfileComplete = !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
 
-    return SuccessResponse(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email } } });
+    return SuccessResponse(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email, isProfileComplete } } });
 };
 // ===================================
 // 4. Forgot Password

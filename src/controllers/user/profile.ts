@@ -47,6 +47,8 @@ export const getProfile = async (req: Request | any, res: Response) => {
     //     .leftJoin(restaurants, eq(restaurants.id, userRestaurantPoints.restaurantId))
     //     .where(eq(userRestaurantPoints.userId, userId));
 
+    const isProfileComplete = !(userInfo.email && userInfo.email.endsWith("@privaterelay.appleid.com"));
+
     return SuccessResponse(res, {
         data: {
             user: {
@@ -58,6 +60,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
                 alternatePhone: userInfo.alternatePhone,
                 isVerified: userInfo.isVerified,
                 createdAt: userInfo.createdAt,
+                isProfileComplete,
             },
             walletBalance: wallet?.balance || "0.00",
             ordersCount: ordersCount?.count || 0,
@@ -106,13 +109,13 @@ export const getRestaurantPoints = async (req: Request | any, res: Response) => 
 export const updateProfile = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
-    const { name, phone, photo, alternatePhone } = req.body;
+    const { name, phone, email, photo, alternatePhone } = req.body;
 
     await db.update(users)
-        .set({ name, phone, photo, alternatePhone })
+        .set({ name, phone, email, photo, alternatePhone })
         .where(eq(users.id, userId));
-
-    return SuccessResponse(res, { message: "Profile updated successfully" });
+    const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
+    return SuccessResponse(res, { message: "Profile updated successfully", data: { isProfileComplete } });
 };
 
 
