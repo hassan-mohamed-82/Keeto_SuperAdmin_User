@@ -1,7 +1,7 @@
 // controllers/user/ProfileController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { cities, countries, orders, users, userWallets, zones, userRestaurantPoints, restaurants } from "../../models/schema";
+import { cities, countries, orders, users, userWallets, zones, userRestaurantPoints, restaurants, addresses } from "../../models/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
@@ -11,6 +11,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
 
+    // 1. Fetch User Profile Info
     const [userInfo] = await db
         .select({
             id: users.id,
@@ -21,22 +22,48 @@ export const getProfile = async (req: Request | any, res: Response) => {
             photo: users.photo,
             isVerified: users.isVerified,
             createdAt: users.createdAt,
-
         })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
 
-    const [ordersCount] = await db.select({count: sql`COUNT(*)`}).from(orders)
+    if (!userInfo) {
+        throw new NotFound("User not found");
+    }
+
+    // 2. Fetch All Addresses for this User
+    const userAddresses = await db
+        .select({
+            id: addresses.id,
+            zoneId: addresses.zoneId,
+            type: addresses.type,
+            title: addresses.title,
+            lat: addresses.lat,
+            lng: addresses.lng,
+            street: addresses.street,
+            number: addresses.number,
+            floor: addresses.floor,
+            landmark: addresses.landmark,
+            location: addresses.location,
+        })
+        .from(addresses)
+        .where(eq(addresses.userId, userId));
+
+    // 3. Fetch Orders Count
+    const [ordersCount] = await db
+        .select({ count: sql`COUNT(*)` })
+        .from(orders)
         .where(eq(orders.userId, userId));
 
+    // 4. Fetch User Wallet Balance
     const [wallet] = await db
         .select({
-            balance: userWallets.balance
+            balance: userWallets.balance,
         })
         .from(userWallets)
         .where(eq(userWallets.userId, userId))
         .limit(1);
+
     // const userPoints = await db
     //     .select({
     //         restaurantId: userRestaurantPoints.restaurantId,
@@ -61,14 +88,14 @@ export const getProfile = async (req: Request | any, res: Response) => {
                 isVerified: userInfo.isVerified,
                 createdAt: userInfo.createdAt,
                 isProfileComplete,
+                addresses: userAddresses,
             },
             walletBalance: wallet?.balance || "0.00",
-            ordersCount: ordersCount?.count || 0,
+            ordersCount: Number(ordersCount?.count || 0),
             // restaurantPoints: userPoints
-        }
+        },
     });
 };
-
 // ==========================================
 // Get User Points for a Specific Restaurant
 // ==========================================
@@ -152,7 +179,7 @@ export const changepassword = async (req: Request | any, res: Response) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
     await db
-    .update(users)
+        .update(users)
         .set({ password: hashedPassword })
         .where(eq(users.id, userId));
 
@@ -186,7 +213,7 @@ export const deleteAccount = async (req: Request | any, res: Response) => {
 
     // Soft delete the user
     await db.update(users)
-        .set({ 
+        .set({
             isDeleted: true,
             deletedAt: new Date()
         })
