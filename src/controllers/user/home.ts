@@ -215,6 +215,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         foodDiscountType: food.discount_type,
         foodDiscountValue: food.discount_value,
         image: food.image,
+        points: food.points,
         
         categoryId: categories.id,
         categoryName: categories.name,
