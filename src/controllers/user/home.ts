@@ -315,6 +315,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                     discountPrice: calculatedDiscountPrice,
                     discountNote,
                     image: row.image,
+                    points: userId? row.points:null,
                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
                     
                     variations: {}, 
