@@ -15,7 +15,6 @@ import { eq, and, sql, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, UnauthorizedError, BadRequest } from "../../Errors";
 import { v4 as uuidv4 } from "uuid";
-import { sendPushNotification } from "../../utils/notifications";
 
 export const getRedeemableProducts = async (req: Request, res: Response) => {
     const { restaurantId } = req.params;

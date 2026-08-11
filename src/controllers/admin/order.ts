@@ -413,9 +413,9 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     // ==========================================
     // 4. إرسال الإشعارات للعميل
     // ==========================================
-    let messageBody = `Your order ${existingOrder.orderNumber} is now ${status}.`;
+    let messageBody = `Your order ${existingOrder.dailyOrderNumber} is now ${status}.`;
     if (status === "cancelled") {
-        messageBody = `Your order ${existingOrder.orderNumber} was cancelled. Reason: ${reason?.name || "Not specified"}`;
+        messageBody = `Your order ${existingOrder.dailyOrderNumber} was cancelled. Reason: ${reason?.name || "Not specified"}`;
     }
 
     await sendPushNotification({
@@ -426,6 +426,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         data: {
             orderId: existingOrder.id,
             orderNumber: existingOrder.orderNumber,
+            dailyOrderNumber: existingOrder.dailyOrderNumber,
             status: status,
             type: "ORDER_STATUS_UPDATE"
         }
