@@ -89,29 +89,29 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
     const { restaurantId } = req.params;
-    const { foodId, branchId } = req.body;
+    const { foodId } = req.body;
 
     // ==========================================
     // 🛡️ 1. Validation
     // ==========================================
     if (!restaurantId) throw new BadRequest("restaurantId is required");
-    if (!foodId || !branchId) throw new BadRequest("foodId and branchId are required");
+    if (!foodId) throw new BadRequest("foodId is required");
 
     // 🟢 1. التأكد أن الفرع موجود ومملوك لنفس المطعم
-    const [branch] = await db
-        .select({ id: branches.id })
-        .from(branches)
-        .where(
-            and(
-                eq(branches.id, branchId),
-                eq(branches.restaurantId, restaurantId)
-            )
-        )
-        .limit(1);
+    // const [branch] = await db
+    //     .select({ id: branches.id })
+    //     .from(branches)
+    //     .where(
+    //         and(
+    //             eq(branches.id, branchId),
+    //             eq(branches.restaurantId, restaurantId)
+    //         )
+    //     )
+    //     .limit(1);
 
-    if (!branch) {
-        throw new BadRequest("Invalid branch selected or does not belong to this restaurant");
-    }
+    // if (!branch) {
+    //     throw new BadRequest("Invalid branch selected or does not belong to this restaurant");
+    // }
 
     // 1.1 التأكد من أن المنتج مسجل ونشط في برنامج النقاط
     const [pointsProd] = await db
@@ -210,7 +210,7 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             orderNumber,
             userId,
             restaurantId,
-            branchId,
+            // branchId,
             orderSource: "online_order",
             paymentMethod: null,
             orderType: "takeaway",

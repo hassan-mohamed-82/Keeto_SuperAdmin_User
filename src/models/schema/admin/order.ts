@@ -21,8 +21,8 @@ export const orders = mysqlTable("orders", {
         .notNull(),
 
     branchId: char("branch_id", { length: 36 })
-        .references(() => branches.id)
-        .notNull(),
+        .references(() => branches.id),
+        // .notNull(),
 
     addressId: char("address_id", { length: 36 })
         .references(() => addresses.id),
