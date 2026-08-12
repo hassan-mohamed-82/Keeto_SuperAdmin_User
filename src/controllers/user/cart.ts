@@ -98,7 +98,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
     // 1. التحقق من صحة الـ Variations المرسلة
     for (const selected of safeVariations) {
         const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
-        
+
         if (!validDbVariation) {
             throw new BadRequest(`Invalid variation ID sent: ${selected.variationId}`);
         }
@@ -233,6 +233,11 @@ export const getCart = async (req: Request | any, res: Response) => {
             cartId: cartItems.id,
             foodId: food.id,
             name: food.name,
+            nameAr: food.nameAr,
+            nameFr: food.nameFr,
+            description: food.description,
+            descriptionAr: food.descriptionAr,
+            descriptionFr: food.descriptionFr,
             image: food.image,
             price: food.price,
             discountType: food.discount_type,
@@ -255,13 +260,13 @@ export const getCart = async (req: Request | any, res: Response) => {
     }
 
     const restaurantId = items[0].restaurantId;
-    
+
     // 1. حساب الـ subtotal الأولي (السعر الأصلي + variations + addons) لتقييم الـ discount بشكل صحيح
     let initialSubtotal = 0;
     const itemsData = items.map(item => {
         const originalBasePrice = parseFloat(item.price as string || "0");
         const { variations: parsedVariations, addons: parsedAddons } = parseCartSnapshot(item.variations);
-        
+
         let initialDiscountPrice = originalBasePrice;
         if (item.discountType && Number(item.discountValue) > 0) {
             if (item.discountType === "percentage") {
@@ -270,7 +275,7 @@ export const getCart = async (req: Request | any, res: Response) => {
                 initialDiscountPrice = Math.max(0, originalBasePrice - Number(item.discountValue));
             }
         }
-        
+
         const dbUnitPrice = parseFloat(item.unitPrice as string || "0");
         // varPrice = كل زيادة على السعر الأصلي (variations + addons)
         const varPrice = dbUnitPrice - originalBasePrice;
@@ -326,7 +331,7 @@ export const getCart = async (req: Request | any, res: Response) => {
 
             const finalUnitPrice = discountedBasePrice + varPrice;
             const finalTotalPrice = finalUnitPrice * item.quantity;
-            
+
             finalSubtotal += finalTotalPrice;
 
             return {
