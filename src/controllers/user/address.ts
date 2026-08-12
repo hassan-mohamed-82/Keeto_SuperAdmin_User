@@ -5,7 +5,7 @@ import * as turf from "@turf/turf";
 import { db } from "../../models/connection";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, UnauthorizedError, BadRequest } from "../../Errors";
-import { addresses, restaurantZoneDeliveryFees, zones } from "../../models/schema";
+import { addresses, restaurantZoneDeliveryFees, zones, cities } from "../../models/schema";
 
 /**
  * دالة مساعدة لتحديد الـ Zone تلقائياً بناءً على إحداثيات العميل
@@ -215,8 +215,41 @@ export const getUserAddresses = async (req: Request, res: Response) => {
 
         // 1. جلب كافة عناوين العميل
         const userAddresses = await db
-            .select()
+            .select({
+                id: addresses.id,
+                userId: addresses.userId,
+                zoneId: addresses.zoneId,
+                type: addresses.type,
+                title: addresses.title,
+                lat: addresses.lat,
+                lng: addresses.lng,
+                street: addresses.street,
+                number: addresses.number,
+                floor: addresses.floor,
+                apartment: addresses.apartment,
+                landmark: addresses.landmark,
+                location: addresses.location,
+                createdAt: addresses.createdAt,
+                updatedAt: addresses.updatedAt,
+                zone: {
+                    id: zones.id,
+                    name: zones.name,
+                    nameAr: zones.nameAr,
+                    nameFr: zones.nameFr,
+                    displayName: zones.displayName,
+                    displayNameAr: zones.displayNameAr,
+                    displayNameFr: zones.displayNameFr,
+                },
+                city: {
+                    id: cities.id,
+                    name: cities.name,
+                    nameAr: cities.nameAr,
+                    nameFr: cities.nameFr,
+                }
+            })
             .from(addresses)
+            .leftJoin(zones, eq(addresses.zoneId, zones.id))
+            .leftJoin(cities, eq(zones.cityId, cities.id))
             .where(eq(addresses.userId, userId));
 
         // إذا لم يحدد المطعم، نرجع العناوين كما هي

@@ -46,8 +46,25 @@ export const getProfile = async (req: Request | any, res: Response) => {
             apartment: addresses.apartment,
             landmark: addresses.landmark,
             location: addresses.location,
+            zone: {
+                id: zones.id,
+                name: zones.name,
+                nameAr: zones.nameAr,
+                nameFr: zones.nameFr,
+                displayName: zones.displayName,
+                displayNameAr: zones.displayNameAr,
+                displayNameFr: zones.displayNameFr,
+            },
+            city: {
+                id: cities.id,
+                name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
+            }
         })
         .from(addresses)
+        .leftJoin(zones, eq(addresses.zoneId, zones.id))
+        .leftJoin(cities, eq(zones.cityId, cities.id))
         .where(eq(addresses.userId, userId));
 
     // 3. Fetch Orders Count
