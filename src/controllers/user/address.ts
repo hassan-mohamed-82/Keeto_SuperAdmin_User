@@ -10,6 +10,75 @@ import { addresses, restaurantZoneDeliveryFees, zones } from "../../models/schem
 /**
  * دالة مساعدة لتحديد الـ Zone تلقائياً بناءً على إحداثيات العميل
  */
+// async function detectZoneFromCoordinates(lat: number, lng: number): Promise<string | null> {
+//     const allZones = await db.select().from(zones);
+//     const userPoint = turf.point([lng, lat]); // Turf يستخدم [lng, lat]
+
+//     for (const zone of allZones) {
+//         if (!zone.coordinates) continue;
+
+//         try {
+//             const parsedCoords = typeof zone.coordinates === "string"
+//                 ? JSON.parse(zone.coordinates)
+//                 : zone.coordinates;
+
+//             const polyCoords = parsedCoords.coordinates ? parsedCoords.coordinates : parsedCoords;
+//             const polygon = turf.polygon(polyCoords);
+
+//             if (turf.booleanPointInPolygon(userPoint, polygon)) {
+//                 return zone.id; // النقطة تقع داخل مضلع المنطقة
+//             }
+//         } catch (err) {
+//             console.error(`Error parsing coordinates for zone ${zone.id}:`, err);
+//         }
+//     }
+
+//     return null; // خارج نطاق التغطية للمناطق المسجلة
+// }
+
+/**
+ * دالة تحويل وتجهيز الإحداثيات لتصبح متوافقة تماماً مع Turf GeoJSON Polygon
+ */
+function parseAndFormatPolygon(rawCoordinates: any): number[][][] | null {
+    try {
+        let coords = typeof rawCoordinates === "string"
+            ? JSON.parse(rawCoordinates)
+            : rawCoordinates;
+
+        if (coords?.coordinates) coords = coords.coordinates;
+        if (!Array.isArray(coords) || coords.length < 3) return null;
+
+        let ring: number[][] = [];
+
+        // 1. إذا كانت النقاط مخزنة كـ [{lat, lng}, ...]
+        if (typeof coords[0] === "object" && !Array.isArray(coords[0]) && "lat" in coords[0]) {
+            ring = coords.map((pt: any) => [parseFloat(pt.lng), parseFloat(pt.lat)]);
+        }
+        // 2. إذا كانت النقاط مخزنة كـ [[lng, lat], ...]
+        else if (Array.isArray(coords[0])) {
+            // لو كانت مقسمة بالفعل 3D Array
+            if (Array.isArray(coords[0][0])) return coords;
+            ring = coords.map((pt: any) => [parseFloat(pt[0]), parseFloat(pt[1])]);
+        }
+
+        if (ring.length < 3) return null;
+
+        // 3. التأكد من إغلاق المضلع (النقطة الأولى = النقطة الأخيرة)
+        const first = ring[0];
+        const last = ring[ring.length - 1];
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+            ring.push([first[0], first[1]]);
+        }
+
+        return [ring]; // Turf يتوقع [ [ [lng, lat], ... ] ]
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * دالة تحديد الـ Zone بعد إصلاح وتنسيق البيانات
+ */
 async function detectZoneFromCoordinates(lat: number, lng: number): Promise<string | null> {
     const allZones = await db.select().from(zones);
     const userPoint = turf.point([lng, lat]); // Turf يستخدم [lng, lat]
@@ -18,22 +87,20 @@ async function detectZoneFromCoordinates(lat: number, lng: number): Promise<stri
         if (!zone.coordinates) continue;
 
         try {
-            const parsedCoords = typeof zone.coordinates === "string"
-                ? JSON.parse(zone.coordinates)
-                : zone.coordinates;
+            const formattedPolygonCoords = parseAndFormatPolygon(zone.coordinates);
+            if (!formattedPolygonCoords) continue;
 
-            const polyCoords = parsedCoords.coordinates ? parsedCoords.coordinates : parsedCoords;
-            const polygon = turf.polygon(polyCoords);
+            const polygon = turf.polygon(formattedPolygonCoords);
 
             if (turf.booleanPointInPolygon(userPoint, polygon)) {
-                return zone.id; // النقطة تقع داخل مضلع المنطقة
+                return zone.id; // تم العثور على المنطقة بنجاح
             }
         } catch (err) {
-            console.error(`Error parsing coordinates for zone ${zone.id}:`, err);
+            console.error(`Error processing zone ${zone.id}:`, err);
         }
     }
 
-    return null; // خارج نطاق التغطية للمناطق المسجلة
+    return null;
 }
 
 /**
