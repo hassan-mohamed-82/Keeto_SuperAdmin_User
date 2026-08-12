@@ -13,10 +13,10 @@ import { validate } from "../../middlewares/validation";
 import { createZoneSchema, updateZoneSchema } from "../../validation/admin/zone";
 const router = Router();
 
-router.post("/", hasPermission("Zones", "Add"), validate(createZoneSchema), catchAsync(createZone));
+router.post("/", hasPermission("Zones", "Add"), catchAsync(createZone));
 router.get("/", hasPermission("Zones", "View"), catchAsync(getAllZones));
 router.get("/:id", hasPermission("Zones", "View"), catchAsync(getZoneById));
-router.put("/:id", hasPermission("Zones", "Edit"), validate(updateZoneSchema), catchAsync(updateZone));
+router.put("/:id", hasPermission("Zones", "Edit"), catchAsync(updateZone));
 router.delete("/:id", hasPermission("Zones", "Delete"), catchAsync(deleteZone));
 router.get("/cities/active", catchAsync(getallcities));
 

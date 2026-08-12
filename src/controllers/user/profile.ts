@@ -43,6 +43,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
             street: addresses.street,
             number: addresses.number,
             floor: addresses.floor,
+            apartment: addresses.apartment,
             landmark: addresses.landmark,
             location: addresses.location,
         })
