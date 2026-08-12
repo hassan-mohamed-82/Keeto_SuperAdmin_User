@@ -89,15 +89,25 @@ exports.getBusinessPlansByRestaurant = getBusinessPlansByRestaurant;
 // ==========================================
 const getBusinessPlanById = async (req, res) => {
     const { id } = req.params;
-    const plan = await connection_1.db
-        .select()
+    const planDetails = await connection_1.db
+        .select({
+        plan: schema_1.restaurantBusinessPlans,
+        restaurant: schema_1.restaurants,
+    })
         .from(schema_1.restaurantBusinessPlans)
+        .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.id, id))
         .limit(1);
-    if (!plan[0]) {
+    if (!planDetails[0]) {
         throw new NotFound_1.NotFound("there is no plan with this id");
     }
-    return (0, response_1.SuccessResponse)(res, { message: "fetched business plan successfully", data: plan[0] });
+    const formattedPlans = planDetails.map((item) => {
+        return {
+            ...item.plan,
+            restaurantDetails: item.restaurant
+        };
+    });
+    return (0, response_1.SuccessResponse)(res, { message: "fetched business plan successfully", data: formattedPlans });
 };
 exports.getBusinessPlanById = getBusinessPlanById;
 // ==========================================

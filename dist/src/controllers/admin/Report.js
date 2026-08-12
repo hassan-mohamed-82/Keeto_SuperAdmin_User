@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.markInvoiceAsPaid = exports.generateAndSaveInvoice = exports.generateRestaurantInvoicePDF = exports.getRestaurantInvoices = exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
+exports.getSalesReport = exports.getRestaurantOrdersReport = exports.markInvoiceAsPaid = exports.generateAndSaveInvoice = exports.generateRestaurantInvoicePDF = exports.getRestaurantInvoices = exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -11,6 +11,7 @@ const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
 const pdfkit_1 = __importDefault(require("pdfkit"));
 const uuid_1 = require("uuid");
+const ALL_RESTAURANT_TYPES = ["mega", "super", "A", "B", "C", "C-"];
 // ==========================================
 // API 1: التقرير المالي العام 
 // ==========================================
@@ -57,11 +58,22 @@ const getFinancialReport = async (req, res) => {
     let grandTotalServiceFees = 0;
     let grandTotalDeliveryFees = 0;
     let validOrdersCount = 0;
+    let totalCanceledByUser = 0;
+    let totalCanceledByRestaurant = 0;
     const breakdownByPayment = { cash: 0, visa: 0, wallet: 0 };
     const breakdownBySource = {};
     const breakdownByStatus = {};
     for (const order of reportData) {
         const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
+        const isCancelledByRestaurant = order.status === "cancelled" && order.cancelReasonType === "restaurant";
+        if (order.status === "cancelled") {
+            if (order.cancelReasonType === "user") {
+                totalCanceledByUser++;
+            }
+            else if (order.cancelReasonType === "restaurant") {
+                totalCanceledByRestaurant++;
+            }
+        }
         // 📈 تجميع الإحصائيات حسب الحالة
         const currentStatus = order.status;
         if (!breakdownByStatus[currentStatus])
@@ -69,8 +81,17 @@ const getFinancialReport = async (req, res) => {
         breakdownByStatus[currentStatus].orders += 1;
         breakdownByStatus[currentStatus].revenue += parseFloat(order.totalAmount || "0");
         // 🛑 استبعاد الأوردرات الملغية من الحسابات المالية الصافية
-        if (isCancelledByUser)
+        if (order.status === "cancelled") {
+            if (order.cancelReasonType === "restaurant") {
+                const commission = parseFloat(order.appCommission || "0");
+                grandTotalKeetoCommission += commission;
+                const source = order.orderSource || "unknown";
+                if (!breakdownBySource[source])
+                    breakdownBySource[source] = { orders: 0, revenue: 0, commission: 0 };
+                breakdownBySource[source].commission += commission;
+            }
             continue;
+        }
         validOrdersCount++;
         const amount = parseFloat(order.totalAmount || "0");
         const commission = parseFloat(order.appCommission || "0");
@@ -113,6 +134,10 @@ const getFinancialReport = async (req, res) => {
                 totalDeliveryFees: grandTotalDeliveryFees.toFixed(2),
             }
         },
+        cancelBreakdown: {
+            user: totalCanceledByUser,
+            restaurant: totalCanceledByRestaurant
+        },
         collectionBreakdown: {
             cashCollectedByRestaurants: breakdownByPayment.cash.toFixed(2),
             digitalCollectedByPlatform: (breakdownByPayment.visa + breakdownByPayment.wallet).toFixed(2),
@@ -139,9 +164,6 @@ const getFinancialReport = async (req, res) => {
     });
 };
 exports.getFinancialReport = getFinancialReport;
-// ==========================================
-// API 2: تقرير تفصيلي حسب كل مطعم (All Restaurants Overview)
-// ==========================================
 // ==========================================
 // API 2: تقرير تفصيلي حسب كل مطعم (All Restaurants Overview)
 // ==========================================
@@ -180,9 +202,6 @@ const getDetailedRestaurantReport = async (req, res) => {
     const restaurantMap = {};
     let grandTotalAmount = 0, grandTotalPlatformCommission = 0;
     for (const order of ordersData) {
-        const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
-        if (isCancelledByUser)
-            continue;
         const rId = order.restaurantId || "unknown";
         if (!restaurantMap[rId]) {
             restaurantMap[rId] = {
@@ -195,6 +214,15 @@ const getDetailedRestaurantReport = async (req, res) => {
             };
         }
         const entry = restaurantMap[rId];
+        if (order.status === "cancelled") {
+            if (order.cancelReasonType === "restaurant") {
+                const commission = parseFloat(order.appCommission || "0");
+                entry.platformDues.totalCommission += commission;
+                grandTotalPlatformCommission += commission;
+                entry.settlementRaw.cashCommission += commission;
+            }
+            continue;
+        }
         const amount = parseFloat(order.totalAmount || "0");
         const commission = parseFloat(order.appCommission || "0");
         const svcFee = parseFloat(order.serviceFee || "0"); // الـ 5 جنيه
@@ -311,13 +339,20 @@ const getSingleRestaurantReport = async (req, res) => {
     };
     let grandTotal = { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 };
     for (const order of ordersData) {
-        const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
-        if (isCancelledByUser)
-            continue;
         const source = order.orderSource;
         const stats = sourceMap[source];
         if (!stats)
             continue;
+        if (order.status === "cancelled") {
+            if (order.cancelReasonType === "restaurant") {
+                const commission = parseFloat(order.appCommission || "0");
+                stats.commission += commission;
+                stats.cashComm += commission;
+                grandTotal.commission += commission;
+                grandTotal.cashComm += commission;
+            }
+            continue;
+        }
         const amount = parseFloat(order.totalAmount || "0");
         const commission = parseFloat(order.appCommission || "0");
         const serviceFee = parseFloat(order.serviceFee || "0"); // 5 جنيه
@@ -408,7 +443,7 @@ const getSingleRestaurantReport = async (req, res) => {
 };
 exports.getSingleRestaurantReport = getSingleRestaurantReport;
 // ==========================================
-// API 3.5: Get All Invoices for a Restaurant
+// API 4: Get All Invoices for a Restaurant
 // ==========================================
 const getRestaurantInvoices = async (req, res) => {
     if (!req.user)
@@ -436,7 +471,7 @@ const getRestaurantInvoices = async (req, res) => {
 };
 exports.getRestaurantInvoices = getRestaurantInvoices;
 // ==========================================
-// API 2: Generate Restaurant Invoice PDF
+// API 5: Generate Restaurant Invoice PDF
 // ==========================================
 const generateRestaurantInvoicePDF = async (req, res) => {
     if (!req.user)
@@ -513,7 +548,7 @@ const generateRestaurantInvoicePDF = async (req, res) => {
 };
 exports.generateRestaurantInvoicePDF = generateRestaurantInvoicePDF;
 // ==========================================
-// API 3: Generate & Save Invoice 
+// API 6: Generate & Save Invoice 
 // ==========================================
 const generateAndSaveInvoice = async (req, res) => {
     if (!req.user)
@@ -596,7 +631,7 @@ const generateAndSaveInvoice = async (req, res) => {
 };
 exports.generateAndSaveInvoice = generateAndSaveInvoice;
 // ==========================================
-// API 4: Mark Invoice as Paid
+// API 7: Mark Invoice as Paid
 // ==========================================
 const markInvoiceAsPaid = async (req, res) => {
     const { invoiceId } = req.params;
@@ -607,3 +642,364 @@ const markInvoiceAsPaid = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Invoice marked as paid successfully" });
 };
 exports.markInvoiceAsPaid = markInvoiceAsPaid;
+// ==========================================
+// API 8: تقرير أعداد الطلبات والمطاعم (Restaurant Orders Count Report)
+// ==========================================
+const getRestaurantOrdersReport = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const { startDate, endDate, type, restaurantId, restaurantsWithOrders, restaurantsWithoutOrders } = req.query;
+    const orderConditions = [];
+    if (startDate)
+        orderConditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(startDate)));
+    if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        orderConditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
+    }
+    // 1. Fetch all restaurants
+    const allRestaurantsRaw = await connection_1.db
+        .select({
+        restaurant: schema_1.restaurants,
+        sales: schema_1.sales,
+    })
+        .from(schema_1.restaurants)
+        .leftJoin(schema_1.sales, (0, drizzle_orm_1.eq)(schema_1.restaurants.salesId, schema_1.sales.id))
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"));
+    const allRestaurants = allRestaurantsRaw.map(r => ({
+        ...r.restaurant,
+        salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null
+    }));
+    let totalRestaurants = allRestaurants.length;
+    let restaurantsByType = {
+        "mega": 0,
+        "super": 0,
+        "A": 0,
+        "B": 0,
+        "C": 0,
+        "C-": 0,
+        "test": 0
+    };
+    allRestaurants.forEach((r) => {
+        const rType = r.type || "Unknown";
+        if (restaurantsByType[rType] !== undefined) {
+            restaurantsByType[rType] += 1;
+        }
+        else {
+            restaurantsByType[rType] = 1;
+        }
+    });
+    // 2. Fetch orders within date range — only for active restaurants
+    const activeRestaurantIds = allRestaurants.map((r) => r.id);
+    const allOrderConditions = [...orderConditions];
+    if (activeRestaurantIds.length > 0) {
+        allOrderConditions.push((0, drizzle_orm_1.inArray)(schema_1.orders.restaurantId, activeRestaurantIds));
+    }
+    const ordersData = await connection_1.db
+        .select({
+        restaurantId: schema_1.orders.restaurantId,
+        appCommission: schema_1.orders.appCommission,
+        status: schema_1.orders.status,
+        cancelReasonType: schema_1.selectReasons.type,
+    })
+        .from(schema_1.orders)
+        .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
+        .where(allOrderConditions.length > 0 ? (0, drizzle_orm_1.and)(...allOrderConditions) : undefined);
+    let totalOrders = ordersData.length;
+    let total_commission = 0;
+    let totalValidOrders = 0;
+    let totalCanceledOrders = 0;
+    let totalCanceledByUser = 0;
+    let totalCanceledByRestaurant = 0;
+    // Group orders by restaurantId
+    const ordersStatsByRestaurant = {};
+    ordersData.forEach((o) => {
+        const comm = parseFloat(o.appCommission) || 0;
+        const isCanceled = o.status === "cancelled";
+        const isCanceledByRestaurant = isCanceled && o.cancelReasonType === "restaurant";
+        // Add commission if valid, or if canceled by restaurant
+        if (!isCanceled || isCanceledByRestaurant) {
+            total_commission += comm;
+        }
+        if (isCanceled) {
+            totalCanceledOrders += 1;
+            if (o.cancelReasonType === "user")
+                totalCanceledByUser += 1;
+            if (o.cancelReasonType === "restaurant")
+                totalCanceledByRestaurant += 1;
+        }
+        else {
+            totalValidOrders += 1;
+        }
+        if (o.restaurantId) {
+            if (!ordersStatsByRestaurant[o.restaurantId]) {
+                ordersStatsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
+            }
+            ordersStatsByRestaurant[o.restaurantId].count += 1;
+            if (!isCanceled || isCanceledByRestaurant) {
+                ordersStatsByRestaurant[o.restaurantId].commission += comm;
+            }
+            if (isCanceled) {
+                ordersStatsByRestaurant[o.restaurantId].canceledCount += 1;
+                if (o.cancelReasonType === "user")
+                    ordersStatsByRestaurant[o.restaurantId].canceledByUser += 1;
+                if (o.cancelReasonType === "restaurant")
+                    ordersStatsByRestaurant[o.restaurantId].canceledByRestaurant += 1;
+            }
+            else {
+                ordersStatsByRestaurant[o.restaurantId].validCount += 1;
+            }
+        }
+    });
+    // 3. Filter restaurants based on 'type' and/or 'restaurantId' if provided
+    let filteredRestaurants = allRestaurants;
+    if (type) {
+        filteredRestaurants = filteredRestaurants.filter((r) => (r.type || "Unknown") === type);
+    }
+    if (restaurantId) {
+        filteredRestaurants = filteredRestaurants.filter((r) => r.id === restaurantId);
+    }
+    // 4. Build with/without orders lists from the full active list
+    const withOrdersList = allRestaurants.filter((r) => {
+        const stats = ordersStatsByRestaurant[r.id];
+        return stats && stats.validCount > 0;
+    });
+    const withoutOrdersList = allRestaurants.filter((r) => {
+        const stats = ordersStatsByRestaurant[r.id];
+        return !stats || stats.validCount === 0;
+    });
+    // ─── Signup Users ────────────────────────────────────────────────────────
+    // 1. Total number of users who signed up
+    const [{ totalSignupUsers }] = await connection_1.db
+        .select({ totalSignupUsers: (0, drizzle_orm_1.count)(schema_1.users.id) })
+        .from(schema_1.users);
+    // 2. Number of signup users per restaurant
+    const signupPerRestaurantRaw = await connection_1.db
+        .select({
+        restaurantId: schema_1.restaurant_users.restaurantId,
+        signupCount: (0, drizzle_orm_1.count)(schema_1.restaurant_users.userId),
+    })
+        .from(schema_1.restaurant_users)
+        .groupBy(schema_1.restaurant_users.restaurantId);
+    // Build a quick lookup map: restaurantId -> signupCount
+    const signupByRestaurantMap = {};
+    for (const row of signupPerRestaurantRaw) {
+        signupByRestaurantMap[row.restaurantId] = Number(row.signupCount);
+    }
+    // 5. Map full filtered restaurants to detailed result
+    const restaurantDetails = filteredRestaurants.map((r) => {
+        const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
+        // If a specific restaurantId is requested, return full restaurant details; otherwise return slim info
+        const restaurantInfo = r;
+        // const restaurantInfo = restaurantId
+        //     ? r
+        //     : { id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status };
+        return {
+            restaurantDetails: restaurantInfo,
+            ordersCount: stats.count,
+            validOrders: stats.validCount,
+            canceledOrders: stats.canceledCount,
+            canceledByUser: stats.canceledByUser,
+            canceledByRestaurant: stats.canceledByRestaurant,
+            total_commission: stats.commission,
+            signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
+        };
+    });
+    // 6. Decide which list to return in 'restaurants' key
+    let restaurantsResult;
+    if (restaurantsWithOrders === "true") {
+        restaurantsResult = withOrdersList.map((r) => ({
+            id: r.id,
+            name: r.name,
+            nameAr: r.nameAr,
+            type: r.type,
+            status: r.status,
+            signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
+        }));
+    }
+    else if (restaurantsWithoutOrders === "true") {
+        restaurantsResult = withoutOrdersList.map((r) => ({
+            id: r.id,
+            name: r.name,
+            nameAr: r.nameAr,
+            type: r.type,
+            status: r.status,
+            signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
+        }));
+    }
+    else {
+        restaurantsResult = restaurantDetails; // already has signupUsersCount
+    }
+    const responseData = {
+        summary: {
+            totalOrders,
+            validOrders: totalValidOrders,
+            canceledOrders: totalCanceledOrders,
+            canceledBreakdown: {
+                user: totalCanceledByUser,
+                restaurant: totalCanceledByRestaurant
+            },
+            totalRestaurants,
+            restaurantsWithOrders: withOrdersList.length,
+            restaurantsWithoutOrders: withoutOrdersList.length,
+            total_commission,
+            restaurantsByType,
+            totalSignupUsers,
+        },
+        restaurants: restaurantsResult,
+    };
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Restaurant orders report generated successfully",
+        data: responseData,
+    });
+};
+exports.getRestaurantOrdersReport = getRestaurantOrdersReport;
+// ==========================================
+// API 9: تقرير المبيعات (Sales Report)
+// ==========================================
+const getSalesReport = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const { startDate, endDate, salesId, type, restaurantId } = req.query;
+    // 1. شروط فلترة السيلز
+    const salesConditions = [];
+    if (salesId) {
+        salesConditions.push((0, drizzle_orm_1.eq)(schema_1.sales.id, salesId));
+    }
+    // 2. شروط فلترة المطاعم (نوع المطعم، معرّف المطعم، وتاريخ التسجيل)
+    const restaurantConditions = [];
+    if (type) {
+        restaurantConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.type, type));
+    }
+    if (restaurantId) {
+        restaurantConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId));
+    }
+    // 💡 التعديل هنا: فلترة المطاعم بناءً على تاريخ إنشائها/تسجيلها
+    if (startDate) {
+        restaurantConditions.push((0, drizzle_orm_1.gte)(schema_1.restaurants.createdAt, new Date(startDate)));
+    }
+    if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        restaurantConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end));
+    }
+    // جلب بيانات السيلز والمطاعم المسجلة
+    const allSalesRaw = await connection_1.db
+        .select({
+        sales: schema_1.sales,
+        restaurant: schema_1.restaurants,
+    })
+        .from(schema_1.sales)
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.sales.id, schema_1.restaurants.salesId), restaurantConditions.length > 0 ? (0, drizzle_orm_1.and)(...restaurantConditions) : undefined))
+        .where(salesConditions.length > 0 ? (0, drizzle_orm_1.and)(...salesConditions) : undefined);
+    const salesMap = new Map();
+    let totalActiveSalesPoints = 0;
+    let totalActiveRestaurantsCount = 0;
+    for (const row of allSalesRaw) {
+        const currentSales = row.sales;
+        const currentRest = row.restaurant;
+        if (currentSales.status !== "active") {
+            continue;
+        }
+        if (!salesMap.has(currentSales.id)) {
+            salesMap.set(currentSales.id, {
+                id: currentSales.id,
+                name: currentSales.name,
+                phone: currentSales.phone,
+                email: currentSales.email,
+                points: currentSales.points || 0,
+                status: currentSales.status,
+                activeRestaurantsCount: 0,
+                inactiveRestaurantsCount: 0,
+                restaurants: [],
+                typeGroups: {}
+            });
+            totalActiveSalesPoints += currentSales.points || 0;
+        }
+        const salesGroup = salesMap.get(currentSales.id);
+        // إذا كان هناك مطعم مسجل للسيلز ده وضمن الفترة المحددة
+        if (currentRest) {
+            const isRestActive = currentRest.status === "active";
+            const restType = currentRest.type || "C";
+            if (isRestActive) {
+                salesGroup.activeRestaurantsCount += 1;
+                totalActiveRestaurantsCount += 1;
+            }
+            else {
+                salesGroup.inactiveRestaurantsCount += 1;
+            }
+            if (restaurantId) {
+                salesGroup.restaurants.push(currentRest);
+            }
+            else {
+                salesGroup.restaurants.push({
+                    id: currentRest.id,
+                    name: currentRest.name,
+                    nameAr: currentRest.nameAr,
+                    createdAt: currentRest.createdAt
+                });
+            }
+            if (salesId) {
+                if (!salesGroup.typeGroups[restType]) {
+                    salesGroup.typeGroups[restType] = {
+                        total: 0,
+                        active: 0,
+                        inactive: 0,
+                        list: []
+                    };
+                }
+                const group = salesGroup.typeGroups[restType];
+                group.total += 1;
+                if (isRestActive) {
+                    group.active += 1;
+                }
+                else {
+                    group.inactive += 1;
+                }
+                group.list.push({
+                    id: currentRest.id,
+                    name: currentRest.name,
+                    nameAr: currentRest.nameAr,
+                    status: currentRest.status,
+                    createdAt: currentRest.createdAt
+                });
+            }
+        }
+    }
+    const salesList = Array.from(salesMap.values()).map(item => {
+        const responseData = {
+            id: item.id,
+            name: item.name,
+            phone: item.phone,
+            email: item.email,
+            status: item.status,
+            totalPoints: item.points,
+            restaurantSummary: {
+                totalRestaurants: item.activeRestaurantsCount + item.inactiveRestaurantsCount,
+                activeCount: item.activeRestaurantsCount,
+                inactiveCount: item.inactiveRestaurantsCount
+            },
+            restaurants: item.restaurants
+        };
+        if (salesId) {
+            responseData.groupedByType = ALL_RESTAURANT_TYPES.map(typeKey => ({
+                type: typeKey,
+                totalRestaurants: item.typeGroups[typeKey]?.total ?? 0,
+                activeCount: item.typeGroups[typeKey]?.active ?? 0,
+                inactiveCount: item.typeGroups[typeKey]?.inactive ?? 0,
+                restaurants: item.typeGroups[typeKey]?.list ?? []
+            }));
+        }
+        return responseData;
+    });
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Sales report fetched successfully",
+        summary: {
+            totalActiveSalesPoints,
+            totalActiveRestaurants: totalActiveRestaurantsCount,
+            totalActiveSales: salesList.length
+        },
+        salesList: salesList
+    });
+};
+exports.getSalesReport = getSalesReport;

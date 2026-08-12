@@ -60,3 +60,5 @@ __exportStar(require("./schema/user/slider"), exports);
 __exportStar(require("./schema/admin/restraurant_user"), exports);
 __exportStar(require("./schema/admin/sales"), exports);
 __exportStar(require("./schema/admin/dashboardTargets"), exports);
+__exportStar(require("./schema/user/userRestaurantPoints"), exports);
+__exportStar(require("./schema/admin/pointsProducts"), exports);

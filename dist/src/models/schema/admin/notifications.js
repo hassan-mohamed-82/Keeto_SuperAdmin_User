@@ -5,8 +5,8 @@ const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 exports.notifications = (0, mysql_core_1.mysqlTable)("notifications", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
-    recipientType: (0, mysql_core_1.mysqlEnum)("recipient_type", ["user", "restaurant"]).notNull(),
-    // ID of the user OR the restaurant, depending on recipientType
+    recipientType: (0, mysql_core_1.mysqlEnum)("recipient_type", ["user", "restaurant", "superadmin"]).notNull(),
+    // ID of the user OR the restaurant OR the superadmin (e.g., 'superadmin'), depending on recipientType
     recipientId: (0, mysql_core_1.char)("recipient_id", { length: 36 }).notNull(),
     title: (0, mysql_core_1.varchar)("title", { length: 255 }).notNull(),
     body: (0, mysql_core_1.text)("body").notNull(),

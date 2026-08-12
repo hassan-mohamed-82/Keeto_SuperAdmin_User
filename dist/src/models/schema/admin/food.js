@@ -33,6 +33,7 @@ exports.food = (0, mysql_core_1.mysqlTable)("food", {
     Maximum_Purchase: (0, mysql_core_1.int)("Maximum_Purchase"),
     stock_type: (0, mysql_core_1.mysqlEnum)("stock_type", ["limited", "unlimited", "daily"]).default("unlimited"),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
+    points: (0, mysql_core_1.int)("points").default(0),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

@@ -6,6 +6,8 @@ const restaurants_1 = require("../../controllers/admin/restaurants");
 const middlewares_1 = require("../../middlewares/");
 const router = (0, express_1.Router)();
 router.get("/select", (0, catchAsync_1.catchAsync)(restaurants_1.getallcousinesandzones));
+router.get("/select-data", (0, catchAsync_1.catchAsync)(restaurants_1.getRestaurantSelectData));
+router.get("/sales/active", (0, catchAsync_1.catchAsync)(restaurants_1.getActiveSales));
 router.post("/", (0, middlewares_1.hasPermission)("Restaurants", "Add"), 
 // validate(createRestaurantSchema),
 (0, catchAsync_1.catchAsync)(restaurants_1.createRestaurant));
@@ -14,5 +16,6 @@ router.get("/:id", (0, middlewares_1.hasPermission)("Restaurants", "View"), (0, 
 router.put("/:id", (0, middlewares_1.hasPermission)("Restaurants", "Edit"), 
 //  validate(updateRestaurantSchema), 
 (0, catchAsync_1.catchAsync)(restaurants_1.updateRestaurant));
+router.put("/:id/delivery-status", (0, middlewares_1.hasPermission)("Restaurants", "Edit"), (0, catchAsync_1.catchAsync)(restaurants_1.changeDeliveryStatus));
 router.delete("/:id", (0, middlewares_1.hasPermission)("Restaurants", "Delete"), (0, catchAsync_1.catchAsync)(restaurants_1.deleteRestaurant));
 exports.default = router;

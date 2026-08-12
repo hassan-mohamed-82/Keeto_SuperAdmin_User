@@ -16,6 +16,7 @@ exports.branches = (0, mysql_core_1.mysqlTable)("branches", {
     addressFr: (0, mysql_core_1.text)("address_fr"),
     phoneNumber: (0, mysql_core_1.varchar)("phone_number", { length: 50 }),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }).references(() => schema_1.zones.id).notNull(), // عشان منطقة توصيل الفرع ده
+    cityId: (0, mysql_core_1.char)("city_id", { length: 36 }).references(() => schema_1.cities.id),
     deliveryRadiusKm: (0, mysql_core_1.decimal)("delivery_radius_km", { precision: 6, scale: 2 }).default("0"), lat: (0, mysql_core_1.varchar)("lat", { length: 255 }),
     lng: (0, mysql_core_1.varchar)("lng", { length: 255 }),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),

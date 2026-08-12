@@ -19,9 +19,8 @@ const createSales = async (req, res) => {
     const { name, phone, email, password, points, status } = req.body;
     if (!name)
         throw new Errors_1.BadRequest("Sales name is required");
-    if (!password)
-        throw new Errors_1.BadRequest("Password is required");
-    const hashedPassword = await bcrypt_1.default.hash(password, 10);
+    // if (!password) throw new BadRequest("Password is required");
+    const hashedPassword = password ? await bcrypt_1.default.hash(password, 10) : null;
     const newSalesId = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.sales).values({
         id: newSalesId,

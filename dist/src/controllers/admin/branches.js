@@ -10,7 +10,7 @@ const BadRequest_1 = require("../../Errors/BadRequest");
 const NotFound_1 = require("../../Errors/NotFound");
 const uuid_1 = require("uuid");
 const createBranch = async (req, res) => {
-    const { restaurantId, name, address, phoneNumber, zoneId, nameAr, nameFr, addressAr, addressFr, deliveryRadiusKm, lat, lng } = req.body;
+    const { restaurantId, name, address, phoneNumber, zoneId, cityId, nameAr, nameFr, addressAr, addressFr, deliveryRadiusKm, lat, lng } = req.body;
     if (!name || !address || !zoneId) {
         throw new BadRequest_1.BadRequest("Missing required fields (name, address, zoneId)");
     }
@@ -33,6 +33,7 @@ const createBranch = async (req, res) => {
         lng,
         phoneNumber: phoneNumber || null,
         zoneId,
+        cityId,
         status: "active"
     });
     return (0, response_1.SuccessResponse)(res, { message: "Branch created successfully", data: { id } }, 201);
@@ -58,10 +59,17 @@ const getMyBranches = async (req, res) => {
             nameAr: schema_1.zones.nameAr,
             nameFr: schema_1.zones.nameFr,
         },
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr
+        },
         restaurantName: schema_1.restaurants.name,
     })
         .from(schema_1.branches)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, schema_1.zones.id))
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.branches.cityId, schema_1.cities.id))
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, schema_1.restaurants.id));
     return (0, response_1.SuccessResponse)(res, { message: "Get branches success", data: myBranches });
 };
@@ -87,10 +95,17 @@ const getBranchById = async (req, res) => {
             nameAr: schema_1.zones.nameAr,
             nameFr: schema_1.zones.nameFr,
         },
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr
+        },
         restaurantName: schema_1.restaurants.name,
     })
         .from(schema_1.branches)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, schema_1.zones.id))
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.branches.cityId, schema_1.cities.id))
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.eq)(schema_1.branches.id, id))
         .limit(1);
@@ -99,7 +114,7 @@ const getBranchById = async (req, res) => {
 exports.getBranchById = getBranchById;
 const updateBranch = async (req, res) => {
     const { id } = req.params;
-    const { restaurantId, name, address, phoneNumber, zoneId, status, nameAr, nameFr, addressAr, addressFr, deliveryRadiusKm, lat, lng } = req.body;
+    const { restaurantId, name, address, phoneNumber, zoneId, cityId, status, nameAr, nameFr, addressAr, addressFr, deliveryRadiusKm, lat, lng } = req.body;
     const existingBranch = await connection_1.db
         .select()
         .from(schema_1.branches)
@@ -136,6 +151,12 @@ const updateBranch = async (req, res) => {
             throw new BadRequest_1.BadRequest("Zone not found");
         updateData.zoneId = zoneId;
     }
+    if (cityId) {
+        const cityExists = await connection_1.db.select().from(schema_1.cities).where((0, drizzle_orm_1.eq)(schema_1.cities.id, cityId)).limit(1);
+        if (!cityExists[0])
+            throw new BadRequest_1.BadRequest("City not found");
+        updateData.cityId = cityId;
+    }
     if (status)
         updateData.status = status;
     await connection_1.db
@@ -146,16 +167,15 @@ const updateBranch = async (req, res) => {
 };
 exports.updateBranch = updateBranch;
 const deleteBranch = async (req, res) => {
-    const { id, restaurantId } = req.params;
-    if (!restaurantId)
-        throw new BadRequest_1.BadRequest("Restaurant ID missing");
+    const { id } = req.params;
+    // if (!restaurantId) throw new BadRequest("Restaurant ID missing");
     const existingBranch = await connection_1.db
         .select()
         .from(schema_1.branches)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.id, id), (0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId)))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.id, id)))
         .limit(1);
     if (!existingBranch[0])
-        throw new NotFound_1.NotFound("Branch not found or you don't have permission to delete it");
+        throw new NotFound_1.NotFound("Branch not found");
     await connection_1.db.delete(schema_1.branches).where((0, drizzle_orm_1.eq)(schema_1.branches.id, id));
     return (0, response_1.SuccessResponse)(res, { message: "Branch deleted successfully" });
 };
@@ -191,8 +211,21 @@ const getallrestraunt = async (req, res) => {
         id: schema_1.zones.id,
         name: schema_1.zones.name,
         nameAr: schema_1.zones.nameAr,
-        nameFr: schema_1.zones.nameFr
-    }).from(schema_1.zones);
-    return (0, response_1.SuccessResponse)(res, { message: "Get restaurants success", data: { restaurant, zone } });
+        nameFr: schema_1.zones.nameFr,
+        cityId: schema_1.zones.cityId,
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr
+        }
+    }).from(schema_1.zones).leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.zones.cityId, schema_1.cities.id));
+    const city = await connection_1.db.select({
+        id: schema_1.cities.id,
+        name: schema_1.cities.name,
+        nameAr: schema_1.cities.nameAr,
+        nameFr: schema_1.cities.nameFr
+    }).from(schema_1.cities);
+    return (0, response_1.SuccessResponse)(res, { message: "Get restaurants success", data: { restaurant, zone, city } });
 };
 exports.getallrestraunt = getallrestraunt;

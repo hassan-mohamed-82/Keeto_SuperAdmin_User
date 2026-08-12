@@ -8,6 +8,8 @@ const fcmToken_1 = require("../../controllers/user/fcmToken");
 const router = (0, express_1.Router)();
 router.get("/", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(profile_1.getProfile));
 router.put("/", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(profile_1.updateProfile));
+router.delete("/", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(profile_1.deleteAccount));
 router.put("/fcm-token", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(fcmToken_1.updateFcmToken));
 router.put("/cahange", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(profile_1.changepassword));
+router.get("/points/:restaurantId", authenticated_1.authenticated, (0, catchAsync_1.catchAsync)(profile_1.getRestaurantPoints));
 exports.default = router;

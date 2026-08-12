@@ -7,11 +7,30 @@ import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 
+// =============================================
+// CREATE ZONE
+// =============================================
 export const createZone = async (req: Request, res: Response) => {
-    const { name, nameAr, nameFr, displayName, displayNameAr, displayNameFr, cityId,lat,lng } = req.body;
+    const {
+        name,
+        nameAr,
+        nameFr,
+        displayName,
+        displayNameAr,
+        displayNameFr,
+        cityId,
+        coordinates,
+        coverageAreaRadiusKm,
+        deliveryFee,
+        minOrderAmount,
+    } = req.body;
 
-    if (!name || !nameAr || !nameFr || !displayName || !displayNameAr || !displayNameFr || !cityId || !lat || !lng) {
-        throw new BadRequest("Name, nameAr, nameFr, displayName, displayNameAr, displayNameFr, cityId, lat, and lng are required");
+    if (!name || !displayName || !cityId) {
+        throw new BadRequest("Name, displayName, and cityId are required");
+    }
+
+    if (!coordinates && !coverageAreaRadiusKm) {
+        throw new BadRequest("Either coordinates (polygon) or coverageAreaRadiusKm (radius) must be provided");
     }
 
     const existingCity = await db
@@ -27,7 +46,7 @@ export const createZone = async (req: Request, res: Response) => {
     const existingZone = await db
         .select()
         .from(zones)
-        .where(and(eq(zones.name, name), eq(zones.cityId, cityId), eq(zones.status, "active"), eq(zones.lat, lat), eq(zones.lng, lng)))
+        .where(and(eq(zones.name, name), eq(zones.cityId, cityId), eq(zones.status, "active")))
         .limit(1);
 
     if (existingZone[0]) {
@@ -39,13 +58,15 @@ export const createZone = async (req: Request, res: Response) => {
     await db.insert(zones).values({
         id,
         name,
-        nameAr,
-        nameFr,
+        nameAr: nameAr || "",
+        nameFr: nameFr || "",
         displayName,
-        displayNameAr,
-        displayNameFr,
-        lat,
-        lng,
+        displayNameAr: displayNameAr || "",
+        displayNameFr: displayNameFr || "",
+        coordinates: coordinates || null,
+        coverageAreaRadiusKm: coverageAreaRadiusKm ? String(coverageAreaRadiusKm) : null,
+        deliveryFee: deliveryFee !== undefined ? String(deliveryFee) : "0.00",
+        minOrderAmount: minOrderAmount !== undefined ? String(minOrderAmount) : "0.00",
         status: "active",
         cityId,
     });
@@ -53,6 +74,9 @@ export const createZone = async (req: Request, res: Response) => {
     return SuccessResponse(res, { message: "Create zone success", data: { id } }, 201);
 };
 
+// =============================================
+// GET ALL ZONES
+// =============================================
 export const getAllZones = async (req: Request, res: Response) => {
     const allZones = await db
         .select({
@@ -63,9 +87,11 @@ export const getAllZones = async (req: Request, res: Response) => {
             displayName: zones.displayName,
             displayNameAr: zones.displayNameAr,
             displayNameFr: zones.displayNameFr,
+            coordinates: zones.coordinates,
+            coverageAreaRadiusKm: zones.coverageAreaRadiusKm,
+            deliveryFee: zones.deliveryFee,
+            minOrderAmount: zones.minOrderAmount,
             status: zones.status,
-            lat: zones.lat,
-            lng: zones.lng,
             cityId: zones.cityId,
             createdAt: zones.createdAt,
             updatedAt: zones.updatedAt,
@@ -83,6 +109,9 @@ export const getAllZones = async (req: Request, res: Response) => {
     return SuccessResponse(res, { message: "Get all zones success", data: allZones });
 };
 
+// =============================================
+// GET ZONE BY ID
+// =============================================
 export const getZoneById = async (req: Request, res: Response) => {
     const { id } = req.params;
 
@@ -95,9 +124,11 @@ export const getZoneById = async (req: Request, res: Response) => {
             displayName: zones.displayName,
             displayNameAr: zones.displayNameAr,
             displayNameFr: zones.displayNameFr,
+            coordinates: zones.coordinates,
+            coverageAreaRadiusKm: zones.coverageAreaRadiusKm,
+            deliveryFee: zones.deliveryFee,
+            minOrderAmount: zones.minOrderAmount,
             status: zones.status,
-            lat: zones.lat,
-            lng: zones.lng,
             cityId: zones.cityId,
             createdAt: zones.createdAt,
             updatedAt: zones.updatedAt,
@@ -121,23 +152,48 @@ export const getZoneById = async (req: Request, res: Response) => {
     return SuccessResponse(res, { message: "Get zone by id success", data: zone[0] });
 };
 
+// =============================================
+// UPDATE ZONE
+// =============================================
 export const updateZone = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, nameAr, nameFr, displayName, displayNameAr, displayNameFr, status, cityId, lat, lng } = req.body;
+    const {
+        name,
+        nameAr,
+        nameFr,
+        displayName,
+        displayNameAr,
+        displayNameFr,
+        status,
+        cityId,
+        coordinates,
+        coverageAreaRadiusKm,
+        deliveryFee,
+        minOrderAmount,
+    } = req.body;
 
-    // 1. التحقق المبكر: هل يوجد بيانات للتحديث أصلاً؟
-    if (!name && !nameAr && !nameFr && !displayName && !displayNameAr && !displayNameFr && !status && !cityId) {
+    if (
+        !name &&
+        !nameAr &&
+        !nameFr &&
+        !displayName &&
+        !displayNameAr &&
+        !displayNameFr &&
+        !status &&
+        !cityId &&
+        coordinates === undefined &&
+        coverageAreaRadiusKm === undefined &&
+        deliveryFee === undefined &&
+        minOrderAmount === undefined
+    ) {
         throw new BadRequest("No data to update");
     }
 
-    // 2. تجهيز الاستعلامات للعمل في نفس الوقت (Concurrent Queries)
     const zonePromise = db.select().from(zones).where(eq(zones.id, id)).limit(1);
-    // إذا تم تمرير cityId نبحث عنه، وإلا نُرجع null مباشرة
-    const cityPromise = cityId 
-        ? db.select().from(cities).where(eq(cities.id, cityId)).limit(1) 
+    const cityPromise = cityId
+        ? db.select().from(cities).where(eq(cities.id, cityId)).limit(1)
         : Promise.resolve(null);
 
-    // تنفيذ الاستعلامات معاً
     const [existingZone, existingCity] = await Promise.all([zonePromise, cityPromise]);
 
     if (!existingZone[0]) {
@@ -148,7 +204,6 @@ export const updateZone = async (req: Request, res: Response) => {
         throw new BadRequest("City not found");
     }
 
-    // 3. بناء كائن التحديث
     const updateData: any = {
         updatedAt: new Date(),
     };
@@ -161,15 +216,20 @@ export const updateZone = async (req: Request, res: Response) => {
     if (displayNameFr !== undefined) updateData.displayNameFr = displayNameFr;
     if (status !== undefined) updateData.status = status;
     if (cityId !== undefined) updateData.cityId = cityId;
-    if (lat !== undefined) updateData.lat = lat;
-    if (lng !== undefined) updateData.lng = lng;
+    if (coordinates !== undefined) updateData.coordinates = coordinates;
+    if (coverageAreaRadiusKm !== undefined)
+        updateData.coverageAreaRadiusKm = coverageAreaRadiusKm ? String(coverageAreaRadiusKm) : null;
+    if (deliveryFee !== undefined) updateData.deliveryFee = String(deliveryFee);
+    if (minOrderAmount !== undefined) updateData.minOrderAmount = String(minOrderAmount);
 
-    // 4. تنفيذ التحديث
     await db.update(zones).set(updateData).where(eq(zones.id, id));
 
     return SuccessResponse(res, { message: "Update zone success" });
 };
 
+// =============================================
+// DELETE ZONE
+// =============================================
 export const deleteZone = async (req: Request, res: Response) => {
     const { id } = req.params;
 
@@ -188,8 +248,10 @@ export const deleteZone = async (req: Request, res: Response) => {
     return SuccessResponse(res, { message: "Delete zone success" });
 };
 
+// =============================================
+// GET ALL CITIES
+// =============================================
 export const getallcities = async (req: Request, res: Response) => {
-    
     const allCities = await db
         .select()
         .from(cities)

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.changepassword = exports.updateProfile = exports.getProfile = void 0;
+exports.deleteAccount = exports.changepassword = exports.updateProfile = exports.getRestaurantPoints = exports.getProfile = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -14,12 +14,14 @@ const getProfile = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
+    // 1. Fetch User Profile Info
     const [userInfo] = await connection_1.db
         .select({
         id: schema_1.users.id,
         name: schema_1.users.name,
         email: schema_1.users.email,
         phone: schema_1.users.phone,
+        alternatePhone: schema_1.users.alternatePhone,
         photo: schema_1.users.photo,
         isVerified: schema_1.users.isVerified,
         createdAt: schema_1.users.createdAt,
@@ -27,13 +29,49 @@ const getProfile = async (req, res) => {
         .from(schema_1.users)
         .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId))
         .limit(1);
+    if (!userInfo) {
+        throw new Errors_1.NotFound("User not found");
+    }
+    // 2. Fetch All Addresses for this User
+    const userAddresses = await connection_1.db
+        .select({
+        id: schema_1.addresses.id,
+        zoneId: schema_1.addresses.zoneId,
+        type: schema_1.addresses.type,
+        title: schema_1.addresses.title,
+        lat: schema_1.addresses.lat,
+        lng: schema_1.addresses.lng,
+        street: schema_1.addresses.street,
+        number: schema_1.addresses.number,
+        floor: schema_1.addresses.floor,
+        landmark: schema_1.addresses.landmark,
+        location: schema_1.addresses.location,
+    })
+        .from(schema_1.addresses)
+        .where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId));
+    // 3. Fetch Orders Count
+    const [ordersCount] = await connection_1.db
+        .select({ count: (0, drizzle_orm_1.sql) `COUNT(*)` })
+        .from(schema_1.orders)
+        .where((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId));
+    // 4. Fetch User Wallet Balance
     const [wallet] = await connection_1.db
         .select({
-        balance: schema_1.userWallets.balance
+        balance: schema_1.userWallets.balance,
     })
         .from(schema_1.userWallets)
         .where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId))
         .limit(1);
+    // const userPoints = await db
+    //     .select({
+    //         restaurantId: userRestaurantPoints.restaurantId,
+    //         restaurantName: restaurants.name,
+    //         points: userRestaurantPoints.points
+    //     })
+    //     .from(userRestaurantPoints)
+    //     .leftJoin(restaurants, eq(restaurants.id, userRestaurantPoints.restaurantId))
+    //     .where(eq(userRestaurantPoints.userId, userId));
+    const isProfileComplete = !(userInfo.email && userInfo.email.endsWith("@privaterelay.appleid.com"));
     return (0, response_1.SuccessResponse)(res, {
         data: {
             user: {
@@ -42,23 +80,60 @@ const getProfile = async (req, res) => {
                 email: userInfo.email,
                 phone: userInfo.phone,
                 photo: userInfo.photo,
+                alternatePhone: userInfo.alternatePhone,
                 isVerified: userInfo.isVerified,
                 createdAt: userInfo.createdAt,
+                isProfileComplete,
+                addresses: userAddresses,
             },
             walletBalance: wallet?.balance || "0.00",
-        }
+            ordersCount: Number(ordersCount?.count || 0),
+            // restaurantPoints: userPoints
+        },
     });
 };
 exports.getProfile = getProfile;
+// ==========================================
+// Get User Points for a Specific Restaurant
+// ==========================================
+const getRestaurantPoints = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
+    const { restaurantId } = req.params;
+    if (!restaurantId)
+        throw new Errors_1.BadRequest("restaurantId is required");
+    const [pointsRecord] = await connection_1.db
+        .select({
+        restaurantId: schema_1.userRestaurantPoints.restaurantId,
+        restaurantName: schema_1.restaurants.name,
+        points: schema_1.userRestaurantPoints.points,
+        updatedAt: schema_1.userRestaurantPoints.updatedAt,
+    })
+        .from(schema_1.userRestaurantPoints)
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.userRestaurantPoints.restaurantId))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userRestaurantPoints.userId, userId), (0, drizzle_orm_1.eq)(schema_1.userRestaurantPoints.restaurantId, restaurantId)))
+        .limit(1);
+    return (0, response_1.SuccessResponse)(res, {
+        data: {
+            restaurantId,
+            restaurantName: pointsRecord?.restaurantName || null,
+            points: pointsRecord?.points || 0,
+            updatedAt: pointsRecord?.updatedAt || null,
+        }
+    });
+};
+exports.getRestaurantPoints = getRestaurantPoints;
 const updateProfile = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
-    const { name, phone, photo } = req.body;
+    const { name, phone, email, photo, alternatePhone } = req.body;
     await connection_1.db.update(schema_1.users)
-        .set({ name, phone, photo })
+        .set({ name, phone, email, photo, alternatePhone })
         .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
-    return (0, response_1.SuccessResponse)(res, { message: "Profile updated successfully" });
+    const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
+    return (0, response_1.SuccessResponse)(res, { message: "Profile updated successfully", data: { isProfileComplete } });
 };
 exports.updateProfile = updateProfile;
 const changepassword = async (req, res) => {
@@ -83,8 +158,8 @@ const changepassword = async (req, res) => {
     if (!user.password) {
         throw new Errors_1.BadRequest("Cannot change password for this account");
     }
-    const isPasswordValid = await bcrypt_1.default.compare(oldPassword, user.password);
-    if (!isPasswordValid) {
+    const passwordMatch = await bcrypt_1.default.compare(oldPassword, user.password);
+    if (!passwordMatch) {
         throw new Errors_1.BadRequest("Invalid old password");
     }
     const salt = await bcrypt_1.default.genSalt(10);
@@ -96,3 +171,34 @@ const changepassword = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "Password changed successfully" });
 };
 exports.changepassword = changepassword;
+// ==========================================
+// Delete Account (Soft Delete)
+// ==========================================
+const deleteAccount = async (req, res) => {
+    if (!req.user)
+        throw new Errors_1.UnauthorizedError("Unauthenticated");
+    const userId = req.user?.id || req.user?._id;
+    if (!userId) {
+        throw new Errors_1.UnauthorizedError("Unauthorized");
+    }
+    const [user] = await connection_1.db
+        .select()
+        .from(schema_1.users)
+        .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId))
+        .limit(1);
+    if (!user) {
+        throw new Errors_1.NotFound("User not found");
+    }
+    if (user.isDeleted) {
+        throw new Errors_1.BadRequest("Account is already deleted");
+    }
+    // Soft delete the user
+    await connection_1.db.update(schema_1.users)
+        .set({
+        isDeleted: true,
+        deletedAt: new Date()
+    })
+        .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
+    return (0, response_1.SuccessResponse)(res, { message: "Account deleted successfully" });
+};
+exports.deleteAccount = deleteAccount;

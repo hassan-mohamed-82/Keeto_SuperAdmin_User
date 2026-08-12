@@ -17,6 +17,12 @@ const normalizeVariations = (variations) => {
         .filter(v => v?.optionId)
         .sort((a, b) => String(a.optionId).localeCompare(String(b.optionId)));
 };
+const normalizeAddons = (addonsInput) => {
+    const safe = Array.isArray(addonsInput) ? addonsInput : [];
+    return safe
+        .filter(a => a?.addonId)
+        .sort((a, b) => String(a.addonId).localeCompare(String(b.addonId)));
+};
 // الفك العميق لتفادي مشكلة (Double Stringification)
 const deepParseJSON = (data) => {
     if (typeof data === 'string') {
@@ -29,13 +35,32 @@ const deepParseJSON = (data) => {
     }
     return data;
 };
+/**
+ * Parse the cart item's `variations` JSON field.
+ * Supports both legacy flat-array format and new object format { variations, addons }.
+ */
+const parseCartSnapshot = (raw) => {
+    const parsed = deepParseJSON(raw);
+    if (Array.isArray(parsed)) {
+        // Legacy: flat array was only variations
+        return { variations: parsed, addons: [] };
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return {
+            variations: Array.isArray(parsed.variations) ? parsed.variations : [],
+            addons: Array.isArray(parsed.addons) ? parsed.addons : []
+        };
+    }
+    return { variations: [], addons: [] };
+};
 /* =========================================
    1. ADD TO CART
 ========================================= */
 const addToCart = async (req, res) => {
     const userId = req.user?.id;
-    const { foodId, quantity = 1, variations = [], note } = req.body;
+    const { foodId, quantity = 1, variations = [], addons: requestAddons = [], note } = req.body;
     const safeVariations = Array.isArray(variations) ? variations : [];
+    const safeAddons = Array.isArray(requestAddons) ? requestAddons : [];
     const [itemFood] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.id, foodId)).limit(1);
     if (!itemFood)
         throw new BadRequest_1.BadRequest("Food not found");
@@ -54,7 +79,7 @@ const addToCart = async (req, res) => {
         .from(schema_1.foodVariations)
         .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, foodId));
     let totalExtraPrice = 0;
-    // 1. التأكد من أن الإضافات المرسلة صحيحة وموجودة بالفعل للأكلة دي
+    // 1. التحقق من صحة الـ Variations المرسلة
     for (const selected of safeVariations) {
         const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
         if (!validDbVariation) {
@@ -76,7 +101,7 @@ const addToCart = async (req, res) => {
         }
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
     }
-    // 2. التأكد من أن الإضافات الإجبارية تم اختيارها
+    // 2. التأكد من أن الـ Variations الإجبارية تم اختيارها
     for (const v of dbVariations) {
         if (v.isRequired) {
             const isProvided = safeVariations.some(x => x.variationId === v.id);
@@ -84,17 +109,54 @@ const addToCart = async (req, res) => {
                 throw new BadRequest_1.BadRequest(`${v.name} is required`);
         }
     }
-    // 3. احتساب السعر الأصلي مع الإضافات لتخزينه في قاعدة البيانات
+    // 3. التحقق من صحة الـ Addons المرسلة وحساب سعرها
+    let addonSnapshot = [];
+    if (safeAddons.length > 0) {
+        // التحقق من أن الـ addons مسموح بها لهذه الأكلة (فقط إذا كانت القائمة المسموح بها غير فارغة)
+        const allowedAddonIds = Array.isArray(itemFood.addonsId) ? itemFood.addonsId : [];
+        if (allowedAddonIds.length > 0) {
+            for (const a of safeAddons) {
+                if (!allowedAddonIds.includes(a.addonId)) {
+                    throw new BadRequest_1.BadRequest(`Addon ${a.addonId} is not available for this food item`);
+                }
+            }
+        }
+        const requestedAddonIds = safeAddons.map((a) => a.addonId);
+        const dbAddons = await connection_1.db
+            .select()
+            .from(schema_1.addons)
+            .where((0, drizzle_orm_1.inArray)(schema_1.addons.id, requestedAddonIds));
+        for (const a of safeAddons) {
+            const dbAddon = dbAddons.find(d => d.id === a.addonId);
+            if (!dbAddon)
+                throw new BadRequest_1.BadRequest(`Addon not found: ${a.addonId}`);
+            if (dbAddon.status === "inactive")
+                throw new BadRequest_1.BadRequest(`Addon "${dbAddon.name}" is currently unavailable`);
+            totalExtraPrice += Number(dbAddon.price || 0);
+            addonSnapshot.push({
+                addonId: dbAddon.id,
+                name: dbAddon.name,
+                nameAr: dbAddon.nameAr,
+                price: dbAddon.price
+            });
+        }
+    }
+    // 4. احتساب السعر الكلي
     const unitPrice = Number(itemFood.price) + totalExtraPrice;
-    const normalized = normalizeVariations(safeVariations);
-    const key = JSON.stringify(normalized);
+    const normalizedVariations = normalizeVariations(safeVariations);
+    const normalizedAddons = normalizeAddons(addonSnapshot);
+    // مفتاح التفرد يشمل كلاً من الـ variations والـ addons
+    const key = JSON.stringify({ variations: normalizedVariations, addons: normalizedAddons });
+    const snapshot = { variations: normalizedVariations, addons: addonSnapshot };
     const existingItems = await connection_1.db.select().from(schema_1.cartItems)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId), (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, foodId)));
     const existingSame = existingItems.find(item => {
-        let dbVars = deepParseJSON(item.variations);
-        if (!Array.isArray(dbVars))
-            dbVars = [];
-        return JSON.stringify(normalizeVariations(dbVars)) === key;
+        const { variations: dbVars, addons: dbAddons } = parseCartSnapshot(item.variations);
+        const existingKey = JSON.stringify({
+            variations: normalizeVariations(dbVars),
+            addons: normalizeAddons(dbAddons)
+        });
+        return existingKey === key;
     });
     if (existingSame) {
         const newQty = existingSame.quantity + quantity;
@@ -103,8 +165,7 @@ const addToCart = async (req, res) => {
             quantity: newQty,
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * newQty).toString(),
-            variations: JSON.stringify(normalized),
-            // update note only if provided
+            variations: JSON.stringify(snapshot),
             ...(note !== undefined ? { note: note || null } : {})
         })
             .where((0, drizzle_orm_1.eq)(schema_1.cartItems.id, existingSame.id));
@@ -118,7 +179,7 @@ const addToCart = async (req, res) => {
             quantity,
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * quantity).toString(),
-            variations: JSON.stringify(normalized),
+            variations: JSON.stringify(snapshot),
             note: note || null
         });
     }
@@ -161,12 +222,11 @@ const getCart = async (req, res) => {
         return (0, response_1.SuccessResponse)(res, { data: { items: [], totalSummary: { subtotal: 0 } } });
     }
     const restaurantId = items[0].restaurantId;
-    // 1. Calculate initial subtotal using original food price + variations to evaluate minOrderAmount correctly
+    // 1. حساب الـ subtotal الأولي (السعر الأصلي + variations + addons) لتقييم الـ discount بشكل صحيح
     let initialSubtotal = 0;
     const itemsData = items.map(item => {
         const originalBasePrice = parseFloat(item.price || "0");
-        const safeVariations = deepParseJSON(item.variations) || [];
-        const details = Array.isArray(safeVariations) ? safeVariations : [];
+        const { variations: parsedVariations, addons: parsedAddons } = parseCartSnapshot(item.variations);
         let initialDiscountPrice = originalBasePrice;
         if (item.discountType && Number(item.discountValue) > 0) {
             if (item.discountType === "percentage") {
@@ -177,17 +237,19 @@ const getCart = async (req, res) => {
             }
         }
         const dbUnitPrice = parseFloat(item.unitPrice || "0");
+        // varPrice = كل زيادة على السعر الأصلي (variations + addons)
         const varPrice = dbUnitPrice - originalBasePrice;
         initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
-        return { item, originalBasePrice, varPrice, details };
+        return { item, originalBasePrice, varPrice, parsedVariations, parsedAddons };
     });
     const availableDiscounts = await (0, discount_1.getAvailableDiscounts)(restaurantId);
     const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
     let finalSubtotal = 0;
     const formatted = await Promise.all(itemsData.map(async (data) => {
-        const { item, originalBasePrice, varPrice, details } = data;
+        const { item, originalBasePrice, varPrice, parsedVariations, parsedAddons } = data;
+        // جلب تفاصيل الـ Variations
         const variationDetails = [];
-        for (const v of details) {
+        for (const v of parsedVariations) {
             if (!v.variationId || !v.optionId)
                 continue;
             const [variation] = await connection_1.db.select().from(schema_1.foodVariations).where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, v.variationId)).limit(1);
@@ -204,6 +266,13 @@ const getCart = async (req, res) => {
                 });
             }
         }
+        // جلب تفاصيل الـ Addons من الـ snapshot المخزن
+        const addonDetails = parsedAddons.map((a) => ({
+            addonId: a.addonId,
+            name: a.name,
+            nameAr: a.nameAr,
+            price: a.price
+        }));
         const { price: discountedBasePrice } = (0, discount_1.applyPriorityDiscount)({ id: item.foodId, discountType: item.discountType, discountValue: item.discountValue }, originalBasePrice, initialSubtotal, availableDiscounts, discountState, true);
         const finalUnitPrice = discountedBasePrice + varPrice;
         const finalTotalPrice = finalUnitPrice * item.quantity;
@@ -216,10 +285,11 @@ const getCart = async (req, res) => {
             restaurantId: item.restaurantId,
             restaurantName: item.restaurantName,
             quantity: item.quantity,
-            price: (originalBasePrice + varPrice).toString(), // Original unit price with variations
-            unitPrice: finalUnitPrice, // Final discounted unit price with variations
+            price: (originalBasePrice + varPrice).toString(), // السعر الأصلي شامل الـ variations والـ addons
+            unitPrice: finalUnitPrice, // السعر بعد الخصم
             totalPrice: finalTotalPrice,
             variations: variationDetails,
+            addons: addonDetails,
             note: item.note || null
         };
     }));
@@ -240,7 +310,7 @@ exports.getCart = getCart;
 const updateCartItem = async (req, res) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
-    const { quantity, variations, note } = req.body;
+    const { quantity, variations, addons: requestAddons, note } = req.body;
     const [cartItem] = await connection_1.db
         .select()
         .from(schema_1.cartItems)
@@ -253,14 +323,23 @@ const updateCartItem = async (req, res) => {
         .from(schema_1.food)
         .where((0, drizzle_orm_1.eq)(schema_1.food.id, cartItem.foodId))
         .limit(1);
-    // تجهيز الإضافات بشكل آمن باستخدام الفك العميق
+    // تجهيز الـ Variations بشكل آمن
     let safeVariations = [];
     if (variations !== undefined) {
         safeVariations = normalizeVariations(variations);
     }
     else {
-        let parsedDbVars = deepParseJSON(cartItem.variations);
-        safeVariations = normalizeVariations(parsedDbVars);
+        const { variations: existingVars } = parseCartSnapshot(cartItem.variations);
+        safeVariations = normalizeVariations(existingVars);
+    }
+    // تجهيز الـ Addons بشكل آمن
+    let safeAddons = [];
+    if (requestAddons !== undefined) {
+        safeAddons = Array.isArray(requestAddons) ? requestAddons : [];
+    }
+    else {
+        const { addons: existingAddons } = parseCartSnapshot(cartItem.variations);
+        safeAddons = existingAddons;
     }
     const qty = quantity ?? cartItem.quantity;
     const dbVariations = await connection_1.db
@@ -268,7 +347,7 @@ const updateCartItem = async (req, res) => {
         .from(schema_1.foodVariations)
         .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, itemFood.id));
     let totalExtraPrice = 0;
-    // التحقق من صحة الإضافات عند التحديث
+    // التحقق من صحة الـ Variations
     for (const selected of safeVariations) {
         const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
         if (!validDbVariation)
@@ -286,15 +365,59 @@ const updateCartItem = async (req, res) => {
             throw new BadRequest_1.BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
     }
-    // 4. احتساب السعر الأصلي مع الإضافات لتخزينه في قاعدة البيانات
+    // التحقق من صحة الـ Addons وحساب سعرها
+    let addonSnapshot = [];
+    if (safeAddons.length > 0) {
+        const allowedAddonIds = Array.isArray(itemFood.addonsId) ? itemFood.addonsId : [];
+        if (allowedAddonIds.length > 0) {
+            for (const a of safeAddons) {
+                if (!allowedAddonIds.includes(a.addonId)) {
+                    throw new BadRequest_1.BadRequest(`Addon ${a.addonId} is not available for this food item`);
+                }
+            }
+        }
+        const requestedAddonIds = safeAddons.map((a) => a.addonId);
+        const dbAddons = await connection_1.db
+            .select()
+            .from(schema_1.addons)
+            .where((0, drizzle_orm_1.inArray)(schema_1.addons.id, requestedAddonIds));
+        for (const a of safeAddons) {
+            const dbAddon = dbAddons.find(d => d.id === a.addonId);
+            if (!dbAddon)
+                throw new BadRequest_1.BadRequest(`Addon not found: ${a.addonId}`);
+            if (dbAddon.status === "inactive")
+                throw new BadRequest_1.BadRequest(`Addon "${dbAddon.name}" is currently unavailable`);
+            totalExtraPrice += Number(dbAddon.price || 0);
+            addonSnapshot.push({
+                addonId: dbAddon.id,
+                name: dbAddon.name,
+                nameAr: dbAddon.nameAr,
+                price: dbAddon.price
+            });
+        }
+    }
+    else if (requestAddons === undefined) {
+        // لو المستخدم ما بعتش addons في الريكويست، نحتفظ بالـ snapshot الموجود
+        const { addons: existingAddonSnapshot } = parseCartSnapshot(cartItem.variations);
+        addonSnapshot = existingAddonSnapshot.map((a) => ({
+            addonId: a.addonId,
+            name: a.name,
+            nameAr: a.nameAr,
+            price: a.price
+        }));
+        // إعادة حساب سعر الـ addons من الـ snapshot الموجود
+        for (const a of addonSnapshot) {
+            totalExtraPrice += Number(a.price || 0);
+        }
+    }
     const unitPrice = Number(itemFood.price) + totalExtraPrice;
+    const snapshot = { variations: safeVariations, addons: addonSnapshot };
     await connection_1.db.update(schema_1.cartItems)
         .set({
         quantity: qty,
         unitPrice: unitPrice.toString(),
         totalPrice: (unitPrice * qty).toString(),
-        variations: JSON.stringify(safeVariations),
-        // update note only if provided
+        variations: JSON.stringify(snapshot),
         ...(note !== undefined ? { note: note || null } : {})
     })
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.id, cartItemId), (0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId)));

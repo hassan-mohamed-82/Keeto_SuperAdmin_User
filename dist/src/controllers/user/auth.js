@@ -142,8 +142,12 @@ const signup = async (req, res) => {
             `
         });
     });
+    const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
     return (0, response_1.SuccessResponse)(res, {
-        message: "Account created successfully. Please check your email."
+        message: "Account created successfully. Please check your email.",
+        data: {
+            isProfileComplete
+        }
     }, 201);
 };
 exports.signup = signup;
@@ -206,7 +210,8 @@ const login = async (req, res) => {
         throw new BadRequest_1.BadRequest("Your account has been blocked. Please contact support.");
     }
     const token = (0, jwt_1.generateUserToken)({ id: user.id, name: user.name });
-    return (0, response_1.SuccessResponse)(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email } } });
+    const isProfileComplete = !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
+    return (0, response_1.SuccessResponse)(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email, isProfileComplete } } });
 };
 exports.login = login;
 // ===================================

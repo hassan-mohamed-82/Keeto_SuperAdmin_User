@@ -55,13 +55,16 @@ const verifyGoogleToken = async (req, res) => {
                 googleId,
                 phone: null,
                 photo: null,
+                alternatePhone: null,
                 fcmToken: null,
                 password: null,
                 isVerified: true,
                 status: "active",
                 createdAt: new Date(),
                 facebookId: null,
-                appleId: null
+                appleId: null,
+                isDeleted: false,
+                deletedAt: null
             };
         }
         else {

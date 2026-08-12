@@ -182,6 +182,7 @@ const getRestaurantDetails = async (req, res) => {
         foodDiscountType: schema_1.food.discount_type,
         foodDiscountValue: schema_1.food.discount_value,
         image: schema_1.food.image,
+        points: schema_1.food.points,
         categoryId: schema_1.categories.id,
         categoryName: schema_1.categories.name,
         categoryNameAr: schema_1.categories.nameAr,
@@ -228,7 +229,6 @@ const getRestaurantDetails = async (req, res) => {
         .leftJoin(schema_1.adonescategory, (0, drizzle_orm_1.eq)(schema_1.addons.adonescategoryid, schema_1.adonescategory.id))
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active")));
     const availableDiscounts = await (0, discount_1.getAvailableDiscounts)(restaurantId);
-    const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
     const groupedMenuObj = rawMenu.reduce((acc, row) => {
         const catId = row.categoryId || "uncategorized";
         // 1. تجميع الكاتيجوري
@@ -244,6 +244,7 @@ const getRestaurantDetails = async (req, res) => {
         // 2. تجميع الأكل داخل الكاتيجوري مع حساب الخصم المباشر
         if (row.foodId) {
             if (!acc[catId].foods[row.foodId]) {
+                const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
                 const { price: calculatedDiscountPrice, discountNote } = (0, discount_1.applyPriorityDiscount)({ id: row.foodId, discountType: row.foodDiscountType, discountValue: row.foodDiscountValue }, Number(row.price), 0, availableDiscounts, discountState, false);
                 acc[catId].foods[row.foodId] = {
                     id: row.foodId,
@@ -259,6 +260,7 @@ const getRestaurantDetails = async (req, res) => {
                     discountPrice: calculatedDiscountPrice,
                     discountNote,
                     image: row.image,
+                    points: userId ? row.points : null,
                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
                     variations: {},
                     addons: {},
@@ -464,6 +466,8 @@ const getUserFavorites = async (req, res) => {
             nameFr: schema_1.food.nameFr,
             price: schema_1.food.price,
             image: schema_1.food.image,
+            discountType: schema_1.food.discount_type,
+            discountValue: schema_1.food.discount_value,
         }
     })
         .from(schema_1.favorites)
@@ -486,7 +490,9 @@ const getUserFavorites = async (req, res) => {
             return {
                 ...foodObj,
                 discountPrice: finalDiscountPrice,
-                discountNote
+                discountNote,
+                discountType: foodObj.discountType,
+                discountValue: foodObj.discountValue
             };
         })
     };
@@ -680,10 +686,10 @@ const searchRestaurantWithMenu = async (req, res) => {
     }
     const formattedData = Array.from(restaurantsMap.values()).map((restaurant) => {
         const availableDiscounts = discountsByRestaurant.get(restaurant.id) || [];
-        const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
         return {
             ...restaurant,
             food: Array.from(restaurant.food.values()).map((foodItem) => {
+                const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
                 const { price: finalDiscountPrice, discountNote } = (0, discount_1.applyPriorityDiscount)({ id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value }, Number(foodItem.price), 0, availableDiscounts, discountState, false);
                 return {
                     ...foodItem,

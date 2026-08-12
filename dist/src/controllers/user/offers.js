@@ -18,6 +18,7 @@ const getRestaurantOffers = async (req, res) => {
             discountName: schema_1.discounts.name,
             discountType: schema_1.discounts.discountType,
             discountValue: schema_1.discounts.discountValue,
+            logo: schema_1.discounts.logo,
         })
             .from(schema_1.discountFoods)
             .innerJoin(schema_1.discounts, (0, drizzle_orm_1.eq)(schema_1.discountFoods.discountId, schema_1.discounts.id))
@@ -52,6 +53,7 @@ const getAllOffers = async (req, res) => {
             discountType: schema_1.discounts.discountType,
             discountValue: schema_1.discounts.discountValue,
             isGlobal: schema_1.discounts.isGlobal,
+            logo: schema_1.discounts.logo,
             // تفاصيل المطعم (مجمعة في Object)
             restaurant: {
                 id: schema_1.restaurants.id,

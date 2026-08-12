@@ -1,11 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.restaurants = void 0;
-// models/schema/restaurants.ts
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 const zone_1 = require("./zone");
-const sales_1 = require("./sales"); // 👈 استدعاء جدول السيلز
+const sales_1 = require("./sales");
 exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     fcmToken: (0, mysql_core_1.text)("fcm_token"),
@@ -17,18 +16,22 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     addressFr: (0, mysql_core_1.text)("address_fr").default(''),
     cuisineId: (0, mysql_core_1.json)("cuisine_id").$type().default([]),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }).references(() => zone_1.zones.id),
-    // 👇 التعديلات الجديدة هنا
-    type: (0, mysql_core_1.mysqlEnum)("type", ["mega", "super", "A", "B", "C", "C-"]).default("C"), // نوع المطعم
-    salesId: (0, mysql_core_1.char)("sales_id", { length: 36 }).references(() => sales_1.sales.id), // المندوب اللي جاب المطعم
-    // 👆
+    type: (0, mysql_core_1.mysqlEnum)("type", ["mega", "super", "A", "B", "C", "C-", "test"]).default("C"),
+    salesId: (0, mysql_core_1.char)("sales_id", { length: 36 }).references(() => sales_1.sales.id),
+    likes: (0, mysql_core_1.int)("likes").default(0),
+    facebookLink: (0, mysql_core_1.varchar)("facebook_link", { length: 500 }),
+    orderLink: (0, mysql_core_1.varchar)("order_link", { length: 500 }),
+    iosApp: (0, mysql_core_1.varchar)("ios_app", { length: 500 }),
+    androidApp: (0, mysql_core_1.varchar)("android_app", { length: 500 }),
     logo: (0, mysql_core_1.varchar)("logo", { length: 500 }).notNull(),
     cover: (0, mysql_core_1.varchar)("cover", { length: 500 }),
     minDeliveryTime: (0, mysql_core_1.varchar)("min_delivery_time", { length: 50 }),
     maxDeliveryTime: (0, mysql_core_1.varchar)("max_delivery_time", { length: 50 }),
     deliveryTimeUnit: (0, mysql_core_1.varchar)("delivery_time_unit", { length: 50 }).default("Minutes"),
     ownerFirstName: (0, mysql_core_1.varchar)("owner_first_name", { length: 255 }).notNull(),
-    ownerLastName: (0, mysql_core_1.varchar)("owner_last_name", { length: 255 }).notNull(),
+    ownerLastName: (0, mysql_core_1.varchar)("owner_last_name", { length: 255 }),
     ownerPhone: (0, mysql_core_1.varchar)("owner_phone", { length: 50 }).notNull(),
+    ownerposition: (0, mysql_core_1.varchar)("owner_position", { length: 255 }),
     tags: (0, mysql_core_1.json)("tags").$type().default([]),
     lat: (0, mysql_core_1.varchar)("lat", { length: 255 }),
     lng: (0, mysql_core_1.varchar)("lng", { length: 255 }),
@@ -38,6 +41,8 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     addhome: (0, mysql_core_1.boolean)("addhome").default(false),
     deliveryRadiusKm: (0, mysql_core_1.int)("delivery_radius_km").default(0),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
+    deliverystatus: (0, mysql_core_1.mysqlEnum)("delivery_status", ["delivered", "not_delivered"]).default("not_delivered"),
+    appBundleId: (0, mysql_core_1.varchar)("app_bundle_id", { length: 255 }).unique(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

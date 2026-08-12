@@ -32,13 +32,17 @@ const sendPushNotification = async (params) => {
                 .limit(1);
             fcmToken = user?.fcmToken || null;
         }
-        else {
+        else if (recipientType === "restaurant") {
             const [restaurant] = await connection_1.db
                 .select({ fcmToken: schema_1.restaurants.fcmToken })
                 .from(schema_1.restaurants)
                 .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, recipientId))
                 .limit(1);
             fcmToken = restaurant?.fcmToken || null;
+        }
+        else if (recipientType === "superadmin") {
+            // Admins currently don't use FCM tokens (e.g. they use web dashboard)
+            fcmToken = null;
         }
         // 3. Send via Firebase if token exists
         if (fcmToken) {
