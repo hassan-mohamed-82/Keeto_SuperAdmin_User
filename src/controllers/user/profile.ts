@@ -46,6 +46,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
             apartment: addresses.apartment,
             landmark: addresses.landmark,
             location: addresses.location,
+            fulladdress: addresses.fulladdress,
             zone: {
                 id: zones.id,
                 name: zones.name,

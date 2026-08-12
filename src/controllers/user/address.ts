@@ -111,7 +111,7 @@ export const addUserAddress = async (req: Request, res: Response) => {
         if (!req.user) throw new UnauthorizedError("Unauthenticated");
         const userId = req.user.id;
 
-        const { type, title, lat, lng, street, number, floor, apartment, landmark, location } = req.body;
+        const { type, title, lat, lng, street, number, floor, apartment, landmark, location, fulladdress } = req.body;
 
         if (!lat || !lng || !street || !number || !title) {
             throw new BadRequest("Missing required address fields");
@@ -134,6 +134,7 @@ export const addUserAddress = async (req: Request, res: Response) => {
             apartment: apartment ? String(apartment) : null,
             landmark: landmark || null,
             location: location || null,
+            fulladdress: fulladdress || null,
             zoneId: detectedZoneId, // يحفظ الـ ID أو null لو خارج التغطية
         });
 
@@ -159,7 +160,7 @@ export const updateUserAddress = async (req: Request, res: Response) => {
         if (!req.user) throw new UnauthorizedError("Unauthenticated");
         const userId = req.user.id;
         const { addressId } = req.params;
-        const { type, title, lat, lng, street, number, floor, apartment, landmark, location } = req.body;
+        const { type, title, lat, lng, street, number, floor, apartment, landmark, location, fulladdress } = req.body;
 
         const [existingAddress] = await db
             .select()
@@ -190,6 +191,7 @@ export const updateUserAddress = async (req: Request, res: Response) => {
                 ...(apartment !== undefined && { apartment: apartment ? String(apartment) : null }),
                 ...(landmark !== undefined && { landmark }),
                 ...(location !== undefined && { location }),
+                ...(fulladdress !== undefined && { fulladdress }),
                 zoneId: updatedZoneId,
             })
             .where(eq(addresses.id, addressId));
@@ -229,6 +231,7 @@ export const getUserAddresses = async (req: Request, res: Response) => {
                 apartment: addresses.apartment,
                 landmark: addresses.landmark,
                 location: addresses.location,
+                fulladdress: addresses.fulladdress,
                 createdAt: addresses.createdAt,
                 updatedAt: addresses.updatedAt,
                 zone: {

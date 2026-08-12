@@ -24,6 +24,7 @@ export const addresses = mysqlTable("addresses", {
     apartment: varchar("apartment", { length: 50 }),
     landmark: varchar("landmark", { length: 500 }),
     location: varchar("location", { length: 255 }),
+    fulladdress: varchar("fulladdress", { length: 500 }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
 });
