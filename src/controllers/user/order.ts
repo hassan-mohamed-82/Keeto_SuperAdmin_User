@@ -14,7 +14,8 @@ import {
     notifications,
     restaurantBusinessPlans, food,
     variationOptions,
-    addons
+    addons,
+    zones
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -26,6 +27,7 @@ import { sendPushNotification } from "../../utils/notifications";
 import { calculateDistance } from "../../utils/geo";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
 import { calculateCurrentStatus } from "./restaurantFeatures";
+import * as turf from "@turf/turf";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -564,7 +566,17 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
 
-    const { orderSource, paymentMethod, orderType, idempotencyKey, userZoneId, branchId, addressId, note, couponCode } = req.body;
+    const {
+        orderSource,
+        paymentMethod,
+        orderType,
+        idempotencyKey,
+        userZoneId,
+        branchId,
+        addressId,
+        note,
+        couponCode
+    } = req.body;
 
     // ==========================================
     // 🛡️ 1. Validation
@@ -632,8 +644,8 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (resolvedOrderType === "delivery" && !status.canDeliveryNow) throw new BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) throw new BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
 
-  // ==========================================
-    // ⚡ 5. Batch Fetching (Resolved N+1 Queries & DB Validation)
+    // ==========================================
+    // ⚡ 5. Batch Fetching
     // ==========================================
     const foodIds = [...new Set(userCart.map(item => item.foodId))];
 
@@ -641,7 +653,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     const allAddonIds: string[] = [];
 
     userCart.forEach(item => {
-        // Parse variations & addons safely
         let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
         if (typeof safeVars === 'string') safeVars = JSON.parse(safeVars);
 
@@ -655,7 +666,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             parsedAddons = Array.isArray(safeVars.addons) ? safeVars.addons : [];
         }
 
-        // Dedicated cart `addons` column fallback
         let safeAddons = typeof item.addons === 'string' ? JSON.parse(item.addons) : item.addons;
         if (typeof safeAddons === 'string') safeAddons = JSON.parse(safeAddons);
         if (Array.isArray(safeAddons)) {
@@ -666,14 +676,13 @@ export const checkout = async (req: Request | any, res: Response) => {
         parsedAddons.forEach((a: any) => { if (a.addonId || a.id) allAddonIds.push(a.addonId || a.id); });
     });
 
-    // Batch fetch Food, Variation Options, and Addons from DB
     const [foodList, optionsList, addonsListDb] = await Promise.all([
         db.select().from(food).where(inArray(food.id, foodIds)),
         allOptionIds.length > 0
             ? db.select().from(variationOptions).where(inArray(variationOptions.id, [...new Set(allOptionIds)]))
             : [],
         allAddonIds.length > 0
-            ? db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)])) // Replace `addonsTable` with your Drizzle schema table for addons
+            ? db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)]))
             : []
     ]);
 
@@ -693,7 +702,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         if (!foodItem) throw new BadRequest(`Food item with ID ${item.foodId} not found`);
 
         const originalBasePrice = parseFloat(foodItem.price as string || "0");
-        
+
         let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
         if (typeof safeVars === 'string') safeVars = JSON.parse(safeVars);
 
@@ -714,8 +723,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
 
         let varPrice = 0;
-        
-        // Calculate variations from DB
+
         for (const v of parsedVariations) {
             if (v.optionId) {
                 const dbOption = optionsMap.get(v.optionId);
@@ -729,16 +737,14 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
         }
 
-        // Calculate addons securely from DB
         for (const a of parsedAddons) {
             const addonId = a.addonId || a.id;
             const dbAddon = addonsMap.get(addonId);
             if (dbAddon) {
                 const dbAddonPrice = parseFloat((dbAddon.price || "0") as string);
                 varPrice += dbAddonPrice;
-                a.price = dbAddonPrice.toString(); // Update snapshot with valid DB price
+                a.price = dbAddonPrice.toString();
             } else {
-                // Fallback to client snapshot if DB record is absent (optional based on your design)
                 varPrice += parseFloat(a.price || "0");
             }
         }
@@ -755,7 +761,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
         itemsWithData.push({ cartItem: item, foodItem, originalBasePrice, varPrice, vars: parsedVariations, addonsList: parsedAddons });
     }
-    
+
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
     const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
     const itemsToInsert: any[] = [];
@@ -846,23 +852,68 @@ export const checkout = async (req: Request | any, res: Response) => {
     totalDiscount = roundMoney(totalDiscount);
 
     // ==========================================
-    // 6. Delivery Logic
+    // 6. Dynamic Delivery & Turf Zone Logic
     // ==========================================
     let deliveryFee = 0;
+    let resolvedZoneId = userZoneId || null;
 
     if (resolvedOrderType === "delivery") {
         if (!addressId) throw new BadRequest("Delivery address is required");
-        // if (!branchId) throw new BadRequest("Branch is required for delivery orders");
 
         const [userAddress] = await db.select().from(addresses)
             .where(and(eq(addresses.id, addressId), eq(addresses.userId, userId))).limit(1);
         if (!userAddress) throw new BadRequest("Invalid delivery address");
+        //-------------------------------------------------
+        // Fallback to address zone ID if not explicitly passed in req.body
+        if (!resolvedZoneId) {
+            resolvedZoneId = userAddress.zoneId || null;
+        }
 
-        // const [branch] = await db.select().from(branches).where(eq(branches.id, branchId)).limit(1);
-        // if (!branch) throw new BadRequest("Invalid branch selected");
+        // 🟢 Spatial Zone Lookup via Turf.js if zone ID is missing
+        if (!resolvedZoneId) {
+            const lat = parseFloat(userAddress.lat as string || "0");
+            const lng = parseFloat(userAddress.lng as string || "0");
 
-        const resolvedZoneId = userZoneId || userAddress.zoneId;
+            if (!lat || !lng) {
+                throw new BadRequest("Delivery address requires valid latitude and longitude coordinates.");
+            }
 
+            const userPoint = turf.point([lng, lat]); // GeoJSON expects [longitude, latitude]
+
+            // Fetch active delivery zones
+            const activeZones = await db.select().from(zones).where(eq(zones.status, "active"));
+
+            for (const zone of activeZones) {
+                if (!zone.coordinates) continue;
+
+                let parsedGeoJson = typeof zone.coordinates === "string"
+                    ? JSON.parse(zone.coordinates)
+                    : zone.coordinates;
+
+                // Handle nested FeatureCollection or direct Geometry
+                let polygonGeom = parsedGeoJson;
+                if (parsedGeoJson.type === "FeatureCollection" && parsedGeoJson.features?.[0]) {
+                    polygonGeom = parsedGeoJson.features[0].geometry;
+                } else if (parsedGeoJson.type === "Feature") {
+                    polygonGeom = parsedGeoJson.geometry;
+                }
+
+                if (polygonGeom && (polygonGeom.type === "Polygon" || polygonGeom.type === "MultiPolygon")) {
+                    const zonePolygon = turf.polygon(polygonGeom.coordinates);
+                    if (turf.booleanPointInPolygon(userPoint, zonePolygon)) {
+                        resolvedZoneId = zone.id;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!resolvedZoneId) {
+            throw new BadRequest("Your delivery address is outside our covered delivery zones.");
+        }
+
+        // -----------------------------------------------
+        // Fetch restaurant delivery fee for the resolved zone
         const [selfFee] = await db.select().from(restaurantZoneDeliveryFees)
             .where(and(
                 eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
@@ -889,15 +940,13 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 10. Execute Order (Transaction)
     // ==========================================
     const now = new Date();
-
-    // 🟢 إنشاء كائن منفصل لبداية اليوم لمنع تعديل متغير now الأصلي
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
 
     let createdDailyOrderNumber = 1;
 
     await db.transaction(async (tx) => {
-        // 🔒 1. التأكد الحرج المباشر للمحفظة داخل الـ Transaction مع القفل (FOR UPDATE)
+        // 🔒 1. Wallet deduction with FOR UPDATE
         if (isWalletPayment) {
             const [userWallet] = await tx.select()
                 .from(userWallets)
@@ -928,20 +977,20 @@ export const checkout = async (req: Request | any, res: Response) => {
             });
         }
 
-        // 🔒 2. حساب رقم الطلب اليومي بأمان باستخدام startOfToday
+        // 🔒 2. Daily order number calculation
         const [ordersCountResult] = await tx
             .select({ count: sql<number>`count(${orders.id})` })
             .from(orders)
             .where(
                 and(
                     eq(orders.restaurantId, restaurantId),
-                    gte(orders.createdAt, startOfToday) // 👈 تم الاستبدال هنا للحفاظ على قيمة now الحقيقية
+                    gte(orders.createdAt, startOfToday)
                 )
             );
 
         createdDailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
 
-        // 3. إنشاء الطلب
+        // 3. Create order record
         await tx.insert(orders).values({
             id: orderId,
             orderNumber,
@@ -949,6 +998,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             userId,
             restaurantId,
             branchId,
+            // zoneId: resolvedZoneId,
             addressId: addressId || null,
             orderSource,
             paymentMethod,
@@ -969,7 +1019,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(cartItems).where(eq(cartItems.userId, userId));
 
-        // إرسال إشعار للـ superadmin
+        // Superadmin notification
         await tx.insert(notifications).values({
             recipientType: "superadmin",
             recipientId: "superadmin",
@@ -978,15 +1028,18 @@ export const checkout = async (req: Request | any, res: Response) => {
             data: { orderId, orderNumber }
         });
 
-
-        // 4. إدارات الكوبونات والتخفيضات
+        // 4. Coupons and Discounts tracking
         if (appliedCoupon) {
             await tx.insert(couponUsages).values({
                 id: uuidv4(),
                 couponId: appliedCoupon.id,
                 userId,
                 orderId,
-                discountAmount: appliedCoupon.discountType === "free_delivery" ? deliveryFee.toFixed(2) : appliedCoupon.discountType === "fixed_amount" ? appliedCoupon.discountValue.toString() : totalDiscount.toFixed(2)
+                discountAmount: appliedCoupon.discountType === "free_delivery"
+                    ? deliveryFee.toFixed(2)
+                    : appliedCoupon.discountType === "fixed_amount"
+                        ? appliedCoupon.discountValue.toString()
+                        : totalDiscount.toFixed(2)
             });
 
             await tx.update(coupons)
@@ -1002,7 +1055,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
         }
 
-        // 5. محفظة المطعم والحسابات المالية
+        // 5. Restaurant wallet calculations
         let [restaurantWallet] = await tx.select().from(restaurantWallets).where(eq(restaurantWallets.restaurantId, restaurantId)).for("update");
 
         if (!restaurantWallet) {
@@ -1058,7 +1111,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 11. Send Notification to Restaurant
     // ==========================================
-    // 🟢 تنسيق الوقت بتوقيت القاهرة المحلي (Africa/Cairo)
     const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
         timeZone: "Africa/Cairo",
         hour: "numeric",
@@ -1086,6 +1138,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             orderDetails: {
                 orderId,
                 orderNumber,
+                zoneId: resolvedZoneId,
                 subtotal,
                 deliveryFee,
                 serviceFee,
@@ -1346,23 +1399,30 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     if (!req.user) {
         throw new UnauthorizedError("Unauthenticated: Token is missing or invalid");
     }
-    
+
     const userId = req.user.id;
     const restaurantId = req.query.restaurantId as string;
     const orderSource = req.query.orderSource as string;
-
-        const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
-    if (!validOrderSources.includes(orderSource)) {
-        throw new BadRequest("Invalid order source");
-    }
 
     if (!restaurantId) {
         throw new BadRequest("restaurantId is required");
     }
 
-    // جلب البيانات المطلوبة من الداتا بيز
-    const [userAddresses, restaurantBranches, zoneFees] = await Promise.all([
-        // أ) عناوين اليوزر 
+    const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
+    if (!orderSource || !validOrderSources.includes(orderSource)) {
+        throw new BadRequest("Invalid or missing order source");
+    }
+
+    // جلب جميع البيانات المطلوبة من الداتا بيز بالتوازي لتقليل زمن الـ Response
+    const [
+        userAddresses,
+        restaurantBranches,
+        zoneFees,
+        activePaymentMethods,
+        getCancelReasons,
+        businessPlans
+    ] = await Promise.all([
+        // أ) عناوين اليوزر
         db.select().from(addresses).where(eq(addresses.userId, userId)),
 
         // ب) فروع المطعم
@@ -1375,7 +1435,34 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                 eq(restaurantZoneDeliveryFees.status, "active")
             )
         ),
+
+        // د) طرق الدفع النشطة
+        db.select({
+            id: paymentMethods.id,
+            name: paymentMethods.name,
+            nameAr: paymentMethods.nameAr
+        }).from(paymentMethods).where(eq(paymentMethods.isActive, true)),
+
+        // هـ) أسباب الإلغاء
+        db.select().from(selectReasons).where(eq(selectReasons.type, "user")),
+
+        // و) خطة العمل ورسوم الخدمة
+        db.select({ serviceFee: restaurantBusinessPlans.serviceFee })
+            .from(restaurantBusinessPlans)
+            .where(
+                and(
+                    eq(restaurantBusinessPlans.restaurantId, restaurantId),
+                    eq(restaurantBusinessPlans.platformType, orderSource as any)
+                )
+            )
+            .limit(1)
     ]);
+
+    // التأكد من وجود خطة عمل نَشِطة
+    const plan = businessPlans[0];
+    if (!plan) {
+        throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
+    }
 
     // دمج معلومات التوصيل والرسوم مع كل عنوان
     const zoneFeeMap = new Map<string, number>();
@@ -1384,41 +1471,17 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     });
 
     const addressesWithDeliveryInfo = userAddresses.map((addr) => {
-        const isDeliverable = zoneFeeMap.has(addr.zoneId);
+        const isDeliverable = addr.zoneId ? zoneFeeMap.has(addr.zoneId) : false;
         return {
             ...addr,
             isDeliverable,
-            deliveryFee: isDeliverable ? zoneFeeMap.get(addr.zoneId)! : null,
+            deliveryFee: isDeliverable && addr.zoneId ? zoneFeeMap.get(addr.zoneId)! : null,
         };
     });
 
-    // د) طرق الدفع 
-    const activePaymentMethods = await db.select({
-        id: paymentMethods.id,
-        name: paymentMethods.name,
-        nameAr: paymentMethods.nameAr
-    }).from(paymentMethods).where(eq(paymentMethods.isActive, true));
+    const serviceFee = parseFloat((plan.serviceFee || "0") as string);
 
-    const getCancelReasons = await db.select().from(selectReasons).where(eq(selectReasons.type, "user"));
-
-    const [plan] = await db.select({serviceFee: restaurantBusinessPlans.serviceFee})
-        .from(restaurantBusinessPlans)
-        .where(
-            and(
-                eq(restaurantBusinessPlans.restaurantId, restaurantId),
-                eq(restaurantBusinessPlans.platformType, orderSource as any)
-            )
-        )
-        .limit(1);
-
-    if (!plan) {
-        throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
-    }
-
-    const serviceFee = parseFloat(plan.serviceFee as string || "0");
-
-
-    // تجميع الداتا وإرسالها
+    // تجميع البيانات وإرسالها
     return SuccessResponse(res, {
         data: {
             addresses: addressesWithDeliveryInfo,
@@ -1429,6 +1492,94 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         }
     });
 };
+
+// export const getOrderPrerequisites = async (req: Request | any, res: Response) => {
+//     if (!req.user) {
+//         throw new UnauthorizedError("Unauthenticated: Token is missing or invalid");
+//     }
+
+//     const userId = req.user.id;
+//     const restaurantId = req.query.restaurantId as string;
+//     const orderSource = req.query.orderSource as string;
+
+//     const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
+//     if (!validOrderSources.includes(orderSource)) {
+//         throw new BadRequest("Invalid order source");
+//     }
+
+//     if (!restaurantId) {
+//         throw new BadRequest("restaurantId is required");
+//     }
+
+//     // جلب البيانات المطلوبة من الداتا بيز
+//     const [userAddresses, restaurantBranches, zoneFees] = await Promise.all([
+//         // أ) عناوين اليوزر 
+//         db.select().from(addresses).where(eq(addresses.userId, userId)),
+
+//         // ب) فروع المطعم
+//         db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
+
+//         // ج) رسوم توصيل المناطق الخاصة بالمطعم
+//         db.select().from(restaurantZoneDeliveryFees).where(
+//             and(
+//                 eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
+//                 eq(restaurantZoneDeliveryFees.status, "active")
+//             )
+//         ),
+//     ]);
+
+//     // دمج معلومات التوصيل والرسوم مع كل عنوان
+//     const zoneFeeMap = new Map<string, number>();
+//     zoneFees.forEach((fee) => {
+//         zoneFeeMap.set(fee.zoneId, parseFloat((fee.deliveryFee || "0") as string));
+//     });
+
+//     const addressesWithDeliveryInfo = userAddresses.map((addr) => {
+//         const isDeliverable = zoneFeeMap.has(addr.zoneId);
+//         return {
+//             ...addr,
+//             isDeliverable,
+//             deliveryFee: isDeliverable ? zoneFeeMap.get(addr.zoneId)! : null,
+//         };
+//     });
+
+//     // د) طرق الدفع 
+//     const activePaymentMethods = await db.select({
+//         id: paymentMethods.id,
+//         name: paymentMethods.name,
+//         nameAr: paymentMethods.nameAr
+//     }).from(paymentMethods).where(eq(paymentMethods.isActive, true));
+
+//     const getCancelReasons = await db.select().from(selectReasons).where(eq(selectReasons.type, "user"));
+
+//     const [plan] = await db.select({ serviceFee: restaurantBusinessPlans.serviceFee })
+//         .from(restaurantBusinessPlans)
+//         .where(
+//             and(
+//                 eq(restaurantBusinessPlans.restaurantId, restaurantId),
+//                 eq(restaurantBusinessPlans.platformType, orderSource as any)
+//             )
+//         )
+//         .limit(1);
+
+//     if (!plan) {
+//         throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
+//     }
+
+//     const serviceFee = parseFloat(plan.serviceFee as string || "0");
+
+
+//     // تجميع الداتا وإرسالها
+//     return SuccessResponse(res, {
+//         data: {
+//             addresses: addressesWithDeliveryInfo,
+//             branches: restaurantBranches,
+//             paymentMethods: activePaymentMethods,
+//             reasons: getCancelReasons,
+//             serviceFee: serviceFee.toFixed(2),
+//         }
+//     });
+// };
 
 // ==========================================
 // 6. إلغاء الطلب من قبل المستخدم (Cancel Order)
