@@ -44,7 +44,7 @@ export const addUserAddress = async (req: Request, res: Response) => {
         if (!req.user) throw new UnauthorizedError("Unauthenticated");
         const userId = req.user.id;
 
-        const { type, title, lat, lng, street, number, floor, landmark, location } = req.body;
+        const { type, title, lat, lng, street, number, floor, apartment, landmark, location } = req.body;
 
         if (!lat || !lng || !street || !number || !title) {
             throw new BadRequest("Missing required address fields");
@@ -64,6 +64,7 @@ export const addUserAddress = async (req: Request, res: Response) => {
             street,
             number: String(number),
             floor: floor ? String(floor) : null,
+            apartment: apartment ? String(apartment) : null,
             landmark: landmark || null,
             location: location || null,
             zoneId: detectedZoneId, // يحفظ الـ ID أو null لو خارج التغطية
@@ -91,7 +92,7 @@ export const updateUserAddress = async (req: Request, res: Response) => {
         if (!req.user) throw new UnauthorizedError("Unauthenticated");
         const userId = req.user.id;
         const { addressId } = req.params;
-        const { type, title, lat, lng, street, number, floor, landmark, location } = req.body;
+        const { type, title, lat, lng, street, number, floor, apartment, landmark, location } = req.body;
 
         const [existingAddress] = await db
             .select()
@@ -119,6 +120,7 @@ export const updateUserAddress = async (req: Request, res: Response) => {
                 ...(street && { street }),
                 ...(number && { number: String(number) }),
                 ...(floor !== undefined && { floor: floor ? String(floor) : null }),
+                ...(apartment !== undefined && { apartment: apartment ? String(apartment) : null }),
                 ...(landmark !== undefined && { landmark }),
                 ...(location !== undefined && { location }),
                 zoneId: updatedZoneId,

@@ -21,6 +21,7 @@ export const addresses = mysqlTable("addresses", {
     street: varchar("street", { length: 255 }).notNull(),
     number: varchar("number", { length: 20 }).notNull(),
     floor: varchar("floor", { length: 20 }),
+    apartment: varchar("apartment", { length: 50 }),
     landmark: varchar("landmark", { length: 500 }),
     location: varchar("location", { length: 255 }),
     createdAt: timestamp("created_at").defaultNow(),
