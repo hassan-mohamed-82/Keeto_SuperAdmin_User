@@ -6,6 +6,7 @@ import { users } from "../user/Users";
 import { branches, paymentMethods } from "../../schema";
 import { addresses } from "../user/address";
 import { selectReasons } from "./selectReasons";
+import { deliveryMen } from "./delivery_man";
 
 export const orders = mysqlTable("orders", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -59,6 +60,9 @@ export const orders = mysqlTable("orders", {
         .references(() => selectReasons.id),
     cancelReason: text("cancel_reason"),
     note: text("note"),
+
+    deliveryManId: char("delivery_man_id", { length: 36 })
+        .references(() => deliveryMen.id),
     dailyOrderNumber: int("daily_order_number").default(1),
 
     rating: int("rating"),

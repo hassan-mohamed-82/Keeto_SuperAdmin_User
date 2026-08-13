@@ -524,6 +524,12 @@ export const toggleFavorite = async (req: Request, res: Response) => {
 export const getUserFavorites = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
+    const restaurantId = req.query.restaurantId as string | undefined;
+
+    const conditions = [eq(favorites.userId, userId)];
+    if (restaurantId) {
+        conditions.push(eq(favorites.restaurantId, restaurantId));
+    }
 
     const favs = await db.select({
         favoriteId: favorites.id,
@@ -552,7 +558,7 @@ export const getUserFavorites = async (req: Request, res: Response) => {
     .from(favorites)
     .leftJoin(restaurants, eq(favorites.restaurantId, restaurants.id))
     .leftJoin(food, eq(favorites.foodId, food.id))
-    .where(eq(favorites.userId, userId));
+    .where(and(...conditions));
 
     const uniqueRestaurants = [...new Set(favs.map(f => f.restaurant?.id).filter(Boolean))];
     const discountsByRestaurant = new Map();

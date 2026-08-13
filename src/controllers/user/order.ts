@@ -15,7 +15,8 @@ import {
     restaurantBusinessPlans, food,
     variationOptions,
     addons,
-    zones
+    zones,
+    deliveryMen
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -1178,11 +1179,16 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             addressTitle: addresses.title,
             addressStreet: addresses.street,
             addressLandmark: addresses.landmark,
+            // Delivery man info
+            deliveryManId: orders.deliveryManId,
+            deliveryManName: deliveryMen.name,
+            deliveryManPhone: deliveryMen.phone,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(branches, eq(orders.branchId, branches.id))
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
+        .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
         .where(
             and(
                 eq(orders.userId, userId),
@@ -1207,6 +1213,9 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
         location: o.orderType === "delivery"
             ? { type: "address", title: o.addressTitle, street: o.addressStreet, landmark: o.addressLandmark }
             : { type: "branch", name: o.branchName },
+        deliveryMan: o.orderType === "delivery" && o.deliveryManId
+            ? { id: o.deliveryManId, name: o.deliveryManName, phone: o.deliveryManPhone }
+            : null,
     }));
 
     return SuccessResponse(res, { data: formatted });
@@ -1240,11 +1249,16 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             addressTitle: addresses.title,
             addressStreet: addresses.street,
             addressLandmark: addresses.landmark,
+            // Delivery man info
+            deliveryManId: orders.deliveryManId,
+            deliveryManName: deliveryMen.name,
+            deliveryManPhone: deliveryMen.phone,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(branches, eq(orders.branchId, branches.id))
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
+        .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
         .where(
             and(
                 eq(orders.userId, userId),
@@ -1271,6 +1285,9 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
         location: o.orderType === "delivery"
             ? { type: "address", title: o.addressTitle, street: o.addressStreet, landmark: o.addressLandmark }
             : { type: "branch", name: o.branchName },
+        deliveryMan: o.orderType === "delivery" && o.deliveryManId
+            ? { id: o.deliveryManId, name: o.deliveryManName, phone: o.deliveryManPhone }
+            : null,
     }));
 
     return SuccessResponse(res, { data: formatted });
@@ -1323,12 +1340,18 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             addressTitle: addresses.title,
             addressStreet: addresses.street,
             addressLandmark: addresses.landmark,
+
+            // Delivery man info
+            deliveryManId: orders.deliveryManId,
+            deliveryManName: deliveryMen.name,
+            deliveryManPhone: deliveryMen.phone,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .leftJoin(branches, eq(orders.branchId, branches.id))
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
+        .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
         .where(eq(orders.id, orderId))
         .limit(1);
 
@@ -1387,6 +1410,9 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
                     name: o.branchName,
                     address: o.branchAddress,
                 },
+            deliveryMan: o.orderType === "delivery" && o.deliveryManId
+                ? { id: o.deliveryManId, name: o.deliveryManName, phone: o.deliveryManPhone }
+                : null,
             items
         }
     });

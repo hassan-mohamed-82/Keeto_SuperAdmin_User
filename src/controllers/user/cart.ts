@@ -227,6 +227,12 @@ export const addToCart = async (req: Request | any, res: Response) => {
 ========================================= */
 export const getCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
+    const queryRestaurantId = req.query.restaurantId as string | undefined;
+
+    const conditions = [eq(cartItems.userId, userId)];
+    if (queryRestaurantId) {
+        conditions.push(eq(cartItems.restaurantId, queryRestaurantId));
+    }
 
     const items = await db
         .select({
@@ -253,7 +259,7 @@ export const getCart = async (req: Request | any, res: Response) => {
         .from(cartItems)
         .leftJoin(food, eq(cartItems.foodId, food.id))
         .leftJoin(restaurants, eq(cartItems.restaurantId, restaurants.id))
-        .where(eq(cartItems.userId, userId));
+        .where(and(...conditions));
 
     if (items.length === 0) {
         return SuccessResponse(res, { data: { items: [], totalSummary: { subtotal: 0 } } });
@@ -338,6 +344,13 @@ export const getCart = async (req: Request | any, res: Response) => {
                 cartId: item.cartId,
                 foodId: item.foodId,
                 name: item.name,
+                nameAr: item.nameAr,
+                nameFr: item.nameFr,
+                description: item.description,
+                descriptionAr: item.descriptionAr,
+                descriptionFr: item.descriptionFr,
+                discountType: item.discountType,
+                discountValue: item.discountValue,
                 image: item.image,
                 restaurantId: item.restaurantId,
                 restaurantName: item.restaurantName,
