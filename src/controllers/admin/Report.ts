@@ -12,6 +12,16 @@ type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "
 type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
 const ALL_RESTAURANT_TYPES = ["mega", "super", "A", "B", "C", "C-"] as const;
 
+// Points per restaurant type (mirrors restaurants.ts logic)
+const RESTAURANT_TYPE_POINTS: Record<string, number> = {
+    mega: 50,
+    super: 25,
+    a: 10,
+    b: 5,
+    c: 2,
+    "c-": 1,
+};
+
 // ==========================================
 // API 1: التقرير المالي العام 
 // ==========================================
@@ -1025,7 +1035,9 @@ export const getSalesReport = async (req: Request, res: Response) => {
                 name: currentSales.name,
                 phone: currentSales.phone,
                 email: currentSales.email,
-                points: currentSales.points || 0,
+                // If date range is given, start from 0 and accumulate from filtered restaurants
+                // Otherwise use the stored cumulative total
+                points: (startDate || endDate) ? 0 : (currentSales.points || 0),
                 status: currentSales.status,
                 activeRestaurantsCount: 0,
                 inactiveRestaurantsCount: 0,
@@ -1033,7 +1045,9 @@ export const getSalesReport = async (req: Request, res: Response) => {
                 typeGroups: {}
             });
 
-            totalActiveSalesPoints += currentSales.points || 0;
+            if (!startDate && !endDate) {
+                totalActiveSalesPoints += currentSales.points || 0;
+            }
         }
 
         const salesGroup = salesMap.get(currentSales.id)!;
@@ -1042,6 +1056,13 @@ export const getSalesReport = async (req: Request, res: Response) => {
         if (currentRest) {
             const isRestActive = currentRest.status === "active";
             const restType = currentRest.type || "C";
+
+            // Accumulate points from filtered restaurants when date range is provided
+            if (startDate || endDate) {
+                const typeKey = restType.toLowerCase();
+                const earnedPoints = RESTAURANT_TYPE_POINTS[typeKey] ?? 0;
+                salesGroup.points += earnedPoints;
+            }
 
             if (isRestActive) {
                 salesGroup.activeRestaurantsCount += 1;
@@ -1119,10 +1140,15 @@ export const getSalesReport = async (req: Request, res: Response) => {
         return responseData;
     });
 
+    // When date range is provided, recalculate the summary total from filtered points
+    const finalTotalPoints = (startDate || endDate)
+        ? salesList.reduce((sum, s) => sum + (s.totalPoints || 0), 0)
+        : totalActiveSalesPoints;
+
     return SuccessResponse(res, {
         message: "Sales report fetched successfully",
         summary: {
-            totalActiveSalesPoints,
+            totalActiveSalesPoints: finalTotalPoints,
             totalActiveRestaurants: totalActiveRestaurantsCount,
             totalActiveSales: salesList.length
         },
