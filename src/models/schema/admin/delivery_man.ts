@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, char, timestamp } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, char, timestamp, boolean } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
 import { branches } from "../../schema";
@@ -18,6 +18,8 @@ export const deliveryMen = mysqlTable("delivery_men", {
     email: varchar("email", { length: 255 }),
     password: varchar("password", { length: 255 }),
     image: varchar("image", { length: 500 }),
+    isActive: boolean("is_active").default(true),
+    isDeleted: boolean("is_deleted").default(false),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
