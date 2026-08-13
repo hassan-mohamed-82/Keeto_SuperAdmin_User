@@ -93,6 +93,8 @@ export const orderItems = mysqlTable("order_items", {
 
     variationsPrice: decimal("variations_price", { precision: 10, scale: 2 }).default("0.00"),
 
+    addonsPrice: decimal("addons_price", { precision: 10, scale: 2 }).default("0.00"),
+
     totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
 
     variations: json("variations"),

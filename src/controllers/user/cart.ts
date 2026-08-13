@@ -258,6 +258,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             unitPrice: cartItems.unitPrice,
             totalPrice: cartItems.totalPrice,
             variations: cartItems.variations,
+            addons: cartItems.addons,
             note: cartItems.note
         })
         .from(cartItems)
@@ -275,7 +276,8 @@ export const getCart = async (req: Request | any, res: Response) => {
     let initialSubtotal = 0;
     const itemsData = items.map(item => {
         const originalBasePrice = parseFloat(item.price as string || "0");
-        const { variations: parsedVariations, addons: parsedAddons } = parseCartSnapshot(item.variations);
+        const { variations: parsedVariations } = parseCartSnapshot(item.variations);
+        const parsedAddons = Array.isArray(deepParseJSON(item.addons)) ? deepParseJSON(item.addons) : [];
 
         let initialDiscountPrice = originalBasePrice;
         if (item.discountType && Number(item.discountValue) > 0) {
@@ -416,8 +418,8 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     if (requestAddons !== undefined) {
         safeAddons = Array.isArray(requestAddons) ? requestAddons : [];
     } else {
-        const { addons: existingAddons } = parseCartSnapshot(cartItem.variations);
-        safeAddons = existingAddons;
+        const existingAddons = deepParseJSON(cartItem.addons);
+        safeAddons = Array.isArray(existingAddons) ? existingAddons : [];
     }
 
     const qty = quantity ?? cartItem.quantity;
@@ -480,8 +482,9 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         }
     } else if (requestAddons === undefined) {
         // لو المستخدم ما بعتش addons في الريكويست، نحتفظ بالـ snapshot الموجود
-        const { addons: existingAddonSnapshot } = parseCartSnapshot(cartItem.variations);
-        addonSnapshot = existingAddonSnapshot.map((a: any) => ({
+        const existingAddonSnapshot = deepParseJSON(cartItem.addons);
+        const addonsList = Array.isArray(existingAddonSnapshot) ? existingAddonSnapshot : [];
+        addonSnapshot = addonsList.map((a: any) => ({
             addonId: a.addonId,
             name: a.name,
             nameAr: a.nameAr,
@@ -501,7 +504,8 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
             quantity: qty,
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * qty).toString(),
-            variations: JSON.stringify(snapshot),
+            variations: JSON.stringify({ variations: safeVariations }),
+            addons: JSON.stringify(addonSnapshot),
             ...(note !== undefined ? { note: note || null } : {})
         })
         .where(and(eq(cartItems.id, cartItemId), eq(cartItems.userId, userId)));

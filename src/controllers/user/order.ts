@@ -724,6 +724,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
 
         let varPrice = 0;
+        let addonPrice = 0;
 
         for (const v of parsedVariations) {
             if (v.optionId) {
@@ -743,10 +744,10 @@ export const checkout = async (req: Request | any, res: Response) => {
             const dbAddon = addonsMap.get(addonId);
             if (dbAddon) {
                 const dbAddonPrice = parseFloat((dbAddon.price || "0") as string);
-                varPrice += dbAddonPrice;
+                addonPrice += dbAddonPrice;
                 a.price = dbAddonPrice.toString();
             } else {
-                varPrice += parseFloat(a.price || "0");
+                addonPrice += parseFloat(a.price || "0");
             }
         }
 
@@ -759,8 +760,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
         }
 
-        initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
-        itemsWithData.push({ cartItem: item, foodItem, originalBasePrice, varPrice, vars: parsedVariations, addonsList: parsedAddons });
+        initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * item.quantity;
+        itemsWithData.push({ cartItem: item, foodItem, originalBasePrice, varPrice, addonPrice, vars: parsedVariations, addonsList: parsedAddons });
     }
 
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
@@ -768,7 +769,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     const itemsToInsert: any[] = [];
 
     for (const data of itemsWithData) {
-        const { cartItem, foodItem, originalBasePrice, varPrice, vars, addonsList } = data;
+        const { cartItem, foodItem, originalBasePrice, varPrice, addonPrice, vars, addonsList } = data;
 
         const { price: discountedBasePrice } = applyPriorityDiscount(
             { id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value },
@@ -779,7 +780,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             true
         );
 
-        const itemTotal = roundMoney((discountedBasePrice + varPrice) * cartItem.quantity);
+        const itemTotal = roundMoney((discountedBasePrice + varPrice + addonPrice) * cartItem.quantity);
         subtotal += itemTotal;
 
         itemsToInsert.push({
@@ -788,6 +789,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             quantity: cartItem.quantity,
             basePrice: discountedBasePrice.toFixed(2),
             variationsPrice: varPrice.toFixed(2),
+            addonsPrice: addonPrice.toFixed(2),
             totalPrice: itemTotal.toFixed(2),
             variations: vars,
             addons: addonsList,
@@ -1203,6 +1205,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             quantity: orderItems.quantity,
             basePrice: orderItems.basePrice,
             variationsPrice: orderItems.variationsPrice,
+            addonsPrice: orderItems.addonsPrice,
             totalPrice: orderItems.totalPrice,
             note: orderItems.note,
             variations: orderItems.variations,
@@ -1304,6 +1307,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             quantity: orderItems.quantity,
             basePrice: orderItems.basePrice,
             variationsPrice: orderItems.variationsPrice,
+            addonsPrice: orderItems.addonsPrice,
             totalPrice: orderItems.totalPrice,
             note: orderItems.note,
             variations: orderItems.variations,
@@ -1424,6 +1428,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             quantity: orderItems.quantity,
             basePrice: orderItems.basePrice,
             variationsPrice: orderItems.variationsPrice,
+            addonsPrice: orderItems.addonsPrice,
             totalPrice: orderItems.totalPrice,
             note: orderItems.note,
             variations: orderItems.variations,
