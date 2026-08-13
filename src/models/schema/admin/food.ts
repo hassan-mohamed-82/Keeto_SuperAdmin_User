@@ -48,6 +48,8 @@ export const food = mysqlTable("food", {
     
     stock_type: mysqlEnum("stock_type", ["limited", "unlimited", "daily"]).default("unlimited"),
 
+    isOutOfStock: boolean("is_out_of_stock").default(false),
+
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     points: int("points").default(0),
     createdAt: timestamp("created_at").defaultNow(),

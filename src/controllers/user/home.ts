@@ -129,6 +129,7 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         price: food.price,
         foodDiscountType: food.discount_type,   
         foodDiscountValue: food.discount_value, 
+        isOutOfStock: food.isOutOfStock,
         restaurantId: restaurants.id,
         restaurantName: restaurants.name,
         restaurantNameAr: restaurants.nameAr,
@@ -175,6 +176,7 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
             restaurantNameAr: f.restaurantNameAr,
             restaurantNameFr: f.restaurantNameFr,
             restaurantLogo: f.restaurantLogo,
+            isOutOfStock: f.isOutOfStock,
             isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false
         };
     });
@@ -214,6 +216,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         price: food.price,
         foodDiscountType: food.discount_type,
         foodDiscountValue: food.discount_value,
+        isOutOfStock: food.isOutOfStock,
         image: food.image,
         points: food.points,
         
@@ -315,6 +318,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                     discountPrice: calculatedDiscountPrice,
                     discountNote,
                     image: row.image,
+                    isOutOfStock: row.isOutOfStock,
                     points: userId? row.points:null,
                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
                     
@@ -551,6 +555,7 @@ export const getUserFavorites = async (req: Request, res: Response) => {
             nameFr: food.nameFr,
             price: food.price,
             image: food.image,
+            isOutOfStock: food.isOutOfStock,
             discountType: food.discount_type,
             discountValue: food.discount_value,
         }
