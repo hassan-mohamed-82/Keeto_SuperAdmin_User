@@ -66,7 +66,7 @@ const formatDate = (date: Date | null | undefined): string | null => {
 //     // ==========================================
 //     // 🛡️ 1. Validation (التحقق من المدخلات)
 //     // ==========================================
-//     const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
+//     const validOrderSources = ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"];
 //     if (!validOrderSources.includes(orderSource)) {
 //         throw new BadRequest("Invalid order source");
 //     }
@@ -582,7 +582,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 🛡️ 1. Validation
     // ==========================================
-    const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
+    const validOrderSources = ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"];
     if (!validOrderSources.includes(orderSource)) {
         throw new BadRequest("Invalid order source");
     }
@@ -1497,7 +1497,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         throw new BadRequest("restaurantId is required");
     }
 
-    const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
+    const validOrderSources = ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"];
     if (!orderSource || !validOrderSources.includes(orderSource)) {
         throw new BadRequest("Invalid or missing order source");
     }

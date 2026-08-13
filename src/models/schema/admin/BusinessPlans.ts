@@ -7,7 +7,7 @@ export const restaurantBusinessPlans = mysqlTable("restaurant_business_plans", {
     restaurantId: char("restaurant_id", { length: 36 }).references(() => restaurants.id).notNull(),
 
     // 💡 التعديل هنا: زودنا "pos"
-    platformType: mysqlEnum("platform_type", ["online_order", "food_aggregator", "mykeeto", "pos"]).notNull(),
+    platformType: mysqlEnum("platform_type", ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"]).notNull(),
 
     // الاشتراكات
     isMonthlyActive: boolean("is_monthly_active").default(false),
