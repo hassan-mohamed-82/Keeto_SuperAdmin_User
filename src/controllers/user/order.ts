@@ -1015,8 +1015,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             recipientType: "superadmin",
             recipientId: "superadmin",
             title: "New Order",
-            body: `Order #${orderNumber} has been placed.`,
-            data: { orderId, orderNumber }
+            body: `Order #${createdDailyOrderNumber} has been placed.`,
+            data: { orderId, orderNumber, createdDailyOrderNumber }
         });
 
         // 4. Coupons and Discounts tracking
