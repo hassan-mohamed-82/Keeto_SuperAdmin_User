@@ -172,16 +172,18 @@ export const addToCart = async (req: Request | any, res: Response) => {
     // مفتاح التفرد يشمل كلاً من الـ variations والـ addons
     const key = JSON.stringify({ variations: normalizedVariations, addons: normalizedAddons });
 
-    const snapshot = { variations: normalizedVariations, addons: addonSnapshot };
+    const snapshot = { variations: normalizedVariations };
 
     const existingItems = await db.select().from(cartItems)
         .where(and(eq(cartItems.userId, userId), eq(cartItems.foodId, foodId)));
 
     const existingSame = existingItems.find(item => {
-        const { variations: dbVars, addons: dbAddons } = parseCartSnapshot(item.variations);
+        const { variations: dbVars } = parseCartSnapshot(item.variations);
+        const dbAddons = deepParseJSON(item.addons);
+        const normalizedDbAddons = normalizeAddons(Array.isArray(dbAddons) ? dbAddons : []);
         const existingKey = JSON.stringify({
             variations: normalizeVariations(dbVars),
-            addons: normalizeAddons(dbAddons)
+            addons: normalizedDbAddons
         });
         return existingKey === key;
     });
@@ -195,6 +197,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
                 unitPrice: unitPrice.toString(),
                 totalPrice: (unitPrice * newQty).toString(),
                 variations: JSON.stringify(snapshot),
+                addons: JSON.stringify(addonSnapshot),
                 ...(note !== undefined ? { note: note || null } : {})
             })
             .where(eq(cartItems.id, existingSame.id));
@@ -209,6 +212,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * quantity).toString(),
             variations: JSON.stringify(snapshot),
+            addons: JSON.stringify(addonSnapshot),
             note: note || null
         });
     }

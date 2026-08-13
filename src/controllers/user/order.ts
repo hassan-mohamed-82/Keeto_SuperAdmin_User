@@ -768,7 +768,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     const itemsToInsert: any[] = [];
 
     for (const data of itemsWithData) {
-        const { cartItem, foodItem, originalBasePrice, varPrice, vars } = data;
+        const { cartItem, foodItem, originalBasePrice, varPrice, vars, addonsList } = data;
 
         const { price: discountedBasePrice } = applyPriorityDiscount(
             { id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value },
@@ -790,6 +790,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             variationsPrice: varPrice.toFixed(2),
             totalPrice: itemTotal.toFixed(2),
             variations: vars,
+            addons: addonsList,
             note: cartItem.note || null
         });
     }
@@ -1198,6 +1199,33 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
         )
         .orderBy(desc(orders.createdAt));
 
+    // Fetch items for the active orders
+    const orderIds = activeOrders.map(o => o.orderId);
+    let allItems: any[] = [];
+    if (orderIds.length > 0) {
+        allItems = await db.select({
+            orderId: orderItems.orderId,
+            foodId: orderItems.foodId,
+            foodName: food.name,
+            foodNameAr: food.nameAr,
+            foodNameFr: food.nameFr,
+            foodDescription: food.description,
+            foodDescriptionAr: food.descriptionAr,
+            foodDescriptionFr: food.descriptionFr,
+            foodImage: food.image,
+            quantity: orderItems.quantity,
+            basePrice: orderItems.basePrice,
+            variationsPrice: orderItems.variationsPrice,
+            totalPrice: orderItems.totalPrice,
+            note: orderItems.note,
+            variations: orderItems.variations,
+            addons: orderItems.addons
+        })
+        .from(orderItems)
+        .leftJoin(food, eq(orderItems.foodId, food.id))
+        .where(inArray(orderItems.orderId, orderIds));
+    }
+
     // Return branch name or address depending on orderType
     const formatted = activeOrders.map(o => ({
         orderId: o.orderId,
@@ -1216,6 +1244,10 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
         deliveryMan: o.orderType === "delivery" && o.deliveryManId
             ? { id: o.deliveryManId, name: o.deliveryManName, phone: o.deliveryManPhone }
             : null,
+        items: allItems.filter(item => item.orderId === o.orderId).map(item => {
+            const { orderId, ...rest } = item;
+            return rest;
+        })
     }));
 
     return SuccessResponse(res, { data: formatted });
@@ -1268,6 +1300,33 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
         )
         .orderBy(desc(orders.createdAt));
 
+    // Fetch items for the history orders
+    const orderIds = historyOrders.map(o => o.orderId);
+    let allItems: any[] = [];
+    if (orderIds.length > 0) {
+        allItems = await db.select({
+            orderId: orderItems.orderId,
+            foodId: orderItems.foodId,
+            foodName: food.name,
+            foodNameAr: food.nameAr,
+            foodNameFr: food.nameFr,
+            foodDescription: food.description,
+            foodDescriptionAr: food.descriptionAr,
+            foodDescriptionFr: food.descriptionFr,
+            foodImage: food.image,
+            quantity: orderItems.quantity,
+            basePrice: orderItems.basePrice,
+            variationsPrice: orderItems.variationsPrice,
+            totalPrice: orderItems.totalPrice,
+            note: orderItems.note,
+            variations: orderItems.variations,
+            addons: orderItems.addons
+        })
+        .from(orderItems)
+        .leftJoin(food, eq(orderItems.foodId, food.id))
+        .where(inArray(orderItems.orderId, orderIds));
+    }
+
     // Return branch name or address depending on orderType
     const formatted = historyOrders.map(o => ({
         orderId: o.orderId,
@@ -1288,6 +1347,10 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
         deliveryMan: o.orderType === "delivery" && o.deliveryManId
             ? { id: o.deliveryManId, name: o.deliveryManName, phone: o.deliveryManPhone }
             : null,
+        items: allItems.filter(item => item.orderId === o.orderId).map(item => {
+            const { orderId, ...rest } = item;
+            return rest;
+        })
     }));
 
     return SuccessResponse(res, { data: formatted });
@@ -1365,11 +1428,19 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
         .select({
             foodId: orderItems.foodId,
             foodName: food.name,
+            foodNameAr: food.nameAr,
+            foodNameFr: food.nameFr,
+            foodDescription: food.description,
+            foodDescriptionAr: food.descriptionAr,
+            foodDescriptionFr: food.descriptionFr,
+            foodImage: food.image,
             quantity: orderItems.quantity,
             basePrice: orderItems.basePrice,
             variationsPrice: orderItems.variationsPrice,
             totalPrice: orderItems.totalPrice,
-            note: orderItems.note
+            note: orderItems.note,
+            variations: orderItems.variations,
+            addons: orderItems.addons
         })
         .from(orderItems)
         .leftJoin(food, eq(orderItems.foodId, food.id))

@@ -97,6 +97,8 @@ export const orderItems = mysqlTable("order_items", {
 
     variations: json("variations"),
 
+    addons: json("addons"),
+
     note: text("note"),
     
 });
