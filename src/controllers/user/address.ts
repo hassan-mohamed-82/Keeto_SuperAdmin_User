@@ -6,6 +6,7 @@ import { db } from "../../models/connection";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, UnauthorizedError, BadRequest } from "../../Errors";
 import { addresses, restaurantZoneDeliveryFees, zones, cities } from "../../models/schema";
+import { isLocationInZone } from "../../utils/geo";
 
 /**
  * دالة مساعدة لتحديد الـ Zone تلقائياً بناءً على إحداثيات العميل
@@ -37,66 +38,26 @@ import { addresses, restaurantZoneDeliveryFees, zones, cities } from "../../mode
 // }
 
 /**
- * دالة تحويل وتجهيز الإحداثيات لتصبح متوافقة تماماً مع Turf GeoJSON Polygon
- */
-function parseAndFormatPolygon(rawCoordinates: any): number[][][] | null {
-    try {
-        let coords = typeof rawCoordinates === "string"
-            ? JSON.parse(rawCoordinates)
-            : rawCoordinates;
-
-        if (coords?.coordinates) coords = coords.coordinates;
-        if (!Array.isArray(coords) || coords.length < 3) return null;
-
-        let ring: number[][] = [];
-
-        // 1. إذا كانت النقاط مخزنة كـ [{lat, lng}, ...]
-        if (typeof coords[0] === "object" && !Array.isArray(coords[0]) && "lat" in coords[0]) {
-            ring = coords.map((pt: any) => [parseFloat(pt.lng), parseFloat(pt.lat)]);
-        }
-        // 2. إذا كانت النقاط مخزنة كـ [[lng, lat], ...]
-        else if (Array.isArray(coords[0])) {
-            // لو كانت مقسمة بالفعل 3D Array
-            if (Array.isArray(coords[0][0])) return coords;
-            ring = coords.map((pt: any) => [parseFloat(pt[0]), parseFloat(pt[1])]);
-        }
-
-        if (ring.length < 3) return null;
-
-        // 3. التأكد من إغلاق المضلع (النقطة الأولى = النقطة الأخيرة)
-        const first = ring[0];
-        const last = ring[ring.length - 1];
-        if (first[0] !== last[0] || first[1] !== last[1]) {
-            ring.push([first[0], first[1]]);
-        }
-
-        return [ring]; // Turf يتوقع [ [ [lng, lat], ... ] ]
-    } catch (e) {
-        return null;
-    }
-}
-
-/**
  * دالة تحديد الـ Zone بعد إصلاح وتنسيق البيانات
  */
 async function detectZoneFromCoordinates(lat: number, lng: number): Promise<string | null> {
-    const allZones = await db.select().from(zones);
-    const userPoint = turf.point([lng, lat]); // Turf يستخدم [lng, lat]
+    const allZones = await db.select().from(zones).where(eq(zones.status, "active"));
 
     for (const zone of allZones) {
         if (!zone.coordinates) continue;
 
-        try {
-            const formattedPolygonCoords = parseAndFormatPolygon(zone.coordinates);
-            if (!formattedPolygonCoords) continue;
+        const radiusKm = parseFloat((zone.coverageAreaRadiusKm as string) || "0");
+        const isRadius = radiusKm > 0;
 
-            const polygon = turf.polygon(formattedPolygonCoords);
+        const dummyFee = {
+            coverageType: isRadius ? "RADIUS" : "POLYGON",
+            defaultCoordinates: zone.coordinates,
+            defaultRadiusKm: radiusKm,
+            zoneId: zone.id
+        };
 
-            if (turf.booleanPointInPolygon(userPoint, polygon)) {
-                return zone.id; // تم العثور على المنطقة بنجاح
-            }
-        } catch (err) {
-            console.error(`Error processing zone ${zone.id}:`, err);
+        if (isLocationInZone(lat, lng, null, dummyFee)) {
+            return zone.id;
         }
     }
 
