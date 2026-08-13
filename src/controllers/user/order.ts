@@ -871,60 +871,47 @@ export const checkout = async (req: Request | any, res: Response) => {
             resolvedZoneId = userAddress.zoneId || null;
         }
 
-        // 🟢 Spatial Zone Lookup via Turf.js if zone ID is missing
-        if (!resolvedZoneId) {
-            const lat = parseFloat(userAddress.lat as string || "0");
-            const lng = parseFloat(userAddress.lng as string || "0");
+        const lat = parseFloat(userAddress.lat as string || "0");
+        const lng = parseFloat(userAddress.lng as string || "0");
 
-            if (!lat || !lng) {
-                throw new BadRequest("Delivery address requires valid latitude and longitude coordinates.");
-            }
+        if (!lat || !lng) {
+            throw new BadRequest("Delivery address requires valid latitude and longitude coordinates.");
+        }
 
-            const userPoint = turf.point([lng, lat]); // GeoJSON expects [longitude, latitude]
+        // Fetch all active delivery fees for this restaurant
+        const restaurantFees = await db.select({
+            id: restaurantZoneDeliveryFees.id,
+            zoneId: restaurantZoneDeliveryFees.zoneId,
+            deliveryFee: restaurantZoneDeliveryFees.deliveryFee,
+            coverageType: restaurantZoneDeliveryFees.coverageType,
+            customCoordinates: restaurantZoneDeliveryFees.customCoordinates,
+            customRadiusKm: restaurantZoneDeliveryFees.customRadiusKm,
+            defaultCoordinates: zones.coordinates,
+            defaultRadiusKm: zones.coverageAreaRadiusKm
+        })
+        .from(restaurantZoneDeliveryFees)
+        .leftJoin(zones, eq(restaurantZoneDeliveryFees.zoneId, zones.id))
+        .where(
+            and(
+                eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
+                eq(restaurantZoneDeliveryFees.status, "active")
+            )
+        );
 
-            // Fetch active delivery zones
-            const activeZones = await db.select().from(zones).where(eq(zones.status, "active"));
-
-            for (const zone of activeZones) {
-                if (!zone.coordinates) continue;
-
-                let parsedGeoJson = typeof zone.coordinates === "string"
-                    ? JSON.parse(zone.coordinates)
-                    : zone.coordinates;
-
-                // Handle nested FeatureCollection or direct Geometry
-                let polygonGeom = parsedGeoJson;
-                if (parsedGeoJson.type === "FeatureCollection" && parsedGeoJson.features?.[0]) {
-                    polygonGeom = parsedGeoJson.features[0].geometry;
-                } else if (parsedGeoJson.type === "Feature") {
-                    polygonGeom = parsedGeoJson.geometry;
-                }
-
-                if (polygonGeom && (polygonGeom.type === "Polygon" || polygonGeom.type === "MultiPolygon")) {
-                    const zonePolygon = turf.polygon(polygonGeom.coordinates);
-                    if (turf.booleanPointInPolygon(userPoint, zonePolygon)) {
-                        resolvedZoneId = zone.id;
-                        break;
-                    }
-                }
+        let applicableFee = null;
+        for (const fee of restaurantFees) {
+            if (isLocationInZone(lat, lng, resolvedZoneId, fee)) {
+                applicableFee = fee;
+                break;
             }
         }
 
-        if (!resolvedZoneId) {
+        if (!applicableFee) {
             throw new BadRequest("Your delivery address is outside our covered delivery zones.");
         }
 
-        // -----------------------------------------------
-        // Fetch restaurant delivery fee for the resolved zone
-        const [selfFee] = await db.select().from(restaurantZoneDeliveryFees)
-            .where(and(
-                eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
-                eq(restaurantZoneDeliveryFees.zoneId, resolvedZoneId),
-                eq(restaurantZoneDeliveryFees.status, "active")
-            )).limit(1);
-
-        if (!selfFee) throw new BadRequest("Restaurant does not deliver to your zone directly");
-        deliveryFee = parseFloat(selfFee.deliveryFee as string || "0");
+        resolvedZoneId = applicableFee.zoneId;
+        deliveryFee = parseFloat(applicableFee.deliveryFee as string || "0");
     }
 
     if (isFreeDelivery) deliveryFee = 0;
