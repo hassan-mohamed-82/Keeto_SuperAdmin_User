@@ -117,17 +117,24 @@ export const addUserAddress = async (req: Request, res: Response) => {
             throw new BadRequest("Missing required address fields");
         }
 
+        const parsedLat = parseFloat(lat);
+        const parsedLng = parseFloat(lng);
+
+        if (isNaN(parsedLat) || isNaN(parsedLng)) {
+            throw new BadRequest("Invalid latitude or longitude format");
+        }
+
         // حساب الـ Zone تلقائياً من الإحداثيات
-        const detectedZoneId = await detectZoneFromCoordinates(parseFloat(lat), parseFloat(lng));
+        const detectedZoneId = await detectZoneFromCoordinates(parsedLat, parsedLng);
 
         const addressId = uuidv4();
-        await db.insert(addresses).values({
+        const newAddress = {
             id: addressId,
             userId,
             type: type || "home",
             title,
-            lat: String(lat),
-            lng: String(lng),
+            lat: String(parsedLat),
+            lng: String(parsedLng),
             street,
             number: String(number),
             floor: floor ? String(floor) : null,
@@ -135,14 +142,15 @@ export const addUserAddress = async (req: Request, res: Response) => {
             landmark: landmark || null,
             location: location || null,
             fulladdress: fulladdress || null,
-            zoneId: detectedZoneId, // يحفظ الـ ID أو null لو خارج التغطية
-        });
+            zoneId: detectedZoneId,
+        };
+
+        await db.insert(addresses).values(newAddress);
 
         return SuccessResponse(res, {
             message: "Address added successfully",
             data: {
-                id: addressId,
-                zoneId: detectedZoneId,
+                ...newAddress,
                 isCovered: !!detectedZoneId,
             },
         });
@@ -171,11 +179,17 @@ export const updateUserAddress = async (req: Request, res: Response) => {
             throw new NotFound("Address not found");
         }
 
+        const targetLat = lat !== undefined ? parseFloat(lat) : parseFloat(existingAddress.lat);
+        const targetLng = lng !== undefined ? parseFloat(lng) : parseFloat(existingAddress.lng);
+
         let updatedZoneId = existingAddress.zoneId;
 
-        // إذا تغيرت الإحداثيات، نعيد اكتشاف الـ Zone
-        if (lat && lng && (lat !== existingAddress.lat || lng !== existingAddress.lng)) {
-            updatedZoneId = await detectZoneFromCoordinates(parseFloat(lat), parseFloat(lng));
+        // إعادة الحساب إذا تغيرت الإحداثيات
+        if (targetLat !== parseFloat(existingAddress.lat) || targetLng !== parseFloat(existingAddress.lng)) {
+            if (isNaN(targetLat) || isNaN(targetLng)) {
+                throw new BadRequest("Invalid coordinates provided");
+            }
+            updatedZoneId = await detectZoneFromCoordinates(targetLat, targetLng);
         }
 
         await db
@@ -183,10 +197,10 @@ export const updateUserAddress = async (req: Request, res: Response) => {
             .set({
                 ...(type && { type }),
                 ...(title && { title }),
-                ...(lat && { lat: String(lat) }),
-                ...(lng && { lng: String(lng) }),
+                ...(lat !== undefined && { lat: String(lat) }),
+                ...(lng !== undefined && { lng: String(lng) }),
                 ...(street && { street }),
-                ...(number && { number: String(number) }),
+                ...(number !== undefined && { number: String(number) }),
                 ...(floor !== undefined && { floor: floor ? String(floor) : null }),
                 ...(apartment !== undefined && { apartment: apartment ? String(apartment) : null }),
                 ...(landmark !== undefined && { landmark }),
@@ -198,7 +212,7 @@ export const updateUserAddress = async (req: Request, res: Response) => {
 
         return SuccessResponse(res, {
             message: "Address updated successfully",
-            data: { id: addressId, zoneId: updatedZoneId },
+            data: { id: addressId, zoneId: updatedZoneId, isCovered: !!updatedZoneId },
         });
     } catch (error) {
         console.error("🔥 UPDATE ADDRESS ERROR:", error);

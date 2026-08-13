@@ -24,7 +24,7 @@ import { NotFound } from "../../Errors/NotFound";
 import { v4 as uuidv4 } from "uuid";
 import { UnauthorizedError } from "../../Errors";
 import { sendPushNotification } from "../../utils/notifications";
-import { calculateDistance } from "../../utils/geo";
+import { calculateDistance, isLocationInZone } from "../../utils/geo";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
 import { calculateCurrentStatus } from "./restaurantFeatures";
 import * as turf from "@turf/turf";
@@ -1413,7 +1413,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         throw new BadRequest("Invalid or missing order source");
     }
 
-    // جلب جميع البيانات المطلوبة من الداتا بيز بالتوازي لتقليل زمن الـ Response
+    // 1. جلب البيانات من الداتا بيز بالتوازي
     const [
         userAddresses,
         restaurantBranches,
@@ -1422,31 +1422,32 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         getCancelReasons,
         businessPlans
     ] = await Promise.all([
-        // أ) عناوين اليوزر
         db.select().from(addresses).where(eq(addresses.userId, userId)),
-
-        // ب) فروع المطعم
         db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
-
-        // ج) رسوم توصيل المناطق الخاصة بالمطعم
-        db.select().from(restaurantZoneDeliveryFees).where(
+        db.select({
+            id: restaurantZoneDeliveryFees.id,
+            zoneId: restaurantZoneDeliveryFees.zoneId,
+            deliveryFee: restaurantZoneDeliveryFees.deliveryFee,
+            coverageType: restaurantZoneDeliveryFees.coverageType,
+            customCoordinates: restaurantZoneDeliveryFees.customCoordinates,
+            customRadiusKm: restaurantZoneDeliveryFees.customRadiusKm,
+            defaultCoordinates: zones.coordinates,
+            defaultRadiusKm: zones.coverageAreaRadiusKm,
+        })
+        .from(restaurantZoneDeliveryFees)
+        .leftJoin(zones, eq(restaurantZoneDeliveryFees.zoneId, zones.id))
+        .where(
             and(
                 eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
                 eq(restaurantZoneDeliveryFees.status, "active")
             )
         ),
-
-        // د) طرق الدفع النشطة
         db.select({
             id: paymentMethods.id,
             name: paymentMethods.name,
             nameAr: paymentMethods.nameAr
         }).from(paymentMethods).where(eq(paymentMethods.isActive, true)),
-
-        // هـ) أسباب الإلغاء
         db.select().from(selectReasons).where(eq(selectReasons.type, "user")),
-
-        // و) خطة العمل ورسوم الخدمة
         db.select({ serviceFee: restaurantBusinessPlans.serviceFee })
             .from(restaurantBusinessPlans)
             .where(
@@ -1458,30 +1459,52 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
             .limit(1)
     ]);
 
-    // التأكد من وجود خطة عمل نَشِطة
     const plan = businessPlans[0];
     if (!plan) {
         throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
     }
 
-    // دمج معلومات التوصيل والرسوم مع كل عنوان
-    const zoneFeeMap = new Map<string, number>();
-    zoneFees.forEach((fee) => {
-        zoneFeeMap.set(fee.zoneId, parseFloat((fee.deliveryFee || "0") as string));
-    });
-
+    // 2. معالجة كل عنوان عند المستخدم ومعرفة هل هو قابل للتوصيل
     const addressesWithDeliveryInfo = userAddresses.map((addr) => {
-        const isDeliverable = addr.zoneId ? zoneFeeMap.has(addr.zoneId) : false;
+        let isDeliverable = false;
+        let applicableDeliveryFee: number | null = null;
+
+        const addrLat = parseFloat(addr.lat || "0");
+        const addrLng = parseFloat(addr.lng || "0");
+
+        // لو العنوان مفيش فيه إحداثيات سليمة
+        if (!addrLat || !addrLng) {
+            return {
+                ...addr,
+                isDeliverable: false,
+                deliveryFee: null,
+            };
+        }
+
+        for (const fee of zoneFees) {
+            let matchesZone = isLocationInZone(addrLat, addrLng, addr.zoneId, fee);
+
+            // لو النطاق ده طابق موقع العميل
+            if (matchesZone) {
+                isDeliverable = true;
+                const currentFee = parseFloat((fee.deliveryFee || "0") as string);
+                
+                // 🚀 اختيار السعر الأعلى في حالة مطابقة أكثر من نطاق متداخل
+                if (applicableDeliveryFee === null || currentFee > applicableDeliveryFee) {
+                    applicableDeliveryFee = currentFee;
+                }
+            }
+        }
+
         return {
             ...addr,
             isDeliverable,
-            deliveryFee: isDeliverable && addr.zoneId ? zoneFeeMap.get(addr.zoneId)! : null,
+            deliveryFee: applicableDeliveryFee,
         };
     });
 
     const serviceFee = parseFloat((plan.serviceFee || "0") as string);
 
-    // تجميع البيانات وإرسالها
     return SuccessResponse(res, {
         data: {
             addresses: addressesWithDeliveryInfo,
@@ -1492,94 +1515,6 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         }
     });
 };
-
-// export const getOrderPrerequisites = async (req: Request | any, res: Response) => {
-//     if (!req.user) {
-//         throw new UnauthorizedError("Unauthenticated: Token is missing or invalid");
-//     }
-
-//     const userId = req.user.id;
-//     const restaurantId = req.query.restaurantId as string;
-//     const orderSource = req.query.orderSource as string;
-
-//     const validOrderSources = ["online_order", "food_aggregator", "mykeeto", "pos"];
-//     if (!validOrderSources.includes(orderSource)) {
-//         throw new BadRequest("Invalid order source");
-//     }
-
-//     if (!restaurantId) {
-//         throw new BadRequest("restaurantId is required");
-//     }
-
-//     // جلب البيانات المطلوبة من الداتا بيز
-//     const [userAddresses, restaurantBranches, zoneFees] = await Promise.all([
-//         // أ) عناوين اليوزر 
-//         db.select().from(addresses).where(eq(addresses.userId, userId)),
-
-//         // ب) فروع المطعم
-//         db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
-
-//         // ج) رسوم توصيل المناطق الخاصة بالمطعم
-//         db.select().from(restaurantZoneDeliveryFees).where(
-//             and(
-//                 eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
-//                 eq(restaurantZoneDeliveryFees.status, "active")
-//             )
-//         ),
-//     ]);
-
-//     // دمج معلومات التوصيل والرسوم مع كل عنوان
-//     const zoneFeeMap = new Map<string, number>();
-//     zoneFees.forEach((fee) => {
-//         zoneFeeMap.set(fee.zoneId, parseFloat((fee.deliveryFee || "0") as string));
-//     });
-
-//     const addressesWithDeliveryInfo = userAddresses.map((addr) => {
-//         const isDeliverable = zoneFeeMap.has(addr.zoneId);
-//         return {
-//             ...addr,
-//             isDeliverable,
-//             deliveryFee: isDeliverable ? zoneFeeMap.get(addr.zoneId)! : null,
-//         };
-//     });
-
-//     // د) طرق الدفع 
-//     const activePaymentMethods = await db.select({
-//         id: paymentMethods.id,
-//         name: paymentMethods.name,
-//         nameAr: paymentMethods.nameAr
-//     }).from(paymentMethods).where(eq(paymentMethods.isActive, true));
-
-//     const getCancelReasons = await db.select().from(selectReasons).where(eq(selectReasons.type, "user"));
-
-//     const [plan] = await db.select({ serviceFee: restaurantBusinessPlans.serviceFee })
-//         .from(restaurantBusinessPlans)
-//         .where(
-//             and(
-//                 eq(restaurantBusinessPlans.restaurantId, restaurantId),
-//                 eq(restaurantBusinessPlans.platformType, orderSource as any)
-//             )
-//         )
-//         .limit(1);
-
-//     if (!plan) {
-//         throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
-//     }
-
-//     const serviceFee = parseFloat(plan.serviceFee as string || "0");
-
-
-//     // تجميع الداتا وإرسالها
-//     return SuccessResponse(res, {
-//         data: {
-//             addresses: addressesWithDeliveryInfo,
-//             branches: restaurantBranches,
-//             paymentMethods: activePaymentMethods,
-//             reasons: getCancelReasons,
-//             serviceFee: serviceFee.toFixed(2),
-//         }
-//     });
-// };
 
 // ==========================================
 // 6. إلغاء الطلب من قبل المستخدم (Cancel Order)
