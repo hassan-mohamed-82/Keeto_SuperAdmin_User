@@ -28,7 +28,7 @@ export const orders = mysqlTable("orders", {
     addressId: char("address_id", { length: 36 })
         .references(() => addresses.id),
 
-    orderSource: mysqlEnum("order_source", ["online_order", "food_aggregator","my_keeto"]).notNull(),
+    orderSource: mysqlEnum("order_source", ["online_order_web", "online_order_app", "food_aggregator","my_keeto"]).notNull(),
 
     paymentMethod: char("payment_method", { length: 36 }),
 
