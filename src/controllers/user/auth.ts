@@ -55,7 +55,7 @@ const verifyLink = `${baseUrl}/api/user/auth/verify-email?token=${token}`;
                 phone,
                 password: hashedPassword,
                 photo,
-             
+                isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
             }).where(eq(users.id, userId));
 
             // delete old tokens
@@ -74,7 +74,8 @@ const verifyLink = `${baseUrl}/api/user/auth/verify-email?token=${token}`;
                 phone,
                 password: hashedPassword,
                 photo,
-                isVerified: false
+                isVerified: false,
+                isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
             });
         }
 
@@ -245,7 +246,9 @@ export const login = async (req: Request, res: Response) => {
 
 
     const token = generateUserToken({ id: user.id, name: user.name });
-    const isProfileComplete = !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
+    
+    // For older users where DB default might be false, fallback to checking email
+    const isProfileComplete = user.isProfileComplete || !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
 
     return SuccessResponse(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email, isProfileComplete } } });
 };

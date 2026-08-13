@@ -21,6 +21,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
             alternatePhone: users.alternatePhone,
             photo: users.photo,
             isVerified: users.isVerified,
+            isProfileComplete: users.isProfileComplete,
             createdAt: users.createdAt,
         })
         .from(users)
@@ -93,7 +94,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
     //     .leftJoin(restaurants, eq(restaurants.id, userRestaurantPoints.restaurantId))
     //     .where(eq(userRestaurantPoints.userId, userId));
 
-    const isProfileComplete = !(userInfo.email && userInfo.email.endsWith("@privaterelay.appleid.com"));
+    const isProfileComplete = userInfo.isProfileComplete;
 
     return SuccessResponse(res, {
         data: {
@@ -157,10 +158,12 @@ export const updateProfile = async (req: Request | any, res: Response) => {
     const userId = req.user?.id || req.user?._id;
     const { name, phone, email, photo, alternatePhone } = req.body;
 
-    await db.update(users)
-        .set({ name, phone, email, photo, alternatePhone })
-        .where(eq(users.id, userId));
     const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
+
+    await db.update(users)
+        .set({ name, phone, email, photo, alternatePhone, isProfileComplete })
+        .where(eq(users.id, userId));
+
     return SuccessResponse(res, { message: "Profile updated successfully", data: { isProfileComplete } });
 };
 

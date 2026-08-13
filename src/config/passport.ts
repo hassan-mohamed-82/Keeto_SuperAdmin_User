@@ -69,6 +69,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         createdAt: new Date(), 
         facebookId: null, 
         appleId:null,
+        isProfileComplete: true,
         isDeleted: false,
         deletedAt: null
       };
