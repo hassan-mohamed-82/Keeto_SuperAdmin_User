@@ -44,19 +44,25 @@ async function detectZoneFromCoordinates(lat: number, lng: number): Promise<stri
     const allZones = await db.select().from(zones).where(eq(zones.status, "active"));
 
     for (const zone of allZones) {
-        if (!zone.coordinates) continue;
+        // فحص وجود إحداثيات (سواء custom أو default أو coordinates)
+        const zoneCoords = (zone as any).customCoordinates || (zone as any).defaultCoordinates || zone.coordinates;
+        if (!zoneCoords) continue;
 
-        const radiusKm = parseFloat((zone.coverageAreaRadiusKm as string) || "0");
-        const isRadius = radiusKm > 0;
+        // جلب نصف القطر مع دعم الـ Fallback
+        const radiusVal = (zone as any).customRadiusKm || (zone as any).defaultRadiusKm || (zone as any).coverageAreaRadiusKm;
+        const radiusKm = parseFloat(radiusVal || "0");
+
+        // تحديد نوع التغطية
+        const coverageType = (zone as any).coverageType || (radiusKm > 0 ? "RADIUS" : "POLYGON");
 
         const dummyFee = {
-            coverageType: isRadius ? "RADIUS" : "POLYGON",
-            defaultCoordinates: zone.coordinates,
+            coverageType,
+            defaultCoordinates: zoneCoords,
             defaultRadiusKm: radiusKm,
             zoneId: zone.id
         };
 
-        if (isLocationInZone(lat, lng, null, dummyFee)) {
+        if (isLocationInZone(lat, lng, zone.id, dummyFee)) {
             return zone.id;
         }
     }
