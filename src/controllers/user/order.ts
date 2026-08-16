@@ -365,6 +365,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     let deliveryFee = 0;
     let resolvedZoneId: string | null = zoneId || null;
+    let resolvedBranchId: string | null = branchId || null;
 
     if (resolvedOrderType === "delivery") {
         if (!addressId) throw new BadRequest("Delivery address is required");
@@ -418,7 +419,70 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
 
         resolvedZoneId = applicableFee.zoneId;
+        if (!resolvedZoneId) {
+            throw new BadRequest("No delivery zone found for this address.");
+        }
         deliveryFee = parseFloat(applicableFee.deliveryFee as string || "0");
+
+        // 🏪 1. If branchId was provided, verify it belongs to this zone and restaurant
+        if (branchId) {
+            const [selectedBranch] = await db.select({ id: branches.id, zoneId: branches.zoneId })
+                .from(branches)
+                .where(
+                    and(
+                        eq(branches.id, branchId),
+                        eq(branches.restaurantId, restaurantId),
+                        eq(branches.status, "active")
+                    )
+                )
+                .limit(1);
+
+            if (!selectedBranch) {
+                throw new BadRequest("Selected branch not found or inactive.");
+            }
+            if (selectedBranch.zoneId !== resolvedZoneId) {
+                throw new BadRequest("Selected branch does not serve your delivery zone.");
+            }
+
+            resolvedBranchId = selectedBranch.id;
+        } else {
+            // 🏪 2. If branchId was NOT provided, auto-resolve it from the matched zone
+            const [matchedBranch] = await db.select({ id: branches.id })
+                .from(branches)
+                .where(
+                    and(
+                        eq(branches.restaurantId, restaurantId),
+                        eq(branches.zoneId, resolvedZoneId),
+                        eq(branches.status, "active")
+                    )
+                )
+                .limit(1);
+
+            if (!matchedBranch) {
+                throw new BadRequest("No active branch found serving your delivery zone.");
+            }
+
+            resolvedBranchId = matchedBranch.id;
+        }
+    } else {
+        // For takeaway or dine_in: branchId is required
+        if (!branchId) throw new BadRequest("Branch is required for takeaway or dine-in orders.");
+
+        const [branch] = await db.select({ id: branches.id, zoneId: branches.zoneId })
+            .from(branches)
+            .where(
+                and(
+                    eq(branches.id, branchId),
+                    eq(branches.restaurantId, restaurantId),
+                    eq(branches.status, "active")
+                )
+            )
+            .limit(1);
+
+        if (!branch) throw new BadRequest("Invalid or inactive branch selected.");
+
+        resolvedBranchId = branch.id;
+        resolvedZoneId = branch.zoneId;
     }
 
     if (isFreeDelivery) deliveryFee = 0;
@@ -493,7 +557,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             idempotencyKey,
             userId,
             restaurantId,
-            branchId,
+            branchId: resolvedBranchId,
             zoneId: resolvedZoneId, // 👈 تم تفعيل حفظ zoneId هنا
             addressId: addressId || null,
             orderSource,
