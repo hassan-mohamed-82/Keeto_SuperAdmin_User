@@ -361,7 +361,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     totalDiscount = roundMoney(totalDiscount);
 
     // ==========================================
-    // 6. Dynamic Delivery & Turf Zone Logic
+    // 6. Dynamic Delivery & Turf Zone Logic (Updated)
     // ==========================================
     let deliveryFee = 0;
     let resolvedZoneId: string | null = zoneId || null;
@@ -381,10 +381,11 @@ export const checkout = async (req: Request | any, res: Response) => {
             throw new BadRequest("Delivery address requires valid latitude and longitude coordinates.");
         }
 
-        // Fetch all active delivery fees for this restaurant
+        // Fetch all active delivery fees for this restaurant (including branchId)
         const restaurantFees = await db.select({
             id: restaurantZoneDeliveryFees.id,
             zoneId: restaurantZoneDeliveryFees.zoneId,
+            branchId: restaurantZoneDeliveryFees.branchId,
             deliveryFee: restaurantZoneDeliveryFees.deliveryFee,
             coverageType: restaurantZoneDeliveryFees.coverageType,
             customCoordinates: restaurantZoneDeliveryFees.customCoordinates,
@@ -397,7 +398,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             .where(
                 and(
                     eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
-                    eq(restaurantZoneDeliveryFees.status, "active")
+                    eq(restaurantZoneDeliveryFees.status, "active"),
+                    branchId ? eq(restaurantZoneDeliveryFees.branchId, branchId) : undefined
                 )
             );
 
@@ -424,9 +426,11 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
         deliveryFee = parseFloat(applicableFee.deliveryFee as string || "0");
 
-        // 🏪 1. If branchId was provided, verify it belongs to this zone and restaurant
-        if (branchId) {
-            const [selectedBranch] = await db.select({ id: branches.id, zoneId: branches.zoneId })
+        // 🏪 تحديد/التحقق من الفرع المخصص للـ Delivery
+        if (applicableFee.branchId) {
+            resolvedBranchId = applicableFee.branchId;
+        } else if (branchId) {
+            const [selectedBranch] = await db.select({ id: branches.id })
                 .from(branches)
                 .where(
                     and(
@@ -440,13 +444,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             if (!selectedBranch) {
                 throw new BadRequest("Selected branch not found or inactive.");
             }
-            if (selectedBranch.zoneId !== resolvedZoneId) {
-                throw new BadRequest("Selected branch does not serve your delivery zone.");
-            }
-
             resolvedBranchId = selectedBranch.id;
         } else {
-            // 🏪 2. If branchId was NOT provided, auto-resolve it from the matched zone
             const [matchedBranch] = await db.select({ id: branches.id })
                 .from(branches)
                 .where(
@@ -558,7 +557,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             userId,
             restaurantId,
             branchId: resolvedBranchId,
-            zoneId: resolvedZoneId, // 👈 تم تفعيل حفظ zoneId هنا
+            zoneId: resolvedZoneId,
             addressId: addressId || null,
             orderSource,
             paymentMethod,
@@ -681,13 +680,13 @@ export const checkout = async (req: Request | any, res: Response) => {
     await sendPushNotification({
         recipientType: "restaurant",
         recipientId: restaurantId,
-        branchId: branchId || null,
+        branchId: resolvedBranchId || null,
         title: "طلب جديد! 🛒",
         body: `تم استلام طلب جديد #${createdDailyOrderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
         data: {
             orderId,
             orderNumber,
-            branchId: branchId || null,
+            branchId: resolvedBranchId || null,
             type: "new_order",
             createdAt: now.toISOString(),
             dailyOrderNumber: createdDailyOrderNumber
