@@ -23,12 +23,14 @@ export const orders = mysqlTable("orders", {
 
     branchId: char("branch_id", { length: 36 })
         .references(() => branches.id),
-        // .notNull(),
+    // .notNull(),
 
     addressId: char("address_id", { length: 36 })
         .references(() => addresses.id),
 
-    orderSource: mysqlEnum("order_source", ["online_order_web", "online_order_app", "food_aggregator","my_keeto"]).notNull(),
+    zoneId: char("zone_id", { length: 36 }),
+
+    orderSource: mysqlEnum("order_source", ["online_order_web", "online_order_app", "food_aggregator", "my_keeto"]).notNull(),
 
     paymentMethod: char("payment_method", { length: 36 }),
 
@@ -67,7 +69,7 @@ export const orders = mysqlTable("orders", {
 
     rating: int("rating"),
     ratingComment: text("rating_comment"),
-    
+
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),
@@ -102,5 +104,5 @@ export const orderItems = mysqlTable("order_items", {
     addons: json("addons"),
 
     note: text("note"),
-    
+
 });
