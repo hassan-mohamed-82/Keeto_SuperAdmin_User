@@ -139,7 +139,11 @@ export const checkout = async (req: Request | any, res: Response) => {
     const schedulesList = await db.select().from(restaurantSchedules).where(eq(restaurantSchedules.restaurantId, restaurantId));
     const [settings] = await db.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1);
 
-    const resolvedOrderType = orderType || "delivery";
+    const validOrderTypes = ["delivery", "takeaway", "dine_in"];
+    if (!orderType || !validOrderTypes.includes(orderType)) {
+        throw new BadRequest("orderType is required and must be one of: delivery, takeaway, dine_in");
+    }
+    const resolvedOrderType = orderType;
     const status = calculateCurrentStatus(settings, schedulesList);
 
     if (!status.isOpenNow) throw new BadRequest(`Order failed. ${status.reason}`);
