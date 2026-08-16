@@ -5,17 +5,16 @@ import {
     mysqlEnum,
     json,
     char,
-    text,decimal,int,
-    time
+    text, decimal, int,
+    time,
+    boolean
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
-import { food, restaurants, zones, cities } from "../../schema";
+import { cities, food, ingredients, restaurants, zones } from "../../schema";
+
 export const branches = mysqlTable("branches", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
-    
-    // مربوط بالمطعم الأساسي اللي إنت (كسوبر أدمن) لسه مكريته
     restaurantId: char("restaurant_id", { length: 36 }).references(() => restaurants.id).notNull(),
-    
     name: varchar("name", { length: 255 }).notNull(), // فرع مدينة نصر مثلاً
     nameAr: varchar("name_ar", { length: 255 }),
     nameFr: varchar("name_fr", { length: 255 }),
@@ -23,44 +22,56 @@ export const branches = mysqlTable("branches", {
     addressAr: text("address_ar"),
     addressFr: text("address_fr"),
     phoneNumber: varchar("phone_number", { length: 50 }),
-    zoneId: char("zone_id", { length: 36 }).references(() => zones.id).notNull(), // عشان منطقة توصيل الفرع ده
+    zoneId: char("zone_id", { length: 36 }).references(() => zones.id).notNull(),
     cityId: char("city_id", { length: 36 }).references(() => cities.id),
-    deliveryRadiusKm: decimal("delivery_radius_km", { precision: 6, scale: 2 }).default("0"),lat:varchar("lat", { length: 255 }),
-    lng:varchar("lng", { length: 255 }),
-        status: mysqlEnum("status", ["active", "inactive"]).default("active"),
+    deliveryRadiusKm: decimal("delivery_radius_km", { precision: 6, scale: 2 }).default("0"),
+    lat: varchar("lat", { length: 255 }),
+    lng: varchar("lng", { length: 255 }),
+    status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),
 });
 
-
 export const branchMenuItems = mysqlTable("branch_menu_items", {
-    // 1. المعرف الأساسي
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
-    
-    // ==========================================
-    // 2. العلاقات (Relations) - أهم جزء
-    // ==========================================
     branchId: char("branch_id", { length: 36 }).references(() => branches.id).notNull(),
     foodId: char("food_id", { length: 36 }).references(() => food.id).notNull(),
 
-    // ==========================================
-    // 3. البيانات المتغيرة الخاصة بالفرع (Overrides)
-    // ==========================================
-    
-    // السعر (ممكن يتغير من فرع لفرع لنفس الأكلة)
-    price: decimal("price", { precision: 10, scale: 2 }).notNull(),
-    
-    // نوع المخزون (هل الفرع بيعمل عدد لا نهائي ولا كمية محدودة كل يوم؟)
+    // السعر اختياري: إذا كان NULL يعتمد basePrice من جدول food
+    price: decimal("price", { precision: 10, scale: 2 }),
+
     stockType: mysqlEnum("stock_type", ["limited", "unlimited"]).default("unlimited"),
-    
-    // الكمية المتاحة (لو نوع المخزون limited، الرقم ده هيقل مع كل أوردر)
-    stockQty: int("stock_qty").default(0), 
-    
-    // حالة الأكلة في الفرع ده تحديداً
-    status: mysqlEnum("status", ["active", "out_of_stock", "inactive"]).default("active"),
-    
-    // ==========================================
-    // 4. التواريخ
-    // ==========================================
+    stockQty: int("stock_qty").default(0),
+
+    // حالة الأكلة يدويًا في هذا الفرع (نشط أو موقوف بقرار مدير الفرع)
+    status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
+
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+});
+
+
+// ===================================================
+// جدول قفل وتوفر المكونات per-branch (عام أو لمنتج معين)
+// ===================================================
+export const branchIngredientLocks = mysqlTable("branch_ingredient_locks", {
+    id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+
+    branchId: char("branch_id", { length: 36 })
+        .references(() => branches.id)
+        .notNull(),
+
+    // إذا كانت NULL -> القفل يطبق على المكون في الفرع ككل (لكل الوجبات)
+    // إذا كانت بها UUID -> القفل يطبق على هذا المكون لهذه الوجبة فقط داخل هذا الفرع
+    foodId: char("food_id", { length: 36 })
+        .references(() => food.id),
+
+    ingredientId: char("ingredient_id", { length: 36 })
+        .references(() => ingredients.id)
+        .notNull(),
+
+    // false = المكون غير متاح
+    isAvailable: boolean("is_available").default(true).notNull(),
+
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

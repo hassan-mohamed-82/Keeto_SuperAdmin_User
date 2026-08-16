@@ -5,6 +5,7 @@ import { eq, and, like, or, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
+import { getUnavailableBranchesForFoods } from "../../helpers/food.helper";
 
 // ==========================================
 // 🔥 Helper: تجهيز favorites لو اليوزر عامل login
@@ -149,6 +150,20 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         if (rId) discountsByRestaurant.set(rId, await getAvailableDiscounts(rId));
     }
 
+    // ==========================================
+    // حساب الفروع غير المتاحة لكل وجبة
+    // ==========================================
+    // الوجبات النشطة فقط (status == active) هي التي وصلت هنا،
+    // لكن isOutOfStock ممكن تكون true → غير متاحة في كل الفروع
+    const activeFoodIds = data
+        .filter(f => !f.isOutOfStock)
+        .map(f => f.foodId)
+        .filter(Boolean) as string[];
+
+    const unavailableBranchesMap = activeFoodIds.length > 0
+        ? await getUnavailableBranchesForFoods(activeFoodIds)
+        : new Map<string, string[]>();
+
     const result = data.map(f => {
         const availableDiscounts = discountsByRestaurant.get(f.restaurantId) || [];
         const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
@@ -161,6 +176,12 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
             discountState,
             false
         );
+
+        // إذا كانت الوجبة isOutOfStock → غير متاحة في جميع الفروع (null)
+        // وإلا → قائمة الفروع غير المتاحة بالتحديد
+        const unavailableBranches: string[] | null = f.isOutOfStock
+            ? null
+            : (unavailableBranchesMap.get(f.foodId!) ?? []);
 
         return {
             foodId: f.foodId,
@@ -177,7 +198,8 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
             restaurantNameFr: f.restaurantNameFr,
             restaurantLogo: f.restaurantLogo,
             isOutOfStock: f.isOutOfStock,
-            isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false
+            isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false,
+            unavailableBranches
         };
     });
 
@@ -400,6 +422,19 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
     }, {});
 
     // 👇 تحويل الكاتيجوريز، الأكلات، الـ Variations، الـ Options، والـ Addons من Objects إلى Arrays
+    // ثم حساب الفروع غير المتاحة لكل وجبة
+    const allMenuFoods = Object.values(groupedMenuObj).flatMap((cat: any) => Object.values(cat.foods)) as any[];
+
+    // الوجبات التي status == active لكن isOutOfStock == false هي المرشحة للفحص
+    const menuActiveFoodIds = allMenuFoods
+        .filter((f: any) => !f.isOutOfStock)
+        .map((f: any) => f.id)
+        .filter(Boolean) as string[];
+
+    const menuUnavailableBranchesMap = menuActiveFoodIds.length > 0
+        ? await getUnavailableBranchesForFoods(menuActiveFoodIds)
+        : new Map<string, string[]>();
+
     const finalMenu = Object.values(groupedMenuObj).map((category: any) => {
         return {
             id: category.id,
@@ -413,7 +448,15 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                     return v;
                 });
                 // تحويل الـ Addons
-                f.addons = Object.values(f.addons); 
+                f.addons = Object.values(f.addons);
+
+                // إرفاق الفروع غير المتاحة
+                // null → الوجبة غير متاحة في جميع الفروع (isOutOfStock)
+                // [] أو [...] → قائمة الفروع غير المتاحة بالتحديد
+                f.unavailableBranches = f.isOutOfStock
+                    ? null
+                    : (menuUnavailableBranchesMap.get(f.id) ?? []);
+
                 return f;
             })
         };
@@ -846,6 +889,22 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         discountsByRestaurant.set(rId, await getAvailableDiscounts(rId));
     }
 
+    // ==========================================
+    // حساب الفروع غير المتاحة لكل وجبة في نتائج البحث
+    // ==========================================
+    const allSearchFoods = Array.from(restaurantsMap.values()).flatMap(
+        (r: any) => Array.from(r.food.values()) as any[]
+    );
+
+    const searchActiveFoodIds = allSearchFoods
+        .filter((f: any) => f.status === "active" && !f.isOutOfStock)
+        .map((f: any) => f.id)
+        .filter(Boolean) as string[];
+
+    const searchUnavailableBranchesMap = searchActiveFoodIds.length > 0
+        ? await getUnavailableBranchesForFoods(searchActiveFoodIds)
+        : new Map<string, string[]>();
+
     const formattedData = Array.from(restaurantsMap.values()).map((restaurant: any) => {
         const availableDiscounts = discountsByRestaurant.get(restaurant.id) || [];
 
@@ -863,11 +922,18 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
                     false
                 );
 
+                // إذا كانت الوجبة isOutOfStock أو غير active → غير متاحة في جميع الفروع
+                const isGloballyUnavailable = foodItem.status !== "active" || foodItem.isOutOfStock;
+                const unavailableBranches: string[] | null = isGloballyUnavailable
+                    ? null
+                    : (searchUnavailableBranchesMap.get(foodItem.id) ?? []);
+
                 return {
                     ...foodItem,
                     discountPrice: finalDiscountPrice,
                     discountNote,
-                    variations: Array.from(foodItem.variations.values())
+                    variations: Array.from(foodItem.variations.values()),
+                    unavailableBranches
                 };
             })
         };

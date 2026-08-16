@@ -47,3 +47,4 @@ export * from "./schema/admin/dashboardTargets";
 export * from "./schema/user/userRestaurantPoints";
 export * from "./schema/admin/pointsProducts";
 export * from "./schema/admin/delivery_man";
+export * from "./schema/admin/ingredients";
