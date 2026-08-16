@@ -3,11 +3,13 @@ import { sql } from "drizzle-orm";
 import { zones } from "./zone";
 import { restaurants } from "./restaurants";
 import { cities } from "./city";
+import { branches } from "./branches";
 
 export const restaurantZoneDeliveryFees = mysqlTable("restaurant_zone_delivery_fees", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
     restaurantId: char("restaurant_id", { length: 36 }).references(() => restaurants.id).notNull(),
+    branchId: char("branch_id", { length: 36 }).references(() => branches.id),
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id).notNull(),
     cityId: char("city_id", { length: 36 }).references(() => cities.id).notNull(),
 

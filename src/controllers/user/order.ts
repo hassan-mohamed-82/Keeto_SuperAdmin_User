@@ -681,11 +681,13 @@ export const checkout = async (req: Request | any, res: Response) => {
     await sendPushNotification({
         recipientType: "restaurant",
         recipientId: restaurantId,
+        branchId: branchId || null,
         title: "طلب جديد! 🛒",
         body: `تم استلام طلب جديد #${createdDailyOrderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
         data: {
             orderId,
             orderNumber,
+            branchId: branchId || null,
             type: "new_order",
             createdAt: now.toISOString(),
             dailyOrderNumber: createdDailyOrderNumber
