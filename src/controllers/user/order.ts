@@ -1082,7 +1082,12 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         businessPlans
     ] = await Promise.all([
         db.select().from(addresses).where(eq(addresses.userId, userId)),
-        db.select().from(branches).where(eq(branches.restaurantId, restaurantId)),
+        db.select().from(branches).where(
+            and(
+                eq(branches.restaurantId, restaurantId),
+                eq(branches.status, "active")
+            )
+        ),
         db.select({
             id: restaurantZoneDeliveryFees.id,
             zoneId: restaurantZoneDeliveryFees.zoneId,

@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory, subcategories } from "../../models/schema";
-import { eq, and, like, or, sql } from "drizzle-orm";
+import { eq, and, like, or, sql, isNull } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
@@ -293,7 +293,9 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
     .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
     .where(and(
         eq(food.restaurantid, restaurantId),
-        eq(food.status, "active")
+        eq(food.status, "active"),
+        or(isNull(categories.id), eq(categories.status, "active")),
+        or(isNull(subcategories.id), eq(subcategories.status, "active"))
     ));
 
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
