@@ -5,7 +5,7 @@ import { eq, and, like, or, sql, isNull } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
-import { getUnavailableBranchesForFoods } from "../../helpers/food.helper";
+import { getUnavailableBranchesForFoods, BranchInfo } from "../../helpers/food.helper";
 
 // ==========================================
 // 🔥 Helper: تجهيز favorites لو اليوزر عامل login
@@ -100,9 +100,9 @@ export const getRestaurantsByCuisine = async (req: Request, res: Response) => {
         addressFr: restaurants.addressFr,
         minDeliveryTime: restaurants.minDeliveryTime,
     }).from(restaurants)
-    .where(and(
-        sql`JSON_CONTAINS(${restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`
-    ));
+        .where(and(
+            sql`JSON_CONTAINS(${restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`
+        ));
 
     const result = data.map(r => ({
         ...r,
@@ -128,8 +128,8 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         foodNameFr: food.nameFr,
         foodImage: food.image,
         price: food.price,
-        foodDiscountType: food.discount_type,   
-        foodDiscountValue: food.discount_value, 
+        foodDiscountType: food.discount_type,
+        foodDiscountValue: food.discount_value,
         isOutOfStock: food.isOutOfStock,
         restaurantId: restaurants.id,
         restaurantName: restaurants.name,
@@ -137,12 +137,12 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         restaurantNameFr: restaurants.nameFr,
         restaurantLogo: restaurants.logo
     })
-    .from(food)
-    .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
-    .where(and(
-        eq(food.categoryid, categoryId),
-        eq(food.status, "active")
-    ));
+        .from(food)
+        .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
+        .where(and(
+            eq(food.categoryid, categoryId),
+            eq(food.status, "active")
+        ));
 
     const uniqueRestaurants = [...new Set(data.map(f => f.restaurantId))];
     const discountsByRestaurant = new Map();
@@ -162,7 +162,7 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
 
     const unavailableBranchesMap = activeFoodIds.length > 0
         ? await getUnavailableBranchesForFoods(activeFoodIds)
-        : new Map<string, string[]>();
+        : new Map<string, BranchInfo[]>();
 
     const result = data.map(f => {
         const availableDiscounts = discountsByRestaurant.get(f.restaurantId) || [];
@@ -179,7 +179,7 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
 
         // إذا كانت الوجبة isOutOfStock → غير متاحة في جميع الفروع (null)
         // وإلا → قائمة الفروع غير المتاحة بالتحديد
-        const unavailableBranches: string[] | null = f.isOutOfStock
+        const unavailableBranches: BranchInfo[] | null = f.isOutOfStock
             ? null
             : (unavailableBranchesMap.get(f.foodId!) ?? []);
 
@@ -241,7 +241,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         isOutOfStock: food.isOutOfStock,
         image: food.image,
         points: food.points,
-        
+
         categoryId: categories.id,
         categoryName: categories.name,
         categoryNameAr: categories.nameAr,
@@ -252,7 +252,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         subcategoryNameAr: subcategories.nameAr,
         subcategoryNameFr: subcategories.nameFr,
         order_level: subcategories.order_Level,
-        
+
         variationId: foodVariations.id,
         variationName: foodVariations.name,
         variationNameAr: foodVariations.nameAr,
@@ -261,7 +261,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         selectionType: foodVariations.selectionType,
         min: foodVariations.min,
         max: foodVariations.max,
-        
+
         optionId: variationOptions.id,
         optionName: variationOptions.optionName,
         optionNameAr: variationOptions.optionNameAr,
@@ -278,25 +278,25 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         addonRestaurantId: addons.restaurantid,
         addonCreatedAt: addons.createdAt,
         addonUpdatedAt: addons.updatedAt,
-        
+
         addonCategoryId: adonescategory.id,
         addonCategoryName: adonescategory.name,
         addonCategoryNameAr: adonescategory.nameAr,
         addonCategoryNameFr: adonescategory.nameFr,
     })
-    .from(food)
-    .leftJoin(categories, eq(food.categoryid, categories.id))
-    .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
-    .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))
-    .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
-    .leftJoin(addons, sql`JSON_CONTAINS(${food.addonsId}, JSON_QUOTE(${addons.id}))`)
-    .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
-    .where(and(
-        eq(food.restaurantid, restaurantId),
-        eq(food.status, "active"),
-        or(isNull(categories.id), eq(categories.status, "active")),
-        or(isNull(subcategories.id), eq(subcategories.status, "active"))
-    ));
+        .from(food)
+        .leftJoin(categories, eq(food.categoryid, categories.id))
+        .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
+        .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))
+        .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
+        .leftJoin(addons, sql`JSON_CONTAINS(${food.addonsId}, JSON_QUOTE(${addons.id}))`)
+        .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
+        .where(and(
+            eq(food.restaurantid, restaurantId),
+            eq(food.status, "active"),
+            or(isNull(categories.id), eq(categories.status, "active")),
+            or(isNull(subcategories.id), eq(subcategories.status, "active"))
+        ));
 
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
 
@@ -310,7 +310,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                 name: row.categoryName || "Other",
                 nameAr: row.categoryNameAr || "أخرى",
                 nameFr: row.categoryNameFr || "Autre",
-                foods: {} 
+                foods: {}
             };
         }
 
@@ -318,7 +318,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         if (row.foodId) {
             if (!acc[catId].foods[row.foodId]) {
                 const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
-                
+
                 const { price: calculatedDiscountPrice, discountNote } = applyPriorityDiscount(
                     { id: row.foodId, discountType: row.foodDiscountType, discountValue: row.foodDiscountValue },
                     Number(row.price),
@@ -343,12 +343,12 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                     discountNote,
                     image: row.image,
                     isOutOfStock: row.isOutOfStock,
-                    points: userId? row.points:null,
+                    points: userId ? row.points : null,
                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
-                    
-                    variations: {}, 
-                    addons: {}, 
-                    
+
+                    variations: {},
+                    addons: {},
+
                     category: row.categoryId ? {
                         id: row.categoryId,
                         name: row.categoryName,
@@ -377,7 +377,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                         selectionType: row.selectionType,
                         min: row.min,
                         max: row.max,
-                        options: {} 
+                        options: {}
                     };
                 }
 
@@ -446,7 +446,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             foods: Object.values(category.foods).map((f: any) => {
                 // تحويل الـ variations والـ options
                 f.variations = Object.values(f.variations).map((v: any) => {
-                    v.options = Object.values(v.options); 
+                    v.options = Object.values(v.options);
                     return v;
                 });
                 // تحويل الـ Addons
@@ -479,16 +479,16 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         categoryNameAr: adonescategory.nameAr,
         categoryNameFr: adonescategory.nameFr,
     })
-    .from(addons)
-    .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
-    .where(and(
-        eq(addons.restaurantid, restaurantId),
-        eq(addons.status, "active")
-    ));
+        .from(addons)
+        .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
+        .where(and(
+            eq(addons.restaurantid, restaurantId),
+            eq(addons.status, "active")
+        ));
 
     const groupedAddonsObj = rawAddons.reduce((acc: any, row) => {
         const catId = row.categoryId || "uncategorized";
-        
+
         if (!acc[catId]) {
             acc[catId] = {
                 id: catId === "uncategorized" ? null : catId,
@@ -605,10 +605,10 @@ export const getUserFavorites = async (req: Request, res: Response) => {
             discountValue: food.discount_value,
         }
     })
-    .from(favorites)
-    .leftJoin(restaurants, eq(favorites.restaurantId, restaurants.id))
-    .leftJoin(food, eq(favorites.foodId, food.id))
-    .where(and(...conditions));
+        .from(favorites)
+        .leftJoin(restaurants, eq(favorites.restaurantId, restaurants.id))
+        .leftJoin(food, eq(favorites.foodId, food.id))
+        .where(and(...conditions));
 
     const uniqueRestaurants = [...new Set(favs.map(f => f.restaurant?.id).filter(Boolean))];
     const discountsByRestaurant = new Map();
@@ -829,7 +829,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
         .where(
             and(
                 eq(restaurants.status, "active"),
-                or(...restaurantConditions) 
+                or(...restaurantConditions)
             )
         );
 
@@ -905,7 +905,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
     const searchUnavailableBranchesMap = searchActiveFoodIds.length > 0
         ? await getUnavailableBranchesForFoods(searchActiveFoodIds)
-        : new Map<string, string[]>();
+        : new Map<string, BranchInfo[]>();
 
     const formattedData = Array.from(restaurantsMap.values()).map((restaurant: any) => {
         const availableDiscounts = discountsByRestaurant.get(restaurant.id) || [];
@@ -914,7 +914,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
             ...restaurant,
             food: Array.from(restaurant.food.values()).map((foodItem: any) => {
                 const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
-                
+
                 const { price: finalDiscountPrice, discountNote } = applyPriorityDiscount(
                     { id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value },
                     Number(foodItem.price),
@@ -926,7 +926,7 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
 
                 // إذا كانت الوجبة isOutOfStock أو غير active → غير متاحة في جميع الفروع
                 const isGloballyUnavailable = foodItem.status !== "active" || foodItem.isOutOfStock;
-                const unavailableBranches: string[] | null = isGloballyUnavailable
+                const unavailableBranches: BranchInfo[] | null = isGloballyUnavailable
                     ? null
                     : (searchUnavailableBranchesMap.get(foodItem.id) ?? []);
 

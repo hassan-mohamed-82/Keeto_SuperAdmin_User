@@ -1,7 +1,17 @@
 // src/helpers/food.helper.ts
-import { branchIngredientLocks, branchMenuItems, foodIngredients } from "../models/schema";
+import { branchIngredientLocks, branchMenuItems, foodIngredients, branches } from "../models/schema";
 import { eq, and, inArray, or, isNull } from "drizzle-orm";
 import { db } from "../models/connection";
+
+// ==========================================
+// نوع بيانات الفرع المُعاد
+// ==========================================
+export type BranchInfo = {
+    id: string;
+    name: string;
+    nameAr: string | null;
+    nameFr: string | null;
+};
 
 /**
  * تحدد الفروع غير المتاحة لكل وجبة من قائمة الوجبات الممررة.
@@ -10,15 +20,17 @@ import { db } from "../models/connection";
  * 2. إغلاق أحد المكونات الأساسية (essential) للوجبة على مستوى الفرع.
  *
  * @param foodIds قائمة معرفات الوجبات المراد فحصها
- * @returns Map تحتوي على foodId كمفتاح وقائمة بـ branchIds غير المتاحة له كقيمة
+ * @returns Map تحتوي على foodId كمفتاح وقائمة بكائنات الفروع غير المتاحة له كقيمة
  */
-export const getUnavailableBranchesForFoods = async (foodIds: string[]): Promise<Map<string, string[]>> => {
-    // تهيئة خريطة النتائج باستخدام Set لمنع تكرار الفروع لكل وجبة
-    const unavailableBranchesMap = new Map<string, Set<string>>();
+export const getUnavailableBranchesForFoods = async (
+    foodIds: string[]
+): Promise<Map<string, BranchInfo[]>> => {
+    // تهيئة خريطة النتائج باستخدام Map داخلية لمنع تكرار الفروع (مفتاحها branchId)
+    const unavailableBranchesMap = new Map<string, Map<string, BranchInfo>>();
 
     if (foodIds.length === 0) return new Map();
 
-    foodIds.forEach((id) => unavailableBranchesMap.set(id, new Set()));
+    foodIds.forEach((id) => unavailableBranchesMap.set(id, new Map()));
 
     // 1. فحص جدول إعدادات الوجبة بالفرع (branch_menu_items): إيجاد الفروع التي أوقفت الوجبة أو نفد مخزونها
     const disabledMenuItems = await db
@@ -28,8 +40,12 @@ export const getUnavailableBranchesForFoods = async (foodIds: string[]): Promise
             stockType: branchMenuItems.stockType,
             stockQty: branchMenuItems.stockQty,
             status: branchMenuItems.status,
+            branchName: branches.name,
+            branchNameAr: branches.nameAr,
+            branchNameFr: branches.nameFr,
         })
         .from(branchMenuItems)
+        .leftJoin(branches, eq(branchMenuItems.branchId, branches.id))
         .where(inArray(branchMenuItems.foodId, foodIds));
 
     for (const item of disabledMenuItems) {
@@ -38,7 +54,13 @@ export const getUnavailableBranchesForFoods = async (foodIds: string[]): Promise
 
         // إذا كانت الوجبة غير نشطة أو نفد مخزونها، يُضاف الفرع لقائمة الفروع غير المتاحة لهذه الوجبة
         if (isInactive || isOutOfStock) {
-            unavailableBranchesMap.get(item.foodId)?.add(item.branchId);
+            const branchInfo: BranchInfo = {
+                id: item.branchId,
+                name: item.branchName ?? item.branchId,
+                nameAr: item.branchNameAr ?? null,
+                nameFr: item.branchNameFr ?? null,
+            };
+            unavailableBranchesMap.get(item.foodId)?.set(item.branchId, branchInfo);
         }
     }
 
@@ -64,8 +86,12 @@ export const getUnavailableBranchesForFoods = async (foodIds: string[]): Promise
                 branchId: branchIngredientLocks.branchId,
                 foodId: branchIngredientLocks.foodId,
                 ingredientId: branchIngredientLocks.ingredientId,
+                branchName: branches.name,
+                branchNameAr: branches.nameAr,
+                branchNameFr: branches.nameFr,
             })
             .from(branchIngredientLocks)
+            .leftJoin(branches, eq(branchIngredientLocks.branchId, branches.id))
             .where(and(
                 inArray(branchIngredientLocks.ingredientId, essentialIngredientIds),
                 eq(branchIngredientLocks.isAvailable, false),
@@ -81,17 +107,23 @@ export const getUnavailableBranchesForFoods = async (foodIds: string[]): Promise
                 if (item.ingredientId === lock.ingredientId) {
                     // القفل يطبق إما على الوجبة المحددة أو على كل الوجبات التي تستخدم المكون إذا كان foodId خاليًا (null)
                     if (!lock.foodId || lock.foodId === item.foodId) {
-                        unavailableBranchesMap.get(item.foodId)?.add(lock.branchId);
+                        const branchInfo: BranchInfo = {
+                            id: lock.branchId,
+                            name: lock.branchName ?? lock.branchId,
+                            nameAr: lock.branchNameAr ?? null,
+                            nameFr: lock.branchNameFr ?? null,
+                        };
+                        unavailableBranchesMap.get(item.foodId)?.set(lock.branchId, branchInfo);
                     }
                 }
             }
         }
     }
 
-    // 4. تحويل نتائج الـ Set إلى Array وتنسيق البنية النهائية للـ Map
-    const resultMap = new Map<string, string[]>();
-    unavailableBranchesMap.forEach((branchSet, foodId) => {
-        resultMap.set(foodId, Array.from(branchSet));
+    // 4. تحويل نتائج الـ Map الداخلية إلى Array وتنسيق البنية النهائية للـ Map
+    const resultMap = new Map<string, BranchInfo[]>();
+    unavailableBranchesMap.forEach((branchMap, foodId) => {
+        resultMap.set(foodId, Array.from(branchMap.values()));
     });
 
     return resultMap;
