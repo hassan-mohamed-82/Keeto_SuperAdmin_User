@@ -55,7 +55,7 @@ export const orders = mysqlTable("orders", {
     ]).default("pending"),
 
     // Duration (in minutes) the restaurant expects to prepare the order
-    durationOrderPreparing: int("duration_order_preparing").default(15),
+    durationOrderPreparing: int("duration_order_preparing").default(30),
 
     isPointsRedeemed: boolean("is_points_redeemed").default(false),
     redeemCode: varchar("redeem_code", { length: 10 }),
