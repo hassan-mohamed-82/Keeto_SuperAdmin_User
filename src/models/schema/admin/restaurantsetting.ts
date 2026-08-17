@@ -1,9 +1,9 @@
-import { 
-  mysqlTable, 
-  int, 
-  boolean, 
-  varchar, 
-  decimal, 
+import {
+  mysqlTable,
+  int,
+  boolean,
+  varchar,
+  decimal,
   mysqlEnum,
   char
 } from "drizzle-orm/mysql-core";
@@ -11,8 +11,8 @@ import {
 // 1. جدول الإعدادات العامة
 export const restaurantSettings = mysqlTable("restaurant_settings", {
   id: int("id").autoincrement().primaryKey(),
-  restaurantId: char("restaurant_id", { length: 36 }).notNull().unique(), 
-  
+  restaurantId: char("restaurant_id", { length: 36 }).notNull().unique(),
+
   foodManagement: boolean("food_management").default(true),
   scheduledDelivery: boolean("scheduled_delivery").default(false),
   reviewsSection: boolean("reviews_section").default(true),
@@ -26,6 +26,9 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   dineIn: boolean("dine_in").default(false),
   firstColor: varchar("first_color", { length: 20 }),
   secondColor: varchar("second_color", { length: 20 }),
+
+  firstTextColor: varchar("first_text_color", { length: 20 }),
+  secondTextColor: varchar("second_text_color", { length: 20 }),
 
   vegType: mysqlEnum("veg_type", ["VEG", "NON_VEG", "BOTH"]).default("BOTH"),
   canEditOrder: boolean("can_edit_order").default(false),

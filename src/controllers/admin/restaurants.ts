@@ -95,7 +95,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans,
-        type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor
+        type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -231,6 +231,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
             restaurantId,
             firstColor: firstColor ? clean(firstColor) : null,
             secondColor: secondColor ? clean(secondColor) : null,
+            firstTextColor: firstTextColor ? clean(firstTextColor) : null,
+            secondTextColor: secondTextColor ? clean(secondTextColor) : null,
         });
 
         await adjustSalesRepPoints(tx, salesId ? clean(salesId) : null, pointsToAward);
@@ -397,6 +399,8 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
         firstColor: row.settingsObj?.firstColor || null,
         secondColor: row.settingsObj?.secondColor || null,
+        firstTextColor: row.settingsObj?.firstTextColor || null,
+        secondTextColor: row.settingsObj?.secondTextColor || null,
     };
     delete (formattedRestaurant as any).cuisineId;
 
@@ -415,7 +419,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
-        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor // 👈 استلام الحقول الجديدة في الـ Update
+        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -507,11 +511,11 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         const lName = ownerLastName || existingRestaurant.ownerLastName;
         ownerUpdateData.name = `${fName} ${lName}`;
     }
-    if (ownerPhone) ownerUpdateData.phoneNumber = ownerPhone;  
+    if (ownerPhone) ownerUpdateData.phoneNumber = ownerPhone;
 
-    if(iosApp !== undefined) restaurantUpdateData.iosApp = iosApp;
-    if(androidApp !== undefined) restaurantUpdateData.androidApp = androidApp;
-    
+    if (iosApp !== undefined) restaurantUpdateData.iosApp = iosApp;
+    if (androidApp !== undefined) restaurantUpdateData.androidApp = androidApp;
+
 
     await db.transaction(async (tx) => {
         if (Object.keys(restaurantUpdateData).length > 1) {
@@ -522,11 +526,13 @@ export const updateRestaurant = async (req: Request, res: Response) => {
             await tx.update(restrauntadmin).set(ownerUpdateData).where(eq(restrauntadmin.id, existingOwner.id));
         }
 
-        if (firstColor !== undefined || secondColor !== undefined) {
+        if (firstColor !== undefined || secondColor !== undefined || firstTextColor !== undefined || secondTextColor !== undefined) {
             const settingsUpdateData: any = {};
             if (firstColor !== undefined) settingsUpdateData.firstColor = (firstColor === "" || firstColor === null) ? null : clean(firstColor);
             if (secondColor !== undefined) settingsUpdateData.secondColor = (secondColor === "" || secondColor === null) ? null : clean(secondColor);
-            
+            if (firstTextColor !== undefined) settingsUpdateData.firstTextColor = (firstTextColor === "" || firstTextColor === null) ? null : clean(firstTextColor);
+            if (secondTextColor !== undefined) settingsUpdateData.secondTextColor = (secondTextColor === "" || secondTextColor === null) ? null : clean(secondTextColor);
+
             if (Object.keys(settingsUpdateData).length > 0) {
                 const existingSettings = await tx.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, id)).limit(1);
                 if (existingSettings.length > 0) {

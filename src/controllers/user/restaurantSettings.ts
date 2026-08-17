@@ -11,10 +11,12 @@ export const getRestaurantSettings = async (req: Request, res: Response): Promis
     const [settings] = await db.select({
         firstColor: restaurantSettings.firstColor,
         secondColor: restaurantSettings.secondColor,
+        firstTextColor: restaurantSettings.firstTextColor,
+        secondTextColor: restaurantSettings.secondTextColor,
     })
-    .from(restaurantSettings)
-    .where(eq(restaurantSettings.restaurantId, restaurantId))
-    .limit(1);
+        .from(restaurantSettings)
+        .where(eq(restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
 
     if (!settings) {
         throw new NotFound("Restaurant settings not found");
