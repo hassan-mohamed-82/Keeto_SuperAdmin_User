@@ -10,6 +10,7 @@ import bcrypt from "bcrypt";
 export const getProfile = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
+    const restaurantId = req.query?.restaurantId as string | undefined;
 
     // 1. Fetch User Profile Info
     const [userInfo] = await db
@@ -69,11 +70,15 @@ export const getProfile = async (req: Request | any, res: Response) => {
         .leftJoin(cities, eq(zones.cityId, cities.id))
         .where(eq(addresses.userId, userId));
 
-    // 3. Fetch Orders Count
+    // 3. Fetch Orders Count (scoped to a restaurant if restaurantId query param is provided)
+    const ordersCountCondition = restaurantId
+        ? and(eq(orders.userId, userId), eq(orders.restaurantId, restaurantId))
+        : eq(orders.userId, userId);
+
     const [ordersCount] = await db
         .select({ count: sql`COUNT(*)` })
         .from(orders)
-        .where(eq(orders.userId, userId));
+        .where(ordersCountCondition);
 
     // 4. Fetch User Wallet Balance
     const [wallet] = await db

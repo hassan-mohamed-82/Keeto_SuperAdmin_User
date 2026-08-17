@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory, subcategories } from "../../models/schema";
-import { eq, and, like, or, sql, isNull } from "drizzle-orm";
+import { eq, and, like, or, sql, isNull, isNotNull } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
@@ -575,9 +575,12 @@ export const getUserFavorites = async (req: Request, res: Response) => {
     const userId = req.user.id;
     const restaurantId = req.query.restaurantId as string | undefined;
 
-    const conditions = [eq(favorites.userId, userId)];
+    const conditions: any[] = [eq(favorites.userId, userId)];
+
     if (restaurantId) {
-        conditions.push(eq(favorites.restaurantId, restaurantId));
+        // Filter favorited foods belonging to the specific restaurant ID
+        conditions.push(isNotNull(favorites.foodId));
+        conditions.push(eq(food.restaurantid, restaurantId));
     }
 
     const favs = await db.select({
@@ -595,6 +598,7 @@ export const getUserFavorites = async (req: Request, res: Response) => {
         },
         food: {
             id: food.id,
+            restaurantId: food.restaurantid, // Added restaurantId to food object
             name: food.name,
             nameAr: food.nameAr,
             nameFr: food.nameFr,
@@ -610,17 +614,25 @@ export const getUserFavorites = async (req: Request, res: Response) => {
         .leftJoin(food, eq(favorites.foodId, food.id))
         .where(and(...conditions));
 
-    const uniqueRestaurants = [...new Set(favs.map(f => f.restaurant?.id).filter(Boolean))];
+    // Get unique restaurant IDs from both restaurant favorites and favorited foods
+    const uniqueRestaurants = [
+        ...new Set(
+            favs
+                .map(f => f.food?.restaurantId || f.restaurant?.id)
+                .filter(Boolean)
+        )
+    ];
+
     const discountsByRestaurant = new Map();
     for (const rId of uniqueRestaurants) {
         discountsByRestaurant.set(rId, await getAvailableDiscounts(rId as string));
     }
 
     const result = {
-        restaurants: favs.filter(f => f.restaurant?.id !== null).map(f => f.restaurant),
-        foods: favs.filter(f => f.food?.id !== null).map(f => {
+        restaurants: favs.filter(f => f.restaurant?.id != null).map(f => f.restaurant),
+        foods: favs.filter(f => f.food?.id != null).map(f => {
             const foodObj = f.food as any;
-            const restId = f.restaurant?.id || null;
+            const restId = foodObj.restaurantId || f.restaurant?.id || null;
             const availableDiscounts = restId ? discountsByRestaurant.get(restId) : [];
             const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
 
