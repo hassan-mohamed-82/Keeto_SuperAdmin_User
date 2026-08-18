@@ -150,6 +150,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (resolvedOrderType === "delivery" && !status.canDeliveryNow) throw new BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) throw new BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
 
+    const defaultPreparingDuration = settings?.maxDeliveryTime ?? 30;
     // ==========================================
     // ⚡ 5. Batch Fetching
     // ==========================================
@@ -572,6 +573,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             note: note || null,
             status: "pending",
             dailyOrderNumber: createdDailyOrderNumber,
+            durationOrderPreparing: defaultPreparingDuration,
             createdAt: now
         });
 
@@ -707,7 +709,8 @@ export const checkout = async (req: Request | any, res: Response) => {
                 couponCode: couponCode || null,
                 totalAmount,
                 createdAt: now.toISOString(),
-                dailyOrderNumber: createdDailyOrderNumber
+                dailyOrderNumber: createdDailyOrderNumber,
+                durationOrderPreparing: defaultPreparingDuration,
             },
             customerDetails: userInfo
         }
