@@ -276,9 +276,9 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
 // 6. Get all branches of a restaurant
 export const getRestaurantsBranches = async (req: Request, res: Response) => {
     const { restaurantId } = req.params;
-    const userId = req.user?.id;
+    // const userId = req.user?.id;
 
-    if (!userId) throw new UnauthorizedError("Unauthenticated");
+    // if (!userId) throw new UnauthorizedError("Unauthenticated");
 
     const restaurant = await db
         .select()
