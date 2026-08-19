@@ -16,7 +16,7 @@ import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
-import { getUnavailableBranchesForFoods } from "../../helpers/food.helper";
+import { getUnavailableBranchesForFoods, type BranchInfo } from "../../helpers/food.helper";
 
 /* =========================================
    Helpers
@@ -135,6 +135,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
 
     const [itemFood] = await db.select().from(food).where(eq(food.id, foodId)).limit(1);
     if (!itemFood) throw new BadRequest("Food not found");
+    if (itemFood.isOutOfStock || itemFood.status === "inactive") {
+        throw new BadRequest("This item is currently out of stock.");
+    }
 
     // Verify branch/address availability for the single item being added
     await validateFoodAvailabilityInBranch(foodId, branchId, addressId, itemFood.restaurantid);
@@ -315,6 +318,8 @@ export const getCart = async (req: Request | any, res: Response) => {
             price: food.price,
             discountType: food.discount_type,
             discountValue: food.discount_value,
+            isOutOfStock: food.isOutOfStock,
+            status: food.status,
             restaurantId: restaurants.id,
             restaurantName: restaurants.name,
             quantity: cartItems.quantity,
@@ -334,33 +339,31 @@ export const getCart = async (req: Request | any, res: Response) => {
     }
 
     const restaurantId = items[0].restaurantId;
-    let availableCartItems = items;
-    let unavailableCartItemsData: any[] = [];
+    let availableCartItems: typeof items = [];
+    let unavailableCartItemsData: typeof items = [];
 
+    const allFoodIds = items
+        .map(i => i.foodId)
+        .filter((id): id is string => id !== null && id !== undefined);
+
+    const unavailableMap = allFoodIds.length > 0
+        ? await getUnavailableBranchesForFoods(allFoodIds)
+        : new Map<string, BranchInfo[]>();
+
+    let targetBranchId: string | undefined = undefined;
     if (branchId || addressId) {
-        const targetBranchId = await resolveBranchId(branchId, addressId, restaurantId || undefined);
+        targetBranchId = (await resolveBranchId(branchId, addressId, restaurantId || undefined)) || undefined;
+    }
 
-        if (targetBranchId) {
-            // Filter out null/undefined IDs so TypeScript receives string[]
-            const allFoodIds = items
-                .map(i => i.foodId)
-                .filter((id): id is string => id !== null && id !== undefined);
+    for (const item of items) {
+        const isGeneralUnavailable = Boolean(item.isOutOfStock) || item.status === "inactive";
+        const unavailableBranches = item.foodId ? (unavailableMap.get(item.foodId) || []) : [];
+        const isBranchUnavailable = Boolean(targetBranchId && unavailableBranches.some(b => b.id === targetBranchId));
 
-            const unavailableMap = await getUnavailableBranchesForFoods(allFoodIds);
-
-            availableCartItems = [];
-
-            for (const item of items) {
-                // Safely retrieve unavailable branches if foodId exists
-                const unavailableBranches = item.foodId ? (unavailableMap.get(item.foodId) || []) : [];
-                const isItemUnavailable = unavailableBranches.some(b => b.id === targetBranchId);
-
-                if (isItemUnavailable) {
-                    unavailableCartItemsData.push(item);
-                } else {
-                    availableCartItems.push(item);
-                }
-            }
+        if (isGeneralUnavailable || isBranchUnavailable) {
+            unavailableCartItemsData.push(item);
+        } else {
+            availableCartItems.push(item);
         }
     }
     let initialSubtotal = 0;
