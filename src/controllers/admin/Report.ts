@@ -1,7 +1,7 @@
 // controllers/admin/FinancialReportController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales, restaurant_users, users } from "../../models/schema";
+import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales, restaurant_users, users, zones, cities } from "../../models/schema";
 import { eq, and, desc, gte, lte, inArray, count, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
@@ -743,14 +743,28 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         .select({
             restaurant: restaurants,
             sales: sales,
+            city: {
+                id: cities.id,
+                name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
+            },
         })
         .from(restaurants)
         .leftJoin(sales, eq(restaurants.salesId, sales.id))
+        .leftJoin(zones, eq(restaurants.zoneId, zones.id))
+        .leftJoin(cities, eq(zones.cityId, cities.id))
         .where(eq(restaurants.status, "active"));
 
     const allRestaurants = allRestaurantsRaw.map(r => ({
         ...r.restaurant,
-        salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null
+        salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null,
+        city: r.city?.id ? {
+            id: r.city.id,
+            name: r.city.name,
+            nameAr: r.city.nameAr,
+            nameFr: r.city.nameFr,
+        } : null,
     }));
 
     let totalRestaurants = allRestaurants.length;
@@ -906,8 +920,10 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             id: r.id,
             name: r.name,
             nameAr: r.nameAr,
+            nameFr: r.nameFr,
             type: r.type,
             status: r.status,
+            city: r.city || null,
             signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
         }));
     } else if (restaurantsWithoutOrders === "true") {
@@ -915,8 +931,10 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             id: r.id,
             name: r.name,
             nameAr: r.nameAr,
+            nameFr: r.nameFr,
             type: r.type,
             status: r.status,
+            city: r.city || null,
             signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
         }));
     } else {

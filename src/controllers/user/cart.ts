@@ -6,9 +6,7 @@ import {
     restaurants,
     variationOptions,
     foodVariations,
-    addons,
-    addresses,
-    branches
+    addons
 } from "../../models/schema";
 
 import { eq, and, inArray } from "drizzle-orm";
@@ -18,6 +16,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
 import { type BranchInfo, getUnavailableBranchesForFoods } from "../../helpers/food.helper";
+import { resolveBranchIdForCart, validateFoodAvailabilityForCart } from "../../helpers/cart.helper";
 
 /* =========================================
    Helpers
@@ -61,68 +60,9 @@ const parseCartSnapshot = (raw: any): { variations: any[]; addons: any[] } => {
     return { variations: [], addons: [] };
 };
 
-/**
- * Resolves target branchId either directly or via address -> zone -> branch link.
- */
-const resolveBranchId = async (branchId?: string, addressId?: string, restaurantId?: string): Promise<string | null> => {
-    if (branchId) return branchId;
-
-    if (addressId) {
-        const [address] = await db
-            .select({ zoneId: addresses.zoneId })
-            .from(addresses)
-            .where(eq(addresses.id, addressId))
-            .limit(1);
-
-        if (address?.zoneId) {
-            const conditions = [eq(branches.zoneId, address.zoneId)];
-            if (restaurantId) {
-                conditions.push(eq(branches.restaurantId, restaurantId));
-            }
-
-            const [branch] = await db
-                .select({ id: branches.id })
-                .from(branches)
-                .where(and(...conditions))
-                .limit(1);
-
-            if (branch) return branch.id;
-        }
-    }
-
-    return null;
-};
-
-/**
- * Validates if a single food item is available at the specified branch/address.
- */
-const validateFoodAvailabilityInBranch = async (
-    foodId: string,
-    branchId?: string,
-    addressId?: string,
-    restaurantId?: string
-) => {
-    const targetBranchId = await resolveBranchId(branchId, addressId, restaurantId);
-
-    if (!targetBranchId) return;
-
-    const unavailableMap = await getUnavailableBranchesForFoods([foodId]);
-    const unavailableBranches = unavailableMap.get(foodId) || [];
-
-    const isUnavailable = unavailableBranches.some(b => b.id === targetBranchId);
-
-    if (isUnavailable) {
-        if (branchId) {
-            throw new BadRequest("This item is currently unavailable in the selected branch.");
-        }
-
-        if (addressId) {
-            throw new BadRequest("This item is currently unavailable for delivery to your selected address.");
-        }
-
-        throw new BadRequest("This item is currently unavailable at your location.");
-    }
-};
+// resolveBranchIdForCart and validateFoodAvailabilityForCart are now in:
+// src/helpers/cart.helper.ts — uses restaurant-specific delivery zones (restaurant_zone_delivery_fees)
+// instead of the generic zones table, for accurate per-restaurant coverage checks.
 
 /* =========================================
    1. ADD TO CART
@@ -146,7 +86,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
     }
 
     // Verify branch/address availability for the single item being added
-    await validateFoodAvailabilityInBranch(foodId, branchId, addressId, itemFood.restaurantid);
+    await validateFoodAvailabilityForCart(foodId, branchId, addressId, itemFood.restaurantid);
 
     const existingCart = await db.select().from(cartItems)
         .where(eq(cartItems.userId, userId))
@@ -358,7 +298,7 @@ export const getCart = async (req: Request | any, res: Response) => {
 
     let targetBranchId: string | undefined = undefined;
     if (branchId || addressId) {
-        targetBranchId = (await resolveBranchId(branchId, addressId, restaurantId || undefined)) || undefined;
+        targetBranchId = (await resolveBranchIdForCart(branchId, addressId, restaurantId || undefined)) || undefined;
     }
 
     for (const item of items) {
@@ -678,7 +618,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         .limit(1);
 
     // Verify branch/address availability
-    await validateFoodAvailabilityInBranch(cartItem.foodId, branchId, addressId, itemFood.restaurantid);
+    await validateFoodAvailabilityForCart(cartItem.foodId, branchId, addressId, itemFood.restaurantid);
 
     let safeVariations: any[] = [];
     if (variations !== undefined) {

@@ -12,7 +12,8 @@ export const getActiveRestaurants = async (req: Request, res: Response) => {
             nameAr: restaurants.nameAr,
             nameFr: restaurants.nameFr,
             orderLink: restaurants.orderLink,
-            logo: restaurants.logo
+            logo: restaurants.logo,
+            type: restaurants.type
         })
             .from(restaurants)
             .where(
