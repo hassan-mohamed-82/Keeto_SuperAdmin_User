@@ -751,12 +751,16 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             deliveryManId: orders.deliveryManId,
             deliveryManName: deliveryMen.name,
             deliveryManPhone: deliveryMen.phone,
+            // Cancellation info
+            cancelReason: orders.cancelReason,
+            cancelReasonType: selectReasons.type,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(branches, eq(orders.branchId, branches.id))
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
+        .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .where(
             and(
                 eq(orders.userId, userId),
@@ -807,6 +811,9 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
         status: o.status,
         createdAt: formatDate(o.createdAt),
         itemsCount: o.itemsCount,
+        cancellation: o.status === "cancelled"
+            ? { reason: o.cancelReason, type: o.cancelReasonType }
+            : null,
         location: o.orderType === "delivery"
             ? { type: "address", title: o.addressTitle, street: o.addressStreet, landmark: o.addressLandmark }
             : { type: "branch", name: o.branchName },
@@ -855,12 +862,16 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             deliveryManId: orders.deliveryManId,
             deliveryManName: deliveryMen.name,
             deliveryManPhone: deliveryMen.phone,
+            // Cancellation info
+            cancelReason: orders.cancelReason,
+            cancelReasonType: selectReasons.type,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(branches, eq(orders.branchId, branches.id))
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
+        .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .where(
             and(
                 eq(orders.userId, userId),
@@ -913,6 +924,9 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
         rating: o.rating,
         ratingComment: o.ratingComment,
         itemsCount: o.itemsCount,
+        cancellation: o.status === "cancelled"
+            ? { reason: o.cancelReason, type: o.cancelReasonType }
+            : null,
         location: o.orderType === "delivery"
             ? { type: "address", title: o.addressTitle, street: o.addressStreet, landmark: o.addressLandmark }
             : { type: "branch", name: o.branchName },
@@ -980,6 +994,9 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             deliveryManId: orders.deliveryManId,
             deliveryManName: deliveryMen.name,
             deliveryManPhone: deliveryMen.phone,
+            // Cancellation info
+            cancelReason: orders.cancelReason,
+            cancelReasonType: selectReasons.type,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
@@ -987,6 +1004,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
         .leftJoin(branches, eq(orders.branchId, branches.id))
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
+        .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .where(eq(orders.id, orderId))
         .limit(1);
 
@@ -1039,6 +1057,9 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             note: o.note,
             rating: o.rating,
             ratingComment: o.ratingComment,
+            cancellation: o.status === "cancelled"
+                ? { reason: o.cancelReason, type: o.cancelReasonType }
+                : null,
             restaurantName: o.restaurantName,
             restaurantImage: o.restaurantImage,
             location: o.orderType === "delivery"
