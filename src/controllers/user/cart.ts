@@ -14,6 +14,7 @@ import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
+import { validateUserNotBlocked } from "../../utils/userBlockCheck";
 
 /* =========================================
    Helpers
@@ -75,6 +76,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
 
     const [itemFood] = await db.select().from(food).where(eq(food.id, foodId)).limit(1);
     if (!itemFood) throw new BadRequest("Food not found");
+
+    // 🛡️ Block check: Verify user is not blocked globally or by this restaurant
+    await validateUserNotBlocked(userId, itemFood.restaurantid);
 
     const existingCart = await db.select().from(cartItems)
         .where(eq(cartItems.userId, userId))
@@ -397,6 +401,9 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         .limit(1);
 
     if (!cartItem) throw new BadRequest("Cart item not found");
+
+    // 🛡️ Block check: Verify user is not blocked globally or by this restaurant
+    await validateUserNotBlocked(userId, cartItem.restaurantId);
 
     const [itemFood] = await db
         .select()

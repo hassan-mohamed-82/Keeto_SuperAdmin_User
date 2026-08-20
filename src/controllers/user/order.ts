@@ -27,6 +27,7 @@ import { UnauthorizedError } from "../../Errors";
 import { sendPushNotification } from "../../utils/notifications";
 import { calculateDistance, isLocationInZone } from "../../utils/geo";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
+import { validateUserNotBlocked } from "../../utils/userBlockCheck";
 import { calculateCurrentStatus } from "./restaurantFeatures";
 import * as turf from "@turf/turf";
 
@@ -112,6 +113,9 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (!userCart.length) throw new BadRequest("Your cart is empty");
 
     const restaurantId = userCart[0].restaurantId;
+
+    // 🛡️ Block check: Verify user is not blocked globally or by this restaurant
+    await validateUserNotBlocked(userId, restaurantId);
 
     // ==========================================
     // 4. Get Restaurant & Business Plan

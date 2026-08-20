@@ -41,6 +41,10 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   isSameTimeEveryDay: boolean("is_same_time_every_day").default(false),
 
   isTemporarilyClosed: boolean("is_temporarily_closed").default(false),
+
+  repeatNotification: boolean("repeat_notification").default(false),
+  repeatNotificationDuration: int("repeat_notification_duration").default(5), // Duration in minutes (e.g. repeated for how many minutes)
+  repeatNotificationInterval: int("repeat_notification_interval").default(60), // Interval in seconds between alerts
 });
 
 

@@ -4,14 +4,19 @@ import {
     getAllUsers,
     getUserById,
     updateUser,
-    deleteUser
+    deleteUser,
+    getBlockedUsers,
+    toggleRestaurantUserBlock
 } from "../../controllers/admin/Keeto_users";
 
 const router = Router();
 
+router.get("/blocked", catchAsync(getBlockedUsers));
+router.post("/restaurant-block", catchAsync(toggleRestaurantUserBlock));
 router.get("/", catchAsync(getAllUsers));
 router.get("/:id", catchAsync(getUserById));
 router.put("/:id", catchAsync(updateUser));
 router.delete("/:id", catchAsync(deleteUser));
 
 export default router;
+

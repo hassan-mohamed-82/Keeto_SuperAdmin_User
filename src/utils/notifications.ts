@@ -77,10 +77,9 @@
 // };
 
 
-
 import { messaging } from "./firebase";
 import { db } from "../models/connection";
-import { notifications, users, restaurants, restrauntadmin } from "../models/schema";
+import { notifications, users, restaurants, restrauntadmin, restaurantSettings } from "../models/schema";
 import { eq, and, or } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
@@ -97,10 +96,36 @@ export const sendPushNotification = async (params: {
 }) => {
     const { recipientType, recipientId, branchId, title, body, data } = params;
 
-    const payloadData = {
+    let payloadData: any = {
         ...(data || {}),
         ...(branchId ? { branchId } : (data?.branchId ? { branchId: data.branchId } : {}))
     };
+
+    // ✅ جلب إعدادات تكرار الإشعارات إذا كان المستلم مطعماً
+    if (recipientType === "restaurant") {
+        try {
+            const [settings] = await db
+                .select({
+                    repeatNotification: restaurantSettings.repeatNotification,
+                    repeatNotificationDuration: restaurantSettings.repeatNotificationDuration,
+                    repeatNotificationInterval: restaurantSettings.repeatNotificationInterval,
+                })
+                .from(restaurantSettings)
+                .where(eq(restaurantSettings.restaurantId, recipientId))
+                .limit(1);
+
+            if (settings) {
+                payloadData = {
+                    repeatNotification: settings.repeatNotification ?? false,
+                    repeatNotificationDuration: settings.repeatNotificationDuration ?? 5,
+                    repeatNotificationInterval: settings.repeatNotificationInterval ?? 60,
+                    ...payloadData,
+                };
+            }
+        } catch (err) {
+            console.error("[NOTIFICATIONS] Failed to load restaurant repeat settings:", err);
+        }
+    }
 
     // 1. Save notification to database regardless of FCM success/failure
     await db.insert(notifications).values({
