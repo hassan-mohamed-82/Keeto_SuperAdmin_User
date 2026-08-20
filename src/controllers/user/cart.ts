@@ -17,7 +17,7 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
-import { BranchInfo, getUnavailableBranchesForFoods } from "../../helpers/food.helper";
+import { type BranchInfo, getUnavailableBranchesForFoods } from "../../helpers/food.helper";
 
 /* =========================================
    Helpers
@@ -137,8 +137,16 @@ export const addToCart = async (req: Request | any, res: Response) => {
     const [itemFood] = await db.select().from(food).where(eq(food.id, foodId)).limit(1);
     if (!itemFood) throw new BadRequest("Food not found");
 
+
     // 🛡️ Block check: Verify user is not blocked globally or by this restaurant
     await validateUserNotBlocked(userId, itemFood.restaurantid);
+
+    if (itemFood.isOutOfStock || itemFood.status === "inactive") {
+        throw new BadRequest("This item is currently out of stock.");
+    }
+
+    // Verify branch/address availability for the single item being added
+    await validateFoodAvailabilityInBranch(foodId, branchId, addressId, itemFood.restaurantid);
 
     const existingCart = await db.select().from(cartItems)
         .where(eq(cartItems.userId, userId))
