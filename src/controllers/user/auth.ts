@@ -19,13 +19,14 @@ const generateOTP = (length: number = 6): string => {
     return otp;
 };
 
+
 // ===================================
 // 1. Signup
 // ===================================
 export const signup = async (req: Request, res: Response) => {
-    const { name, email, phone, password ,photo, restaurantId} = req.body;
+    const { name, email, phone, password, photo, restaurantId } = req.body;
 
-    if (!name || !email || !phone || !password ) {
+    if (!name || !email || !phone || !password) {
         throw new BadRequest("Please provide all required fields");
     }
 
@@ -36,13 +37,11 @@ export const signup = async (req: Request, res: Response) => {
     // 🔥 always use same userId logic
     const userId = existingUser ? existingUser.id : uuidv4();
 
-   // استدعاء الرابط من البيئة، وإذا لم يوجد نستخدم لوكال هوست كاحتياط
-const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    // استدعاء الرابط من البيئة، وإذا لم يوجد نستخدم لوكال هوست كاحتياط
+    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    const token = uuidv4();
+    const verifyLink = `${baseUrl}/api/user/auth/verify-email?token=${token}`;
 
-const token = uuidv4();
-
-// ✅ الآن الرابط سيتغير تلقائياً بناءً على مكان تشغيل الكود
-const verifyLink = `${baseUrl}/api/user/auth/verify-email?token=${token}`;
     await db.transaction(async (tx) => {
 
         if (existingUser) {
@@ -79,13 +78,22 @@ const verifyLink = `${baseUrl}/api/user/auth/verify-email?token=${token}`;
             });
         }
 
+        // if (restaurantId) {
+        //     const [existingLink] = await tx.select().from(restaurant_users)
+        //         .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, userId)))
+        //         .limit(1);
+        //     if (!existingLink) {
+        //         await tx.insert(restaurant_users).values({ restaurantId, userId });
+        //     }
+        // }
+
+
+
+        // ✅ تحسين: إضافة مباشرة مع تجاهل التكرار لتوفير الـ Query
         if (restaurantId) {
-            const [existingLink] = await tx.select().from(restaurant_users)
-                .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, userId)))
-                .limit(1);
-            if (!existingLink) {
-                await tx.insert(restaurant_users).values({ restaurantId, userId });
-            }
+            await tx.insert(restaurant_users)
+                .ignore()
+                .values({ restaurantId, userId });
         }
 
         const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
@@ -213,18 +221,19 @@ export const verifyEmail = async (req: Request, res: Response) => {
 
         // إرسال صفحة النجاح بتصميمها الجديد!
         return res.send(successHTML);
-        
+
     } catch (error) {
         console.error("Verification Error:", error);
         // إذا فشلت قاعدة البيانات، أرسل واجهة الخطأ بدلاً من توقف التطبيق عن العمل
-        return res.status(500).send(errorHTML); 
+        return res.status(500).send(errorHTML);
     }
 };
+
 // ===================================
 // 3. Login
 // ===================================
 export const login = async (req: Request, res: Response) => {
-    const { email, password } = req.body;
+    const { email, password, restaurantId } = req.body;
 
     if (!email || !password) throw new BadRequest("Email and password are required");
 
@@ -232,7 +241,6 @@ export const login = async (req: Request, res: Response) => {
     if (!user) throw new BadRequest("Invalid credentials");
 
     if (!user.isVerified) {
-        // ممكن نعيد إرسال الكود هنا لو أردت
         throw new BadRequest("Please verify your email before logging in");
     }
 
@@ -243,14 +251,30 @@ export const login = async (req: Request, res: Response) => {
         throw new BadRequest("Your account has been blocked. Please contact support.");
     }
 
-
+    // ✅ تحسين: إدخال مباشر بدون Select مسبق
+    if (restaurantId) {
+        await db.insert(restaurant_users)
+            .ignore()
+            .values({ restaurantId, userId: user.id });
+    }
 
     const token = generateUserToken({ id: user.id, name: user.name });
-    
+
     // For older users where DB default might be false, fallback to checking email
     const isProfileComplete = user.isProfileComplete || !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
 
-    return SuccessResponse(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email, isProfileComplete } } });
+    return SuccessResponse(res, {
+        message: "Login successful",
+        data: {
+            token,
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                isProfileComplete
+            }
+        }
+    });
 };
 // ===================================
 // 4. Forgot Password

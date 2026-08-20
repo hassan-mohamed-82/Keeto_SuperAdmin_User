@@ -6,7 +6,9 @@ import {
     restaurants,
     variationOptions,
     foodVariations,
-    addons
+    addons,
+    addresses,
+    branches
 } from "../../models/schema";
 
 import { eq, and, inArray } from "drizzle-orm";
@@ -33,7 +35,6 @@ const normalizeAddons = (addonsInput: any) => {
         .sort((a, b) => String(a.addonId).localeCompare(String(b.addonId)));
 };
 
-// الفك العميق لتفادي مشكلة (Double Stringification)
 const deepParseJSON = (data: any): any => {
     if (typeof data === 'string') {
         try {
@@ -45,14 +46,9 @@ const deepParseJSON = (data: any): any => {
     return data;
 };
 
-/**
- * Parse the cart item's `variations` JSON field.
- * Supports both legacy flat-array format and new object format { variations, addons }.
- */
 const parseCartSnapshot = (raw: any): { variations: any[]; addons: any[] } => {
     const parsed = deepParseJSON(raw);
     if (Array.isArray(parsed)) {
-        // Legacy: flat array was only variations
         return { variations: parsed, addons: [] };
     }
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -64,12 +60,75 @@ const parseCartSnapshot = (raw: any): { variations: any[]; addons: any[] } => {
     return { variations: [], addons: [] };
 };
 
+/**
+ * Resolves target branchId either directly or via address -> zone -> branch link.
+ */
+const resolveBranchId = async (branchId?: string, addressId?: string, restaurantId?: string): Promise<string | null> => {
+    if (branchId) return branchId;
+
+    if (addressId) {
+        const [address] = await db
+            .select({ zoneId: addresses.zoneId })
+            .from(addresses)
+            .where(eq(addresses.id, addressId))
+            .limit(1);
+
+        if (address?.zoneId) {
+            const conditions = [eq(branches.zoneId, address.zoneId)];
+            if (restaurantId) {
+                conditions.push(eq(branches.restaurantId, restaurantId));
+            }
+
+            const [branch] = await db
+                .select({ id: branches.id })
+                .from(branches)
+                .where(and(...conditions))
+                .limit(1);
+
+            if (branch) return branch.id;
+        }
+    }
+
+    return null;
+};
+
+/**
+ * Validates if a single food item is available at the specified branch/address.
+ */
+const validateFoodAvailabilityInBranch = async (
+    foodId: string,
+    branchId?: string,
+    addressId?: string,
+    restaurantId?: string
+) => {
+    const targetBranchId = await resolveBranchId(branchId, addressId, restaurantId);
+
+    if (!targetBranchId) return;
+
+    const unavailableMap = await getUnavailableBranchesForFoods([foodId]);
+    const unavailableBranches = unavailableMap.get(foodId) || [];
+
+    const isUnavailable = unavailableBranches.some(b => b.id === targetBranchId);
+
+    if (isUnavailable) {
+        if (branchId) {
+            throw new BadRequest("This item is currently unavailable in the selected branch.");
+        }
+
+        if (addressId) {
+            throw new BadRequest("This item is currently unavailable for delivery to your selected address.");
+        }
+
+        throw new BadRequest("This item is currently unavailable at your location.");
+    }
+};
+
 /* =========================================
    1. ADD TO CART
 ========================================= */
 export const addToCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
-    const { foodId, quantity = 1, variations = [], addons: requestAddons = [], note } = req.body;
+    const { foodId, quantity = 1, variations = [], addons: requestAddons = [], note, branchId, addressId } = req.body;
 
     const safeVariations = Array.isArray(variations) ? variations : [];
     const safeAddons = Array.isArray(requestAddons) ? requestAddons : [];
@@ -99,7 +158,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
 
     let totalExtraPrice = 0;
 
-    // 1. التحقق من صحة الـ Variations المرسلة
+    // 1. Check variations
     for (const selected of safeVariations) {
         const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
 
@@ -126,7 +185,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
     }
 
-    // 2. التأكد من أن الـ Variations الإجبارية تم اختيارها
+    // 2. Mandatory variations check
     for (const v of dbVariations) {
         if (v.isRequired) {
             const isProvided = safeVariations.some(x => x.variationId === v.id);
@@ -134,10 +193,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
         }
     }
 
-    // 3. التحقق من صحة الـ Addons المرسلة وحساب سعرها
+    // 3. Addons validation
     let addonSnapshot: { addonId: string; name: string; nameAr: string; price: string }[] = [];
     if (safeAddons.length > 0) {
-        // التحقق من أن الـ addons مسموح بها لهذه الأكلة (فقط إذا كانت القائمة المسموح بها غير فارغة)
         const allowedAddonIds: string[] = Array.isArray(itemFood.addonsId) ? itemFood.addonsId : [];
         if (allowedAddonIds.length > 0) {
             for (const a of safeAddons) {
@@ -168,15 +226,14 @@ export const addToCart = async (req: Request | any, res: Response) => {
         }
     }
 
-    // 4. احتساب السعر الكلي
+    // 4. Calculate total price
     const unitPrice = Number(itemFood.price) + totalExtraPrice;
 
-    const normalizedVariations = normalizeVariations(safeVariations);
-    const normalizedAddons = normalizeAddons(addonSnapshot);
-    // مفتاح التفرد يشمل كلاً من الـ variations والـ addons
-    const key = JSON.stringify({ variations: normalizedVariations, addons: normalizedAddons });
+    const normalizedVariationsList = normalizeVariations(safeVariations);
+    const normalizedAddonsList = normalizeAddons(addonSnapshot);
+    const key = JSON.stringify({ variations: normalizedVariationsList, addons: normalizedAddonsList });
 
-    const snapshot = { variations: normalizedVariations };
+    const snapshot = { variations: normalizedVariationsList };
 
     const existingItems = await db.select().from(cartItems)
         .where(and(eq(cartItems.userId, userId), eq(cartItems.foodId, foodId)));
@@ -231,11 +288,13 @@ export const addToCart = async (req: Request | any, res: Response) => {
 };
 
 /* =========================================
-   2. GET CART (DETAILED)
+   2. GET CART
 ========================================= */
 export const getCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const queryRestaurantId = req.query.restaurantId as string | undefined;
+    const branchId = req.query.branchId as string | undefined;
+    const addressId = req.query.addressId as string | undefined;
 
     const conditions = [eq(cartItems.userId, userId)];
     if (queryRestaurantId) {
@@ -256,6 +315,8 @@ export const getCart = async (req: Request | any, res: Response) => {
             price: food.price,
             discountType: food.discount_type,
             discountValue: food.discount_value,
+            isOutOfStock: food.isOutOfStock,
+            status: food.status,
             restaurantId: restaurants.id,
             restaurantName: restaurants.name,
             quantity: cartItems.quantity,
@@ -271,14 +332,39 @@ export const getCart = async (req: Request | any, res: Response) => {
         .where(and(...conditions));
 
     if (items.length === 0) {
-        return SuccessResponse(res, { data: { items: [], totalSummary: { subtotal: 0 } } });
+        return SuccessResponse(res, { data: { items: [], unavailableItems: [], hasUnavailableItems: false, totalSummary: { subtotal: 0 } } });
     }
 
     const restaurantId = items[0].restaurantId;
+    let availableCartItems: typeof items = [];
+    let unavailableCartItemsData: typeof items = [];
 
-    // 1. حساب الـ subtotal الأولي (السعر الأصلي + variations + addons) لتقييم الـ discount بشكل صحيح
+    const allFoodIds = items
+        .map(i => i.foodId)
+        .filter((id): id is string => id !== null && id !== undefined);
+
+    const unavailableMap = allFoodIds.length > 0
+        ? await getUnavailableBranchesForFoods(allFoodIds)
+        : new Map<string, BranchInfo[]>();
+
+    let targetBranchId: string | undefined = undefined;
+    if (branchId || addressId) {
+        targetBranchId = (await resolveBranchId(branchId, addressId, restaurantId || undefined)) || undefined;
+    }
+
+    for (const item of items) {
+        const isGeneralUnavailable = Boolean(item.isOutOfStock) || item.status === "inactive";
+        const unavailableBranches = item.foodId ? (unavailableMap.get(item.foodId) || []) : [];
+        const isBranchUnavailable = Boolean(targetBranchId && unavailableBranches.some(b => b.id === targetBranchId));
+
+        if (isGeneralUnavailable || isBranchUnavailable) {
+            unavailableCartItemsData.push(item);
+        } else {
+            availableCartItems.push(item);
+        }
+    }
     let initialSubtotal = 0;
-    const itemsData = items.map(item => {
+    const itemsData = availableCartItems.map(item => {
         const originalBasePrice = parseFloat(item.price as string || "0");
         const { variations: parsedVariations } = parseCartSnapshot(item.variations);
         const parsedAddons = Array.isArray(deepParseJSON(item.addons)) ? deepParseJSON(item.addons) : [];
@@ -293,7 +379,6 @@ export const getCart = async (req: Request | any, res: Response) => {
         }
 
         const dbUnitPrice = parseFloat(item.unitPrice as string || "0");
-        // varPrice = كل زيادة على السعر الأصلي (variations + addons)
         const varPrice = dbUnitPrice - originalBasePrice;
 
         initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
@@ -305,11 +390,10 @@ export const getCart = async (req: Request | any, res: Response) => {
 
     let finalSubtotal = 0;
 
-    const formatted = await Promise.all(
+    const formattedAvailableItems = await Promise.all(
         itemsData.map(async (data: any) => {
             const { item, originalBasePrice, varPrice, parsedVariations, parsedAddons } = data;
 
-            // جلب تفاصيل الـ Variations
             const variationDetails: any[] = [];
             for (const v of parsedVariations) {
                 if (!v.variationId || !v.optionId) continue;
@@ -328,7 +412,6 @@ export const getCart = async (req: Request | any, res: Response) => {
                 }
             }
 
-            // جلب تفاصيل الـ Addons من الـ snapshot المخزن
             const addonDetails = parsedAddons.map((a: any) => ({
                 addonId: a.addonId,
                 name: a.name,
@@ -365,20 +448,41 @@ export const getCart = async (req: Request | any, res: Response) => {
                 restaurantId: item.restaurantId,
                 restaurantName: item.restaurantName,
                 quantity: item.quantity,
-                price: (originalBasePrice + varPrice).toString(), // السعر الأصلي شامل الـ variations والـ addons
-                unitPrice: finalUnitPrice, // السعر بعد الخصم
+                price: (originalBasePrice + varPrice).toString(),
+                unitPrice: finalUnitPrice,
                 totalPrice: finalTotalPrice,
                 variations: variationDetails,
                 addons: addonDetails,
-                note: item.note || null
+                note: item.note || null,
+                isAvailable: true
             };
         })
     );
 
+    const formattedUnavailableItems = unavailableCartItemsData.map(item => {
+        const { variations: parsedVariations } = parseCartSnapshot(item.variations);
+        const parsedAddons = Array.isArray(deepParseJSON(item.addons)) ? deepParseJSON(item.addons) : [];
+
+        return {
+            cartId: item.cartId,
+            foodId: item.foodId,
+            name: item.name,
+            nameAr: item.nameAr,
+            image: item.image,
+            quantity: item.quantity,
+            variations: parsedVariations,
+            addons: parsedAddons,
+            isAvailable: false,
+            reason: "Out of stock or unavailable at selected location"
+        };
+    });
+
     return SuccessResponse(res, {
         message: "Cart fetched successfully",
         data: {
-            items: formatted,
+            items: formattedAvailableItems,
+            unavailableItems: formattedUnavailableItems,
+            hasUnavailableItems: formattedUnavailableItems.length > 0,
             totalSummary: {
                 subtotal: finalSubtotal,
             }
@@ -386,13 +490,166 @@ export const getCart = async (req: Request | any, res: Response) => {
     });
 };
 
+// export const getCart = async (req: Request | any, res: Response) => {
+//     const userId = req.user?.id;
+//     const queryRestaurantId = req.query.restaurantId as string | undefined;
+
+//     const conditions = [eq(cartItems.userId, userId)];
+//     if (queryRestaurantId) {
+//         conditions.push(eq(cartItems.restaurantId, queryRestaurantId));
+//     }
+
+//     const items = await db
+//         .select({
+//             cartId: cartItems.id,
+//             foodId: food.id,
+//             name: food.name,
+//             nameAr: food.nameAr,
+//             nameFr: food.nameFr,
+//             description: food.description,
+//             descriptionAr: food.descriptionAr,
+//             descriptionFr: food.descriptionFr,
+//             image: food.image,
+//             price: food.price,
+//             discountType: food.discount_type,
+//             discountValue: food.discount_value,
+//             restaurantId: restaurants.id,
+//             restaurantName: restaurants.name,
+//             quantity: cartItems.quantity,
+//             unitPrice: cartItems.unitPrice,
+//             totalPrice: cartItems.totalPrice,
+//             variations: cartItems.variations,
+//             addons: cartItems.addons,
+//             note: cartItems.note
+//         })
+//         .from(cartItems)
+//         .leftJoin(food, eq(cartItems.foodId, food.id))
+//         .leftJoin(restaurants, eq(cartItems.restaurantId, restaurants.id))
+//         .where(and(...conditions));
+
+//     if (items.length === 0) {
+//         return SuccessResponse(res, { data: { items: [], totalSummary: { subtotal: 0 } } });
+//     }
+
+//     const restaurantId = items[0].restaurantId;
+
+//     // 1. حساب الـ subtotal الأولي (السعر الأصلي + variations + addons) لتقييم الـ discount بشكل صحيح
+//     let initialSubtotal = 0;
+//     const itemsData = items.map(item => {
+//         const originalBasePrice = parseFloat(item.price as string || "0");
+//         const { variations: parsedVariations } = parseCartSnapshot(item.variations);
+//         const parsedAddons = Array.isArray(deepParseJSON(item.addons)) ? deepParseJSON(item.addons) : [];
+
+//         let initialDiscountPrice = originalBasePrice;
+//         if (item.discountType && Number(item.discountValue) > 0) {
+//             if (item.discountType === "percentage") {
+//                 initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(item.discountValue) / 100));
+//             } else if (item.discountType === "amount" || item.discountType === "fixed") {
+//                 initialDiscountPrice = Math.max(0, originalBasePrice - Number(item.discountValue));
+//             }
+//         }
+
+//         const dbUnitPrice = parseFloat(item.unitPrice as string || "0");
+//         // varPrice = كل زيادة على السعر الأصلي (variations + addons)
+//         const varPrice = dbUnitPrice - originalBasePrice;
+
+//         initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
+//         return { item, originalBasePrice, varPrice, parsedVariations, parsedAddons };
+//     });
+
+//     const availableDiscounts = await getAvailableDiscounts(restaurantId!);
+//     const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+
+//     let finalSubtotal = 0;
+
+//     const formatted = await Promise.all(
+//         itemsData.map(async (data: any) => {
+//             const { item, originalBasePrice, varPrice, parsedVariations, parsedAddons } = data;
+
+//             // جلب تفاصيل الـ Variations
+//             const variationDetails: any[] = [];
+//             for (const v of parsedVariations) {
+//                 if (!v.variationId || !v.optionId) continue;
+//                 const [variation] = await db.select().from(foodVariations).where(eq(foodVariations.id, v.variationId)).limit(1);
+//                 const [option] = await db.select().from(variationOptions).where(eq(variationOptions.id, v.optionId)).limit(1);
+//                 if (variation && option) {
+//                     variationDetails.push({
+//                         variationId: variation.id,
+//                         variationName: variation.name,
+//                         variationNameAr: variation.nameAr,
+//                         optionId: option.id,
+//                         optionName: option.optionName,
+//                         optionNameAr: option.optionNameAr,
+//                         additionalPrice: option.additionalPrice
+//                     });
+//                 }
+//             }
+
+//             // جلب تفاصيل الـ Addons من الـ snapshot المخزن
+//             const addonDetails = parsedAddons.map((a: any) => ({
+//                 addonId: a.addonId,
+//                 name: a.name,
+//                 nameAr: a.nameAr,
+//                 price: a.price
+//             }));
+
+//             const { price: discountedBasePrice } = applyPriorityDiscount(
+//                 { id: item.foodId, discountType: item.discountType, discountValue: item.discountValue },
+//                 originalBasePrice,
+//                 initialSubtotal,
+//                 availableDiscounts,
+//                 discountState,
+//                 true
+//             );
+
+//             const finalUnitPrice = discountedBasePrice + varPrice;
+//             const finalTotalPrice = finalUnitPrice * item.quantity;
+
+//             finalSubtotal += finalTotalPrice;
+
+//             return {
+//                 cartId: item.cartId,
+//                 foodId: item.foodId,
+//                 name: item.name,
+//                 nameAr: item.nameAr,
+//                 nameFr: item.nameFr,
+//                 description: item.description,
+//                 descriptionAr: item.descriptionAr,
+//                 descriptionFr: item.descriptionFr,
+//                 discountType: item.discountType,
+//                 discountValue: item.discountValue,
+//                 image: item.image,
+//                 restaurantId: item.restaurantId,
+//                 restaurantName: item.restaurantName,
+//                 quantity: item.quantity,
+//                 price: (originalBasePrice + varPrice).toString(), // السعر الأصلي شامل الـ variations والـ addons
+//                 unitPrice: finalUnitPrice, // السعر بعد الخصم
+//                 totalPrice: finalTotalPrice,
+//                 variations: variationDetails,
+//                 addons: addonDetails,
+//                 note: item.note || null
+//             };
+//         })
+//     );
+
+//     return SuccessResponse(res, {
+//         message: "Cart fetched successfully",
+//         data: {
+//             items: formatted,
+//             totalSummary: {
+//                 subtotal: finalSubtotal,
+//             }
+//         }
+//     });
+// };
+
 /* =========================================
    3. UPDATE CART ITEM
 ========================================= */
 export const updateCartItem = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
-    const { quantity, variations, addons: requestAddons, note } = req.body;
+    const { quantity, variations, addons: requestAddons, note, branchId, addressId } = req.body;
 
     const [cartItem] = await db
         .select()
@@ -411,7 +668,9 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         .where(eq(food.id, cartItem.foodId))
         .limit(1);
 
-    // تجهيز الـ Variations بشكل آمن
+    // Verify branch/address availability
+    await validateFoodAvailabilityInBranch(cartItem.foodId, branchId, addressId, itemFood.restaurantid);
+
     let safeVariations: any[] = [];
     if (variations !== undefined) {
         safeVariations = normalizeVariations(variations);
@@ -420,7 +679,6 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         safeVariations = normalizeVariations(existingVars);
     }
 
-    // تجهيز الـ Addons بشكل آمن
     let safeAddons: any[] = [];
     if (requestAddons !== undefined) {
         safeAddons = Array.isArray(requestAddons) ? requestAddons : [];
@@ -438,7 +696,6 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
 
     let totalExtraPrice = 0;
 
-    // التحقق من صحة الـ Variations
     for (const selected of safeVariations) {
         const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
         if (!validDbVariation) throw new BadRequest("Invalid variation ID");
@@ -456,7 +713,6 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         totalExtraPrice += Number(foundOption.additionalPrice || 0);
     }
 
-    // التحقق من صحة الـ Addons وحساب سعرها
     let addonSnapshot: { addonId: string; name: string; nameAr: string; price: string }[] = [];
     if (safeAddons.length > 0) {
         const allowedAddonIds: string[] = Array.isArray(itemFood.addonsId) ? itemFood.addonsId : [];
@@ -488,7 +744,6 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
             });
         }
     } else if (requestAddons === undefined) {
-        // لو المستخدم ما بعتش addons في الريكويست، نحتفظ بالـ snapshot الموجود
         const existingAddonSnapshot = deepParseJSON(cartItem.addons);
         const addonsList = Array.isArray(existingAddonSnapshot) ? existingAddonSnapshot : [];
         addonSnapshot = addonsList.map((a: any) => ({
@@ -497,14 +752,12 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
             nameAr: a.nameAr,
             price: a.price
         }));
-        // إعادة حساب سعر الـ addons من الـ snapshot الموجود
         for (const a of addonSnapshot) {
             totalExtraPrice += Number(a.price || 0);
         }
     }
 
     const unitPrice = Number(itemFood.price) + totalExtraPrice;
-    const snapshot = { variations: safeVariations, addons: addonSnapshot };
 
     await db.update(cartItems)
         .set({

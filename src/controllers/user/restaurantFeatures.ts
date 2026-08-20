@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurants, favorites, userAddHome, restaurantSchedules, restaurantSettings } from "../../models/schema"; 
+import { restaurants, favorites, userAddHome, restaurantSchedules, restaurantSettings, branches, cities, zones } from "../../models/schema"; 
 import { eq, like, or, and, sql, getTableColumns } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, BadRequest, UnauthorizedError } from "../../Errors";
@@ -271,3 +271,64 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
         reason: "Restaurant is open and active"
     };
 }
+
+
+// 6. Get all branches of a restaurant
+export const getRestaurantsBranches = async (req: Request, res: Response) => {
+    const { restaurantId } = req.params;
+    // const userId = req.user?.id;
+
+    // if (!userId) throw new UnauthorizedError("Unauthenticated");
+
+    const restaurant = await db
+        .select()
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+
+    if (!restaurant[0]) {
+        throw new NotFound("Restaurant not found");
+    }
+
+    const allBranches = await db
+        .select({
+            id: branches.id,
+            restaurantId: branches.restaurantId,
+            name: branches.name,
+            nameAr: branches.nameAr,
+            nameFr: branches.nameFr,
+            address: branches.address,
+            addressAr: branches.addressAr,
+            addressFr: branches.addressFr,
+            phoneNumber: branches.phoneNumber,
+            deliveryRadiusKm: branches.deliveryRadiusKm,
+            lat: branches.lat,
+            lng: branches.lng,
+            status: branches.status,
+            createdAt: branches.createdAt,
+            city: {
+                id: cities.id,
+                name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
+            },
+            zone: {
+                id: zones.id,
+                name: zones.name,
+                nameAr: zones.nameAr,
+                nameFr: zones.nameFr,
+            }
+        })
+        .from(branches)
+        .leftJoin(cities, eq(branches.cityId, cities.id))
+        .leftJoin(zones, eq(branches.zoneId, zones.id))
+        .where(and(
+            eq(branches.restaurantId, restaurantId),
+            eq(branches.status, "active")
+        ));
+
+    return SuccessResponse(res, {
+        message: "Restaurant branches fetched successfully",
+        data: allBranches
+    });
+};

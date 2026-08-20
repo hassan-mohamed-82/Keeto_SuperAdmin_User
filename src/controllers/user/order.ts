@@ -154,6 +154,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (resolvedOrderType === "delivery" && !status.canDeliveryNow) throw new BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) throw new BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
 
+    const defaultPreparingDuration = settings?.maxDeliveryTime ?? 30;
     // ==========================================
     // ⚡ 5. Batch Fetching
     // ==========================================
@@ -576,6 +577,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             note: note || null,
             status: "pending",
             dailyOrderNumber: createdDailyOrderNumber,
+            durationOrderPreparing: defaultPreparingDuration,
             createdAt: now
         });
 
@@ -587,8 +589,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             recipientType: "superadmin",
             recipientId: "superadmin",
             title: "New Order",
-            body: `Order #${createdDailyOrderNumber} has been placed.`,
-            data: { orderId, orderNumber, createdDailyOrderNumber }
+            body: `Order #${createdDailyOrderNumber} has been placed at ${restaurant?.name}.`,
+            data: { orderId, orderNumber, createdDailyOrderNumber, restaurantName: restaurant?.name }
         });
 
         // 4. Coupons and Discounts tracking
@@ -711,7 +713,8 @@ export const checkout = async (req: Request | any, res: Response) => {
                 couponCode: couponCode || null,
                 totalAmount,
                 createdAt: now.toISOString(),
-                dailyOrderNumber: createdDailyOrderNumber
+                dailyOrderNumber: createdDailyOrderNumber,
+                durationOrderPreparing: defaultPreparingDuration,
             },
             customerDetails: userInfo
         }
@@ -1298,6 +1301,23 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
                 reference: order.orderNumber,
                 note: "Refund/Revert due to user cancellation"
             });
+        }
+    });
+
+    // 4. إرسال إشعارات إلغاء الطلب (Type: cancel)
+    await sendPushNotification({
+        recipientType: "restaurant",
+        recipientId: order.restaurantId,
+        branchId: order.branchId || null,
+        title: "إلغاء الطلب ❌",
+        body: `تم إلغاء الطلب #${order.dailyOrderNumber} من قبل العميل. السبب: ${reason.name}`,
+        data: {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            dailyOrderNumber: order.dailyOrderNumber,
+            branchId: order.branchId || null,
+            type: "cancel",
+            reason: reason.name
         }
     });
 

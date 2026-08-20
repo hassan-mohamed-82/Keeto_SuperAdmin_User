@@ -215,7 +215,19 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
 
     const { favoriteFoodIds, favoriteRestaurantIds } = await getUserFavoritesSets(userId);
 
-    const [restaurantInfo] = await db.select().from(restaurants)
+    const [restaurantInfo] = await db.select({
+        id: restaurants.id,
+        name: restaurants.name,
+        nameAr: restaurants.nameAr,
+        nameFr: restaurants.nameFr,
+        minDeliveryTime: restaurants.minDeliveryTime,
+        maxDeliveryTime: restaurants.maxDeliveryTime,
+        deliveryTimeUnit: restaurants.deliveryTimeUnit,
+        logo: restaurants.logo,
+        cover: restaurants.cover,
+        iosApp: restaurants.iosApp,
+        androidApp: restaurants.androidApp,
+    }).from(restaurants)
         .where(eq(restaurants.id, restaurantId));
 
     if (!restaurantInfo) throw new Error("Restaurant not found");

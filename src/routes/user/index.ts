@@ -30,9 +30,9 @@ router.use("/rating", ratingRouter);
 router.use("/landing-page" , landingPageRouter)
 router.use("/settings",restaurantSettingsRouter)
 
+router.use("/restaurants", restaurantFeaturesRouter);
 router.use(authenticated,authorizeRoles("user"));
 router.use("/profile", profileRouter);
-router.use("/restaurants", restaurantFeaturesRouter);
 router.use("/order", orderRouter);
 router.use("/wallet",user_walletsRouter);
 router.use("/address", addressRouter);
