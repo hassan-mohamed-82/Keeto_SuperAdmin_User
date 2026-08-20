@@ -38,7 +38,6 @@ export * from "./schema/user/favouriteliste";
 export * from "./schema/user/cart";
 export * from "./schema/user/userAddHome";
 export * from "./schema/user/restaurantRating";
-export * from "./schema/user/SocialMedia";
 export * from "./schema/admin/invoices";
 export * from "./schema/user/slider"
 export * from "./schema/admin/restraurant_user";
@@ -48,3 +47,5 @@ export * from "./schema/user/userRestaurantPoints";
 export * from "./schema/admin/pointsProducts";
 export * from "./schema/admin/delivery_man";
 export * from "./schema/admin/ingredients";
+export * from "./schema/admin/platforms";
+export * from "./schema/admin/SocialMedia";

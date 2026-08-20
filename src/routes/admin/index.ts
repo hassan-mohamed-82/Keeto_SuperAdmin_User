@@ -33,6 +33,7 @@ import KeetoUsersRouter from "./Keeto_users";
 import salesRouter from "./sales";
 import DashboardRouter from "./dashboard";
 import NotificationRouter from "./notification";
+import platformRouter from "./platform";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -40,7 +41,7 @@ const router = Router();
 router.use("/auth", authRouter);
 router.use(authenticated, authorizeRoles("superadmin", "admin"));
 router.use("/notifications", NotificationRouter);
-router.use ("/report",ReportRouter)
+router.use("/report", ReportRouter)
 router.use("/admin", AdmiRouter);
 router.use("/roles", RolesRouter);
 router.use("/countries", CountryRouter);
@@ -72,4 +73,5 @@ router.use("/coupons", couponRouter);
 router.use("/keeto-users", KeetoUsersRouter);
 router.use("/sales", salesRouter);
 router.use("/dashboard", DashboardRouter);
+router.use("/platform", platformRouter);
 export default router;
