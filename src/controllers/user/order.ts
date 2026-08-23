@@ -16,7 +16,8 @@ import {
     variationOptions,
     addons,
     zones,
-    deliveryMen
+    deliveryMen,
+    freeDeliveryOffers
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -490,6 +491,34 @@ export const checkout = async (req: Request | any, res: Response) => {
     }
 
     if (isFreeDelivery) deliveryFee = 0;
+
+    // ==========================================
+    // 6.5 Free Delivery Offer Check (schema-based)
+    // ==========================================
+    if (!isFreeDelivery && resolvedOrderType === "delivery") {
+        const nowForOffer = new Date();
+        const [freeDeliveryOffer] = await db
+            .select()
+            .from(freeDeliveryOffers)
+            .where(
+                and(
+                    eq(freeDeliveryOffers.restaurantId, restaurantId),
+                    eq(freeDeliveryOffers.status, "active")
+                )
+            )
+            .limit(1);
+
+        if (freeDeliveryOffer) {
+            const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= nowForOffer;
+            const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= nowForOffer;
+            const minAmount = parseFloat(freeDeliveryOffer.minOrderAmount as string || "0");
+
+            if (startOk && endOk && subtotal >= minAmount) {
+                isFreeDelivery = true;
+                deliveryFee = 0;
+            }
+        }
+    }
 
     let totalAmount = roundMoney(subtotal + deliveryFee + serviceFee - totalDiscount);
     if (totalAmount < 0) totalAmount = 0;
@@ -1112,7 +1141,8 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         zoneFees,
         activePaymentMethods,
         getCancelReasons,
-        businessPlans
+        businessPlans,
+        freeDeliveryOfferRows
     ] = await Promise.all([
         db.select().from(addresses).where(eq(addresses.userId, userId)),
         db.select().from(branches).where(
@@ -1151,6 +1181,15 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                 and(
                     eq(restaurantBusinessPlans.restaurantId, restaurantId),
                     eq(restaurantBusinessPlans.platformType, orderSource as any)
+                )
+            )
+            .limit(1),
+        db.select()
+            .from(freeDeliveryOffers)
+            .where(
+                and(
+                    eq(freeDeliveryOffers.restaurantId, restaurantId),
+                    eq(freeDeliveryOffers.status, "active")
                 )
             )
             .limit(1)
@@ -1206,6 +1245,27 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
 
     const serviceFee = parseFloat((plan.serviceFee || "0") as string);
 
+    // Free delivery offer — check validity window
+    const nowForPrereq = new Date();
+    const activeFreeDeliveryOffer = freeDeliveryOfferRows[0] ?? null;
+    let freeDeliveryOfferData: {
+        minOrderAmount: number;
+        startDate: string | null;
+        endDate: string | null;
+    } | null = null;
+
+    if (activeFreeDeliveryOffer) {
+        const startOk = !activeFreeDeliveryOffer.startDate || new Date(activeFreeDeliveryOffer.startDate) <= nowForPrereq;
+        const endOk = !activeFreeDeliveryOffer.endDate || new Date(activeFreeDeliveryOffer.endDate) >= nowForPrereq;
+        if (startOk && endOk) {
+            freeDeliveryOfferData = {
+                minOrderAmount: parseFloat(activeFreeDeliveryOffer.minOrderAmount as string || "0"),
+                startDate: activeFreeDeliveryOffer.startDate ? activeFreeDeliveryOffer.startDate.toISOString() : null,
+                endDate: activeFreeDeliveryOffer.endDate ? activeFreeDeliveryOffer.endDate.toISOString() : null,
+            };
+        }
+    }
+
     return SuccessResponse(res, {
         data: {
             addresses: addressesWithDeliveryInfo,
@@ -1214,6 +1274,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
             paymentMethods: activePaymentMethods,
             reasons: getCancelReasons,
             serviceFee: serviceFee.toFixed(2),
+            freeDeliveryOffer: freeDeliveryOfferData,
         }
     });
 };

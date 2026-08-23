@@ -50,3 +50,4 @@ export * from "./schema/admin/ingredients";
 export * from "./schema/admin/platforms";
 export * from "./schema/admin/SocialMedia";
 export * from "./schema/admin/recommendedFood"
+export * from "./schema/admin/freeDeliveryOffer";

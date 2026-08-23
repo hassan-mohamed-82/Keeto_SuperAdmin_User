@@ -6,7 +6,8 @@ import {
     restaurants,
     variationOptions,
     foodVariations,
-    addons
+    addons,
+    freeDeliveryOffers
 } from "../../models/schema";
 
 import { eq, and, inArray } from "drizzle-orm";
@@ -426,6 +427,42 @@ export const getCart = async (req: Request | any, res: Response) => {
         };
     });
 
+    // ==========================================
+    // Free Delivery Offer check
+    // ==========================================
+    const now = new Date();
+    const [freeDeliveryOffer] = await db
+        .select()
+        .from(freeDeliveryOffers)
+        .where(
+            and(
+                eq(freeDeliveryOffers.restaurantId, restaurantId!),
+                eq(freeDeliveryOffers.status, "active")
+            )
+        )
+        .limit(1);
+
+    let freeDeliveryInfo: {
+        isEligible: boolean;
+        minOrderAmount: number;
+        remainingAmount: number;
+    } | null = null;
+
+    if (freeDeliveryOffer) {
+        const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= now;
+        const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= now;
+
+        if (startOk && endOk) {
+            const minAmount = parseFloat(freeDeliveryOffer.minOrderAmount as string || "0");
+            const isEligible = finalSubtotal >= minAmount;
+            freeDeliveryInfo = {
+                isEligible,
+                minOrderAmount: minAmount,
+                remainingAmount: isEligible ? 0 : parseFloat((minAmount - finalSubtotal).toFixed(2))
+            };
+        }
+    }
+
     return SuccessResponse(res, {
         message: "Cart fetched successfully",
         data: {
@@ -434,6 +471,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             hasUnavailableItems: formattedUnavailableItems.length > 0,
             totalSummary: {
                 subtotal: finalSubtotal,
+                freeDelivery: freeDeliveryInfo
             }
         }
     });
