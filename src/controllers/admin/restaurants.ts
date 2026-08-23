@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurants, cuisines, zones, restaurantWallets, food, restrauntadmin, restaurantBusinessPlans, sales, restaurantSettings } from "../../models/schema";
+import { restaurants, cuisines, zones, restaurantWallets, food, restrauntadmin, restaurantBusinessPlans, sales, restaurantSettings, cities } from "../../models/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -91,7 +91,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
     const {
         name, nameAr, nameFr, address, addressAr, addressFr,
-        zoneId, logo, cover, minDeliveryTime, maxDeliveryTime,
+        zoneId, cityId, logo, cover, minDeliveryTime, maxDeliveryTime,
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans,
@@ -100,7 +100,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
 
-    if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerPhone || !email || !password) {
+    if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerPhone || !email || !password ) {
         throw new BadRequest("Missing required fields");
     }
 
@@ -151,6 +151,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             addressFr: clean(addressFr),
             cuisineId: parsedCuisines,
             zoneId: zoneId ? clean(zoneId) : null,
+            cityId: cityId ? clean(cityId) : null,
 
             type: restaurantType, // 👈 حفظ نوع المطعم (Default C)
             salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
@@ -276,6 +277,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         ownerposition: restaurants.ownerposition, // 👈 استرجاع منصب المالك
         cuisineIds: restaurants.cuisineId,
         email: restrauntadmin.email,
+        city: { id: cities.id, name: cities.name, nameAr: cities.nameAr, nameFr: cities.nameFr },
         zone_id: zones.id,
         zone_name: zones.name,
         likes: restaurants.likes,
@@ -286,6 +288,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         androidApp: restaurants.androidApp,
     })
         .from(restaurants)
+        .leftJoin(cities, eq(restaurants.cityId, cities.id))
         .leftJoin(zones, eq(restaurants.zoneId, zones.id))
         .leftJoin(
             restrauntadmin,
@@ -333,6 +336,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             cuisines: parsedCuisines.map((id: string) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
             businessPlans: plansMap.get(r.id) || [],
             zone: r.zone_id ? { id: r.zone_id, name: r.zone_name } : null,
+            city: r.city ? { id: r.city.id, name: r.city.name, nameAr: r.city.nameAr, nameFr: r.city.nameFr } : null,
             likes: r.likes,
             facebookLink: r.facebookLink || null,
             orderLink: r.orderLink || null,
@@ -355,6 +359,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         .select({
             restaurantObj: restaurants,
             zoneObj: zones,
+            cityObj: cities,
             salesObj: sales,
             ownerEmail: restrauntadmin.email,
             settingsObj: restaurantSettings,
@@ -362,6 +367,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         .from(restaurants)
         .leftJoin(zones, eq(restaurants.zoneId, zones.id))
         .leftJoin(sales, eq(restaurants.salesId, sales.id))
+        .leftJoin(cities, eq(restaurants.cityId, cities.id))
         .leftJoin(
             restrauntadmin,
             and(eq(restaurants.id, restrauntadmin.restaurantId), eq(restrauntadmin.type, "owner"))
@@ -397,6 +403,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         cuisines: restaurantCuisines,
         businessPlans: restaurantPlans,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
+        city: row.cityObj ? { id: row.cityObj.id, name: row.cityObj.name, nameAr: row.cityObj.nameAr, nameFr: row.cityObj.nameFr } : null,
         firstColor: row.settingsObj?.firstColor || null,
         secondColor: row.settingsObj?.secondColor || null,
         firstTextColor: row.settingsObj?.firstTextColor || null,
@@ -419,7 +426,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
-        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor
+        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -516,6 +523,8 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (iosApp !== undefined) restaurantUpdateData.iosApp = iosApp;
     if (androidApp !== undefined) restaurantUpdateData.androidApp = androidApp;
 
+    if (cityId !== undefined) restaurantUpdateData.cityId = clean(cityId);
+    if (zoneId !== undefined) restaurantUpdateData.zoneId = clean(zoneId);
 
     await db.transaction(async (tx) => {
         if (Object.keys(restaurantUpdateData).length > 1) {
@@ -632,7 +641,9 @@ export const getActiveSales = async (req: Request, res: Response) => {
         .from(sales)
         .where(eq(sales.status, "active"));
 
-    return SuccessResponse(res, { message: "Get all active sales success", data: activeSales });
+    const allCities = await db.select({ id: cities.id, name: cities.name, nameAr: cities.nameAr, nameFr: cities.nameFr }).from(cities).where(eq(cities.status, "active"));
+
+    return SuccessResponse(res, { message: "Get all active sales success", data: { activeSales, allCities } });
 };
 
 // ==========================================

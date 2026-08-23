@@ -29,13 +29,14 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
     // 1. استقبال متغيرات الفلترة فقط (بدون page و limit)
-    const { restaurantId, startDate, endDate, status, paymentMethod } = req.query;
+    const { restaurantId, startDate, endDate, status, paymentMethod, cityId } = req.query;
 
     const conditions = [];
 
     if (restaurantId) conditions.push(eq(orders.restaurantId, restaurantId as string));
     if (status) conditions.push(eq(orders.status, status as OrderStatus));
     if (paymentMethod) conditions.push(eq(paymentMethods.name, paymentMethod as string));
+    if (cityId) conditions.push(eq(restaurants.cityId, cityId as string));
 
     if (startDate) conditions.push(gte(orders.createdAt, new Date(startDate as string)));
     if (endDate) {
@@ -57,6 +58,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             cancelReasonType: selectReasons.type,
         })
         .from(orders)
+        .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined);
@@ -187,9 +189,10 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
 export const getDetailedRestaurantReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, cityId } = req.query;
     const conditions = [];
 
+    if (cityId) conditions.push(eq(restaurants.cityId, cityId as string));
     if (startDate) conditions.push(gte(orders.createdAt, new Date(startDate as string)));
     if (endDate) {
         const end = new Date(endDate as string);
@@ -209,11 +212,18 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             totalAmount: orders.totalAmount,
             restaurantId: restaurants.id,
             restaurantName: restaurants.name,
+            city: {
+                id: cities.id,
+                name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
+            },
             status: orders.status,
             cancelReasonType: selectReasons.type,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(cities, eq(restaurants.cityId, cities.id))
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .leftJoin(paymentMethods, eq(orders.paymentMethod, paymentMethods.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined);
@@ -227,6 +237,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             restaurantMap[rId] = {
                 restaurantId: rId,
                 restaurantName: order.restaurantName || "Unknown",
+                city: order.city?.id ? order.city : null,
                 counts: { total: 0, cash: 0, digital: 0 },
                 sales: { totalRevenue: 0, cashCollected: 0, digitalCollected: 0 },
                 platformDues: { totalCommission: 0, totalServiceFee: 0 }, // 👈 رجعنا السيرفس فيز للمنصة
@@ -290,6 +301,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         return {
             restaurantId: entry.restaurantId,
             restaurantName: entry.restaurantName,
+            city: entry.city,
             ordersCount: entry.counts,
             sales: {
                 totalRevenue: entry.sales.totalRevenue.toFixed(2),
@@ -332,12 +344,32 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
     const { restaurantId } = req.params;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, cityId } = req.query;
 
     if (!restaurantId) throw new BadRequest("Restaurant ID is required");
 
-    const [restaurant] = await db.select().from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
-    if (!restaurant) throw new BadRequest("Restaurant not found");
+    const [restaurantData] = await db
+        .select({
+            restaurant: restaurants,
+            city: {
+                id: cities.id,
+                name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
+            }
+        })
+        .from(restaurants)
+        .leftJoin(cities, eq(restaurants.cityId, cities.id))
+        .where(
+            and(
+                eq(restaurants.id, restaurantId),
+                cityId ? eq(restaurants.cityId, cityId as string) : undefined
+            )
+        )
+        .limit(1);
+
+    if (!restaurantData) throw new BadRequest("Restaurant not found");
+    const restaurant = restaurantData.restaurant;
 
     const conditions = [eq(orders.restaurantId, restaurantId)];
     if (startDate) conditions.push(gte(orders.createdAt, new Date(startDate as string)));
@@ -474,7 +506,11 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
     return SuccessResponse(res, {
         message: "Single restaurant breakdown generated successfully",
         data: {
-            restaurant: { id: restaurant.id, name: restaurant.name },
+            restaurant: {
+                id: restaurant.id,
+                name: restaurant.name,
+                city: restaurantData.city?.id ? restaurantData.city : null,
+            },
             breakdownBySource: reportBySource,
             overallSummary: {
                 totalOrders: finalReport.ordersCount,
@@ -500,7 +536,7 @@ export const getRestaurantInvoices = async (req: Request | any, res: Response) =
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
     const { restaurantId } = req.params;
-    const { status } = req.query;
+    const { status, cityId } = req.query;
 
     if (!restaurantId) {
         throw new BadRequest("Restaurant ID is required");
@@ -513,12 +549,30 @@ export const getRestaurantInvoices = async (req: Request | any, res: Response) =
     if (status) {
         conditions.push(eq(invoices.status, status as any));
     }
+    if (cityId) {
+        conditions.push(eq(restaurants.cityId, cityId as string));
+    }
 
-    const restaurantInvoices = await db
-        .select()
+    const restaurantInvoicesRaw = await db
+        .select({
+            invoice: invoices,
+            city: {
+                id: cities.id,
+                name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
+            }
+        })
         .from(invoices)
+        .leftJoin(restaurants, eq(invoices.restaurantId, restaurants.id))
+        .leftJoin(cities, eq(restaurants.cityId, cities.id))
         .where(and(...conditions))
         .orderBy(desc(invoices.createdAt));
+
+    const restaurantInvoices = restaurantInvoicesRaw.map(row => ({
+        ...row.invoice,
+        city: row.city?.id ? row.city : null,
+    }));
 
     return SuccessResponse(res, {
         message: "Invoices retrieved successfully",
@@ -543,13 +597,23 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
 
     if (!invoice[0]) throw new NotFound("Invoice not found");
 
-    const restaurant = await db
-        .select()
+    const restaurantData = await db
+        .select({
+            restaurant: restaurants,
+            city: {
+                id: cities.id,
+                name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
+            }
+        })
         .from(restaurants)
+        .leftJoin(cities, eq(restaurants.cityId, cities.id))
         .where(eq(restaurants.id, invoice[0].restaurantId))
         .limit(1);
 
-    if (!restaurant[0]) throw new NotFound("Restaurant not found");
+    if (!restaurantData[0]) throw new NotFound("Restaurant not found");
+    const restaurant = restaurantData[0].restaurant;
 
     const invoiceData = invoice[0];
 
@@ -557,7 +621,7 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
     const doc = new PDFDocument({ margin: 50 });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="invoice_${restaurant[0].name.replace(/\s+/g, '_')}_${invoiceData.invoiceNumber}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="invoice_${restaurantData[0].restaurant?.name.replace(/\s+/g, '_')}_${invoiceData.invoiceNumber}.pdf"`);
 
     doc.pipe(res);
 
@@ -566,7 +630,7 @@ export const generateRestaurantInvoicePDF = async (req: Request | any, res: Resp
     doc.moveDown();
 
     // Restaurant Details
-    doc.fontSize(14).fillColor('black').text(`Restaurant: ${restaurant[0].name} / ${restaurant[0].nameAr || ''}`);
+    doc.fontSize(14).fillColor('black').text(`Restaurant: ${restaurantData[0].restaurant?.name} / ${restaurantData[0].restaurant?.nameAr || ''}`);
     doc.fontSize(12).text(`Invoice Number: ${invoiceData.invoiceNumber}`);
     doc.text(`Date Range: ${new Date(invoiceData.startDate).toLocaleDateString()} to ${new Date(invoiceData.endDate).toLocaleDateString()}`);
     doc.text(`Generated At: ${new Date(invoiceData.createdAt || Date.now()).toLocaleString()}`);
@@ -728,7 +792,7 @@ export const markInvoiceAsPaid = async (req: Request, res: Response) => {
 export const getRestaurantOrdersReport = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
-    const { startDate, endDate, type, restaurantId, restaurantsWithOrders, restaurantsWithoutOrders } = req.query;
+    const { startDate, endDate, type, restaurantId, cityId, restaurantsWithOrders, restaurantsWithoutOrders } = req.query;
 
     const orderConditions = [];
     if (startDate) orderConditions.push(gte(orders.createdAt, new Date(startDate as string)));
@@ -737,6 +801,9 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         end.setHours(23, 59, 59, 999);
         orderConditions.push(lte(orders.createdAt, end));
     }
+
+    const restConditions = [eq(restaurants.status, "active")];
+    if (cityId) restConditions.push(eq(restaurants.cityId, cityId as string));
 
     // 1. Fetch all restaurants
     const allRestaurantsRaw = await db
@@ -752,9 +819,8 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         })
         .from(restaurants)
         .leftJoin(sales, eq(restaurants.salesId, sales.id))
-        .leftJoin(zones, eq(restaurants.zoneId, zones.id))
-        .leftJoin(cities, eq(zones.cityId, cities.id))
-        .where(eq(restaurants.status, "active"));
+        .leftJoin(cities, eq(restaurants.cityId, cities.id))
+        .where(and(...restConditions));
 
     const allRestaurants = allRestaurantsRaw.map(r => ({
         ...r.restaurant,
@@ -971,7 +1037,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
 export const getSalesReport = async (req: Request, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
-    const { startDate, endDate, salesId, type, restaurantId } = req.query;
+    const { startDate, endDate, salesId, type, restaurantId, cityId } = req.query;
 
     // 1. شروط فلترة السيلز
     const salesConditions = [];
@@ -986,6 +1052,9 @@ export const getSalesReport = async (req: Request, res: Response) => {
     }
     if (restaurantId) {
         restaurantConditions.push(eq(restaurants.id, restaurantId as string));
+    }
+    if (cityId) {
+        restaurantConditions.push(eq(restaurants.cityId, cityId as string));
     }
 
     // 💡 التعديل هنا: فلترة المطاعم بناءً على تاريخ إنشائها/تسجيلها
@@ -1003,6 +1072,12 @@ export const getSalesReport = async (req: Request, res: Response) => {
         .select({
             sales: sales,
             restaurant: restaurants,
+            city: {
+                id: cities.id,
+                name: cities.name,
+                nameAr: cities.nameAr,
+                nameFr: cities.nameFr,
+            }
         })
         .from(sales)
         .leftJoin(
@@ -1012,6 +1087,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
                 restaurantConditions.length > 0 ? and(...restaurantConditions) : undefined
             )
         )
+        .leftJoin(cities, eq(restaurants.cityId, cities.id))
         .where(
             salesConditions.length > 0 ? and(...salesConditions) : undefined
         );
@@ -1090,12 +1166,16 @@ export const getSalesReport = async (req: Request, res: Response) => {
             }
 
             if (restaurantId) {
-                salesGroup.restaurants.push(currentRest);
+                salesGroup.restaurants.push({
+                    ...currentRest,
+                    city: row.city?.id ? row.city : null,
+                });
             } else {
                 salesGroup.restaurants.push({
                     id: currentRest.id,
                     name: currentRest.name,
                     nameAr: currentRest.nameAr,
+                    city: row.city?.id ? row.city : null,
                     createdAt: currentRest.createdAt
                 });
             }
@@ -1123,6 +1203,7 @@ export const getSalesReport = async (req: Request, res: Response) => {
                     name: currentRest.name,
                     nameAr: currentRest.nameAr,
                     status: currentRest.status,
+                    city: row.city?.id ? row.city : null,
                     createdAt: currentRest.createdAt
                 });
             }

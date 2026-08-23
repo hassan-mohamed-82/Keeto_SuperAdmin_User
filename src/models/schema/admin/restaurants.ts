@@ -2,6 +2,7 @@ import { mysqlTable, varchar, timestamp, json, char, text, date, mysqlEnum, bool
 import { sql } from "drizzle-orm";
 import { zones } from "./zone";
 import { sales } from "./sales";
+import { cities } from "./city";
 
 export const restaurants = mysqlTable("restaurants", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -15,6 +16,7 @@ export const restaurants = mysqlTable("restaurants", {
     addressFr: text("address_fr").default(''),
 
     cuisineId: json("cuisine_id").$type<string[]>().default([]),
+    cityId: char("city_id", { length: 36 }).references(() => cities.id),
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id),
 
     type: mysqlEnum("type", ["mega", "super", "A", "B", "C", "C-", "test"]).default("C"),
