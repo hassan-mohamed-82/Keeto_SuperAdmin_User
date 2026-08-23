@@ -6,6 +6,7 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { SuccessResponse } from "../../utils/response";
 import { saveBase64Image, handleImageUpdate, deleteImage } from "../../utils/handleImages";
+import { v4 as uuidv4 } from "uuid";
 
 // 1. Create Platform
 export const createPlatform = async (req: Request, res: Response) => {
@@ -18,12 +19,20 @@ export const createPlatform = async (req: Request, res: Response) => {
     // حفظ الصورة من Base64 والحصول على رابط الصورة المباشر
     const { url: iconUrl } = await saveBase64Image(req, logo, "icons");
 
+    const id = uuidv4();
+
     await db.insert(platforms).values({
+        id,
         name,
         logo: iconUrl
     });
 
-    return SuccessResponse(res, { message: "Platform created successfully" }, 201);
+    const [newPlatform] = await db.select().from(platforms).where(eq(platforms.id, id));
+
+    return SuccessResponse(res, {
+        message: "Platform created successfully",
+        data: newPlatform,
+    }, 201);
 };
 
 // 2. Get All Platforms
@@ -74,7 +83,12 @@ export const updatePlatform = async (req: Request, res: Response) => {
         })
         .where(eq(platforms.id, id));
 
-    return SuccessResponse(res, { message: "Platform updated successfully" });
+    const [updatedPlatform] = await db.select().from(platforms).where(eq(platforms.id, id));
+
+    return SuccessResponse(res, {
+        message: "Platform updated successfully",
+        data: updatedPlatform,
+    });
 };
 
 // 5. Delete Platform
