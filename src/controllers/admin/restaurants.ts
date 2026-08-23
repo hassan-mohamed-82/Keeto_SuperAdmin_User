@@ -523,8 +523,8 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (iosApp !== undefined) restaurantUpdateData.iosApp = iosApp;
     if (androidApp !== undefined) restaurantUpdateData.androidApp = androidApp;
 
-    if (cityId !== undefined) restaurantUpdateData.cityId = clean(cityId);
-    if (zoneId !== undefined) restaurantUpdateData.zoneId = clean(zoneId);
+    if (cityId !== undefined) restaurantUpdateData.cityId = (cityId && clean(cityId)) ? clean(cityId) : null;
+    if (zoneId !== undefined) restaurantUpdateData.zoneId = (zoneId && clean(zoneId)) ? clean(zoneId) : null;
 
     await db.transaction(async (tx) => {
         if (Object.keys(restaurantUpdateData).length > 1) {
