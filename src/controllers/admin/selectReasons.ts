@@ -13,7 +13,7 @@ type ReasonStatus = "active" | "inactive";
 // 1. إنشاء سبب جديد (Create)
 // ==========================================
 export const createReason = async (req: Request, res: Response) => {
-    const { name, status, type } = req.body;
+    const { name, name_ar, name_fr, status, type } = req.body;
 
     if (!name || !type) {
         throw new BadRequest("Reason name and type are required");
@@ -24,6 +24,8 @@ export const createReason = async (req: Request, res: Response) => {
     await db.insert(selectReasons).values({
         id,
         name,
+        nameAr: name_ar ?? "",
+        nameFr: name_fr ?? "",
         type,
         // لو مبعتش حالة، الديفولت هيكون active زي ما أنت عامل في الداتا بيز
         status: (status as ReasonStatus) || "active", 
@@ -74,7 +76,7 @@ export const getReasonById = async (req: Request, res: Response) => {
 // ==========================================
 export const updateReason = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, status } = req.body;
+    const { name, name_ar, name_fr, status } = req.body;
 
     const [existing] = await db.select().from(selectReasons).where(eq(selectReasons.id, id));
     if (!existing) {
@@ -84,6 +86,8 @@ export const updateReason = async (req: Request, res: Response) => {
     // تجهيز الداتا اللي هتتحدث بناءً على اللي مبعوت في الـ Body
     const updateData: any = {};
     if (name) updateData.name = name;
+    if (name_ar !== undefined) updateData.nameAr = name_ar;
+    if (name_fr !== undefined) updateData.nameFr = name_fr;
     if (status) updateData.status = status as ReasonStatus;
 
     await db.update(selectReasons)
