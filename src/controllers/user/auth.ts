@@ -251,14 +251,18 @@ export const login = async (req: Request, res: Response) => {
         throw new BadRequest("Your account has been blocked. Please contact support.");
     }
 
-    // ✅ تحسين: إدخال مباشر بدون Select مسبق
+    // 🔗 ربط المستخدم بالمطعم (يتأكد من عدم التكرار حتى لليوزرز القدامى)
     if (restaurantId) {
-        await db.insert(restaurant_users)
-            .ignore()
-            .values({ restaurantId, userId: user.id });
+        const existingLink = await db.select().from(restaurant_users)
+            .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, user.id)))
+            .limit(1);
+            
+        if (existingLink.length === 0) {
+            await db.insert(restaurant_users).values({ restaurantId, userId: user.id });
+        }
     }
 
-    const token = generateUserToken({ id: user.id, name: user.name });
+    const token = generateUserToken({ id: user.id, name: user.name, restaurantId });
 
     // For older users where DB default might be false, fallback to checking email
     const isProfileComplete = user.isProfileComplete || !(user.email && user.email.endsWith("@privaterelay.appleid.com"));

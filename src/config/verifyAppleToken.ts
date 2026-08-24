@@ -361,7 +361,6 @@
 //   }
 // };
 
-
 import { Request, Response } from "express";
 import appleSignin from "apple-signin-auth";
 import jwt from "jsonwebtoken";
@@ -511,7 +510,7 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
       });
     }
 
-    // 7️⃣ Link user to restaurant in multi-tenant table
+    // 7️⃣ Link user to restaurant in multi-tenant table (Always checks if relation exists regardless of new/old user)
     if (restaurantId) {
       const existingLink = await db
         .select()

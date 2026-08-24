@@ -9,12 +9,14 @@ const JWT_SECRET = process.env.JWT_SECRET as string;
 export const generateUserToken = (data: {
     id: string;
     name: string;
+    restaurantId: string | null;
 }): string => {
     return jwt.sign(
         {
             id: data.id,
             name: data.name,
             role: "user",
+            restaurantId: data.restaurantId || null
         },
         JWT_SECRET,
         { expiresIn: "30d" }

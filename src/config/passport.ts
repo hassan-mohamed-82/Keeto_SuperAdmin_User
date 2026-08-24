@@ -55,21 +55,21 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         isVerified: true,
         isProfileComplete: true,
       });
-      user = { 
-        id: newId, 
-        name, 
-        email, 
-        googleId, 
-        phone: null, 
-        photo: null, 
+      user = {
+        id: newId,
+        name,
+        email,
+        googleId,
+        phone: null,
+        photo: null,
         alternatePhone: null,
-        fcmToken: null, 
-        password: null, 
-        isVerified: true, 
-        status: "active", 
-        createdAt: new Date(), 
-        facebookId: null, 
-        appleId:null,
+        fcmToken: null,
+        password: null,
+        isVerified: true,
+        status: "active",
+        createdAt: new Date(),
+        facebookId: null,
+        appleId: null,
         isProfileComplete: true,
         isDeleted: false,
         deletedAt: null
@@ -94,25 +94,36 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
     }
 
     // 🔗 Link to restaurant if restaurantId is provided
-    if (restaurantId && isNewUser) {
-      const existingLink = await db.select().from(restaurant_users)
-        .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, user.id)))
+    if (restaurantId) {
+      const existingLink = await db
+        .select()
+        .from(restaurant_users)
+        .where(
+          and(
+            eq(restaurant_users.restaurantId, restaurantId),
+            eq(restaurant_users.userId, user.id)
+          )
+        )
         .limit(1);
+
       if (existingLink.length === 0) {
-        await db.insert(restaurant_users).values({ restaurantId, userId: user.id });
+        await db.insert(restaurant_users).values({
+          restaurantId,
+          userId: user.id,
+        });
       }
     }
 
     // 🔑 Generate JWT (تم التعديل هنا ✅)
     const authToken = jwt.sign(
-      { 
+      {
         id: user.id,
         name: user.name,
         role: "user", // أضفنا الرول لكي يمر من الـ Middleware
         type: "user", // أضفنا النوع لكي يخزنه الـ Middleware
         restaurantId: restaurantId || null // تمرير الـ restaurantId إذا وجد
-      }, 
-      process.env.JWT_SECRET!, 
+      },
+      process.env.JWT_SECRET!,
       {
         expiresIn: "7d",
       }

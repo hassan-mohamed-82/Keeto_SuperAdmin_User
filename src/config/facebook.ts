@@ -1,19 +1,19 @@
 import { Request, Response } from "express";
 import axios from "axios";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { db } from "../models/connection"; // مسار الاتصال بقاعدة البيانات
-import { users } from "../models/schema"; // مسار الـ schema بتاعك
+import { restaurant_users, users } from "../models/schema"; // مسار الـ schema بتاعك
 
 export const facebookLoginOrSignup = async (req: Request, res: Response) => {
     try {
-        const { accessToken } = req.body;
+        const { accessToken, restaurantId } = req.body; // ⬅️ إضافة استقبال restaurantId
 
         if (!accessToken) {
             return res.status(400).json({ success: false, message: "Access Token is required" });
         }
 
-        // 1. جلب بيانات اليوزر من الفيس بوك (الاسم، الإيميل، والصورة بجودة عالية)
+        // 1. جلب بيانات اليوزر من الفيس بوك
         const fbResponse = await axios.get(
             `https://graph.facebook.com/me?fields=id,name,email,picture.type(large)&access_token=${accessToken}`
         );
@@ -29,16 +29,15 @@ export const facebookLoginOrSignup = async (req: Request, res: Response) => {
         let existingUser = await db.select().from(users).where(eq(users.facebookId, fbUser.id)).limit(1);
         let userRecord = existingUser[0];
 
-        // 3. لو مش موجود بالـ Facebook ID، ندور بالإيميل (عشان لو مسجل قبل كده عادي)
+        // 3. لو مش موجود بالـ Facebook ID، ندور بالإيميل
         if (!userRecord && fbUser.email) {
             const userByEmail = await db.select().from(users).where(eq(users.email, fbUser.email)).limit(1);
 
             if (userByEmail[0]) {
-                // نربط الحساب القديم بالفيس بوك ونحدث الـ FCM Token لو مبعوت
                 await db.update(users)
                     .set({ 
                         facebookId: fbUser.id,
-                        photo: userByEmail[0].photo || fbPhotoUrl, // نحط صورة الفيس لو معندوش صورة
+                        photo: userByEmail[0].photo || fbPhotoUrl,
                     })
                     .where(eq(users.id, userByEmail[0].id));
                 
@@ -53,12 +52,10 @@ export const facebookLoginOrSignup = async (req: Request, res: Response) => {
                 email: fbUser.email || null,
                 facebookId: fbUser.id,
                 photo: fbPhotoUrl,
-                isVerified: true, // متوثق من الفيس بوك
+                isVerified: true,
                 isProfileComplete: true,
-                // phone & password will be null
             });
 
-            // نجيب اليوزر بعد ما اتعمله Insert عشان محتاجين الـ ID بتاعه
             const newUser = await db.select().from(users).where(eq(users.facebookId, fbUser.id)).limit(1);
             userRecord = newUser[0];
         } else if (!userRecord.isProfileComplete) {
@@ -66,14 +63,42 @@ export const facebookLoginOrSignup = async (req: Request, res: Response) => {
             userRecord.isProfileComplete = true;
         }
 
-        // 5. إنشاء التوكن الخاص بالسيستم بتاعك
+        // 5. Check account status
+        if (userRecord.status === "blocked") {
+            return res.status(403).json({ success: false, message: "Your account has been blocked. Please contact support." });
+        }
+
+        // 6. 🔗 Link user to restaurant in multi-tenant table (مضافة لضمان ربط كل المطاعم)
+        if (restaurantId) {
+            const existingLink = await db.select().from(restaurant_users)
+                .where(and(
+                    eq(restaurant_users.restaurantId, restaurantId),
+                    eq(restaurant_users.userId, userRecord.id)
+                ))
+                .limit(1);
+
+            if (existingLink.length === 0) {
+                await db.insert(restaurant_users).values({
+                    restaurantId,
+                    userId: userRecord.id
+                });
+            }
+        }
+
+        // 7. إنشاء التوكن (تم موائمته مع باقي الـ Auth Handlers)
         const token = jwt.sign(
-            { id: userRecord.id }, 
+            { 
+                id: userRecord.id,
+                name: userRecord.name,
+                role: "user",
+                type: "user",
+                restaurantId: restaurantId || null
+            }, 
             process.env.JWT_SECRET || "fallback_secret_key", 
             { expiresIn: "30d" }
         );
 
-        // 6. إرسال الرد للـ Frontend
+        // 8. إرسال الرد للـ Frontend
         return res.status(200).json({
             success: true,
             message: "Authentication successful",
@@ -83,7 +108,7 @@ export const facebookLoginOrSignup = async (req: Request, res: Response) => {
                     name: userRecord.name,
                     email: userRecord.email,
                     photo: userRecord.photo,
-                    phone: userRecord.phone, // لو null الـ Frontend هيعرف إنه محتاج يسأله على الرقم
+                    phone: userRecord.phone,
                     isVerified: userRecord.isVerified,
                     isProfileComplete: userRecord.isProfileComplete ?? true
                 },
