@@ -53,6 +53,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         email,
         name,
         isVerified: true,
+        isProfileComplete: true,
       });
       user = { 
         id: newId, 
@@ -76,9 +77,14 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
     } else {
       // 👤 Login (existing user)
       // لو المستخدم كان موجود بالإيميل بس ومفيش googleId نخزنه
-      if (!user.googleId) {
-        await db.update(users).set({ googleId }).where(eq(users.id, user.id));
-        user.googleId = googleId;
+      const updates: Record<string, any> = {};
+      if (!user.googleId) updates.googleId = googleId;
+      if (!user.isProfileComplete) updates.isProfileComplete = true;
+
+      if (Object.keys(updates).length > 0) {
+        await db.update(users).set(updates).where(eq(users.id, user.id));
+        if (updates.googleId) user.googleId = googleId;
+        if (updates.isProfileComplete) user.isProfileComplete = true;
       }
     }
 
@@ -119,6 +125,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         id: user.id,
         name: user.name,
         email: user.email,
+        isProfileComplete: user.isProfileComplete ?? true,
       },
     });
   } catch (error) {

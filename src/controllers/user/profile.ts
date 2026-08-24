@@ -99,7 +99,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
     //     .leftJoin(restaurants, eq(restaurants.id, userRestaurantPoints.restaurantId))
     //     .where(eq(userRestaurantPoints.userId, userId));
 
-    const isProfileComplete = userInfo.isProfileComplete;
+    const isProfileComplete = userInfo.isProfileComplete || !(userInfo.email && userInfo.email.endsWith("@privaterelay.appleid.com"));
 
     return SuccessResponse(res, {
         data: {

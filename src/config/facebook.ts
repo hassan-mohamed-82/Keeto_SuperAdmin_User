@@ -54,12 +54,16 @@ export const facebookLoginOrSignup = async (req: Request, res: Response) => {
                 facebookId: fbUser.id,
                 photo: fbPhotoUrl,
                 isVerified: true, // متوثق من الفيس بوك
+                isProfileComplete: true,
                 // phone & password will be null
             });
 
             // نجيب اليوزر بعد ما اتعمله Insert عشان محتاجين الـ ID بتاعه
             const newUser = await db.select().from(users).where(eq(users.facebookId, fbUser.id)).limit(1);
             userRecord = newUser[0];
+        } else if (!userRecord.isProfileComplete) {
+            await db.update(users).set({ isProfileComplete: true }).where(eq(users.id, userRecord.id));
+            userRecord.isProfileComplete = true;
         }
 
         // 5. إنشاء التوكن الخاص بالسيستم بتاعك
@@ -80,7 +84,8 @@ export const facebookLoginOrSignup = async (req: Request, res: Response) => {
                     email: userRecord.email,
                     photo: userRecord.photo,
                     phone: userRecord.phone, // لو null الـ Frontend هيعرف إنه محتاج يسأله على الرقم
-                    isVerified: userRecord.isVerified
+                    isVerified: userRecord.isVerified,
+                    isProfileComplete: userRecord.isProfileComplete ?? true
                 },
                 token
             }

@@ -475,6 +475,7 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
       const finalEmail = email || `${appleId}@privaterelay.appleid.com`;
       const finalName = fullName || finalEmail.split("@")[0];
       const newId = uuidv4();
+      const isProfileComplete = !(finalEmail && finalEmail.endsWith("@privaterelay.appleid.com"));
 
       await db.insert(users).values({
         id: newId,
@@ -482,6 +483,7 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
         email: finalEmail,
         name: finalName,
         isVerified: true,
+        isProfileComplete,
       });
 
       user = {
@@ -489,8 +491,16 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
         name: finalName,
         email: finalEmail,
         appleId,
+        isProfileComplete,
         status: "active",
       } as any;
+    } else {
+      // If user exists and isProfileComplete was false but now email is real, update it
+      const shouldBeComplete = !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
+      if (!user.isProfileComplete && shouldBeComplete) {
+        await db.update(users).set({ isProfileComplete: true }).where(eq(users.id, user.id));
+        user.isProfileComplete = true;
+      }
     }
 
     // 6️⃣ Check account status
@@ -542,6 +552,7 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
         id: user.id,
         name: user.name,
         email: user.email,
+        isProfileComplete: user.isProfileComplete ?? !(user.email && user.email.endsWith("@privaterelay.appleid.com")),
       },
       restaurantId: restaurantId || null,
     });

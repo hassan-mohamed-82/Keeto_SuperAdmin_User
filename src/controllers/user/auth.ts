@@ -263,6 +263,10 @@ export const login = async (req: Request, res: Response) => {
     // For older users where DB default might be false, fallback to checking email
     const isProfileComplete = user.isProfileComplete || !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
 
+    if (!user.isProfileComplete && isProfileComplete) {
+        await db.update(users).set({ isProfileComplete: true }).where(eq(users.id, user.id));
+    }
+
     return SuccessResponse(res, {
         message: "Login successful",
         data: {
