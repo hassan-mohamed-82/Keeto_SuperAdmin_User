@@ -641,9 +641,9 @@ export const getActiveSales = async (req: Request, res: Response) => {
         .from(sales)
         .where(eq(sales.status, "active"));
 
-    const allCities = await db.select({ id: cities.id, name: cities.name, nameAr: cities.nameAr, nameFr: cities.nameFr }).from(cities).where(eq(cities.status, "active"));
+    // const allCities = await db.select({ id: cities.id, name: cities.name, nameAr: cities.nameAr, nameFr: cities.nameFr }).from(cities).where(eq(cities.status, "active"));
 
-    return SuccessResponse(res, { message: "Get all active sales success", data: { activeSales, allCities } });
+    return SuccessResponse(res, { message: "Get all active sales success", data: { activeSales} });
 };
 
 // ==========================================
