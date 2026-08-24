@@ -23,6 +23,10 @@ export const restaurantBusinessPlans = mysqlTable("restaurant_business_plans", {
     commissionRate: decimal("commission_rate", { precision: 5, scale: 2 }).default("0.00"), 
     serviceFee: decimal("service_fee", { precision: 10, scale: 2 }).default("0.00"), 
 
+    // حالة المنصة (خاص بـ food_aggregator و mykeeto فقط)
+    aggregatorStatus: mysqlEnum("aggregator_status", ["active", "inactive"]).default("active"),
+    mykeetoStatus: mysqlEnum("mykeeto_status", ["active", "inactive"]).default("active"),
+
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

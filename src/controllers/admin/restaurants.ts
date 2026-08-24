@@ -221,6 +221,9 @@ export const createRestaurant = async (req: Request, res: Response) => {
                     annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
                     commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
                     serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
+                    // حالة المنصة (خاصة بـ food_aggregator و mykeeto)
+                    aggregatorStatus: (plan.aggregatorStatus === "inactive" ? "inactive" : "active") as "active" | "inactive",
+                    mykeetoStatus: (plan.mykeetoStatus === "inactive" ? "inactive" : "active") as "active" | "inactive",
                 };
 
                 await tx.insert(restaurantBusinessPlans).values(newPlan);
@@ -571,6 +574,9 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                         annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
                         commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
                         serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
+                        // حالة المنصة (خاصة بـ food_aggregator و mykeeto)
+                        aggregatorStatus: plan.aggregatorStatus === "inactive" ? "inactive" : "active",
+                        mykeetoStatus: plan.mykeetoStatus === "inactive" ? "inactive" : "active",
                     });
                 }
             }
