@@ -183,6 +183,7 @@ export const getUserAddresses = async (req: Request, res: Response) => {
                 isDeliverable: !!matchingFee,
                 deliveryFee: matchingFee ? matchingFee.deliveryFee : null,
                 minOrderAmount: matchingFee ? matchingFee.minOrderAmount : null,
+                restaurantDeliveryZoneId: matchingFee ? matchingFee.id : null,
                 zoneId: matchingFee ? matchingFee.zoneId : null,
             };
         });

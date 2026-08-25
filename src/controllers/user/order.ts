@@ -1204,7 +1204,8 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     const addressesWithDeliveryInfo = userAddresses.map((addr) => {
         let isDeliverable = false;
         let applicableDeliveryFee: number | null = null;
-        let matchedZoneId: string | null = null; // 👈 إضافة متغيرة لحفظ رقم المنطقة المطابقة
+        let matchedZoneId: string | null = null; // 👈 generic zoneId
+        let matchedRestaurantDeliveryZoneId: string | null = null; // 👈 restaurantZoneDeliveryFees.id
 
         const addrLat = parseFloat(addr.lat || "0");
         const addrLng = parseFloat(addr.lng || "0");
@@ -1215,6 +1216,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                 ...addr,
                 isDeliverable: false,
                 deliveryFee: null,
+                restaurantDeliveryZoneId: null,
                 zoneId: null,
             };
         }
@@ -1230,7 +1232,8 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                 // 🚀 اختيار السعر الأعلى والـ zoneId التابع له في حالة مطابقة أكثر من نطاق
                 if (applicableDeliveryFee === null || currentFee > applicableDeliveryFee) {
                     applicableDeliveryFee = currentFee;
-                    matchedZoneId = fee.zoneId; // 👈 تحديث الـ zoneId المطابق
+                    matchedZoneId = fee.zoneId;
+                    matchedRestaurantDeliveryZoneId = fee.id; // 👈 تحديث id الخاص بنطاق المطعم
                 }
             }
         }
@@ -1239,7 +1242,9 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
             ...addr,
             isDeliverable,
             deliveryFee: applicableDeliveryFee,
-            zoneId: matchedZoneId, // 👈 إرجاع zoneId داخل العنوان
+            // restaurantDeliveryZoneId: matchedRestaurantDeliveryZoneId, // 👈 id الخاص بنطاق المطعم (restaurantZoneDeliveryFees)
+            //zoneId: matchedZoneId, // 👈 إرجاع zoneId داخل العنوان
+            zoneId: matchedRestaurantDeliveryZoneId, // 👈 generic zoneId
         };
     });
 
