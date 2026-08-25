@@ -1,4 +1,4 @@
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, or } from "drizzle-orm";
 import { addons, foodVariations, addresses, branches, deliveryMen, food, orderItems, orders, paymentMethods, pointsProducts, restaurants, restaurantWallets, restaurantWalletTransactions, restaurantZoneDeliveryFees, selectReasons, userPointsTransactions, userRestaurantPoints, users, userWallets, userWalletTransactions, variationOptions, zones, restaurantSettings } from "../../models/schema";
 import { SuccessResponse } from "../../utils/response";
 import { Request, Response } from "express";
@@ -248,10 +248,20 @@ export const getOrdersByRestaurant = async (req: Request, res: Response) => {
             totalAmount: orders.totalAmount,
             orderStatus: orders.status,
             customerName: users.name, // اسم العميل من جدول اليوزرز
-            customerPhone: users.phone
+            customerPhone: users.phone,
+            branchName: branches.name,
+            branchId: branches.id,
+            zoneName: zones.name,
+            zoneNameAr: zones.nameAr,
+            zoneId: orders.zoneId,
+            orderType: orders.orderType,
+            deliveryFee: orders.deliveryFee,
         })
         .from(orders)
-        .leftJoin(users, eq(orders.userId, users.id)); // ربطنا الأوردر باليوزر
+        .leftJoin(users, eq(orders.userId, users.id))
+        .leftJoin(branches, eq(orders.branchId, branches.id))
+        .leftJoin(restaurantZoneDeliveryFees, eq(orders.zoneId, restaurantZoneDeliveryFees.id))
+        .leftJoin(zones, or(eq(restaurantZoneDeliveryFees.zoneId, zones.id), eq(orders.zoneId, zones.id)));
 
     // لو الأدمن داس على تابة معينة (مثلاً Pending فقط)
     let condition = eq(orders.restaurantId, restaurantId);
@@ -322,7 +332,8 @@ export const getOrderDetails = async (req: Request, res: Response) => {
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
-        .leftJoin(zones, eq(addresses.zoneId, zones.id))
+        .leftJoin(restaurantZoneDeliveryFees, eq(orders.zoneId, restaurantZoneDeliveryFees.id))
+        .leftJoin(zones, or(eq(restaurantZoneDeliveryFees.zoneId, zones.id), eq(orders.zoneId, zones.id), eq(addresses.zoneId, zones.id)))
         .where(eq(orders.id, id))
         .limit(1);
 
@@ -625,6 +636,11 @@ export const getAllOrders = async (req: Request, res: Response) => {
         customerPhone: users.phone,
         restaurantName: restaurants.name,
         restaurantId: restaurants.id,
+        branchName: branches.name,
+        branchId: branches.id,
+        zoneName: zones.name,
+        zoneNameAr: zones.nameAr,
+        zoneId: orders.zoneId,
         paymentMethod: orders.paymentMethod,
         orderType: orders.orderType,
         deliveryFee: orders.deliveryFee,
@@ -640,13 +656,16 @@ export const getAllOrders = async (req: Request, res: Response) => {
     })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .leftJoin(branches, eq(orders.branchId, branches.id))
         .leftJoin(users, eq(orders.userId, users.id))
+        .leftJoin(restaurantZoneDeliveryFees, eq(orders.zoneId, restaurantZoneDeliveryFees.id))
+        .leftJoin(zones, or(eq(restaurantZoneDeliveryFees.zoneId, zones.id), eq(orders.zoneId, zones.id)))
         .orderBy(desc(orders.createdAt));
     return SuccessResponse(res, {
         message: "All orders fetched successfully",
         data: result
     });
-}
+};
 
 
 // ==========================================
