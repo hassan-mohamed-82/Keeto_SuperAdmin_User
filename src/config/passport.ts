@@ -16,11 +16,19 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
   const { token, restaurantId } = req.body;
 
   try {
+    // const ticket = await client.verifyIdToken({
+    //   idToken: token,
+    //   audience: process.env.GOOGLE_CLIENT_ID,
+    // });
+    // بدل كود client.verifyIdToken الحالي:
     const ticket = await client.verifyIdToken({
       idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: [
+        process.env.GOOGLE_CLIENT_ID_WEB!,
+        process.env.GOOGLE_CLIENT_ID_IOS!,
+        process.env.GOOGLE_CLIENT_ID_ANDROID!,
+      ],
     });
-
     const payload = ticket.getPayload();
 
     if (!payload) {
