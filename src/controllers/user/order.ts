@@ -426,7 +426,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             throw new BadRequest("Your delivery address is outside our covered delivery zones.");
         }
 
-        resolvedZoneId = applicableFee.zoneId;
+        const genericZoneId = applicableFee.zoneId;
+        resolvedZoneId = applicableFee.id; // 👈 حفظ id الخاص بـ restaurantZoneDeliveryFees في الـ order
         if (!resolvedZoneId) {
             throw new BadRequest("No delivery zone found for this address.");
         }
@@ -457,7 +458,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                 .where(
                     and(
                         eq(branches.restaurantId, restaurantId),
-                        eq(branches.zoneId, resolvedZoneId),
+                        eq(branches.zoneId, genericZoneId),
                         eq(branches.status, "active")
                     )
                 )
