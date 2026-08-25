@@ -8,6 +8,7 @@ import { SuccessResponse } from "../../utils/response";
 // ─── Get All Active Popups (filtered by date and status) ───
 export const getActivePopups = async (req: Request, res: Response) => {
     const now = new Date();
+    const { restaurantId } = req.params;
 
     const activePopups = await db
         .select({
@@ -30,7 +31,8 @@ export const getActivePopups = async (req: Request, res: Response) => {
             and(
                 eq(popup.status, "active"),
                 lte(popup.startDate, now),
-                gte(popup.endDate, now)
+                gte(popup.endDate, now),
+                eq(popup.restaurantId, restaurantId)
             )
         );
 
@@ -39,7 +41,7 @@ export const getActivePopups = async (req: Request, res: Response) => {
 
 // ─── Get Active Popup By ID ───
 export const getPopupById = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { restaurantId, id } = req.params;
 
     const result = await db
         .select({
@@ -61,7 +63,8 @@ export const getPopupById = async (req: Request, res: Response) => {
         .where(
             and(
                 eq(popup.id, id),
-                eq(popup.status, "active")
+                eq(popup.status, "active"),
+                eq(popup.restaurantId, restaurantId)
             )
         )
         .limit(1);

@@ -4,7 +4,7 @@ import { catchAsync } from "../../utils/catchAsync";
 
 const router = Router();
 
-router.get("/", catchAsync(getActivePopups));
-router.get("/:id", catchAsync(getPopupById));
+router.get("/:restaurantId", catchAsync(getActivePopups));
+router.get("/:restaurantId/:id", catchAsync(getPopupById));
 
 export default router;

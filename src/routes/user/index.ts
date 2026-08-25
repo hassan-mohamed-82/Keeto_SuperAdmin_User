@@ -21,7 +21,10 @@ import pointsRouter from "./userPoints";
 import restaurantSettingsRouter from "./restaurantSettings";
 import recommendedFoodRouter from "./recommendedFood"
 import policyRouter from "./policyRouter";
+import popupRouter from "./popup";
+
 const router = Router();
+
 router.use("/home", homeRouter);
 router.use("/auth", authRouter);
 router.use("/socialmedia", SocialMediaRouter);
@@ -32,6 +35,7 @@ router.use("/landing-page" , landingPageRouter)
 router.use("/settings",restaurantSettingsRouter)
 router.use("/recommended-foods", recommendedFoodRouter);
 router.use("/policy",policyRouter)
+router.use("/popup", popupRouter);
 
 router.use("/restaurants", restaurantFeaturesRouter);
 router.use(authenticated,authorizeRoles("user"));
