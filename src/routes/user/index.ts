@@ -20,6 +20,7 @@ import landingPageRouter from "./landingPage";
 import pointsRouter from "./userPoints";
 import restaurantSettingsRouter from "./restaurantSettings";
 import recommendedFoodRouter from "./recommendedFood"
+import policyRouter from "./policyRouter";
 const router = Router();
 router.use("/home", homeRouter);
 router.use("/auth", authRouter);
@@ -30,6 +31,7 @@ router.use("/rating", ratingRouter);
 router.use("/landing-page" , landingPageRouter)
 router.use("/settings",restaurantSettingsRouter)
 router.use("/recommended-foods", recommendedFoodRouter);
+router.use("/policy",policyRouter)
 
 router.use("/restaurants", restaurantFeaturesRouter);
 router.use(authenticated,authorizeRoles("user"));
