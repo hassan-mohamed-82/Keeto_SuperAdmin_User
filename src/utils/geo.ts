@@ -79,12 +79,30 @@ export const isLocationInZone = (
                 }
 
                 if (Array.isArray(rawCoords) && rawCoords.length > 0) {
-                    // تحويل الإحداثيات إذا كانت قادمة كـ [{lat, lng}] إلى [[lng, lat]]
-                    let formattedRing = rawCoords[0].map((pt: any) => {
-                        if (Array.isArray(pt)) return [parseFloat(pt[0]), parseFloat(pt[1])];
-                        if (pt?.lng !== undefined && pt?.lat !== undefined) return [parseFloat(pt.lng), parseFloat(pt.lat)];
-                        return pt;
-                    });
+                    // تحديد الـ ring: إذا كانت مصفوفة متداخلة نأخذ المستوى الداخلي، وإلا نستخدم المصفوفة نفسها
+                    let ring = rawCoords;
+                    if (Array.isArray(rawCoords[0]) && Array.isArray(rawCoords[0][0])) {
+                        // [[[lng, lat], ...]] (GeoJSON Polygon standard)
+                        ring = rawCoords[0];
+                    } else if (Array.isArray(rawCoords[0]) && typeof rawCoords[0][0] === "object" && rawCoords[0][0] !== null) {
+                        // [[{lat, lng}, ...]]
+                        ring = rawCoords[0];
+                    }
+
+                    // تحويل الإحداثيات إلى صيغة Turf المطلوبة: [[lng, lat]]
+                    let formattedRing: [number, number][] = ring
+                        .map((pt: any) => {
+                            if (Array.isArray(pt)) {
+                                return [parseFloat(pt[0]), parseFloat(pt[1])] as [number, number];
+                            }
+                            if (pt && typeof pt === "object" && pt.lng !== undefined && pt.lat !== undefined) {
+                                return [parseFloat(pt.lng), parseFloat(pt.lat)] as [number, number];
+                            }
+                            return null;
+                        })
+                        .filter((pt): pt is [number, number] => pt !== null && !isNaN(pt[0]) && !isNaN(pt[1]));
+
+                    if (formattedRing.length < 3) return false;
 
                     // تأكيد إغلاق الحلقة (First point === Last point)
                     const firstPt = formattedRing[0];
@@ -92,6 +110,8 @@ export const isLocationInZone = (
                     if (firstPt[0] !== lastPt[0] || firstPt[1] !== lastPt[1]) {
                         formattedRing.push(firstPt);
                     }
+
+                    if (formattedRing.length < 4) return false;
 
                     const polygon = turf.polygon([formattedRing]);
                     return turf.booleanPointInPolygon(userPoint, polygon);

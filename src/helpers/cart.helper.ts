@@ -53,6 +53,7 @@ export const resolveBranchIdForCart = async (
                 id: restaurantZoneDeliveryFees.id,
                 zoneId: restaurantZoneDeliveryFees.zoneId,
                 branchId: restaurantZoneDeliveryFees.branchId,
+                deliveryFee: restaurantZoneDeliveryFees.deliveryFee,
                 coverageType: restaurantZoneDeliveryFees.coverageType,
                 customCoordinates: restaurantZoneDeliveryFees.customCoordinates,
                 customRadiusKm: restaurantZoneDeliveryFees.customRadiusKm,
@@ -68,12 +69,17 @@ export const resolveBranchIdForCart = async (
                 )
             );
 
-        // Find the first restaurant delivery zone whose polygon/radius covers the address
+        // Find the restaurant delivery zone with the highest delivery fee whose polygon/radius covers the address
         let matchedFee: (typeof restaurantFees)[number] | null = null;
+        let maxDeliveryFee = -1;
+
         for (const fee of restaurantFees) {
             if (isLocationInZone(lat, lng, fee.zoneId, fee)) {
-                matchedFee = fee;
-                break;
+                const currentFee = parseFloat((fee as any).deliveryFee || "0");
+                if (matchedFee === null || currentFee > maxDeliveryFee) {
+                    maxDeliveryFee = currentFee;
+                    matchedFee = fee;
+                }
             }
         }
 

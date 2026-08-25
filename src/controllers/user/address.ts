@@ -155,6 +155,7 @@ export const getUserAddresses = async (req: Request, res: Response) => {
             const addrLng = parseFloat(addr.lng);
 
             let matchingFee: typeof restaurantZoneDeliveryFees.$inferSelect | null = null;
+            let maxDeliveryFee = -1;
 
             if (!isNaN(addrLat) && !isNaN(addrLng)) {
                 for (const item of restaurantFees) {
@@ -167,8 +168,12 @@ export const getUserAddresses = async (req: Request, res: Response) => {
                     };
 
                     if (isLocationInZone(addrLat, addrLng, item.fee.zoneId, feeData)) {
-                        matchingFee = item.fee;
-                        break;
+                        const currentFee = parseFloat(item.fee.deliveryFee || "0");
+                        // 🚀 اختيار النطاق ذو أعلى سعر توصيل والـ zoneId المقترن به في حالة التقاطع
+                        if (matchingFee === null || currentFee > maxDeliveryFee) {
+                            maxDeliveryFee = currentFee;
+                            matchingFee = item.fee;
+                        }
                     }
                 }
             }
@@ -178,6 +183,7 @@ export const getUserAddresses = async (req: Request, res: Response) => {
                 isDeliverable: !!matchingFee,
                 deliveryFee: matchingFee ? matchingFee.deliveryFee : null,
                 minOrderAmount: matchingFee ? matchingFee.minOrderAmount : null,
+                zoneId: matchingFee ? matchingFee.zoneId : null,
             };
         });
 
