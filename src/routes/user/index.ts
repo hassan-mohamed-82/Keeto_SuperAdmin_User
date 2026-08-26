@@ -22,6 +22,7 @@ import restaurantSettingsRouter from "./restaurantSettings";
 import recommendedFoodRouter from "./recommendedFood"
 import policyRouter from "./policyRouter";
 import popupRouter from "./popup";
+import couponRouter from "./coupon";
 
 const router = Router();
 
@@ -48,4 +49,5 @@ router.use("/favlist", favlistRouter);
 router.use("/notifications", notificationRouter);
 router.use("/offers", offersRouter);
 router.use("/points", pointsRouter);
+router.use("/coupon", couponRouter);
 export default router;

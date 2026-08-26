@@ -1108,42 +1108,17 @@
 //     let isFreeDelivery = false;
 
 //     if (couponCode) {
-//         const [coupon] = await db.select().from(coupons).where(eq(coupons.code, couponCode)).limit(1);
-//         if (!coupon || !coupon.isActive) throw new BadRequest("Invalid or inactive coupon");
+//       const couponResult = await validateAndCalculateCoupon(
+        //     couponCode,
+        //     userId,
+        //     restaurantId,
+        //     subtotal,
+        //     0 // Delivery fee is resolved in step 6; if free_delivery, isFreeDelivery flag is set
+        // );
 
-//         if (coupon.startDate && new Date(coupon.startDate) > nowTemp) throw new BadRequest("Coupon not yet active");
-//         if (coupon.endDate && new Date(coupon.endDate) < nowTemp) throw new BadRequest("Coupon expired");
-
-//         if (coupon.usageLimit && coupon.usedCount! >= coupon.usageLimit) throw new BadRequest("Coupon usage limit reached");
-//         if (parseFloat(coupon.minOrderAmount as string || "0") > subtotal) throw new BadRequest(`Minimum order amount of ${coupon.minOrderAmount} required for this coupon`);
-
-//         if (!coupon.isGlobal) {
-//             const [coupRest] = await db.select().from(couponRestaurants)
-//                 .where(and(eq(couponRestaurants.couponId, coupon.id), eq(couponRestaurants.restaurantId, restaurantId))).limit(1);
-//             if (!coupRest) throw new BadRequest("Coupon is not applicable to this restaurant");
-//         }
-
-//         if (coupon.perUserLimit) {
-//             const usages = await db.select({ count: sql<number>`count(*)` }).from(couponUsages)
-//                 .where(and(eq(couponUsages.couponId, coupon.id), eq(couponUsages.userId, userId)));
-//             if (usages[0].count >= coupon.perUserLimit) throw new BadRequest("You have reached the usage limit for this coupon");
-//         }
-
-//         const value = parseFloat(coupon.discountValue as string);
-//         if (coupon.discountType === "free_delivery") {
-//             isFreeDelivery = true;
-//         } else if (coupon.discountType === "fixed_amount") {
-//             totalDiscount += value;
-//         } else if (coupon.discountType === "percentage") {
-//             let pDiscount = subtotal * (value / 100);
-//             if (coupon.maxDiscount) {
-//                 const max = parseFloat(coupon.maxDiscount as string);
-//                 if (pDiscount > max) pDiscount = max;
-//             }
-//             totalDiscount += pDiscount;
-//         }
-
-//         appliedCoupon = coupon;
+        // appliedCoupon = couponResult.coupon;
+        // totalDiscount = couponResult.discountAmount;
+        // isFreeDelivery = couponResult.isFreeDelivery;
 //     }
 
 //     totalDiscount = roundMoney(totalDiscount);
@@ -1272,6 +1247,8 @@
 //         resolvedBranchId = branch.id;
 //         resolvedZoneId = branch.zoneId;
 //     }
+
+ //   const calculatedDeliveryFee = deliveryFee;
 
 //     if (isFreeDelivery) deliveryFee = 0;
 
@@ -1412,11 +1389,9 @@
 //                 couponId: appliedCoupon.id,
 //                 userId,
 //                 orderId,
-//                 discountAmount: appliedCoupon.discountType === "free_delivery"
-//                     ? deliveryFee.toFixed(2)
-//                     : appliedCoupon.discountType === "fixed_amount"
-//                         ? appliedCoupon.discountValue.toString()
-//                         : totalDiscount.toFixed(2)
+//                  discountAmount: appliedCoupon.discountType === "free_delivery"
+                    // ? calculatedDeliveryFee.toFixed(2)
+                    // : totalDiscount.toFixed(2)
 //             });
 
 //             await tx.update(coupons)
