@@ -766,6 +766,8 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             orderType: orders.orderType,
             durationOrderPreparing: orders.durationOrderPreparing,
             restaurantName: restaurants.name,
+            restaurantNameAr: restaurants.nameAr,
+            restaurantNameFr: restaurants.nameFr,
             restaurantImage: restaurants.logo,
             totalAmount: orders.totalAmount,
             status: orders.status,
@@ -836,6 +838,8 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
         orderType: o.orderType,
         durationOrderPreparing: o.durationOrderPreparing,
         restaurantName: o.restaurantName,
+        restaurantNameAr: o.restaurantNameAr,
+        restaurantNameFr: o.restaurantNameFr,
         restaurantImage: o.restaurantImage,
         totalAmount: o.totalAmount,
         status: o.status,
@@ -875,6 +879,8 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             orderType: orders.orderType,
             durationOrderPreparing: orders.durationOrderPreparing,
             restaurantName: restaurants.name,
+            restaurantNameAr: restaurants.nameAr,
+            restaurantNameFr: restaurants.nameFr,
             restaurantImage: restaurants.logo,
             totalAmount: orders.totalAmount,
             status: orders.status,
@@ -947,6 +953,8 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
         orderType: o.orderType,
         durationOrderPreparing: o.durationOrderPreparing,
         restaurantName: o.restaurantName,
+        restaurantNameAr: o.restaurantNameAr,
+        restaurantNameFr: o.restaurantNameFr,
         restaurantImage: o.restaurantImage,
         totalAmount: o.totalAmount,
         status: o.status,
@@ -1007,6 +1015,8 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             ratingComment: orders.ratingComment,
 
             restaurantName: restaurants.name,
+            restaurantNameAr: restaurants.nameAr,
+            restaurantNameFr: restaurants.nameFr,
             restaurantImage: restaurants.logo,
 
             // Branch (takeaway / dine_in)
@@ -1091,6 +1101,8 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
                 ? { reason: o.cancelReason, type: o.cancelReasonType }
                 : null,
             restaurantName: o.restaurantName,
+            restaurantNameAr: o.restaurantNameAr,
+            restaurantNameFr: o.restaurantNameFr,
             restaurantImage: o.restaurantImage,
             location: o.orderType === "delivery"
                 ? {
