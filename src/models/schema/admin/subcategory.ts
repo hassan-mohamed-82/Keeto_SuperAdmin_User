@@ -6,10 +6,12 @@ import {
     json,
     char,
     int,
+    uniqueIndex,
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { categories } from "./Category";
 import { restaurants } from "./restaurants";
+import { branches } from "./branches";
 
 export const subcategories = mysqlTable("subcategories", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -25,3 +27,25 @@ export const subcategories = mysqlTable("subcategories", {
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
+
+export const branchSubcategories = mysqlTable(
+    "branch_subcategories",
+    {
+        id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+        branchId: char("branch_id", { length: 36 })
+            .references(() => branches.id)
+            .notNull(),
+        subcategoryId: char("subcategory_id", { length: 36 })
+            .references(() => subcategories.id)
+            .notNull(),
+        status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
+        createdAt: timestamp("created_at").defaultNow(),
+        updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+    },
+    (table) => ({
+        branchSubcategoryIdx: uniqueIndex("unique_branch_subcategory").on(
+            table.branchId,
+            table.subcategoryId
+        ),
+    })
+); 

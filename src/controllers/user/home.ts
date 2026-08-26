@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory, subcategories } from "../../models/schema";
-import { eq, and, like, or, sql, isNull, isNotNull } from "drizzle-orm";
+import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory, subcategories, branchSubcategories, branches } from "../../models/schema";
+import { eq, and, like, or, sql, isNull, isNotNull, inArray } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
@@ -447,7 +447,48 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
 
     const menuUnavailableBranchesMap = menuActiveFoodIds.length > 0
         ? await getUnavailableBranchesForFoods(menuActiveFoodIds)
-        : new Map<string, string[]>();
+        : new Map<string, BranchInfo[]>();
+
+    // ─── جلب الفروع غير المتاحة بناءً على الـ subcategories ───
+    const activeSubcategoryIds = [...new Set(
+        allMenuFoods
+            .filter((f: any) => !f.isOutOfStock && f.subcategory?.id)
+            .map((f: any) => f.subcategory.id)
+    )] as string[];
+
+    const subcategoryUnavailableBranchesMap = new Map<string, BranchInfo[]>();
+    
+    if (activeSubcategoryIds.length > 0) {
+        const inactiveSubcats = await db
+            .select({
+                subcategoryId: branchSubcategories.subcategoryId,
+                branchId: branches.id,
+                branchName: branches.name,
+                branchNameAr: branches.nameAr,
+                branchNameFr: branches.nameFr,
+            })
+            .from(branchSubcategories)
+            .leftJoin(branches, eq(branchSubcategories.branchId, branches.id))
+            .where(and(
+                inArray(branchSubcategories.subcategoryId, activeSubcategoryIds),
+                eq(branchSubcategories.status, "inactive")
+            ));
+
+        for (const row of inactiveSubcats) {
+            if (!row.branchId) continue;
+            
+            if (!subcategoryUnavailableBranchesMap.has(row.subcategoryId)) {
+                subcategoryUnavailableBranchesMap.set(row.subcategoryId, []);
+            }
+            
+            subcategoryUnavailableBranchesMap.get(row.subcategoryId)!.push({
+                id: row.branchId,
+                name: row.branchName || "",
+                nameAr: row.branchNameAr,
+                nameFr: row.branchNameFr,
+            });
+        }
+    }
 
     const finalMenu = Object.values(groupedMenuObj).map((category: any) => {
         return {
@@ -467,9 +508,22 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                 // إرفاق الفروع غير المتاحة
                 // null → الوجبة غير متاحة في جميع الفروع (isOutOfStock)
                 // [] أو [...] → قائمة الفروع غير المتاحة بالتحديد
-                f.unavailableBranches = f.isOutOfStock
-                    ? null
-                    : (menuUnavailableBranchesMap.get(f.id) ?? []);
+                if (f.isOutOfStock) {
+                    f.unavailableBranches = null;
+                } else {
+                    const foodUnavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
+                    const subcatUnavailableBranches = f.subcategory?.id 
+                        ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || []) 
+                        : [];
+                    
+                    // دمج الفرعين بدون تكرار
+                    const combinedBranches = new Map<string, BranchInfo>();
+                    [...foodUnavailableBranches, ...subcatUnavailableBranches].forEach(b => {
+                        combinedBranches.set(b.id, b);
+                    });
+                    
+                    f.unavailableBranches = Array.from(combinedBranches.values());
+                }
 
                 return f;
             })

@@ -10,9 +10,11 @@ import {
     addons,
     freeDeliveryOffers,
     branches,
+    subcategories,
+    branchSubcategories,
 } from "../../models/schema";
 
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
@@ -337,6 +339,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             note: cartItems.note,
             storedBranchId: cartItems.branchId,
             storedServiceModule: cartItems.serviceModule,
+            subcategoryId: food.subcategoryid,
         })
         .from(cartItems)
         .leftJoin(food, eq(cartItems.foodId, food.id))
@@ -361,16 +364,42 @@ export const getCart = async (req: Request | any, res: Response) => {
         ? await getUnavailableBranchesForFoods(allFoodIds)
         : new Map<string, BranchInfo[]>();
 
+    // ─── Branch-subcategory availability check ────────────────────────
+    // Fetch all subcategoryIds that are explicitly set to "inactive" for this branch
+    const inactiveSubcategoryIds = new Set<string>();
+    if (targetBranchId) {
+        const inactiveRows = await db
+            .select({ subcategoryId: branchSubcategories.subcategoryId })
+            .from(branchSubcategories)
+            .where(and(
+                eq(branchSubcategories.branchId, targetBranchId),
+                eq(branchSubcategories.status, "inactive")
+            ));
+        for (const row of inactiveRows) {
+            inactiveSubcategoryIds.add(row.subcategoryId);
+        }
+    }
+
     let availableCartItems: typeof items = [];
-    let unavailableCartItemsData: typeof items = [];
+    let unavailableCartItemsData: Array<typeof items[number] & { unavailableReason: string }> = [];
 
     for (const item of items) {
         const isGeneralUnavailable = Boolean(item.isOutOfStock) || item.status === "inactive";
         const unavailableBranches = item.foodId ? (unavailableMap.get(item.foodId) || []) : [];
         const isBranchUnavailable = Boolean(targetBranchId && unavailableBranches.some(b => b.id === targetBranchId));
+        const isSubcategoryInactive = Boolean(
+            targetBranchId &&
+            item.subcategoryId &&
+            inactiveSubcategoryIds.has(item.subcategoryId)
+        );
 
-        if (isGeneralUnavailable || isBranchUnavailable) {
-            unavailableCartItemsData.push(item);
+        if (isGeneralUnavailable || isBranchUnavailable || isSubcategoryInactive) {
+            const reason = isGeneralUnavailable
+                ? "Out of stock or inactive"
+                : isSubcategoryInactive
+                    ? "This item's category is not available at the selected branch"
+                    : "Not available at the selected branch";
+            unavailableCartItemsData.push({ ...item, unavailableReason: reason });
         } else {
             availableCartItems.push(item);
         }
@@ -519,7 +548,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             variations: parsedVariations,
             addons: parsedAddonsParsed,
             isAvailable: false,
-            reason: "Out of stock or unavailable at selected location",
+            reason: item.unavailableReason,
         };
     });
 
