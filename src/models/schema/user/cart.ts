@@ -1,8 +1,10 @@
-import { mysqlTable, varchar, char, timestamp, decimal,  json, boolean, int } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, char, timestamp, decimal, json, boolean, int, mysqlEnum } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { users } from "./Users";
 import { food } from "../admin/food";
 import { restaurants } from "../admin/restaurants";
+import { branches } from "../admin/branches";
+
 export const cartItems = mysqlTable("cart_items", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
@@ -31,6 +33,12 @@ export const cartItems = mysqlTable("cart_items", {
     addons: json("addons"),
 
     note: varchar("note", { length: 500 }),
+
+    // ─── Channel Pricing Context ───────────────────────────────────────
+    // Nullable: populated only when the item was added with branchId+serviceModule context.
+    // Used by GET /cart to detect price drift and by checkout for final validation.
+    branchId: char("branch_id", { length: 36 }).references(() => branches.id),
+    serviceModule: mysqlEnum("service_module", ["takeaway", "dine_in", "delivery"]),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),

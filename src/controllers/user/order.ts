@@ -31,6 +31,7 @@ import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discou
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
 import { calculateCurrentStatus } from "./restaurantFeatures";
 import * as turf from "@turf/turf";
+import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -156,114 +157,159 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) throw new BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
 
     const defaultPreparingDuration = settings?.maxDeliveryTime ?? 30;
-    // ==========================================
-    // ⚡ 5. Batch Fetching
-    // ==========================================
-    const foodIds = [...new Set(userCart.map(item => item.foodId))];
 
-    const allOptionIds: string[] = [];
+    // ==========================================
+    // ⚡ 5. Channel Pricing Engine — Subtotal, Variations & Addons
+    // orderType IS the serviceModule (they are the same concept)
+    // ==========================================
+    const serviceModule = resolvedOrderType as ServiceModule;
+
+    // We need the resolvedBranchId from step 6, but step 6 runs after step 5 in the
+    // original flow. We pre-resolve it here so the pricing engine can run first.
+    // Branch resolution for pricing purposes (full resolution happens again in step 6 for delivery fee).
+    let pricingBranchId: string | null = branchId || null;
+
+    if (resolvedOrderType === "delivery") {
+        if (!addressId) throw new BadRequest("Delivery address is required.");
+        if (!pricingBranchId) {
+            try {
+                pricingBranchId = await resolveBranchIdFromAddress(addressId, restaurantId);
+            } catch (err: any) {
+                const storedBranch = userCart.find(c => c.branchId);
+                pricingBranchId = storedBranch?.branchId || null;
+            }
+        }
+    } else {
+        // Takeaway / dine_in: branchId is required
+        if (!branchId) throw new BadRequest("Branch is required for takeaway or dine-in orders.");
+    }
+
+    // Parse cart variations + addons (needed for pricing engine + order items)
     const allAddonIds: string[] = [];
-
-    userCart.forEach(item => {
-        let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
-        if (typeof safeVars === 'string') safeVars = JSON.parse(safeVars);
-
-        let parsedVars: any[] = [];
-        let parsedAddons: any[] = [];
-
-        if (Array.isArray(safeVars)) {
-            parsedVars = safeVars;
-        } else if (safeVars && typeof safeVars === 'object') {
-            parsedVars = Array.isArray(safeVars.variations) ? safeVars.variations : [];
-            parsedAddons = Array.isArray(safeVars.addons) ? safeVars.addons : [];
-        }
-
-        let safeAddons = typeof item.addons === 'string' ? JSON.parse(item.addons) : item.addons;
-        if (typeof safeAddons === 'string') safeAddons = JSON.parse(safeAddons);
-        if (Array.isArray(safeAddons)) {
-            parsedAddons = [...parsedAddons, ...safeAddons];
-        }
-
-        parsedVars.forEach((v: any) => { if (v.optionId) allOptionIds.push(v.optionId); });
-        parsedAddons.forEach((a: any) => { if (a.addonId || a.id) allAddonIds.push(a.addonId || a.id); });
-    });
-
-    const [foodList, optionsList, addonsListDb] = await Promise.all([
-        db.select().from(food).where(inArray(food.id, foodIds)),
-        allOptionIds.length > 0
-            ? db.select().from(variationOptions).where(inArray(variationOptions.id, [...new Set(allOptionIds)]))
-            : [],
-        allAddonIds.length > 0
-            ? db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)]))
-            : []
-    ]);
-
-    const foodMap = new Map(foodList.map(f => [f.id, f]));
-    const optionsMap = new Map(optionsList.map(o => [o.id, o]));
-    const addonsMap = new Map(addonsListDb.map(a => [a.id, a]));
-
-    // ==========================================
-    // 5.1 Calculate Subtotal, Variations & Addons
-    // ==========================================
-    let subtotal = 0;
-    let initialSubtotal = 0;
-    const itemsWithData = [];
-
-    for (const item of userCart) {
-        const foodItem = foodMap.get(item.foodId);
-        if (!foodItem) throw new BadRequest(`Food item with ID ${item.foodId} not found`);
-
-        const originalBasePrice = parseFloat(foodItem.price as string || "0");
-
-        let safeVars = typeof item.variations === 'string' ? JSON.parse(item.variations) : item.variations;
-        if (typeof safeVars === 'string') safeVars = JSON.parse(safeVars);
+    const cartParsed = userCart.map(item => {
+        let safeVars = typeof item.variations === "string" ? JSON.parse(item.variations) : item.variations;
+        if (typeof safeVars === "string") safeVars = JSON.parse(safeVars);
 
         let parsedVariations: any[] = [];
         let parsedAddons: any[] = [];
 
         if (Array.isArray(safeVars)) {
             parsedVariations = safeVars;
-        } else if (safeVars && typeof safeVars === 'object') {
+        } else if (safeVars && typeof safeVars === "object") {
             parsedVariations = Array.isArray(safeVars.variations) ? safeVars.variations : [];
             parsedAddons = Array.isArray(safeVars.addons) ? safeVars.addons : [];
         }
 
-        let safeAddons = typeof item.addons === 'string' ? JSON.parse(item.addons) : item.addons;
-        if (typeof safeAddons === 'string') safeAddons = JSON.parse(safeAddons);
+        let safeAddons = typeof item.addons === "string" ? JSON.parse(item.addons) : item.addons;
+        if (typeof safeAddons === "string") safeAddons = JSON.parse(safeAddons);
         if (Array.isArray(safeAddons)) {
             parsedAddons = [...parsedAddons, ...safeAddons];
         }
 
-        let varPrice = 0;
+        parsedAddons.forEach((a: any) => { if (a.addonId || a.id) allAddonIds.push(a.addonId || a.id); });
+        return { cartItem: item, parsedVariations, parsedAddons };
+    });
+
+    // Batch fetch addon prices (channel pricing does not cover addons)
+    const addonsListDb = allAddonIds.length > 0
+        ? await db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)]))
+        : [];
+    const addonsMap = new Map(addonsListDb.map(a => [a.id, a]));
+
+    // ─── Per-item pricing via 4-tier cascade ────────────────────────────
+    let subtotal = 0;
+    let initialSubtotal = 0;
+    const itemsWithData: any[] = [];
+    let checkoutHasUnavailable = false;
+    let checkoutPriceChanged = false;
+    const priceChangedItems: any[] = [];
+
+    for (const { cartItem, parsedVariations, parsedAddons } of cartParsed) {
+        const optionIds = parsedVariations.map((v: any) => v.optionId).filter(Boolean);
+
+        // Resolve addon prices (not covered by channel pricing)
         let addonPrice = 0;
-
-        for (const v of parsedVariations) {
-            if (v.optionId) {
-                const dbOption = optionsMap.get(v.optionId);
-                if (dbOption) {
-                    const dbOptionPrice = parseFloat((dbOption.additionalPrice || "0") as string);
-                    varPrice += dbOptionPrice;
-                    v.additionalPrice = dbOptionPrice.toString();
-                }
-            } else {
-                varPrice += parseFloat(v.additionalPrice || v.price || v.amount || "0");
-            }
-        }
-
         for (const a of parsedAddons) {
             const addonId = a.addonId || a.id;
             const dbAddon = addonsMap.get(addonId);
             if (dbAddon) {
-                const dbAddonPrice = parseFloat((dbAddon.price || "0") as string);
-                addonPrice += dbAddonPrice;
-                a.price = dbAddonPrice.toString();
+                const p = parseFloat((dbAddon.price || "0") as string);
+                addonPrice += p;
+                a.price = p.toString();
             } else {
                 addonPrice += parseFloat(a.price || "0");
             }
         }
 
+        let channelBasePrice: number;
+        let varPrice: number;
+        let itemIsAvailable = true;
+
+        if (pricingBranchId) {
+            // ── Channel pricing cascade ──────────────────────────────
+            const priceResult = await calculateCalculatedPrice(
+                cartItem.foodId,
+                optionIds,
+                pricingBranchId,
+                serviceModule
+            );
+
+            channelBasePrice = priceResult.basePrice;
+            varPrice = priceResult.variants.reduce((s, v) => s + v.price, 0);
+            itemIsAvailable = priceResult.isAvailable;
+
+            // Sync resolved variant prices back into snapshot for order record
+            for (const v of parsedVariations) {
+                if (v.optionId) {
+                    const resolved = priceResult.variants.find(r => r.variantOptionId === v.optionId);
+                    if (resolved) v.additionalPrice = resolved.price.toString();
+                }
+            }
+
+            // Detect price drift vs stored cart snapshot
+            const storedUnit = parseFloat(cartItem.unitPrice as string || "0");
+            const liveUnit = channelBasePrice + varPrice + addonPrice;
+            if (Math.abs(liveUnit - storedUnit) > 0.01) {
+                checkoutPriceChanged = true;
+                priceChangedItems.push({
+                    foodId: cartItem.foodId,
+                    oldUnitPrice: storedUnit,
+                    newUnitPrice: liveUnit,
+                });
+            }
+        } else {
+            // ── Fallback: no channel context — use food.price + option additionalPrice ──
+            const [foodRow] = await db.select({ price: food.price, status: food.status, isOutOfStock: food.isOutOfStock })
+                .from(food).where(eq(food.id, cartItem.foodId)).limit(1);
+            if (!foodRow) throw new BadRequest(`Food item with ID ${cartItem.foodId} not found`);
+
+            channelBasePrice = parseFloat(foodRow.price as string || "0");
+            itemIsAvailable = foodRow.status !== "inactive" && !foodRow.isOutOfStock;
+
+            varPrice = 0;
+            if (optionIds.length > 0) {
+                const opts = await db.select({ id: variationOptions.id, additionalPrice: variationOptions.additionalPrice })
+                    .from(variationOptions).where(inArray(variationOptions.id, optionIds));
+                const optMap = new Map(opts.map(o => [o.id, o]));
+                for (const v of parsedVariations) {
+                    if (v.optionId) {
+                        const opt = optMap.get(v.optionId);
+                        if (opt) { varPrice += parseFloat(opt.additionalPrice as string || "0"); }
+                    }
+                }
+            }
+        }
+
+        if (!itemIsAvailable) checkoutHasUnavailable = true;
+
+        // Build initial subtotal for discount engine
+        const originalBasePrice = channelBasePrice;
+        const foodMeta = await db.select({ id: food.id, discount_type: food.discount_type, discount_value: food.discount_value })
+            .from(food).where(eq(food.id, cartItem.foodId)).limit(1);
+        const foodItem = foodMeta[0];
+
         let initialDiscountPrice = originalBasePrice;
-        if (foodItem.discount_value && Number(foodItem.discount_value) > 0) {
+        if (foodItem?.discount_value && Number(foodItem.discount_value) > 0) {
             if (foodItem.discount_type === "percentage") {
                 initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(foodItem.discount_value) / 100));
             } else if (foodItem.discount_type === "amount" || foodItem.discount_type === "fixed") {
@@ -271,8 +317,42 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
         }
 
-        initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * item.quantity;
-        itemsWithData.push({ cartItem: item, foodItem, originalBasePrice, varPrice, addonPrice, vars: parsedVariations, addonsList: parsedAddons });
+        initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * cartItem.quantity;
+        itemsWithData.push({
+            cartItem,
+            foodItem,
+            originalBasePrice,
+            varPrice,
+            addonPrice,
+            vars: parsedVariations,
+            addonsList: parsedAddons,
+            itemIsAvailable,
+        });
+    }
+
+    // ─── 422: Unavailable items guard ────────────────────────────────────
+    if (checkoutHasUnavailable) {
+        return res.status(422).json({
+            success: false,
+            message: "One or more items in your cart are unavailable. Please review your cart before placing the order.",
+            data: {
+                unavailableItems: itemsWithData
+                    .filter(d => !d.itemIsAvailable)
+                    .map(d => ({ foodId: d.cartItem.foodId })),
+            },
+        });
+    }
+
+    // ─── 409: Price drift guard ───────────────────────────────────────────
+    if (checkoutPriceChanged) {
+        return res.status(409).json({
+            success: false,
+            message: "Prices have changed since you added items to your cart. Please review the updated prices and re-confirm your order.",
+            data: {
+                isPriceChanged: true,
+                changedItems: priceChangedItems,
+            },
+        });
     }
 
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
@@ -304,7 +384,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             totalPrice: itemTotal.toFixed(2),
             variations: vars,
             addons: addonsList,
-            note: cartItem.note || null
+            note: cartItem.note || null,
         });
     }
 
@@ -471,7 +551,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             resolvedBranchId = matchedBranch.id;
         }
     } else {
-        // For takeaway or dine_in: branchId is required
+        // For takeaway or dine_in: branchId is required (already validated in step 5)
         if (!branchId) throw new BadRequest("Branch is required for takeaway or dine-in orders.");
 
         const [branch] = await db.select({ id: branches.id, zoneId: branches.zoneId })
