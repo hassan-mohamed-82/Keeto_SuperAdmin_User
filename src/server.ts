@@ -14,6 +14,7 @@ import { connectDB } from './models/connection';
 dotenv.config();
 
 const app = express();
+app.set("trust proxy", true);
 connectDB(); 
 
 const httpServer = http.createServer(app);
@@ -45,8 +46,11 @@ app.use(cookieParser());
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 
-// إعداد المسارات الثابتة (Static Files)
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+// إعداد المسارات الثابتة (Static Files مع التخزين المؤقت)
+app.use("/uploads", express.static(path.join(__dirname, "../uploads"), {
+  maxAge: "30d",
+  immutable: true
+}));
 app.use(express.static(path.join(process.cwd(), "public")));
 
 // اختبار عمل الـ API
