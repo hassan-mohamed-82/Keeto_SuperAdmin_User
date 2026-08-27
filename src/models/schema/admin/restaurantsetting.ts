@@ -5,7 +5,8 @@ import {
   varchar,
   decimal,
   mysqlEnum,
-  char
+  char,
+  json
 } from "drizzle-orm/mysql-core";
 
 // 1. جدول الإعدادات العامة
@@ -45,6 +46,10 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   repeatNotification: boolean("repeat_notification").default(false),
   repeatNotificationDuration: int("repeat_notification_duration").default(5), // Duration in minutes (e.g. repeated for how many minutes)
   repeatNotificationInterval: int("repeat_notification_interval").default(60), // Interval in seconds between alerts
+
+  orderAlertNotification: boolean("order_alert_notification").default(true),
+  orderAlertDurationThreshold: int("order_alert_duration_threshold").default(20), // Threshold in minutes to alert active orders (accepted/preparing/out_for_delivery)
+  orderAlertStatuses: json("order_alert_statuses").$type<string[]>().default(["accepted", "preparing", "out_for_delivery"]),
 });
 
 
