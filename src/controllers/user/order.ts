@@ -17,7 +17,8 @@ import {
     addons,
     zones,
     deliveryMen,
-    freeDeliveryOffers
+    freeDeliveryOffers,
+    branchSubcategories
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -183,6 +184,47 @@ export const checkout = async (req: Request | any, res: Response) => {
     } else {
         // Takeaway / dine_in: branchId is required
         if (!branchId) throw new BadRequest("Branch is required for takeaway or dine-in orders.");
+    }
+
+    // ─── Subcategory-branch availability guard ──────────────────────────
+    // Block checkout if any cart item belongs to a subcategory that is
+    // inactive at the resolved branch (independent of food-level locks)
+    if (pricingBranchId) {
+        const cartFoodIds = userCart.map(c => c.foodId).filter(Boolean) as string[];
+        const cartFoods = cartFoodIds.length > 0
+            ? await db
+                .select({ id: food.id, subcategoryid: food.subcategoryid })
+                .from(food)
+                .where(inArray(food.id, cartFoodIds))
+            : [];
+
+        const subcatIdsInCart = [...new Set(cartFoods.map(f => f.subcategoryid).filter(Boolean))] as string[];
+
+        if (subcatIdsInCart.length > 0) {
+            const inactiveSubcats = await db
+                .select({ subcategoryId: branchSubcategories.subcategoryId })
+                .from(branchSubcategories)
+                .where(and(
+                    eq(branchSubcategories.branchId, pricingBranchId),
+                    inArray(branchSubcategories.subcategoryId, subcatIdsInCart),
+                    eq(branchSubcategories.status, "inactive")
+                ));
+
+            if (inactiveSubcats.length > 0) {
+                const inactiveSet = new Set(inactiveSubcats.map(r => r.subcategoryId));
+                const blockedFoodIds = cartFoods
+                    .filter(f => f.subcategoryid && inactiveSet.has(f.subcategoryid))
+                    .map(f => f.id);
+
+                return res.status(422).json({
+                    success: false,
+                    message: "One or more items in your cart are not available at the selected branch or location.",
+                    data: {
+                        unavailableItems: blockedFoodIds.map(foodId => ({ foodId })),
+                    },
+                });
+            }
+        }
     }
 
     // Parse cart variations + addons (needed for pricing engine + order items)

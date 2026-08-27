@@ -507,22 +507,16 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
 
                 // إرفاق الفروع غير المتاحة
                 // null → الوجبة غير متاحة في جميع الفروع (isOutOfStock)
-                // [] أو [...] → قائمة الفروع غير المتاحة بالتحديد
+                // [] أو [...] → قائمة الفروع غير المتاحة بالتحديد (food-level فقط)
+                // subcatUnavailableBranches → الفروع غير المتاحة بسبب الـ subcategory (منفصلة)
                 if (f.isOutOfStock) {
                     f.unavailableBranches = null;
+                    f.subcatUnavailableBranches = null;
                 } else {
-                    const foodUnavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
-                    const subcatUnavailableBranches = f.subcategory?.id 
-                        ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || []) 
+                    f.unavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
+                    f.subcatUnavailableBranches = f.subcategory?.id
+                        ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || [])
                         : [];
-                    
-                    // دمج الفرعين بدون تكرار
-                    const combinedBranches = new Map<string, BranchInfo>();
-                    [...foodUnavailableBranches, ...subcatUnavailableBranches].forEach(b => {
-                        combinedBranches.set(b.id, b);
-                    });
-                    
-                    f.unavailableBranches = Array.from(combinedBranches.values());
                 }
 
                 return f;

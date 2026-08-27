@@ -137,6 +137,22 @@ export const addToCart = async (req: Request | any, res: Response) => {
         if (!br) throw new BadRequest("Selected branch not found or inactive.");
     }
 
+    // ─── Validate subcategory-branch availability ─────────────────────
+    if (resolvedBranchId && itemFood.subcategoryid) {
+        const [inactiveSubcat] = await db
+            .select({ subcategoryId: branchSubcategories.subcategoryId })
+            .from(branchSubcategories)
+            .where(and(
+                eq(branchSubcategories.branchId, resolvedBranchId),
+                eq(branchSubcategories.subcategoryId, itemFood.subcategoryid),
+                eq(branchSubcategories.status, "inactive")
+            ))
+            .limit(1);
+        if (inactiveSubcat) {
+            throw new BadRequest("This item's category is not available at the selected branch or at your location");
+        }
+    }
+
     // ─── Validate food availability at branch (ingredient/menu locks) ─
     await validateFoodAvailabilityForCart(foodId, resolvedBranchId || undefined, undefined, itemFood.restaurantid);
 
@@ -626,6 +642,22 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
             resolvedBranchId = await resolveBranchIdFromAddress(addressId, itemFood.restaurantid);
         } catch (err: any) {
             throw new BadRequest(err.message || "Could not resolve delivery branch for this address.");
+        }
+    }
+
+    // ─── Validate subcategory-branch availability ─────────────────────
+    if (resolvedBranchId && itemFood.subcategoryid) {
+        const [inactiveSubcat] = await db
+            .select({ subcategoryId: branchSubcategories.subcategoryId })
+            .from(branchSubcategories)
+            .where(and(
+                eq(branchSubcategories.branchId, resolvedBranchId),
+                eq(branchSubcategories.subcategoryId, itemFood.subcategoryid),
+                eq(branchSubcategories.status, "inactive")
+            ))
+            .limit(1);
+        if (inactiveSubcat) {
+            throw new BadRequest("This item's category is not available at the selected branch or at your location.");
         }
     }
 
