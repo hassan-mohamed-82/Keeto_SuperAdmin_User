@@ -457,7 +457,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
     )] as string[];
 
     const subcategoryUnavailableBranchesMap = new Map<string, BranchInfo[]>();
-    
+
     if (activeSubcategoryIds.length > 0) {
         const inactiveSubcats = await db
             .select({
@@ -476,11 +476,11 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
 
         for (const row of inactiveSubcats) {
             if (!row.branchId) continue;
-            
+
             if (!subcategoryUnavailableBranchesMap.has(row.subcategoryId)) {
                 subcategoryUnavailableBranchesMap.set(row.subcategoryId, []);
             }
-            
+
             subcategoryUnavailableBranchesMap.get(row.subcategoryId)!.push({
                 id: row.branchId,
                 name: row.branchName || "",
@@ -505,19 +505,35 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                 // تحويل الـ Addons
                 f.addons = Object.values(f.addons);
 
-                // إرفاق الفروع غير المتاحة
-                // null → الوجبة غير متاحة في جميع الفروع (isOutOfStock)
-                // [] أو [...] → قائمة الفروع غير المتاحة بالتحديد (food-level فقط)
-                // subcatUnavailableBranches → الفروع غير المتاحة بسبب الـ subcategory (منفصلة)
+                // // إرفاق الفروع غير المتاحة
+                // // null → الوجبة غير متاحة في جميع الفروع (isOutOfStock)
+                // // [] أو [...] → قائمة الفروع غير المتاحة بالتحديد
                 if (f.isOutOfStock) {
                     f.unavailableBranches = null;
-                    f.subcatUnavailableBranches = null;
                 } else {
-                    f.unavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
-                    f.subcatUnavailableBranches = f.subcategory?.id
+                    const foodUnavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
+                    const subcatUnavailableBranches = f.subcategory?.id
                         ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || [])
                         : [];
+
+                    // دمج الفرعين بدون تكرار
+                    const combinedBranches = new Map<string, BranchInfo>();
+                    [...foodUnavailableBranches, ...subcatUnavailableBranches].forEach(b => {
+                        combinedBranches.set(b.id, b);
+                    });
+
+                    f.unavailableBranches = Array.from(combinedBranches.values());
                 }
+
+                //  if (f.isOutOfStock) {
+                //     f.unavailableBranches = null;
+                //     f.subcatUnavailableBranches = null;
+                // } else {
+                //     f.unavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
+                //     f.subcatUnavailableBranches = f.subcategory?.id
+                //         ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || [])
+                //         : [];
+                // }
 
                 return f;
             })
