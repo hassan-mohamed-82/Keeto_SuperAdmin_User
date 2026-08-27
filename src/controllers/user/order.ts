@@ -839,7 +839,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             deliveryManPhone: deliveryMen.phone,
             // Cancellation info
             cancelReason: orders.cancelReason,
-            cancelReasonType: selectReasons.type,
+            cancelReasonType: orders.cancelReasonType ? orders.cancelReasonType : selectReasons.type,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
@@ -954,7 +954,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             deliveryManPhone: deliveryMen.phone,
             // Cancellation info
             cancelReason: orders.cancelReason,
-            cancelReasonType: selectReasons.type,
+            cancelReasonType: orders.cancelReasonType ? orders.cancelReasonType : selectReasons.type,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
@@ -1090,7 +1090,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             deliveryManPhone: deliveryMen.phone,
             // Cancellation info
             cancelReason: orders.cancelReason,
-            cancelReasonType: selectReasons.type,
+            cancelReasonType: orders.cancelReasonType ? orders.cancelReasonType : selectReasons.type,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
@@ -1358,9 +1358,13 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
     const { orderId } = req.params;
-    const { cancelReasonId } = req.body;
+    const { cancelReasonId, customReason } = req.body;
 
-    if (!cancelReasonId) throw new BadRequest("Cancel reason ID is required");
+    const inputCustomReason = customReason as string | undefined;
+
+    if (!cancelReasonId && (!inputCustomReason || typeof inputCustomReason !== "string" || inputCustomReason.trim() === "")) {
+        throw new BadRequest("Cancel reason or cancel reason ID is required");
+    }
 
     // 1. جلب الطلب والتأكد أنه للمستخدم وأنه قابل للإلغاء
     const [order] = await db.select().from(orders).where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1);
@@ -1370,8 +1374,18 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
     }
 
     // 2. التحقق من سبب الإلغاء
-    const [reason] = await db.select().from(selectReasons).where(and(eq(selectReasons.id, cancelReasonId), eq(selectReasons.type, "user"))).limit(1);
-    if (!reason) throw new BadRequest("Invalid cancel reason for user");
+    let finalReasonId: string | null = null;
+    let finalReasonText: string | null = null;
+
+    if (cancelReasonId) {
+        const [reason] = await db.select().from(selectReasons).where(and(eq(selectReasons.id, cancelReasonId), eq(selectReasons.type, "user"))).limit(1);
+        if (!reason) throw new BadRequest("Invalid cancel reason for user");
+        finalReasonId = reason.id;
+        finalReasonText = (inputCustomReason && inputCustomReason.trim()) ? inputCustomReason.trim() : reason.name;
+    } else {
+        finalReasonId = null;
+        finalReasonText = (inputCustomReason as string).trim();
+    }
 
     // 3. تحديث حالة الطلب وإرجاع المبالغ المالية (إلغاء أرباح المطعم والعمولة)
     await db.transaction(async (tx) => {
@@ -1379,8 +1393,10 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
         await tx.update(orders)
             .set({
                 status: "cancelled",
-                cancelReasonId: reason.id,
-                cancelReason: reason.name
+                cancelReasonId: finalReasonId,
+                cancelReason: finalReasonText,
+                cancelReasonType: "user",
+                updatedAt: new Date()
             })
             .where(eq(orders.id, orderId));
 
@@ -1464,14 +1480,14 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
         recipientId: order.restaurantId,
         branchId: order.branchId || null,
         title: "إلغاء الطلب ❌",
-        body: `تم إلغاء الطلب #${order.dailyOrderNumber} من قبل العميل. السبب: ${reason.name}`,
+        body: `تم إلغاء الطلب #${order.dailyOrderNumber} من قبل العميل. السبب: ${finalReasonText}`,
         data: {
             orderId: order.id,
             orderNumber: order.orderNumber,
             dailyOrderNumber: order.dailyOrderNumber,
             branchId: order.branchId || null,
             type: "cancel",
-            reason: reason.name
+            reason: finalReasonText
         }
     });
 
