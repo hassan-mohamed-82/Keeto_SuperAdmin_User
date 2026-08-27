@@ -816,6 +816,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         title: "طلب جديد! 🛒",
         body: `تم استلام طلب جديد #${createdDailyOrderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
         data: {
+            restaurantId,
             orderId,
             orderNumber,
             branchId: resolvedBranchId || null,
@@ -1524,6 +1525,7 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
         title: "إلغاء الطلب ❌",
         body: `تم إلغاء الطلب #${order.dailyOrderNumber} من قبل العميل. السبب: ${finalReasonText}`,
         data: {
+            restaurantId: order.restaurantId,
             orderId: order.id,
             orderNumber: order.orderNumber,
             dailyOrderNumber: order.dailyOrderNumber,

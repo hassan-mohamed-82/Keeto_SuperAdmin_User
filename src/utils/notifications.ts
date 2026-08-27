@@ -79,8 +79,8 @@
 
 import { messaging } from "./firebase";
 import { db } from "../models/connection";
-import { notifications, users, restaurants, restrauntadmin, restaurantSettings } from "../models/schema";
-import { eq, and, or } from "drizzle-orm";
+import { notifications, users, restaurants, restrauntadmin, restaurantSettings, userFcmTokens } from "../models/schema";
+import { eq, and, or, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 /**
@@ -98,10 +98,13 @@ export const sendPushNotification = async (params: {
 
     let payloadData: any = {
         ...(data || {}),
-        ...(branchId ? { branchId } : (data?.branchId ? { branchId: data.branchId } : {}))
+        recipientType,
+        recipientId,
+        branchId: branchId || data?.branchId || null,
+        restaurantId: data?.restaurantId || (recipientType === "restaurant" ? recipientId : null)
     };
 
-    // ✅ جلب إعدادات تكرار الإشعارات إذا كان المستلم مطعماً
+    // If recipient is a restaurant, attach repeat notification settings
     if (recipientType === "restaurant") {
         try {
             const [settings] = await db
@@ -143,12 +146,42 @@ export const sendPushNotification = async (params: {
         const tokens: string[] = [];
 
         if (recipientType === "user") {
-            const [user] = await db
-                .select({ fcmToken: users.fcmToken })
-                .from(users)
-                .where(eq(users.id, recipientId))
-                .limit(1);
-            if (user?.fcmToken) tokens.push(user.fcmToken);
+            const targetRestaurantId = payloadData.restaurantId || data?.restaurantId;
+
+            let userTokens: { fcmToken: string }[] = [];
+            if (targetRestaurantId) {
+                userTokens = await db
+                    .select({ fcmToken: userFcmTokens.fcmToken })
+                    .from(userFcmTokens)
+                    .where(and(
+                        eq(userFcmTokens.userId, recipientId),
+                        or(
+                            eq(userFcmTokens.restaurantId, targetRestaurantId),
+                            sql`${userFcmTokens.restaurantId} IS NULL`
+                        )
+                    ));
+            } else {
+                userTokens = await db
+                    .select({ fcmToken: userFcmTokens.fcmToken })
+                    .from(userFcmTokens)
+                    .where(eq(userFcmTokens.userId, recipientId));
+            }
+
+            for (const t of userTokens) {
+                if (t.fcmToken && !tokens.includes(t.fcmToken)) {
+                    tokens.push(t.fcmToken);
+                }
+            }
+
+            // Fallback to legacy user fcmToken if userFcmTokens table has no records for this user/restaurant
+            if (tokens.length === 0) {
+                const [user] = await db
+                    .select({ fcmToken: users.fcmToken })
+                    .from(users)
+                    .where(eq(users.id, recipientId))
+                    .limit(1);
+                if (user?.fcmToken) tokens.push(user.fcmToken);
+            }
         } else if (recipientType === "restaurant") {
             // Main restaurant owner token
             const [restaurant] = await db
