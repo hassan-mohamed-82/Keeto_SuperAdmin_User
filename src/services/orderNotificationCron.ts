@@ -87,10 +87,11 @@ export function initOrderNotificationCron() {
         // تتبع الطلبات النشطة لحفظ السيرفر
         currentActiveOrderIds.add(order.orderId);
 
-        const isAlertEnabled = order.orderAlertNotification ?? true;
+        // ✏️ التعديل هنا: القيمة الافتراضية أصبحت false بدلاً من true
+        const isAlertEnabled = order.orderAlertNotification ?? false;
         const allowedStatuses = order.orderAlertStatuses || ["accepted", "preparing", "out_for_delivery"];
 
-        if (!order.status || !allowedStatuses.includes(order.status)) {
+        if (!isAlertEnabled || !order.status || !allowedStatuses.includes(order.status)) {
           return;
         }
 
@@ -100,7 +101,7 @@ export function initOrderNotificationCron() {
 
         const elapsedMinutes = Math.floor((now.getTime() - new Date(order.createdAt).getTime()) / 60000);
 
-        if (isAlertEnabled && elapsedMinutes >= thresholdMinutes) {
+        if (elapsedMinutes >= thresholdMinutes) {
           const lastAlertTime = alertedOverdueOrders.get(order.orderId) || 0;
 
           // التنبيه كحد أقصى مرة كل 10 دقائق

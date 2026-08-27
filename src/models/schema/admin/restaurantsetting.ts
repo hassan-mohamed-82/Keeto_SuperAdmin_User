@@ -47,7 +47,7 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   repeatNotificationDuration: int("repeat_notification_duration").default(5), // Duration in minutes (e.g. repeated for how many minutes)
   repeatNotificationInterval: int("repeat_notification_interval").default(60), // Interval in seconds between alerts
 
-  orderAlertNotification: boolean("order_alert_notification").default(true),
+  orderAlertNotification: boolean("order_alert_notification").default(false),
   orderAlertDurationThreshold: int("order_alert_duration_threshold").default(20), // Threshold in minutes to alert active orders (accepted/preparing/out_for_delivery)
   orderAlertStatuses: json("order_alert_statuses").$type<string[]>().default(["accepted", "preparing", "out_for_delivery"]),
 });
