@@ -485,7 +485,9 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         );
 
         let activeDiscountInfo = null;
-        if (appliedDiscount) {
+
+        // إذا وُجد خصم مطبق وله id فهو خصم مطعم أو خصم عام من جدول الخصومات
+        if (appliedDiscount && appliedDiscount.id) {
             activeDiscountInfo = {
                 id: appliedDiscount.id,
                 name: appliedDiscount.name,
@@ -496,7 +498,9 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                 isGlobal: Boolean(appliedDiscount.isGlobal),
                 source: appliedDiscount.isGlobal ? "global_discount" : "restaurant_discount"
             };
-        } else if (row.foodDiscountValue && Number(row.foodDiscountValue) > 0) {
+        }
+        // إذا كان الخصم قادماً من الصنف نفسه (سواء تم حسابه عبر الدالة أو من قيم الوجبة مباشرة)
+        else if (row.foodDiscountType && Number(row.foodDiscountValue) > 0) {
             activeDiscountInfo = {
                 id: null,
                 name: "Item Discount",
@@ -505,7 +509,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
                 value: Number(row.foodDiscountValue),
                 maxDiscount: null,
                 isGlobal: false,
-                source: "food_level"
+                source: "food_level" // سيعود الآن بشكل صحيح
             };
         }
 
