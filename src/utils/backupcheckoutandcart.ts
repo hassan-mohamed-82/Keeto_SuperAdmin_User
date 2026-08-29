@@ -1109,16 +1109,16 @@
 
 //     if (couponCode) {
 //       const couponResult = await validateAndCalculateCoupon(
-        //     couponCode,
-        //     userId,
-        //     restaurantId,
-        //     subtotal,
-        //     0 // Delivery fee is resolved in step 6; if free_delivery, isFreeDelivery flag is set
-        // );
+//     couponCode,
+//     userId,
+//     restaurantId,
+//     subtotal,
+//     0 // Delivery fee is resolved in step 6; if free_delivery, isFreeDelivery flag is set
+// );
 
-        // appliedCoupon = couponResult.coupon;
-        // totalDiscount = couponResult.discountAmount;
-        // isFreeDelivery = couponResult.isFreeDelivery;
+// appliedCoupon = couponResult.coupon;
+// totalDiscount = couponResult.discountAmount;
+// isFreeDelivery = couponResult.isFreeDelivery;
 //     }
 
 //     totalDiscount = roundMoney(totalDiscount);
@@ -1248,7 +1248,7 @@
 //         resolvedZoneId = branch.zoneId;
 //     }
 
- //   const calculatedDeliveryFee = deliveryFee;
+//   const calculatedDeliveryFee = deliveryFee;
 
 //     if (isFreeDelivery) deliveryFee = 0;
 
@@ -1390,8 +1390,8 @@
 //                 userId,
 //                 orderId,
 //                  discountAmount: appliedCoupon.discountType === "free_delivery"
-                    // ? calculatedDeliveryFee.toFixed(2)
-                    // : totalDiscount.toFixed(2)
+// ? calculatedDeliveryFee.toFixed(2)
+// : totalDiscount.toFixed(2)
 //             });
 
 //             await tx.update(coupons)
@@ -1504,6 +1504,431 @@
 //                 durationOrderPreparing: defaultPreparingDuration,
 //             },
 //             customerDetails: userInfo
+//         }
+//     });
+// };
+
+
+
+
+
+// ==========================================
+// 4. Restaurant Details + Menu
+// ==========================================
+// export const getRestaurantDetails = async (req: Request, res: Response) => {
+//     const { restaurantId } = req.params;
+//     const userId = req.user?.id;
+
+//     const { favoriteFoodIds, favoriteRestaurantIds } = await getUserFavoritesSets(userId);
+
+//     // 1. Fetch Restaurant Info
+//     const [restaurantInfo] = await db
+//         .select({
+//             id: restaurants.id,
+//             name: restaurants.name,
+//             nameAr: restaurants.nameAr,
+//             nameFr: restaurants.nameFr,
+//             minDeliveryTime: restaurants.minDeliveryTime,
+//             maxDeliveryTime: restaurants.maxDeliveryTime,
+//             deliveryTimeUnit: restaurants.deliveryTimeUnit,
+//             logo: restaurants.logo,
+//             cover: restaurants.cover,
+//             iosApp: restaurants.iosApp,
+//             androidApp: restaurants.androidApp,
+//         })
+//         .from(restaurants)
+//         .where(eq(restaurants.id, restaurantId));
+
+//     if (!restaurantInfo) throw new Error("Restaurant not found");
+
+//     const restaurantWithFav = {
+//         ...restaurantInfo,
+//         isFavorite: userId ? favoriteRestaurantIds.has(restaurantId) : false,
+//     };
+
+//     // 2. Fetch Active Foods and main relations
+//     const rawMenu = await db
+//         .select({
+//             foodId: food.id,
+//             foodName: food.name,
+//             foodNameAr: food.nameAr,
+//             foodNameFr: food.nameFr,
+//             description: food.description,
+//             descriptionAr: food.descriptionAr,
+//             descriptionFr: food.descriptionFr,
+//             price: food.price,
+//             foodDiscountType: food.discount_type,
+//             foodDiscountValue: food.discount_value,
+//             isOutOfStock: food.isOutOfStock,
+//             image: food.image,
+//             points: food.points,
+//             addonsId: food.addonsId,
+
+//             categoryId: categories.id,
+//             categoryName: categories.name,
+//             categoryNameAr: categories.nameAr,
+//             categoryNameFr: categories.nameFr,
+
+//             subcategoryId: subcategories.id,
+//             subcategoryName: subcategories.name,
+//             subcategoryNameAr: subcategories.nameAr,
+//             subcategoryNameFr: subcategories.nameFr,
+//             order_level: subcategories.order_Level,
+//         })
+//         .from(food)
+//         .leftJoin(categories, eq(food.categoryid, categories.id))
+//         .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
+//         .where(
+//             and(
+//                 eq(food.restaurantid, restaurantId),
+//                 eq(food.status, "active"),
+//                 or(isNull(categories.id), eq(categories.status, "active")),
+//                 or(isNull(subcategories.id), eq(subcategories.status, "active"))
+//             )
+//         );
+
+//     if (rawMenu.length === 0) {
+//         return SuccessResponse(res, {
+//             data: {
+//                 restaurant: restaurantWithFav,
+//                 menu: [],
+//                 addons: []
+//             }
+//         });
+//     }
+
+//     const foodIds = rawMenu.map(r => r.foodId);
+
+//     // 3. Batch Fetch Variations & Options
+//     const variationsList = foodIds.length > 0
+//         ? await db
+//             .select({
+//                 variationId: foodVariations.id,
+//                 foodId: foodVariations.foodId,
+//                 variationName: foodVariations.name,
+//                 variationNameAr: foodVariations.nameAr,
+//                 variationNameFr: foodVariations.nameFr,
+//                 isRequired: foodVariations.isRequired,
+//                 selectionType: foodVariations.selectionType,
+//                 min: foodVariations.min,
+//                 max: foodVariations.max,
+//                 optionId: variationOptions.id,
+//                 optionName: variationOptions.optionName,
+//                 optionNameAr: variationOptions.optionNameAr,
+//                 optionNameFr: variationOptions.optionNameFr,
+//                 additionalPrice: variationOptions.additionalPrice,
+//             })
+//             .from(foodVariations)
+//             .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
+//             .where(inArray(foodVariations.foodId, foodIds))
+//         : [];
+
+//     // Group variations by foodId
+//     const foodVariationsMap = new Map<string, any[]>();
+//     for (const v of variationsList) {
+//         if (!v.foodId) continue;
+//         if (!foodVariationsMap.has(v.foodId)) foodVariationsMap.set(v.foodId, []);
+
+//         const currentVars = foodVariationsMap.get(v.foodId)!;
+//         let existingVar = currentVars.find(x => x.id === v.variationId);
+
+//         if (!existingVar) {
+//             existingVar = {
+//                 id: v.variationId,
+//                 name: v.variationName,
+//                 nameAr: v.variationNameAr,
+//                 nameFr: v.variationNameFr,
+//                 isRequired: v.isRequired,
+//                 selectionType: v.selectionType,
+//                 min: v.min,
+//                 max: v.max,
+//                 options: []
+//             };
+//             currentVars.push(existingVar);
+//         }
+
+//         if (v.optionId) {
+//             existingVar.options.push({
+//                 id: v.optionId,
+//                 name: v.optionName,
+//                 nameAr: v.optionNameAr,
+//                 nameFr: v.optionNameFr,
+//                 additionalPrice: v.additionalPrice
+//             });
+//         }
+//     }
+
+//     // 4. Batch Fetch Restaurant Active Addons
+//     const rawAddons = await db
+//         .select({
+//             addonId: addons.id,
+//             addonName: addons.name,
+//             addonNameAr: addons.nameAr,
+//             addonNameFr: addons.nameFr,
+//             addonPrice: addons.price,
+//             addonStockType: addons.stock_type,
+//             addonStatus: addons.status,
+//             addonRestaurantId: addons.restaurantid,
+//             addonCreatedAt: addons.createdAt,
+//             addonUpdatedAt: addons.updatedAt,
+//             categoryId: adonescategory.id,
+//             categoryName: adonescategory.name,
+//             categoryNameAr: adonescategory.nameAr,
+//             categoryNameFr: adonescategory.nameFr,
+//         })
+//         .from(addons)
+//         .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
+//         .where(
+//             and(
+//                 eq(addons.restaurantid, restaurantId),
+//                 eq(addons.status, "active")
+//             )
+//         );
+
+//     const addonsMap = new Map<string, any>();
+//     for (const a of rawAddons) {
+//         addonsMap.set(a.addonId, {
+//             id: a.addonId,
+//             name: a.addonName,
+//             nameAr: a.addonNameAr,
+//             nameFr: a.addonNameFr,
+//             price: a.addonPrice,
+//             status: a.addonStatus,
+//             stockType: a.addonStockType,
+//             restaurantId: a.addonRestaurantId,
+//             createdAt: a.addonCreatedAt,
+//             updatedAt: a.addonUpdatedAt,
+//             category: a.categoryId ? {
+//                 id: a.categoryId,
+//                 name: a.categoryName,
+//                 nameAr: a.categoryNameAr,
+//                 nameFr: a.categoryNameFr
+//             } : null
+//         });
+//     }
+
+//     // 5. Check Food & Subcategory Branch Availability
+//     const menuActiveFoodIds = rawMenu
+//         .filter(f => !f.isOutOfStock)
+//         .map(f => f.foodId);
+
+//     const menuUnavailableBranchesMap = menuActiveFoodIds.length > 0
+//         ? await getUnavailableBranchesForFoods(menuActiveFoodIds)
+//         : new Map<string, BranchInfo[]>();
+
+//     const activeSubcategoryIds = [...new Set(
+//         rawMenu
+//             .filter(f => !f.isOutOfStock && f.subcategoryId)
+//             .map(f => f.subcategoryId!)
+//     )];
+
+//     const subcategoryUnavailableBranchesMap = new Map<string, BranchInfo[]>();
+//     if (activeSubcategoryIds.length > 0) {
+//         const inactiveSubcats = await db
+//             .select({
+//                 subcategoryId: branchSubcategories.subcategoryId,
+//                 branchId: branches.id,
+//                 branchName: branches.name,
+//                 branchNameAr: branches.nameAr,
+//                 branchNameFr: branches.nameFr,
+//             })
+//             .from(branchSubcategories)
+//             .leftJoin(branches, eq(branchSubcategories.branchId, branches.id))
+//             .where(
+//                 and(
+//                     inArray(branchSubcategories.subcategoryId, activeSubcategoryIds),
+//                     eq(branchSubcategories.status, "inactive")
+//                 )
+//             );
+
+//         for (const row of inactiveSubcats) {
+//             if (!row.branchId) continue;
+//             if (!subcategoryUnavailableBranchesMap.has(row.subcategoryId)) {
+//                 subcategoryUnavailableBranchesMap.set(row.subcategoryId, []);
+//             }
+//             subcategoryUnavailableBranchesMap.get(row.subcategoryId)!.push({
+//                 id: row.branchId,
+//                 name: row.branchName || "",
+//                 nameAr: row.branchNameAr,
+//                 nameFr: row.branchNameFr,
+//             });
+//         }
+//     }
+
+//     // 6. Process Menu & Discounts
+//     const availableDiscounts = await getAvailableDiscounts(restaurantId);
+//     const categoriesMap = new Map<string, any>();
+
+//     for (const row of rawMenu) {
+//         const catId = row.categoryId || "uncategorized";
+
+//         if (!categoriesMap.has(catId)) {
+//             categoriesMap.set(catId, {
+//                 id: catId === "uncategorized" ? null : catId,
+//                 name: row.categoryName || "Other",
+//                 nameAr: row.categoryNameAr || "أخرى",
+//                 nameFr: row.categoryNameFr || "Autre",
+//                 foods: []
+//             });
+//         }
+
+//         const discountState = {
+//             remainingMaxDiscounts: new Map<string, number>(),
+//             appliedDiscounts: new Set<string>()
+//         };
+
+//         const {
+//             price: calculatedDiscountPrice,
+//             appliedDiscount,
+//             discountNote
+//         } = applyPriorityDiscount(
+//             { id: row.foodId ?? "", discountType: row.foodDiscountType, discountValue: row.foodDiscountValue },
+//             Number(row.price),
+//             0,
+//             availableDiscounts,
+//             discountState,
+//             false
+//         );
+
+//         let activeDiscountInfo = null;
+
+//         // إذا وُجد خصم مطبق وله id فهو خصم مطعم أو خصم عام من جدول الخصومات
+//         if (appliedDiscount && appliedDiscount.id) {
+//             activeDiscountInfo = {
+//                 id: appliedDiscount.id,
+//                 name: appliedDiscount.name,
+//                 nameAr: appliedDiscount.nameAr,
+//                 type: appliedDiscount.discountType,
+//                 value: Number(appliedDiscount.discountValue),
+//                 maxDiscount: appliedDiscount.maxDiscount ? Number(appliedDiscount.maxDiscount) : null,
+//                 isGlobal: Boolean(appliedDiscount.isGlobal),
+//                 source: appliedDiscount.isGlobal ? "global_discount" : "restaurant_discount"
+//             };
+//         }
+//         // إذا كان الخصم قادماً من الصنف نفسه (سواء تم حسابه عبر الدالة أو من قيم الوجبة مباشرة)
+//         else if (row.foodDiscountType && Number(row.foodDiscountValue) > 0) {
+//             activeDiscountInfo = {
+//                 id: null,
+//                 name: "Item Discount",
+//                 nameAr: "خصم على الصنف",
+//                 type: row.foodDiscountType,
+//                 value: Number(row.foodDiscountValue),
+//                 maxDiscount: null,
+//                 isGlobal: false,
+//                 source: "food_level" // سيعود الآن بشكل صحيح
+//             };
+//         }
+
+//         // ==========================================
+//         // Safe Addons Parsing
+//         // ==========================================
+//         let foodAddonIds: string[] = [];
+
+//         if (Array.isArray(row.addonsId)) {
+//             foodAddonIds = row.addonsId;
+//         } else if (row.addonsId) {
+//             const rawAddonsId = row.addonsId as any; // Caste to bypass 'never' type checking
+
+//             if (typeof rawAddonsId === 'string') {
+//                 try {
+//                     const parsed = JSON.parse(rawAddonsId);
+//                     if (Array.isArray(parsed)) {
+//                         foodAddonIds = parsed;
+//                     } else if (typeof parsed === 'string') {
+//                         foodAddonIds = [parsed];
+//                     }
+//                 } catch {
+//                     foodAddonIds = rawAddonsId.split(',').map((s: string) => s.trim());
+//                 }
+//             }
+//         }
+
+//         const foodAddons = foodAddonIds
+//             .map(id => addonsMap.get(String(id).trim()))
+//             .filter(Boolean);
+
+//         // Branch Unavailability calculations
+//         let unavailableBranches: BranchInfo[] | null = [];
+//         if (row.isOutOfStock) {
+//             unavailableBranches = null;
+//         } else {
+//             const foodUnavailable = menuUnavailableBranchesMap.get(row.foodId) || [];
+//             const subcatUnavailable = row.subcategoryId
+//                 ? (subcategoryUnavailableBranchesMap.get(row.subcategoryId) || [])
+//                 : [];
+
+//             const combinedBranches = new Map<string, BranchInfo>();
+//             [...foodUnavailable, ...subcatUnavailable].forEach(b => combinedBranches.set(b.id, b));
+//             unavailableBranches = Array.from(combinedBranches.values());
+//         }
+
+//         const foodObject = {
+//             id: row.foodId,
+//             name: row.foodName,
+//             nameAr: row.foodNameAr,
+//             nameFr: row.foodNameFr,
+//             description: row.description,
+//             descriptionAr: row.descriptionAr,
+//             descriptionFr: row.descriptionFr,
+//             price: Number(row.price),
+//             discountType: activeDiscountInfo?.type ?? null,
+//             discountValue: activeDiscountInfo?.value ?? null,
+//             discountPrice: calculatedDiscountPrice,
+//             discountNote,
+//             discountDetails: activeDiscountInfo,
+//             image: row.image,
+//             isOutOfStock: row.isOutOfStock,
+//             points: userId ? row.points : null,
+//             isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
+//             variations: foodVariationsMap.get(row.foodId) || [],
+//             addons: foodAddons,
+//             unavailableBranches,
+//             category: row.categoryId ? {
+//                 id: row.categoryId,
+//                 name: row.categoryName,
+//                 nameAr: row.categoryNameAr,
+//                 nameFr: row.categoryNameFr,
+//             } : null,
+//             subcategory: row.subcategoryId ? {
+//                 id: row.subcategoryId,
+//                 name: row.subcategoryName,
+//                 nameAr: row.subcategoryNameAr,
+//                 nameFr: row.subcategoryNameFr,
+//                 order_level: row.order_level,
+//             } : null,
+//         };
+
+//         categoriesMap.get(catId).foods.push(foodObject);
+//     }
+
+//     // 7. Format General Addons Response
+//     const addonsCategoryMap = new Map<string, any>();
+//     for (const addon of rawAddons) {
+//         const catId = addon.categoryId || "uncategorized";
+//         if (!addonsCategoryMap.has(catId)) {
+//             addonsCategoryMap.set(catId, {
+//                 id: catId === "uncategorized" ? null : catId,
+//                 name: addon.categoryName || "Other",
+//                 nameAr: addon.categoryNameAr || "أخرى",
+//                 nameFr: addon.categoryNameFr || "Autre",
+//                 addons: []
+//             });
+//         }
+//         addonsCategoryMap.get(catId).addons.push({
+//             id: addon.addonId,
+//             name: addon.addonName,
+//             nameAr: addon.addonNameAr,
+//             nameFr: addon.addonNameFr,
+//             price: addon.addonPrice,
+//             stockType: addon.addonStockType
+//         });
+//     }
+
+//     return SuccessResponse(res, {
+//         data: {
+//             restaurant: restaurantWithFav,
+//             menu: Array.from(categoriesMap.values()),
+//             addons: Array.from(addonsCategoryMap.values())
 //         }
 //     });
 // };
