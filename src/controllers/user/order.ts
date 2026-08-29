@@ -464,8 +464,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             const activeDiscount = matchedItem.discount as any;
 
             orderDiscountId = activeDiscount.id;
-            const discountScope = activeDiscount.discountScope || activeDiscount.scope;
-            orderDiscountSource = discountScope === "restaurant" ? "restaurant_discount" : "global_discount";
+            const isGlobalDiscount = Boolean(activeDiscount.isGlobal);
+            orderDiscountSource = isGlobalDiscount ? "global_discount" : "restaurant_discount";
             orderDiscountType = activeDiscount.discountType === "percentage" ? "percentage" : "fixed_amount";
             orderDiscountValue = activeDiscount.discountValue ? activeDiscount.discountValue.toString() : "0";
         }
