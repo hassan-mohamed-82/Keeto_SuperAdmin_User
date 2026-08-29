@@ -16,52 +16,7 @@ export function initOrderNotificationCron() {
       const now = new Date();
       const currentActiveOrderIds = new Set<string>();
 
-      // ====================================================
-      // 1. Pending Orders Repeat Notification
-      // ====================================================
-      const pendingOrders = await db
-        .select({
-          orderId: orders.id,
-          orderNumber: orders.orderNumber,
-          dailyOrderNumber: orders.dailyOrderNumber,
-          restaurantId: orders.restaurantId,
-          branchId: orders.branchId,
-          createdAt: orders.createdAt,
-          repeatNotification: restaurantSettings.repeatNotification,
-          repeatNotificationDuration: restaurantSettings.repeatNotificationDuration,
-        })
-        .from(orders)
-        .leftJoin(restaurantSettings, eq(orders.restaurantId, restaurantSettings.restaurantId))
-        .where(eq(orders.status, "pending"));
-
-      const pendingPromises = pendingOrders.map(async (order) => {
-        if (!order.createdAt) return;
-
-        const elapsedMinutes = Math.floor((now.getTime() - new Date(order.createdAt).getTime()) / 60000);
-        const maxDuration = order.repeatNotificationDuration ?? 5;
-        const isRepeatEnabled = order.repeatNotification ?? false;
-
-        // نبدأ التكرار بعد الدقيقة الأولى لتجنب التكرار مع إشعار الإنشاء اللحظي
-        if (isRepeatEnabled && elapsedMinutes >= 1 && elapsedMinutes <= maxDuration) {
-          return sendPushNotification({
-            recipientType: "restaurant",
-            recipientId: order.restaurantId,
-            branchId: order.branchId || null,
-            title: "طلب معلق! ⏳",
-            body: `تنبيه: الطلب #${order.dailyOrderNumber} ما زال معلقاً منذ ${elapsedMinutes} دقيقة ولم يتم قبوله بعد!`,
-            data: {
-              type: "pending_order_reminder",
-              orderId: order.orderId,
-              dailyOrderNumber: order.dailyOrderNumber,
-              elapsedMinutes,
-            },
-          });
-        }
-      });
-
-      // ====================================================
-      // 2. Overdue Active Orders Alert
-      // ====================================================
+      // جلب كافة الطلبات النشطة مع الإعدادات باستخدام المسميات الجديدة
       const activeOrders = await db
         .select({
           orderId: orders.id,
@@ -73,33 +28,35 @@ export function initOrderNotificationCron() {
           createdAt: orders.createdAt,
           updatedAt: orders.updatedAt,
           durationOrderPreparing: orders.durationOrderPreparing,
-          orderAlertNotification: restaurantSettings.orderAlertNotification,
-          orderAlertDurationThreshold: restaurantSettings.orderAlertDurationThreshold,
-          orderAlertStatuses: restaurantSettings.orderAlertStatuses,
+          repeatNotification: restaurantSettings.repeatNotification,
+          repeatNotificationDuration: restaurantSettings.repeatNotificationDuration,
+          repeatNotificationStatuses: restaurantSettings.repeatNotificationStatuses,
         })
         .from(orders)
         .leftJoin(restaurantSettings, eq(orders.restaurantId, restaurantSettings.restaurantId))
-        .where(inArray(orders.status, ["accepted", "preparing", "out_for_delivery"]));
+        .where(inArray(orders.status, ["pending", "accepted", "preparing", "out_for_delivery"]));
 
-      const activePromises = activeOrders.map(async (order) => {
+      const alertPromises = activeOrders.map(async (order) => {
         if (!order.createdAt) return;
 
-        // تتبع الطلبات النشطة لحفظ السيرفر
         currentActiveOrderIds.add(order.orderId);
 
-        // ✏️ التعديل هنا: القيمة الافتراضية أصبحت false بدلاً من true
-        const isAlertEnabled = order.orderAlertNotification ?? false;
-        const allowedStatuses = order.orderAlertStatuses || ["accepted", "preparing", "out_for_delivery"];
+        const isRepeatEnabled = order.repeatNotification ?? false;
+        // القيمة الافتراضية للحالات المسموحة هي ["pending"] فقط
+        const allowedStatuses = order.repeatNotificationStatuses || ["pending"];
 
-        if (!isAlertEnabled || !order.status || !allowedStatuses.includes(order.status)) {
+        if (!isRepeatEnabled || !order.status || !allowedStatuses.includes(order.status)) {
           return;
         }
 
-        const thresholdMinutes = order.durationOrderPreparing && order.durationOrderPreparing > 0
-          ? order.durationOrderPreparing
-          : (order.orderAlertDurationThreshold ?? 20);
+        const thresholdMinutes =
+          order.durationOrderPreparing && order.durationOrderPreparing > 0
+            ? order.durationOrderPreparing
+            : (order.repeatNotificationDuration ?? 20);
 
-        const elapsedMinutes = Math.floor((now.getTime() - new Date(order.createdAt).getTime()) / 60000);
+        const elapsedMinutes = Math.floor(
+          (now.getTime() - new Date(order.createdAt).getTime()) / 60000
+        );
 
         if (elapsedMinutes >= thresholdMinutes) {
           const lastAlertTime = alertedOverdueOrders.get(order.orderId) || 0;
@@ -108,17 +65,27 @@ export function initOrderNotificationCron() {
           if (now.getTime() - lastAlertTime > 10 * 60 * 1000) {
             alertedOverdueOrders.set(order.orderId, now.getTime());
 
-            let statusAr = "قيد المعالجة";
+            let statusAr = "معلق";
             if (order.status === "accepted") statusAr = "مقبول";
             else if (order.status === "preparing") statusAr = "جاري التحضير";
             else if (order.status === "out_for_delivery") statusAr = "خرج للتوصيل";
+
+            const title =
+              order.status === "pending"
+                ? "طلب معلق يتطلب الانتباه! ⏳"
+                : "تنبيه تأخير الطلب! ⚠️";
+
+            const body =
+              order.status === "pending"
+                ? `الطلب #${order.dailyOrderNumber} ما زال معلقاً منذ ${elapsedMinutes} دقيقة ولم يتم قبوله بعد!`
+                : `الطلب #${order.dailyOrderNumber} في حالة (${statusAr}) استغرق ${elapsedMinutes} دقيقة وتجاوز الوقت المحدد (${thresholdMinutes} دقيقة)!`;
 
             return sendPushNotification({
               recipientType: "restaurant",
               recipientId: order.restaurantId,
               branchId: order.branchId || null,
-              title: "تنبيه تأخير الطلب! ⚠️",
-              body: `الطلب #${order.dailyOrderNumber} في حالة (${statusAr}) استغرق ${elapsedMinutes} دقيقة وتجاوز الوقت المحدد (${thresholdMinutes} دقيقة) ولم يتم تسليمه بعد!`,
+              title,
+              body,
               data: {
                 type: "overdue_order_alert",
                 orderId: order.orderId,
@@ -132,19 +99,14 @@ export function initOrderNotificationCron() {
         }
       });
 
-      // إرسال الإشعارات بالتوازي لجميع الطلبات لسرعة الأداء
-      await Promise.allSettled([...pendingPromises, ...activePromises]);
+      await Promise.allSettled(alertPromises);
 
-      // ====================================================
-      // 3. Smart Clean-up for Cache
-      // ====================================================
-      // حذف الطلبات التي انتهت (لم تعد نشطة) من الـ Map لمنع التسريب
+      // تنظيف الـ Cache للطلبات المنتهية
       for (const orderId of alertedOverdueOrders.keys()) {
         if (!currentActiveOrderIds.has(orderId)) {
           alertedOverdueOrders.delete(orderId);
         }
       }
-
     } catch (error) {
       console.error("❌ Error running order notification cron:", error);
     }
