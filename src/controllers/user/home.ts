@@ -215,249 +215,208 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
 
     const { favoriteFoodIds, favoriteRestaurantIds } = await getUserFavoritesSets(userId);
 
-    const [restaurantInfo] = await db.select({
-        id: restaurants.id,
-        name: restaurants.name,
-        nameAr: restaurants.nameAr,
-        nameFr: restaurants.nameFr,
-        minDeliveryTime: restaurants.minDeliveryTime,
-        maxDeliveryTime: restaurants.maxDeliveryTime,
-        deliveryTimeUnit: restaurants.deliveryTimeUnit,
-        logo: restaurants.logo,
-        cover: restaurants.cover,
-        iosApp: restaurants.iosApp,
-        androidApp: restaurants.androidApp,
-    }).from(restaurants)
+    // 1. Fetch Restaurant Info
+    const [restaurantInfo] = await db
+        .select({
+            id: restaurants.id,
+            name: restaurants.name,
+            nameAr: restaurants.nameAr,
+            nameFr: restaurants.nameFr,
+            minDeliveryTime: restaurants.minDeliveryTime,
+            maxDeliveryTime: restaurants.maxDeliveryTime,
+            deliveryTimeUnit: restaurants.deliveryTimeUnit,
+            logo: restaurants.logo,
+            cover: restaurants.cover,
+            iosApp: restaurants.iosApp,
+            androidApp: restaurants.androidApp,
+        })
+        .from(restaurants)
         .where(eq(restaurants.id, restaurantId));
 
     if (!restaurantInfo) throw new Error("Restaurant not found");
 
-    const { ...safeRestaurantInfo } = restaurantInfo;
-
     const restaurantWithFav = {
-        ...safeRestaurantInfo,
-        isFavorite: userId ? favoriteRestaurantIds.has(restaurantId) : false
+        ...restaurantInfo,
+        isFavorite: userId ? favoriteRestaurantIds.has(restaurantId) : false,
     };
 
-    const rawMenu = await db.select({
-        foodId: food.id,
-        foodName: food.name,
-        foodNameAr: food.nameAr,
-        foodNameFr: food.nameFr,
-        description: food.description,
-        descriptionAr: food.descriptionAr,
-        descriptionFr: food.descriptionFr,
-        price: food.price,
-        foodDiscountType: food.discount_type,
-        foodDiscountValue: food.discount_value,
-        isOutOfStock: food.isOutOfStock,
-        image: food.image,
-        points: food.points,
+    // 2. Fetch Active Foods and main relations
+    const rawMenu = await db
+        .select({
+            foodId: food.id,
+            foodName: food.name,
+            foodNameAr: food.nameAr,
+            foodNameFr: food.nameFr,
+            description: food.description,
+            descriptionAr: food.descriptionAr,
+            descriptionFr: food.descriptionFr,
+            price: food.price,
+            foodDiscountType: food.discount_type,
+            foodDiscountValue: food.discount_value,
+            isOutOfStock: food.isOutOfStock,
+            image: food.image,
+            points: food.points,
+            addonsId: food.addonsId,
 
-        categoryId: categories.id,
-        categoryName: categories.name,
-        categoryNameAr: categories.nameAr,
-        categoryNameFr: categories.nameFr,
+            categoryId: categories.id,
+            categoryName: categories.name,
+            categoryNameAr: categories.nameAr,
+            categoryNameFr: categories.nameFr,
 
-        subcategoryId: subcategories.id,
-        subcategoryName: subcategories.name,
-        subcategoryNameAr: subcategories.nameAr,
-        subcategoryNameFr: subcategories.nameFr,
-        order_level: subcategories.order_Level,
-
-        variationId: foodVariations.id,
-        variationName: foodVariations.name,
-        variationNameAr: foodVariations.nameAr,
-        variationNameFr: foodVariations.nameFr,
-        isRequired: foodVariations.isRequired,
-        selectionType: foodVariations.selectionType,
-        min: foodVariations.min,
-        max: foodVariations.max,
-
-        optionId: variationOptions.id,
-        optionName: variationOptions.optionName,
-        optionNameAr: variationOptions.optionNameAr,
-        optionNameFr: variationOptions.optionNameFr,
-        additionalPrice: variationOptions.additionalPrice,
-
-        addonId: addons.id,
-        addonName: addons.name,
-        addonNameAr: addons.nameAr,
-        addonNameFr: addons.nameFr,
-        addonPrice: addons.price,
-        addonStatus: addons.status,
-        addonStockType: addons.stock_type,
-        addonRestaurantId: addons.restaurantid,
-        addonCreatedAt: addons.createdAt,
-        addonUpdatedAt: addons.updatedAt,
-
-        addonCategoryId: adonescategory.id,
-        addonCategoryName: adonescategory.name,
-        addonCategoryNameAr: adonescategory.nameAr,
-        addonCategoryNameFr: adonescategory.nameFr,
-    })
+            subcategoryId: subcategories.id,
+            subcategoryName: subcategories.name,
+            subcategoryNameAr: subcategories.nameAr,
+            subcategoryNameFr: subcategories.nameFr,
+            order_level: subcategories.order_Level,
+        })
         .from(food)
         .leftJoin(categories, eq(food.categoryid, categories.id))
         .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
-        .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))
-        .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
-        .leftJoin(addons, sql`JSON_CONTAINS(${food.addonsId}, JSON_QUOTE(${addons.id}))`)
-        .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
-        .where(and(
-            eq(food.restaurantid, restaurantId),
-            eq(food.status, "active"),
-            or(isNull(categories.id), eq(categories.status, "active")),
-            or(isNull(subcategories.id), eq(subcategories.status, "active"))
-        ));
+        .where(
+            and(
+                eq(food.restaurantid, restaurantId),
+                eq(food.status, "active"),
+                or(isNull(categories.id), eq(categories.status, "active")),
+                or(isNull(subcategories.id), eq(subcategories.status, "active"))
+            )
+        );
 
-    const availableDiscounts = await getAvailableDiscounts(restaurantId);
+    if (rawMenu.length === 0) {
+        return SuccessResponse(res, {
+            data: {
+                restaurant: restaurantWithFav,
+                menu: [],
+                addons: []
+            }
+        });
+    }
 
-    const groupedMenuObj = rawMenu.reduce((acc: any, row) => {
-        const catId = row.categoryId || "uncategorized";
+    const foodIds = rawMenu.map(r => r.foodId);
 
-        // 1. تجميع الكاتيجوري
-        if (!acc[catId]) {
-            acc[catId] = {
-                id: catId === "uncategorized" ? null : catId,
-                name: row.categoryName || "Other",
-                nameAr: row.categoryNameAr || "أخرى",
-                nameFr: row.categoryNameFr || "Autre",
-                foods: {}
+    // 3. Batch Fetch Variations & Options (Optimized Single Queries)
+    const variationsList = foodIds.length > 0
+        ? await db
+            .select({
+                variationId: foodVariations.id,
+                foodId: foodVariations.foodId,
+                variationName: foodVariations.name,
+                variationNameAr: foodVariations.nameAr,
+                variationNameFr: foodVariations.nameFr,
+                isRequired: foodVariations.isRequired,
+                selectionType: foodVariations.selectionType,
+                min: foodVariations.min,
+                max: foodVariations.max,
+                optionId: variationOptions.id,
+                optionName: variationOptions.optionName,
+                optionNameAr: variationOptions.optionNameAr,
+                optionNameFr: variationOptions.optionNameFr,
+                additionalPrice: variationOptions.additionalPrice,
+            })
+            .from(foodVariations)
+            .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
+            .where(inArray(foodVariations.foodId, foodIds))
+        : [];
+
+    // Group variations by foodId
+    const foodVariationsMap = new Map<string, any[]>();
+    for (const v of variationsList) {
+        if (!v.foodId) continue;
+        if (!foodVariationsMap.has(v.foodId)) foodVariationsMap.set(v.foodId, []);
+
+        const currentVars = foodVariationsMap.get(v.foodId)!;
+        let existingVar = currentVars.find(x => x.id === v.variationId);
+
+        if (!existingVar) {
+            existingVar = {
+                id: v.variationId,
+                name: v.variationName,
+                nameAr: v.variationNameAr,
+                nameFr: v.variationNameFr,
+                isRequired: v.isRequired,
+                selectionType: v.selectionType,
+                min: v.min,
+                max: v.max,
+                options: []
             };
+            currentVars.push(existingVar);
         }
 
-        // 2. تجميع الأكل داخل الكاتيجوري مع حساب الخصم المباشر
-        if (row.foodId) {
-            if (!acc[catId].foods[row.foodId]) {
-                const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
-
-                const { price: calculatedDiscountPrice, discountNote } = applyPriorityDiscount(
-                    { id: row.foodId, discountType: row.foodDiscountType, discountValue: row.foodDiscountValue },
-                    Number(row.price),
-                    0,
-                    availableDiscounts,
-                    discountState,
-                    false
-                );
-
-                acc[catId].foods[row.foodId] = {
-                    id: row.foodId,
-                    name: row.foodName,
-                    nameAr: row.foodNameAr,
-                    nameFr: row.foodNameFr,
-                    description: row.description,
-                    descriptionAr: row.descriptionAr,
-                    descriptionFr: row.descriptionFr,
-                    price: Number(row.price),
-                    discountType: row.foodDiscountType ?? null,
-                    discountValue: row.foodDiscountValue !== null ? Number(row.foodDiscountValue) : null,
-                    discountPrice: calculatedDiscountPrice,
-                    discountNote,
-                    image: row.image,
-                    isOutOfStock: row.isOutOfStock,
-                    points: userId ? row.points : null,
-                    isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
-
-                    variations: {},
-                    addons: {},
-
-                    category: row.categoryId ? {
-                        id: row.categoryId,
-                        name: row.categoryName,
-                        nameAr: row.categoryNameAr,
-                        nameFr: row.categoryNameFr,
-                    } : null,
-                    subcategory: row.subcategoryId ? {
-                        id: row.subcategoryId,
-                        name: row.subcategoryName,
-                        nameAr: row.subcategoryNameAr,
-                        nameFr: row.subcategoryNameFr,
-                        order_level: row.order_level,
-                    } : null,
-                };
-            }
-
-            // 3. تجميع الـ Variations داخل الأكل
-            if (row.variationId) {
-                if (!acc[catId].foods[row.foodId].variations[row.variationId]) {
-                    acc[catId].foods[row.foodId].variations[row.variationId] = {
-                        id: row.variationId,
-                        name: row.variationName,
-                        nameAr: row.variationNameAr,
-                        nameFr: row.variationNameFr,
-                        isRequired: row.isRequired,
-                        selectionType: row.selectionType,
-                        min: row.min,
-                        max: row.max,
-                        options: {}
-                    };
-                }
-
-                // 4. تجميع الـ Options داخل الـ Variations
-                if (row.optionId) {
-                    if (!acc[catId].foods[row.foodId].variations[row.variationId].options[row.optionId]) {
-                        acc[catId].foods[row.foodId].variations[row.variationId].options[row.optionId] = {
-                            id: row.optionId,
-                            name: row.optionName,
-                            nameAr: row.optionNameAr,
-                            nameFr: row.optionNameFr,
-                            additionalPrice: row.additionalPrice
-                        };
-                    }
-                }
-            }
-
-            // 5. تجميع الـ Addons داخل الأكل
-            if (row.addonId) {
-                if (!acc[catId].foods[row.foodId].addons[row.addonId]) {
-                    acc[catId].foods[row.foodId].addons[row.addonId] = {
-                        id: row.addonId,
-                        name: row.addonName,
-                        nameAr: row.addonNameAr,
-                        nameFr: row.addonNameFr,
-                        price: row.addonPrice,
-                        status: row.addonStatus,
-                        stockType: row.addonStockType,
-                        restaurantId: row.addonRestaurantId,
-                        createdAt: row.addonCreatedAt,
-                        updatedAt: row.addonUpdatedAt,
-                        category: row.addonCategoryId ? {
-                            id: row.addonCategoryId,
-                            name: row.addonCategoryName,
-                            nameAr: row.addonCategoryNameAr,
-                            nameFr: row.addonCategoryNameFr,
-                        } : null
-                    };
-                }
-            }
+        if (v.optionId) {
+            existingVar.options.push({
+                id: v.optionId,
+                name: v.optionName,
+                nameAr: v.optionNameAr,
+                nameFr: v.optionNameFr,
+                additionalPrice: v.additionalPrice
+            });
         }
+    }
 
-        return acc;
-    }, {});
+    // 4. Batch Fetch Restaurant Active Addons
+    const rawAddons = await db
+        .select({
+            addonId: addons.id,
+            addonName: addons.name,
+            addonNameAr: addons.nameAr,
+            addonNameFr: addons.nameFr,
+            addonPrice: addons.price,
+            addonStockType: addons.stock_type,
+            addonStatus: addons.status,
+            addonRestaurantId: addons.restaurantid,
+            addonCreatedAt: addons.createdAt,
+            addonUpdatedAt: addons.updatedAt,
+            categoryId: adonescategory.id,
+            categoryName: adonescategory.name,
+            categoryNameAr: adonescategory.nameAr,
+            categoryNameFr: adonescategory.nameFr,
+        })
+        .from(addons)
+        .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
+        .where(
+            and(
+                eq(addons.restaurantid, restaurantId),
+                eq(addons.status, "active")
+            )
+        );
 
-    // 👇 تحويل الكاتيجوريز، الأكلات، الـ Variations، الـ Options، والـ Addons من Objects إلى Arrays
-    // ثم حساب الفروع غير المتاحة لكل وجبة
-    const allMenuFoods = Object.values(groupedMenuObj).flatMap((cat: any) => Object.values(cat.foods)) as any[];
+    const addonsMap = new Map<string, any>();
+    for (const a of rawAddons) {
+        addonsMap.set(a.addonId, {
+            id: a.addonId,
+            name: a.addonName,
+            nameAr: a.addonNameAr,
+            nameFr: a.addonNameFr,
+            price: a.addonPrice,
+            status: a.addonStatus,
+            stockType: a.addonStockType,
+            restaurantId: a.addonRestaurantId,
+            createdAt: a.addonCreatedAt,
+            updatedAt: a.addonUpdatedAt,
+            category: a.categoryId ? {
+                id: a.categoryId,
+                name: a.categoryName,
+                nameAr: a.categoryNameAr,
+                nameFr: a.categoryNameFr
+            } : null
+        });
+    }
 
-    // الوجبات التي status == active لكن isOutOfStock == false هي المرشحة للفحص
-    const menuActiveFoodIds = allMenuFoods
-        .filter((f: any) => !f.isOutOfStock)
-        .map((f: any) => f.id)
-        .filter(Boolean) as string[];
+    // 5. Check Food & Subcategory Branch Availability
+    const menuActiveFoodIds = rawMenu
+        .filter(f => !f.isOutOfStock)
+        .map(f => f.foodId);
 
     const menuUnavailableBranchesMap = menuActiveFoodIds.length > 0
         ? await getUnavailableBranchesForFoods(menuActiveFoodIds)
         : new Map<string, BranchInfo[]>();
 
-    // ─── جلب الفروع غير المتاحة بناءً على الـ subcategories ───
     const activeSubcategoryIds = [...new Set(
-        allMenuFoods
-            .filter((f: any) => !f.isOutOfStock && f.subcategory?.id)
-            .map((f: any) => f.subcategory.id)
-    )] as string[];
+        rawMenu
+            .filter(f => !f.isOutOfStock && f.subcategoryId)
+            .map(f => f.subcategoryId!)
+    )];
 
     const subcategoryUnavailableBranchesMap = new Map<string, BranchInfo[]>();
-
     if (activeSubcategoryIds.length > 0) {
         const inactiveSubcats = await db
             .select({
@@ -469,18 +428,18 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             })
             .from(branchSubcategories)
             .leftJoin(branches, eq(branchSubcategories.branchId, branches.id))
-            .where(and(
-                inArray(branchSubcategories.subcategoryId, activeSubcategoryIds),
-                eq(branchSubcategories.status, "inactive")
-            ));
+            .where(
+                and(
+                    inArray(branchSubcategories.subcategoryId, activeSubcategoryIds),
+                    eq(branchSubcategories.status, "inactive")
+                )
+            );
 
         for (const row of inactiveSubcats) {
             if (!row.branchId) continue;
-
             if (!subcategoryUnavailableBranchesMap.has(row.subcategoryId)) {
                 subcategoryUnavailableBranchesMap.set(row.subcategoryId, []);
             }
-
             subcategoryUnavailableBranchesMap.get(row.subcategoryId)!.push({
                 id: row.branchId,
                 name: row.branchName || "",
@@ -490,124 +449,558 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         }
     }
 
-    const finalMenu = Object.values(groupedMenuObj).map((category: any) => {
-        return {
-            id: category.id,
-            name: category.name,
-            nameAr: category.nameAr,
-            nameFr: category.nameFr,
-            foods: Object.values(category.foods).map((f: any) => {
-                // تحويل الـ variations والـ options
-                f.variations = Object.values(f.variations).map((v: any) => {
-                    v.options = Object.values(v.options);
-                    return v;
-                });
-                // تحويل الـ Addons
-                f.addons = Object.values(f.addons);
+    // 6. Process Menu & Discounts
+    const availableDiscounts = await getAvailableDiscounts(restaurantId);
+    const categoriesMap = new Map<string, any>();
 
-                // // إرفاق الفروع غير المتاحة
-                // // null → الوجبة غير متاحة في جميع الفروع (isOutOfStock)
-                // // [] أو [...] → قائمة الفروع غير المتاحة بالتحديد
-                if (f.isOutOfStock) {
-                    f.unavailableBranches = null;
-                } else {
-                    const foodUnavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
-                    const subcatUnavailableBranches = f.subcategory?.id
-                        ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || [])
-                        : [];
-
-                    // دمج الفرعين بدون تكرار
-                    const combinedBranches = new Map<string, BranchInfo>();
-                    [...foodUnavailableBranches, ...subcatUnavailableBranches].forEach(b => {
-                        combinedBranches.set(b.id, b);
-                    });
-
-                    f.unavailableBranches = Array.from(combinedBranches.values());
-                }
-
-                //  if (f.isOutOfStock) {
-                //     f.unavailableBranches = null;
-                //     f.subcatUnavailableBranches = null;
-                // } else {
-                //     f.unavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
-                //     f.subcatUnavailableBranches = f.subcategory?.id
-                //         ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || [])
-                //         : [];
-                // }
-
-                return f;
-            })
-        };
-    });
-
-    // ==========================================
-    // جلب الـ Addons مع الـ Categories (للقائمة العامة)
-    // ==========================================
-    const rawAddons = await db.select({
-        addonId: addons.id,
-        addonName: addons.name,
-        addonNameAr: addons.nameAr,
-        addonNameFr: addons.nameFr,
-        addonPrice: addons.price,
-        addonStockType: addons.stock_type,
-        categoryId: adonescategory.id,
-        categoryName: adonescategory.name,
-        categoryNameAr: adonescategory.nameAr,
-        categoryNameFr: adonescategory.nameFr,
-    })
-        .from(addons)
-        .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
-        .where(and(
-            eq(addons.restaurantid, restaurantId),
-            eq(addons.status, "active")
-        ));
-
-    const groupedAddonsObj = rawAddons.reduce((acc: any, row) => {
+    for (const row of rawMenu) {
         const catId = row.categoryId || "uncategorized";
 
-        if (!acc[catId]) {
-            acc[catId] = {
+        if (!categoriesMap.has(catId)) {
+            categoriesMap.set(catId, {
                 id: catId === "uncategorized" ? null : catId,
                 name: row.categoryName || "Other",
                 nameAr: row.categoryNameAr || "أخرى",
                 nameFr: row.categoryNameFr || "Autre",
-                addons: []
-            };
-        }
-
-        if (row.addonId) {
-            acc[catId].addons.push({
-                id: row.addonId,
-                name: row.addonName,
-                nameAr: row.addonNameAr,
-                nameFr: row.addonNameFr,
-                price: row.addonPrice,
-                stockType: row.addonStockType
+                foods: []
             });
         }
 
-        return acc;
-    }, {});
-
-    const finalAddons = Object.values(groupedAddonsObj).map((category: any) => {
-        return {
-            id: category.id,
-            name: category.name,
-            nameAr: category.nameAr,
-            nameFr: category.nameFr,
-            addons: category.addons
+        const discountState = {
+            remainingMaxDiscounts: new Map<string, number>(),
+            appliedDiscounts: new Set<string>()
         };
-    });
+
+        const {
+            price: calculatedDiscountPrice,
+            appliedDiscount,
+            discountNote
+        } = applyPriorityDiscount(
+            { id: row.foodId ?? "", discountType: row.foodDiscountType, discountValue: row.foodDiscountValue },
+            Number(row.price),
+            0,
+            availableDiscounts,
+            discountState,
+            false
+        );
+
+        let activeDiscountInfo = null;
+        if (appliedDiscount) {
+            activeDiscountInfo = {
+                id: appliedDiscount.id,
+                name: appliedDiscount.name,
+                nameAr: appliedDiscount.nameAr,
+                type: appliedDiscount.discountType,
+                value: Number(appliedDiscount.discountValue),
+                maxDiscount: appliedDiscount.maxDiscount ? Number(appliedDiscount.maxDiscount) : null,
+                isGlobal: Boolean(appliedDiscount.isGlobal),
+                source: appliedDiscount.isGlobal ? "global_discount" : "restaurant_discount"
+            };
+        } else if (row.foodDiscountValue && Number(row.foodDiscountValue) > 0) {
+            activeDiscountInfo = {
+                id: null,
+                name: "Item Discount",
+                nameAr: "خصم على الصنف",
+                type: row.foodDiscountType,
+                value: Number(row.foodDiscountValue),
+                maxDiscount: null,
+                isGlobal: false,
+                source: "food_level"
+            };
+        }
+
+        // Parse linked Addons for this specific food
+        const foodAddonIds: string[] = Array.isArray(row.addonsId) ? row.addonsId : [];
+        const foodAddons = foodAddonIds
+            .map(id => addonsMap.get(id))
+            .filter(Boolean);
+
+        // Branch Unavailability calculations
+        let unavailableBranches: BranchInfo[] | null = [];
+        if (row.isOutOfStock) {
+            unavailableBranches = null;
+        } else {
+            const foodUnavailable = menuUnavailableBranchesMap.get(row.foodId) || [];
+            const subcatUnavailable = row.subcategoryId
+                ? (subcategoryUnavailableBranchesMap.get(row.subcategoryId) || [])
+                : [];
+
+            const combinedBranches = new Map<string, BranchInfo>();
+            [...foodUnavailable, ...subcatUnavailable].forEach(b => combinedBranches.set(b.id, b));
+            unavailableBranches = Array.from(combinedBranches.values());
+        }
+
+        const foodObject = {
+            id: row.foodId,
+            name: row.foodName,
+            nameAr: row.foodNameAr,
+            nameFr: row.foodNameFr,
+            description: row.description,
+            descriptionAr: row.descriptionAr,
+            descriptionFr: row.descriptionFr,
+            price: Number(row.price),
+            discountType: activeDiscountInfo?.type ?? null,
+            discountValue: activeDiscountInfo?.value ?? null,
+            discountPrice: calculatedDiscountPrice,
+            discountNote,
+            discountDetails: activeDiscountInfo,
+            image: row.image,
+            isOutOfStock: row.isOutOfStock,
+            points: userId ? row.points : null,
+            isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
+            variations: foodVariationsMap.get(row.foodId) || [],
+            addons: foodAddons,
+            unavailableBranches,
+            category: row.categoryId ? {
+                id: row.categoryId,
+                name: row.categoryName,
+                nameAr: row.categoryNameAr,
+                nameFr: row.categoryNameFr,
+            } : null,
+            subcategory: row.subcategoryId ? {
+                id: row.subcategoryId,
+                name: row.subcategoryName,
+                nameAr: row.subcategoryNameAr,
+                nameFr: row.subcategoryNameFr,
+                order_level: row.order_level,
+            } : null,
+        };
+
+        categoriesMap.get(catId).foods.push(foodObject);
+    }
+
+    // 7. Format General Addons Response
+    const addonsCategoryMap = new Map<string, any>();
+    for (const addon of rawAddons) {
+        const catId = addon.categoryId || "uncategorized";
+        if (!addonsCategoryMap.has(catId)) {
+            addonsCategoryMap.set(catId, {
+                id: catId === "uncategorized" ? null : catId,
+                name: addon.categoryName || "Other",
+                nameAr: addon.categoryNameAr || "أخرى",
+                nameFr: addon.categoryNameFr || "Autre",
+                addons: []
+            });
+        }
+        addonsCategoryMap.get(catId).addons.push({
+            id: addon.addonId,
+            name: addon.addonName,
+            nameAr: addon.addonNameAr,
+            nameFr: addon.addonNameFr,
+            price: addon.addonPrice,
+            stockType: addon.addonStockType
+        });
+    }
 
     return SuccessResponse(res, {
         data: {
             restaurant: restaurantWithFav,
-            menu: finalMenu,
-            addons: finalAddons
+            menu: Array.from(categoriesMap.values()),
+            addons: Array.from(addonsCategoryMap.values())
         }
     });
 };
 
+
+
+// export const getRestaurantDetails = async (req: Request, res: Response) => {
+//     const { restaurantId } = req.params;
+//     const userId = req.user?.id;
+
+//     const { favoriteFoodIds, favoriteRestaurantIds } = await getUserFavoritesSets(userId);
+
+//     const [restaurantInfo] = await db.select({
+//         id: restaurants.id,
+//         name: restaurants.name,
+//         nameAr: restaurants.nameAr,
+//         nameFr: restaurants.nameFr,
+//         minDeliveryTime: restaurants.minDeliveryTime,
+//         maxDeliveryTime: restaurants.maxDeliveryTime,
+//         deliveryTimeUnit: restaurants.deliveryTimeUnit,
+//         logo: restaurants.logo,
+//         cover: restaurants.cover,
+//         iosApp: restaurants.iosApp,
+//         androidApp: restaurants.androidApp,
+//     }).from(restaurants)
+//         .where(eq(restaurants.id, restaurantId));
+
+//     if (!restaurantInfo) throw new Error("Restaurant not found");
+
+//     const { ...safeRestaurantInfo } = restaurantInfo;
+
+//     const restaurantWithFav = {
+//         ...safeRestaurantInfo,
+//         isFavorite: userId ? favoriteRestaurantIds.has(restaurantId) : false
+//     };
+
+//     const rawMenu = await db.select({
+//         foodId: food.id,
+//         foodName: food.name,
+//         foodNameAr: food.nameAr,
+//         foodNameFr: food.nameFr,
+//         description: food.description,
+//         descriptionAr: food.descriptionAr,
+//         descriptionFr: food.descriptionFr,
+//         price: food.price,
+//         foodDiscountType: food.discount_type,
+//         foodDiscountValue: food.discount_value,
+//         isOutOfStock: food.isOutOfStock,
+//         image: food.image,
+//         points: food.points,
+
+//         categoryId: categories.id,
+//         categoryName: categories.name,
+//         categoryNameAr: categories.nameAr,
+//         categoryNameFr: categories.nameFr,
+
+//         subcategoryId: subcategories.id,
+//         subcategoryName: subcategories.name,
+//         subcategoryNameAr: subcategories.nameAr,
+//         subcategoryNameFr: subcategories.nameFr,
+//         order_level: subcategories.order_Level,
+
+//         variationId: foodVariations.id,
+//         variationName: foodVariations.name,
+//         variationNameAr: foodVariations.nameAr,
+//         variationNameFr: foodVariations.nameFr,
+//         isRequired: foodVariations.isRequired,
+//         selectionType: foodVariations.selectionType,
+//         min: foodVariations.min,
+//         max: foodVariations.max,
+
+//         optionId: variationOptions.id,
+//         optionName: variationOptions.optionName,
+//         optionNameAr: variationOptions.optionNameAr,
+//         optionNameFr: variationOptions.optionNameFr,
+//         additionalPrice: variationOptions.additionalPrice,
+
+//         addonId: addons.id,
+//         addonName: addons.name,
+//         addonNameAr: addons.nameAr,
+//         addonNameFr: addons.nameFr,
+//         addonPrice: addons.price,
+//         addonStatus: addons.status,
+//         addonStockType: addons.stock_type,
+//         addonRestaurantId: addons.restaurantid,
+//         addonCreatedAt: addons.createdAt,
+//         addonUpdatedAt: addons.updatedAt,
+
+//         addonCategoryId: adonescategory.id,
+//         addonCategoryName: adonescategory.name,
+//         addonCategoryNameAr: adonescategory.nameAr,
+//         addonCategoryNameFr: adonescategory.nameFr,
+//     })
+//         .from(food)
+//         .leftJoin(categories, eq(food.categoryid, categories.id))
+//         .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
+//         .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))
+//         .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
+//         .leftJoin(addons, sql`JSON_CONTAINS(${food.addonsId}, JSON_QUOTE(${addons.id}))`)
+//         .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
+//         .where(and(
+//             eq(food.restaurantid, restaurantId),
+//             eq(food.status, "active"),
+//             or(isNull(categories.id), eq(categories.status, "active")),
+//             or(isNull(subcategories.id), eq(subcategories.status, "active"))
+//         ));
+
+//     const availableDiscounts = await getAvailableDiscounts(restaurantId);
+
+//     const groupedMenuObj = rawMenu.reduce((acc: any, row) => {
+//         const catId = row.categoryId || "uncategorized";
+
+//         // 1. تجميع الكاتيجوري
+//         if (!acc[catId]) {
+//             acc[catId] = {
+//                 id: catId === "uncategorized" ? null : catId,
+//                 name: row.categoryName || "Other",
+//                 nameAr: row.categoryNameAr || "أخرى",
+//                 nameFr: row.categoryNameFr || "Autre",
+//                 foods: {}
+//             };
+//         }
+
+//         // 2. تجميع الأكل داخل الكاتيجوري مع حساب الخصم المباشر
+//         if (row.foodId) {
+//             if (!acc[catId].foods[row.foodId]) {
+//                 const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+
+//                 const { price: calculatedDiscountPrice, discountNote } = applyPriorityDiscount(
+//                     { id: row.foodId, discountType: row.foodDiscountType, discountValue: row.foodDiscountValue },
+//                     Number(row.price),
+//                     0,
+//                     availableDiscounts,
+//                     discountState,
+//                     false
+//                 );
+
+//                 acc[catId].foods[row.foodId] = {
+//                     id: row.foodId,
+//                     name: row.foodName,
+//                     nameAr: row.foodNameAr,
+//                     nameFr: row.foodNameFr,
+//                     description: row.description,
+//                     descriptionAr: row.descriptionAr,
+//                     descriptionFr: row.descriptionFr,
+//                     price: Number(row.price),
+//                     discountType: row.foodDiscountType ?? null,
+//                     discountValue: row.foodDiscountValue !== null ? Number(row.foodDiscountValue) : null,
+//                     discountPrice: calculatedDiscountPrice,
+//                     discountNote,
+//                     image: row.image,
+//                     isOutOfStock: row.isOutOfStock,
+//                     points: userId ? row.points : null,
+//                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
+
+//                     variations: {},
+//                     addons: {},
+
+//                     category: row.categoryId ? {
+//                         id: row.categoryId,
+//                         name: row.categoryName,
+//                         nameAr: row.categoryNameAr,
+//                         nameFr: row.categoryNameFr,
+//                     } : null,
+//                     subcategory: row.subcategoryId ? {
+//                         id: row.subcategoryId,
+//                         name: row.subcategoryName,
+//                         nameAr: row.subcategoryNameAr,
+//                         nameFr: row.subcategoryNameFr,
+//                         order_level: row.order_level,
+//                     } : null,
+//                 };
+//             }
+
+//             // 3. تجميع الـ Variations داخل الأكل
+//             if (row.variationId) {
+//                 if (!acc[catId].foods[row.foodId].variations[row.variationId]) {
+//                     acc[catId].foods[row.foodId].variations[row.variationId] = {
+//                         id: row.variationId,
+//                         name: row.variationName,
+//                         nameAr: row.variationNameAr,
+//                         nameFr: row.variationNameFr,
+//                         isRequired: row.isRequired,
+//                         selectionType: row.selectionType,
+//                         min: row.min,
+//                         max: row.max,
+//                         options: {}
+//                     };
+//                 }
+
+//                 // 4. تجميع الـ Options داخل الـ Variations
+//                 if (row.optionId) {
+//                     if (!acc[catId].foods[row.foodId].variations[row.variationId].options[row.optionId]) {
+//                         acc[catId].foods[row.foodId].variations[row.variationId].options[row.optionId] = {
+//                             id: row.optionId,
+//                             name: row.optionName,
+//                             nameAr: row.optionNameAr,
+//                             nameFr: row.optionNameFr,
+//                             additionalPrice: row.additionalPrice
+//                         };
+//                     }
+//                 }
+//             }
+
+//             // 5. تجميع الـ Addons داخل الأكل
+//             if (row.addonId) {
+//                 if (!acc[catId].foods[row.foodId].addons[row.addonId]) {
+//                     acc[catId].foods[row.foodId].addons[row.addonId] = {
+//                         id: row.addonId,
+//                         name: row.addonName,
+//                         nameAr: row.addonNameAr,
+//                         nameFr: row.addonNameFr,
+//                         price: row.addonPrice,
+//                         status: row.addonStatus,
+//                         stockType: row.addonStockType,
+//                         restaurantId: row.addonRestaurantId,
+//                         createdAt: row.addonCreatedAt,
+//                         updatedAt: row.addonUpdatedAt,
+//                         category: row.addonCategoryId ? {
+//                             id: row.addonCategoryId,
+//                             name: row.addonCategoryName,
+//                             nameAr: row.addonCategoryNameAr,
+//                             nameFr: row.addonCategoryNameFr,
+//                         } : null
+//                     };
+//                 }
+//             }
+//         }
+
+//         return acc;
+//     }, {});
+
+//     // 👇 تحويل الكاتيجوريز، الأكلات، الـ Variations، الـ Options، والـ Addons من Objects إلى Arrays
+//     // ثم حساب الفروع غير المتاحة لكل وجبة
+//     const allMenuFoods = Object.values(groupedMenuObj).flatMap((cat: any) => Object.values(cat.foods)) as any[];
+
+//     // الوجبات التي status == active لكن isOutOfStock == false هي المرشحة للفحص
+//     const menuActiveFoodIds = allMenuFoods
+//         .filter((f: any) => !f.isOutOfStock)
+//         .map((f: any) => f.id)
+//         .filter(Boolean) as string[];
+
+//     const menuUnavailableBranchesMap = menuActiveFoodIds.length > 0
+//         ? await getUnavailableBranchesForFoods(menuActiveFoodIds)
+//         : new Map<string, BranchInfo[]>();
+
+//     // ─── جلب الفروع غير المتاحة بناءً على الـ subcategories ───
+//     const activeSubcategoryIds = [...new Set(
+//         allMenuFoods
+//             .filter((f: any) => !f.isOutOfStock && f.subcategory?.id)
+//             .map((f: any) => f.subcategory.id)
+//     )] as string[];
+
+//     const subcategoryUnavailableBranchesMap = new Map<string, BranchInfo[]>();
+
+//     if (activeSubcategoryIds.length > 0) {
+//         const inactiveSubcats = await db
+//             .select({
+//                 subcategoryId: branchSubcategories.subcategoryId,
+//                 branchId: branches.id,
+//                 branchName: branches.name,
+//                 branchNameAr: branches.nameAr,
+//                 branchNameFr: branches.nameFr,
+//             })
+//             .from(branchSubcategories)
+//             .leftJoin(branches, eq(branchSubcategories.branchId, branches.id))
+//             .where(and(
+//                 inArray(branchSubcategories.subcategoryId, activeSubcategoryIds),
+//                 eq(branchSubcategories.status, "inactive")
+//             ));
+
+//         for (const row of inactiveSubcats) {
+//             if (!row.branchId) continue;
+
+//             if (!subcategoryUnavailableBranchesMap.has(row.subcategoryId)) {
+//                 subcategoryUnavailableBranchesMap.set(row.subcategoryId, []);
+//             }
+
+//             subcategoryUnavailableBranchesMap.get(row.subcategoryId)!.push({
+//                 id: row.branchId,
+//                 name: row.branchName || "",
+//                 nameAr: row.branchNameAr,
+//                 nameFr: row.branchNameFr,
+//             });
+//         }
+//     }
+
+//     const finalMenu = Object.values(groupedMenuObj).map((category: any) => {
+//         return {
+//             id: category.id,
+//             name: category.name,
+//             nameAr: category.nameAr,
+//             nameFr: category.nameFr,
+//             foods: Object.values(category.foods).map((f: any) => {
+//                 // تحويل الـ variations والـ options
+//                 f.variations = Object.values(f.variations).map((v: any) => {
+//                     v.options = Object.values(v.options);
+//                     return v;
+//                 });
+//                 // تحويل الـ Addons
+//                 f.addons = Object.values(f.addons);
+
+//                 // // إرفاق الفروع غير المتاحة
+//                 // // null → الوجبة غير متاحة في جميع الفروع (isOutOfStock)
+//                 // // [] أو [...] → قائمة الفروع غير المتاحة بالتحديد
+//                 if (f.isOutOfStock) {
+//                     f.unavailableBranches = null;
+//                 } else {
+//                     const foodUnavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
+//                     const subcatUnavailableBranches = f.subcategory?.id
+//                         ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || [])
+//                         : [];
+
+//                     // دمج الفرعين بدون تكرار
+//                     const combinedBranches = new Map<string, BranchInfo>();
+//                     [...foodUnavailableBranches, ...subcatUnavailableBranches].forEach(b => {
+//                         combinedBranches.set(b.id, b);
+//                     });
+
+//                     f.unavailableBranches = Array.from(combinedBranches.values());
+//                 }
+
+//                 //  if (f.isOutOfStock) {
+//                 //     f.unavailableBranches = null;
+//                 //     f.subcatUnavailableBranches = null;
+//                 // } else {
+//                 //     f.unavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
+//                 //     f.subcatUnavailableBranches = f.subcategory?.id
+//                 //         ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || [])
+//                 //         : [];
+//                 // }
+
+//                 return f;
+//             })
+//         };
+//     });
+
+//     // ==========================================
+//     // جلب الـ Addons مع الـ Categories (للقائمة العامة)
+//     // ==========================================
+//     const rawAddons = await db.select({
+//         addonId: addons.id,
+//         addonName: addons.name,
+//         addonNameAr: addons.nameAr,
+//         addonNameFr: addons.nameFr,
+//         addonPrice: addons.price,
+//         addonStockType: addons.stock_type,
+//         categoryId: adonescategory.id,
+//         categoryName: adonescategory.name,
+//         categoryNameAr: adonescategory.nameAr,
+//         categoryNameFr: adonescategory.nameFr,
+//     })
+//         .from(addons)
+//         .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
+//         .where(and(
+//             eq(addons.restaurantid, restaurantId),
+//             eq(addons.status, "active")
+//         ));
+
+//     const groupedAddonsObj = rawAddons.reduce((acc: any, row) => {
+//         const catId = row.categoryId || "uncategorized";
+
+//         if (!acc[catId]) {
+//             acc[catId] = {
+//                 id: catId === "uncategorized" ? null : catId,
+//                 name: row.categoryName || "Other",
+//                 nameAr: row.categoryNameAr || "أخرى",
+//                 nameFr: row.categoryNameFr || "Autre",
+//                 addons: []
+//             };
+//         }
+
+//         if (row.addonId) {
+//             acc[catId].addons.push({
+//                 id: row.addonId,
+//                 name: row.addonName,
+//                 nameAr: row.addonNameAr,
+//                 nameFr: row.addonNameFr,
+//                 price: row.addonPrice,
+//                 stockType: row.addonStockType
+//             });
+//         }
+
+//         return acc;
+//     }, {});
+
+//     const finalAddons = Object.values(groupedAddonsObj).map((category: any) => {
+//         return {
+//             id: category.id,
+//             name: category.name,
+//             nameAr: category.nameAr,
+//             nameFr: category.nameFr,
+//             addons: category.addons
+//         };
+//     });
+
+//     return SuccessResponse(res, {
+//         data: {
+//             restaurant: restaurantWithFav,
+//             menu: finalMenu,
+//             addons: finalAddons
+//         }
+//     });
+// };
 // ==========================================
 // 5. Toggle Favorite
 // ==========================================

@@ -266,6 +266,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     let checkoutHasUnavailable = false;
     let checkoutPriceChanged = false;
     const priceChangedItems: any[] = [];
+    let hasFoodLevelDiscount = false; // 💡 Flag لتتبع وجود خصومات على مستوى الصنف نفسه
 
     for (const { cartItem, parsedVariations, parsedAddons } of cartParsed) {
         const optionIds = parsedVariations.map((v: any) => v.optionId).filter(Boolean);
@@ -353,6 +354,7 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         let initialDiscountPrice = originalBasePrice;
         if (foodItem?.discount_value && Number(foodItem.discount_value) > 0) {
+            hasFoodLevelDiscount = true; // 💡 تحديد وجود خصم على الصنف
             if (foodItem.discount_type === "percentage") {
                 initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(foodItem.discount_value) / 100));
             } else if (foodItem.discount_type === "amount" || foodItem.discount_type === "fixed") {
@@ -441,30 +443,72 @@ export const checkout = async (req: Request | any, res: Response) => {
     const appCommission = roundMoney(subtotal * (commissionRate / 100));
 
     // ==========================================
-    // 5.5 Check Coupons (Unified Engine)
+    // 5.5 Check Coupons & Order Level Discounts
     // ==========================================
     let totalDiscount = 0;
     let appliedCoupon: any = null;
     let isFreeDelivery = false;
 
+    let orderDiscountId: string | null = null;
+    let orderCouponId: string | null = null;
+    let orderDiscountType: "percentage" | "fixed_amount" | null = null;
+    let orderDiscountValue: string | null = null;
+    let orderDiscountSource: "food_level" | "restaurant_discount" | "global_discount" | "coupon" | null = null;
+
+    // 1️⃣ تتبع الخصم المطبق (إما خصم عام/مطعم أو خصم مباشر على الصنف)
+    if (discountState.appliedDiscounts.size > 0) {
+        const appliedDiscountId = Array.from(discountState.appliedDiscounts)[0];
+        const matchedItem = availableDiscounts.find(item => item.discount.id === appliedDiscountId);
+
+        if (matchedItem) {
+            const activeDiscount = matchedItem.discount as any;
+
+            orderDiscountId = activeDiscount.id;
+            const discountScope = activeDiscount.discountScope || activeDiscount.scope;
+            orderDiscountSource = discountScope === "restaurant" ? "restaurant_discount" : "global_discount";
+            orderDiscountType = activeDiscount.discountType === "percentage" ? "percentage" : "fixed_amount";
+            orderDiscountValue = activeDiscount.discountValue ? activeDiscount.discountValue.toString() : "0";
+        }
+    } else if (hasFoodLevelDiscount) {
+        // حالة الخصم المباشر من الصنف نفسه
+        orderDiscountId = null;
+        orderDiscountSource = "food_level";
+        orderDiscountType = null;
+        orderDiscountValue = roundMoney(initialSubtotal - subtotal).toFixed(2);
+    }
+
+    // 2️⃣ تطبيق الكوبون وتجميعه مع الخصم (بدون إلغاء بيانات الخصم الأصلي)
     if (couponCode) {
         const couponResult = await validateAndCalculateCoupon(
             couponCode,
             userId,
             restaurantId,
             subtotal,
-            0 // Delivery fee is resolved in step 6; if free_delivery, isFreeDelivery flag is set
+            0
         );
 
         appliedCoupon = couponResult.coupon;
-        totalDiscount = couponResult.discountAmount;
+        const couponDiscountAmount = couponResult.discountAmount;
         isFreeDelivery = couponResult.isFreeDelivery;
+
+        if (appliedCoupon) {
+            orderCouponId = appliedCoupon.id || null;
+            // إضافة قيمة خصم الكوبون على المجموع الكلي للخصومات
+            totalDiscount += couponDiscountAmount;
+
+            // إذا لم يكن هناك خصم سابق على الأصناف، يتم تعيين الكوبون كمصدر رئيسي للخصم
+            if (!orderDiscountSource) {
+                orderDiscountSource = "coupon";
+                orderDiscountType = appliedCoupon.discountType === "percentage" ? "percentage" : "fixed_amount";
+                orderDiscountValue = appliedCoupon.discountValue ? appliedCoupon.discountValue.toString() : couponDiscountAmount.toFixed(2);
+            }
+        }
     }
 
     totalDiscount = roundMoney(totalDiscount);
 
     // ==========================================
-    // 6. Dynamic Delivery & Turf Zone Logic (Updated)
+    // 6. Dynamic Delivery & Turf Zone Logic
     // ==========================================
     let deliveryFee = 0;
     let resolvedZoneId: string | null = zoneId || null;
@@ -484,7 +528,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             throw new BadRequest("Delivery address requires valid latitude and longitude coordinates.");
         }
 
-        // Fetch all active delivery fees for this restaurant (including branchId)
         const restaurantFees = await db.select({
             id: restaurantZoneDeliveryFees.id,
             zoneId: restaurantZoneDeliveryFees.zoneId,
@@ -524,13 +567,12 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
 
         const genericZoneId = applicableFee.zoneId;
-        resolvedZoneId = applicableFee.id; // 👈 حفظ id الخاص بـ restaurantZoneDeliveryFees في الـ order
+        resolvedZoneId = applicableFee.id;
         if (!resolvedZoneId) {
             throw new BadRequest("No delivery zone found for this address.");
         }
         deliveryFee = parseFloat(applicableFee.deliveryFee as string || "0");
 
-        // 🏪 تحديد/التحقق من الفرع المخصص للـ Delivery
         if (applicableFee.branchId) {
             resolvedBranchId = applicableFee.branchId;
         } else if (branchId) {
@@ -568,7 +610,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             resolvedBranchId = matchedBranch.id;
         }
     } else {
-        // For takeaway or dine_in: branchId is required (already validated in step 5)
         if (!branchId) throw new BadRequest("Branch is required for takeaway or dine-in orders.");
 
         const [branch] = await db.select({ id: branches.id, zoneId: branches.zoneId })
@@ -699,7 +740,14 @@ export const checkout = async (req: Request | any, res: Response) => {
             deliveryFee: deliveryFee.toFixed(2),
             serviceFee: serviceFee.toFixed(2),
             appCommission: appCommission.toFixed(2),
+
+            discountId: orderDiscountId,
+            couponId: orderCouponId,
             discountAmount: totalDiscount.toFixed(2),
+            discountType: orderDiscountType,
+            discountValue: orderDiscountValue,
+            discountSource: orderDiscountSource,
+
             couponCode: couponCode || null,
             totalAmount: totalAmount.toFixed(2),
             note: note || null,
@@ -826,6 +874,9 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
     });
 
+    // ==========================================
+    // 📤 إرجاع البيانات في الـ Response
+    // ==========================================
     return SuccessResponse(res, {
         message: "Order created successfully",
         order_level: {
@@ -842,6 +893,16 @@ export const checkout = async (req: Request | any, res: Response) => {
                 createdAt: now.toISOString(),
                 dailyOrderNumber: createdDailyOrderNumber,
                 durationOrderPreparing: defaultPreparingDuration,
+            },
+            discountDetails: {
+                discountId: orderDiscountId,
+                couponId: orderCouponId,
+                discountAmount: totalDiscount,
+                discountType: orderDiscountType,
+                discountValue: orderDiscountValue,
+                discountSource: orderDiscountSource,
+                couponCode: couponCode || null,
+                isFreeDelivery
             },
             customerDetails: userInfo
         }
