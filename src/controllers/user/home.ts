@@ -293,7 +293,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
 
     const foodIds = rawMenu.map(r => r.foodId);
 
-    // 3. Batch Fetch Variations & Options (Optimized Single Queries)
+    // 3. Batch Fetch Variations & Options
     const variationsList = foodIds.length > 0
         ? await db
             .select({
@@ -509,10 +509,32 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             };
         }
 
-        // Parse linked Addons for this specific food
-        const foodAddonIds: string[] = Array.isArray(row.addonsId) ? row.addonsId : [];
+        // ==========================================
+        // Safe Addons Parsing
+        // ==========================================
+        let foodAddonIds: string[] = [];
+
+        if (Array.isArray(row.addonsId)) {
+            foodAddonIds = row.addonsId;
+        } else if (row.addonsId) {
+            const rawAddonsId = row.addonsId as any; // Caste to bypass 'never' type checking
+
+            if (typeof rawAddonsId === 'string') {
+                try {
+                    const parsed = JSON.parse(rawAddonsId);
+                    if (Array.isArray(parsed)) {
+                        foodAddonIds = parsed;
+                    } else if (typeof parsed === 'string') {
+                        foodAddonIds = [parsed];
+                    }
+                } catch {
+                    foodAddonIds = rawAddonsId.split(',').map((s: string) => s.trim());
+                }
+            }
+        }
+
         const foodAddons = foodAddonIds
-            .map(id => addonsMap.get(id))
+            .map(id => addonsMap.get(String(id).trim()))
             .filter(Boolean);
 
         // Branch Unavailability calculations
