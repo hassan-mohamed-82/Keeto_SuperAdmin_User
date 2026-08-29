@@ -24,7 +24,7 @@ const generateOTP = (length: number = 6): string => {
 // 1. Signup
 // ===================================
 export const signup = async (req: Request, res: Response) => {
-    const { name, email, phone, password, photo, restaurantId } = req.body;
+    const { name, email, phone, alternatePhone, password, photo, restaurantId } = req.body;
 
     if (!name || !email || !phone || !password) {
         throw new BadRequest("Please provide all required fields");
@@ -52,6 +52,7 @@ export const signup = async (req: Request, res: Response) => {
             await tx.update(users).set({
                 name,
                 phone,
+                alternatePhone,
                 password: hashedPassword,
                 photo,
                 isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
@@ -71,6 +72,7 @@ export const signup = async (req: Request, res: Response) => {
                 name,
                 email,
                 phone,
+                alternatePhone,
                 password: hashedPassword,
                 photo,
                 isVerified: false,
@@ -256,7 +258,7 @@ export const login = async (req: Request, res: Response) => {
         const existingLink = await db.select().from(restaurant_users)
             .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, user.id)))
             .limit(1);
-            
+
         if (existingLink.length === 0) {
             await db.insert(restaurant_users).values({ restaurantId, userId: user.id });
         }
