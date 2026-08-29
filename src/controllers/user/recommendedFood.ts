@@ -71,9 +71,9 @@ export const getRecommendedFoodsForUser = async (req: Request, res: Response) =>
                 eq(recommendedFoods.foodId, foodId),
                 eq(recommendedFoods.status, "active"),
                 eq(food.status, "active"),
-                eq(food.isOutOfStock, false),
-                or(isNull(categories.id), eq(categories.status, "active")),
-                or(isNull(subcategories.id), eq(subcategories.status, "active"))
+                // eq(food.isOutOfStock, false),
+                // or(isNull(categories.id), eq(categories.status, "active")),
+                // or(isNull(subcategories.id), eq(subcategories.status, "active"))
             )
         )
         .orderBy(asc(recommendedFoods.sortOrder));
