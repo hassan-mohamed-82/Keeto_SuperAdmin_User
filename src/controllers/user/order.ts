@@ -18,7 +18,8 @@ import {
     zones,
     deliveryMen,
     freeDeliveryOffers,
-    branchSubcategories
+    branchSubcategories,
+    foodVariations
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -1212,7 +1213,8 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
 
     const o = orderInfo[0];
 
-    const items = await db
+    // 1. جلب عناصر الطلب الأساسية
+    const itemsRaw = await db
         .select({
             foodId: orderItems.foodId,
             foodName: food.name,
@@ -1234,6 +1236,56 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
         .from(orderItems)
         .leftJoin(food, eq(orderItems.foodId, food.id))
         .where(eq(orderItems.orderId, orderId));
+
+    // 2. معالجة الـ Variations واستخراج أسماء الفارييشنز وتفاصيلها كاملة
+    const formattedItems = await Promise.all(
+        itemsRaw.map(async (item) => {
+            let cleanVariations = item.variations;
+            
+            // فك التشفير إذا كانت مفكوكة كـ String
+            if (typeof cleanVariations === 'string') {
+                try {
+                    cleanVariations = JSON.parse(cleanVariations);
+                    if (typeof cleanVariations === 'string') cleanVariations = JSON.parse(cleanVariations);
+                } catch (e) {}
+            }
+
+            let variationDetails: any[] = [];
+
+            if (Array.isArray(cleanVariations) && cleanVariations.length > 0) {
+                // استخراج جميع الـ optionIds الموجودة بالـ Item
+                const optionIds = cleanVariations
+                    .map((v: any) => v.optionId || v.id)
+                    .filter(Boolean);
+
+                if (optionIds.length > 0) {
+                    // جلب بيانات الخيار مضافًا إليها بيانات الفارييشن الأب (Variation Name) عبر Join
+                    const optionsWithParent = await db
+                        .select({
+                            optionId: variationOptions.id,
+                            optionName: variationOptions.optionName,
+                            optionNameAr: variationOptions.optionNameAr,
+                            optionNameFr: variationOptions.optionNameFr,
+                            additionalPrice: variationOptions.additionalPrice,
+                            variationId: foodVariations.id,
+                            variationName: foodVariations.name,
+                            variationNameAr: foodVariations.nameAr,
+                            variationNameFr: foodVariations.nameFr,
+                        })
+                        .from(variationOptions)
+                        .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
+                        .where(inArray(variationOptions.id, optionIds));
+
+                    variationDetails = optionsWithParent;
+                }
+            }
+
+            return {
+                ...item,
+                variations: variationDetails // إرجاع مصفوفة تفاصيل الفارييشن بالأسماء كاملة
+            };
+        })
+    );
 
     return SuccessResponse(res, {
         data: {
@@ -1279,7 +1331,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             deliveryMan: o.orderType === "delivery" && o.deliveryManId
                 ? { id: o.deliveryManId, name: o.deliveryManName, phone: o.deliveryManPhone }
                 : null,
-            items
+            items: formattedItems
         }
     });
 };
