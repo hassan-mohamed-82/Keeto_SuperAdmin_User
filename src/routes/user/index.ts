@@ -37,6 +37,7 @@ router.use("/settings",restaurantSettingsRouter)
 router.use("/recommended-foods", recommendedFoodRouter);
 router.use("/policy",policyRouter)
 router.use("/popup", popupRouter);
+router.use("/offers", offersRouter);
 
 router.use("/restaurants", restaurantFeaturesRouter);
 router.use(authenticated,authorizeRoles("user"));
@@ -47,7 +48,6 @@ router.use("/address", addressRouter);
 router.use("/cart", cartRouter);
 router.use("/favlist", favlistRouter);
 router.use("/notifications", notificationRouter);
-router.use("/offers", offersRouter);
 router.use("/points", pointsRouter);
 router.use("/coupon", couponRouter);
 export default router;

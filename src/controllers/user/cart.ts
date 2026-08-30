@@ -368,6 +368,7 @@ export const getCart = async (req: Request | any, res: Response) => {
                 items: [],
                 unavailableItems: [],
                 hasUnavailableItems: false,
+                hasPriceChanges: false,
                 totalSummary: {
                     subtotal: 0,
                     originalSubtotal: 0,
@@ -383,6 +384,19 @@ export const getCart = async (req: Request | any, res: Response) => {
     let targetBranchId: string | undefined = undefined;
     if (branchId || addressId) {
         targetBranchId = (await resolveBranchIdForCart(branchId, addressId, restaurantId || undefined)) || undefined;
+    }
+
+    // ─── Fetch Active Restaurant Branches (For Multi-branch Price Checks) ───
+    let activeRestaurantBranches: Array<{ id: string; name: string; nameAr?: string | null }> = [];
+    if (!targetBranchId && restaurantId) {
+        activeRestaurantBranches = await db
+            .select({
+                id: branches.id,
+                name: branches.name,
+                nameAr: branches.nameAr,
+            })
+            .from(branches)
+            .where(and(eq(branches.restaurantId, restaurantId), eq(branches.status, "active")));
     }
 
     // ─── Availability checks ──────────────────────────────────────────
@@ -430,7 +444,7 @@ export const getCart = async (req: Request | any, res: Response) => {
         }
     }
 
-    // ─── Optimization: Fetch Variations & Options in Batch (Fix N+1) ─
+    // ─── Optimization: Fetch Variations & Options in Batch ──────────
     const allVariationIds = new Set<string>();
     const allOptionIds = new Set<string>();
 
@@ -458,7 +472,7 @@ export const getCart = async (req: Request | any, res: Response) => {
         optList.forEach(o => optionsMap.set(o.id, o));
     }
 
-    // ─── Calculate Initial Base Subtotal for Discount Eligibility ────
+    // ─── Calculate Live Prices with Branch & Channel Strategies ──────
     let initialSubtotal = 0;
     const itemsPrepped = await Promise.all(parsedItemsData.map(async (data) => {
         const { item, parsedVariations, parsedAddons } = data;
@@ -472,8 +486,10 @@ export const getCart = async (req: Request | any, res: Response) => {
         let liveUnitPrice: number | null = null;
         let priceChanged = false;
         let channelAvailable = true;
+        const branchPrices: Array<{ branchId: string; branchName: string; branchNameAr: string; unitPrice: number }> = [];
 
-        if (effectiveBranchId && effectiveServiceModule && item.foodId) {
+        // 1️⃣ حالة تحديد فرع محدد (Direct Branch Pricing)
+        if (effectiveBranchId && item.foodId) {
             try {
                 const optionIds = extractOptionIds(parsedVariations);
                 const livePrice = await calculateCalculatedPrice(
@@ -484,11 +500,46 @@ export const getCart = async (req: Request | any, res: Response) => {
                 );
                 const addonTotal = parsedAddons.reduce((s: number, a: any) => s + Number(a.price || 0), 0);
                 const computedLivePrice = livePrice.totalUnitPrice + addonTotal;
+
                 liveUnitPrice = computedLivePrice;
                 channelAvailable = livePrice.isAvailable;
                 priceChanged = Math.abs(computedLivePrice - dbUnitPrice) > 0.001;
             } catch {
                 liveUnitPrice = null;
+            }
+        } 
+        // 2️⃣ حالة عدم تحديد فرع (Cross-Branch Price Comparison Strategy)
+        else if (!effectiveBranchId && item.foodId && activeRestaurantBranches.length > 0) {
+            const optionIds = extractOptionIds(parsedVariations);
+            const addonTotal = parsedAddons.reduce((s: number, a: any) => s + Number(a.price || 0), 0);
+
+            const branchPriceResults = await Promise.allSettled(
+                activeRestaurantBranches.map(async (b) => {
+                    const bPrice = await calculateCalculatedPrice(
+                        item.foodId!,
+                        optionIds,
+                        b.id,
+                        effectiveServiceModule
+                    );
+                    return { branch: b, bPrice };
+                })
+            );
+
+            for (const result of branchPriceResults) {
+                if (result.status === "fulfilled") {
+                    const { branch: b, bPrice } = result.value;
+                    const bComputedUnitPrice = bPrice.totalUnitPrice + addonTotal;
+
+                    if (Math.abs(bComputedUnitPrice - dbUnitPrice) > 0.001) {
+                        priceChanged = true;
+                        branchPrices.push({
+                            branchId: b.id,
+                            branchName: b.name,
+                            branchNameAr: b.nameAr || b.name,
+                            unitPrice: bComputedUnitPrice
+                        });
+                    }
+                }
             }
         }
 
@@ -503,6 +554,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             liveUnitPrice,
             priceChanged,
             channelAvailable,
+            branchPrices,
             effectiveBranchId,
             effectiveServiceModule
         };
@@ -518,8 +570,8 @@ export const getCart = async (req: Request | any, res: Response) => {
 
     const formattedAvailableItems = itemsPrepped.map(data => {
         const {
-            item, originalBasePrice, varPrice, currentBasePrice, liveUnitPrice,
-            priceChanged, channelAvailable, effectiveBranchId, effectiveServiceModule,
+            item, originalBasePrice, varPrice, currentBasePrice,liveUnitPrice,
+            priceChanged, channelAvailable, branchPrices, effectiveBranchId, effectiveServiceModule,
             parsedVariations, parsedAddons
         } = data;
 
@@ -545,7 +597,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             price: a.price,
         }));
 
-        // Apply Priority Discount on current base price (Channel Price safe)
+        // Apply Priority Discount on current base price
         const discountResult = applyPriorityDiscount(
             {
                 id: item.foodId ?? "",
@@ -602,6 +654,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             note: item.note || null,
             isAvailable: channelAvailable,
             priceChanged,
+            branchPrices: branchPrices.length > 0 ? branchPrices : undefined,
             resolvedBranchId: effectiveBranchId || null,
             serviceModule: effectiveServiceModule || null,
         };

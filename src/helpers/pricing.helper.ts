@@ -187,20 +187,20 @@ export const calculateCalculatedPrice = async (
     foodId: string,
     variantOptionIds: string[],
     branchId: string,
-    serviceModule: ServiceModule
+    serviceModule?: ServiceModule
 ): Promise<CalculatedPriceResult> => {
     // ─── Parallel batch fetch ───────────────────────────────────────────
     const [
         foodRow,
         // Food channel pricing — branch-specific
         channelBranchRows,
-        // Food channel pricing — global (branchId IS NULL)
+        // Food channel pricing — global
         channelGlobalRows,
         // Branch menu item override
         branchMenuRow,
-        // Variant channel pricing — branch-specific (all selected variants)
+        // Variant channel pricing — branch-specific
         variantChannelBranchRows,
-        // Variant channel pricing — global (all selected variants)
+        // Variant channel pricing — global
         variantChannelGlobalRows,
         // Branch variant pricing overrides
         branchVariantRows,
@@ -220,7 +220,7 @@ export const calculateCalculatedPrice = async (
                 and(
                     eq(productChannelPricing.foodId, foodId),
                     eq(productChannelPricing.branchId, branchId),
-                    eq(productChannelPricing.serviceModule, serviceModule)
+                    serviceModule ? eq(productChannelPricing.serviceModule, serviceModule) : undefined
                 )
             )
             .limit(1),
@@ -231,8 +231,8 @@ export const calculateCalculatedPrice = async (
             .where(
                 and(
                     eq(productChannelPricing.foodId, foodId),
-                    eq(productChannelPricing.serviceModule, serviceModule),
-                    isNull(productChannelPricing.branchId)
+                    isNull(productChannelPricing.branchId),
+                    serviceModule ? eq(productChannelPricing.serviceModule, serviceModule) : undefined
                 )
             )
             .limit(1),
@@ -253,7 +253,7 @@ export const calculateCalculatedPrice = async (
             )
             .limit(1),
 
-        // Variant queries — only run if there are variants selected
+        // Variant channel pricing — branch-specific
         variantOptionIds.length > 0
             ? db.select({
                     variantId: variantChannelPricing.variantId,
@@ -265,11 +265,12 @@ export const calculateCalculatedPrice = async (
                     and(
                         inArray(variantChannelPricing.variantId, variantOptionIds),
                         eq(variantChannelPricing.branchId, branchId),
-                        eq(variantChannelPricing.serviceModule, serviceModule)
+                        serviceModule ? eq(variantChannelPricing.serviceModule, serviceModule) : undefined
                     )
                 )
             : Promise.resolve([]),
 
+        // Variant channel pricing — global
         variantOptionIds.length > 0
             ? db.select({
                     variantId: variantChannelPricing.variantId,
@@ -280,12 +281,13 @@ export const calculateCalculatedPrice = async (
                 .where(
                     and(
                         inArray(variantChannelPricing.variantId, variantOptionIds),
-                        eq(variantChannelPricing.serviceModule, serviceModule),
-                        isNull(variantChannelPricing.branchId)
+                        isNull(variantChannelPricing.branchId),
+                        serviceModule ? eq(variantChannelPricing.serviceModule, serviceModule) : undefined
                     )
                 )
             : Promise.resolve([]),
 
+        // Branch variant pricing overrides
         variantOptionIds.length > 0
             ? db.select({
                     variantId: branchVariantPricing.variantId,
@@ -301,6 +303,7 @@ export const calculateCalculatedPrice = async (
                 )
             : Promise.resolve([]),
 
+        // Base variant option prices
         variantOptionIds.length > 0
             ? db.select({
                     id: variationOptions.id,
@@ -318,66 +321,64 @@ export const calculateCalculatedPrice = async (
         throw new NotFound(`Food item not found: ${foodId}`);
     }
 
-    let basePrice = parseFloat(foodData.price as string || "0");
+    let basePrice = parseFloat((foodData.price as string) || "0");
     let isFoodAvailable = foodData.status !== "inactive" && !foodData.isOutOfStock;
 
-    // A. Branch-specific channel pricing (highest priority)
+    // 1. تسعير القناة الخاص بالفرع
     if (channelBranchRows.length > 0) {
         const row = channelBranchRows[0];
-        basePrice = parseFloat(row.price as string || "0");
+        basePrice = parseFloat((row.price as string) || "0");
         if (row.status === "inactive") isFoodAvailable = false;
     }
-    // B. Global channel pricing (second priority)
+    // 2. تسعير القناة العام
     else if (channelGlobalRows.length > 0) {
         const row = channelGlobalRows[0];
-        basePrice = parseFloat(row.price as string || "0");
+        basePrice = parseFloat((row.price as string) || "0");
         if (row.status === "inactive") isFoodAvailable = false;
     }
-    // C. Branch menu item override (third priority)
+    // 3. تسعير الفرع المباشر (Fallback)
     else if (branchMenuRow.length > 0) {
         const row = branchMenuRow[0];
         if (row.price !== null && row.price !== undefined) {
-            basePrice = parseFloat(row.price as string || "0");
+            basePrice = parseFloat((row.price as string) || "0");
         }
         if (row.status === "inactive") isFoodAvailable = false;
         if (row.stockType === "limited" && (row.stockQty ?? 0) <= 0) isFoodAvailable = false;
     }
-    // D. food.price — already set as basePrice above
+    // 4. food.price العام
 
     // ─── Resolve variant prices ─────────────────────────────────────────
     const resolvedVariants: VariantPriceResult[] = [];
     let totalVariantPrice = 0;
 
-    // Build lookup maps for O(1) access
-    const vcBranchMap = new Map(variantChannelBranchRows.map(r => [r.variantId, r]));
-    const vcGlobalMap = new Map(variantChannelGlobalRows.map(r => [r.variantId, r]));
-    const bvMap = new Map(branchVariantRows.map(r => [r.variantId, r]));
-    const baseVarMap = new Map(baseVariantRows.map(r => [r.id, r]));
+    const vcBranchMap = new Map(variantChannelBranchRows.map((r) => [r.variantId, r]));
+    const vcGlobalMap = new Map(variantChannelGlobalRows.map((r) => [r.variantId, r]));
+    const bvMap = new Map(branchVariantRows.map((r) => [r.variantId, r]));
+    const baseVarMap = new Map(baseVariantRows.map((r) => [r.id, r]));
 
     for (const optionId of variantOptionIds) {
         const baseOption = baseVarMap.get(optionId);
         let varPrice = parseFloat((baseOption?.additionalPrice as string) || "0");
         let varAvailable = baseOption ? baseOption.status !== false : true;
 
-        // A. Variant channel — branch-specific
-        const vcBranch = vcBranchMap.get(optionId);
-        if (vcBranch) {
-            varPrice = parseFloat(vcBranch.price as string || "0");
+        if (vcBranchMap.get(optionId)) {
+            const vcBranch = vcBranchMap.get(optionId)!;
+            varPrice = parseFloat((vcBranch.price as string) || "0");
             if (vcBranch.status === "inactive") varAvailable = false;
         }
-        // B. Variant channel — global
-        else if (vcGlobalMap.get(optionId)) {
+        // Variant channel pricing — global
+         else if (vcGlobalMap.get(optionId)) {
             const vcGlobal = vcGlobalMap.get(optionId)!;
-            varPrice = parseFloat(vcGlobal.price as string || "0");
+            varPrice = parseFloat((vcGlobal.price as string) || "0");
             if (vcGlobal.status === "inactive") varAvailable = false;
         }
-        // C. Branch variant pricing
-        else if (bvMap.get(optionId)) {
+        // Branch variant pricing
+         else if (bvMap.get(optionId)) {
             const bv = bvMap.get(optionId)!;
-            varPrice = parseFloat(bv.price as string || "0");
+            varPrice = parseFloat((bv.price as string) || "0");
             if (bv.status === "inactive") varAvailable = false;
         }
-        // D. Base variant price — already set above
+        // Base variant price — already set above
 
         totalVariantPrice += varPrice;
         resolvedVariants.push({
@@ -387,7 +388,7 @@ export const calculateCalculatedPrice = async (
         });
     }
 
-    const hasUnavailableVariant = resolvedVariants.some(v => !v.isAvailable);
+    const hasUnavailableVariant = resolvedVariants.some((v) => !v.isAvailable);
 
     return {
         basePrice,
