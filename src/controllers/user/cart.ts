@@ -1201,15 +1201,16 @@ export const clearCart = async (req: Request | any, res: Response) => {
    POST /api/cart/validate-pricing
 ========================================= */
 export const validateCartPricing = async (req: Request | any, res: Response) => {
+    const userId = req.user?.id;
     const {
         restaurantId,
         serviceModule,
         branchId,
         addressId,
-        items: reqItems,
     } = req.body;
 
     // ─── Input validation ─────────────────────────────────────────────
+    if (!userId) throw new BadRequest("User authentication required.");
     if (!restaurantId) throw new BadRequest("restaurantId is required.");
     if (!serviceModule || !["takeaway", "dine_in", "delivery"].includes(serviceModule)) {
         throw new BadRequest("serviceModule must be one of: takeaway, dine_in, delivery.");
@@ -1220,8 +1221,20 @@ export const validateCartPricing = async (req: Request | any, res: Response) => 
     if (serviceModule === "delivery" && !branchId && !addressId) {
         throw new BadRequest("addressId or branchId is required for delivery orders.");
     }
-    if (!Array.isArray(reqItems) || reqItems.length === 0) {
-        throw new BadRequest("items array is required and must not be empty.");
+
+    // ─── Fetch User Cart Items from DB ────────────────────────────────
+    const userCartItems = await db
+        .select()
+        .from(cartItems)
+        .where(
+            and(
+                eq(cartItems.userId, userId),
+                eq(cartItems.restaurantId, restaurantId)
+            )
+        );
+
+    if (userCartItems.length === 0) {
+        throw new BadRequest("Cart is empty for this restaurant.");
     }
 
     // ─── Resolve branch ───────────────────────────────────────────────
@@ -1239,7 +1252,7 @@ export const validateCartPricing = async (req: Request | any, res: Response) => 
         resolvedBranchId = await resolveBranchIdFromAddress(addressId, restaurantId);
     }
 
-    // ─── Process each item ────────────────────────────────────────────
+    // ─── Process each item from Database ──────────────────────────────
     let oldSubtotal = 0;
     let newSubtotal = 0;
     let isPriceChanged = false;
@@ -1247,15 +1260,19 @@ export const validateCartPricing = async (req: Request | any, res: Response) => 
 
     const itemResults: any[] = [];
 
-    for (const reqItem of reqItems) {
-        const { foodId, quantity, expectedUnitPrice, selectedVariants = [] } = reqItem;
+    for (const item of userCartItems) {
+        const foodId = item.foodId;
+        const quantity = item.quantity;
+        const storedUnitPrice = Number(item.unitPrice || 0);
 
-        if (!foodId || !quantity || expectedUnitPrice === undefined) {
-            throw new BadRequest(`Invalid item payload: foodId, quantity, and expectedUnitPrice are required.`);
-        }
+        // فك تفاصيل الـ Variations والـ Addons من snapshot الـ Cart
+        const { variations: parsedVariations } = parseCartSnapshot(item.variations);
+        const parsedAddons = Array.isArray(deepParseJSON(item.addons)) ? deepParseJSON(item.addons) : [];
 
-        const optionIds: string[] = selectedVariants.map((v: any) => v.variantOptionId).filter(Boolean);
+        const optionIds = extractOptionIds(parsedVariations);
+        const addonTotal = parsedAddons.reduce((s: number, a: any) => s + Number(a.price || 0), 0);
 
+        // حساب السعر الحالي المباشر للفرع والقناة
         const priceResult = await calculateCalculatedPrice(
             foodId,
             optionIds,
@@ -1263,50 +1280,28 @@ export const validateCartPricing = async (req: Request | any, res: Response) => 
             serviceModule as ServiceModule
         );
 
-        const newUnitPrice = priceResult.basePrice;
-        const oldUnitPrice = Number(expectedUnitPrice);
-        const basePriceChanged = Math.abs(newUnitPrice - oldUnitPrice) > 0.001;
+        const newCalculatedUnitPrice = priceResult.totalUnitPrice + addonTotal;
+        const basePriceChanged = Math.abs(newCalculatedUnitPrice - storedUnitPrice) > 0.001;
         const itemIsAvailable = priceResult.isAvailable;
 
         if (basePriceChanged) isPriceChanged = true;
         if (!itemIsAvailable) hasUnavailableItems = true;
 
-        // Per-variant comparison
-        const variantResults: any[] = [];
-        for (const sv of selectedVariants) {
-            const { variantOptionId, expectedPrice } = sv;
-            const resolved = priceResult.variants.find(v => v.variantOptionId === variantOptionId);
-            const newVarPrice = resolved ? resolved.price : 0;
-            const varAvailable = resolved ? resolved.isAvailable : false;
-            const varPriceChanged = Math.abs(newVarPrice - Number(expectedPrice)) > 0.001;
+        const oldTotal = storedUnitPrice * quantity;
+        const newTotal = newCalculatedUnitPrice * quantity;
 
-            if (varPriceChanged) isPriceChanged = true;
-            if (!varAvailable) hasUnavailableItems = true;
-
-            variantResults.push({
-                variantOptionId,
-                isAvailable: varAvailable,
-                priceChanged: varPriceChanged,
-                oldPrice: Number(expectedPrice),
-                newPrice: newVarPrice,
-            });
-        }
-
-        const variantPriceSum = priceResult.variants.reduce((s, v) => s + v.price, 0);
-        const oldTotal = oldUnitPrice * quantity;
-        const newTotal = priceResult.totalUnitPrice * quantity;
-        oldSubtotal += Number(expectedUnitPrice) * quantity + selectedVariants.reduce((s: number, v: any) => s + Number(v.expectedPrice) * quantity, 0);
-        newSubtotal += priceResult.totalUnitPrice * quantity;
+        oldSubtotal += oldTotal;
+        newSubtotal += newTotal;
 
         itemResults.push({
+            cartItemId: item.id,
             foodId,
-            isAvailable: itemIsAvailable,
-            basePriceChanged,
-            oldUnitPrice,
-            newUnitPrice,
             quantity,
+            isAvailable: itemIsAvailable,
+            priceChanged: basePriceChanged,
+            oldUnitPrice: storedUnitPrice,
+            newUnitPrice: newCalculatedUnitPrice,
             totalItemPrice: newTotal,
-            selectedVariants: variantResults,
         });
     }
 
