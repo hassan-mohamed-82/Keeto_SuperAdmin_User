@@ -1325,6 +1325,8 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         db.select({
             id: restaurantZoneDeliveryFees.id,
             zoneId: restaurantZoneDeliveryFees.zoneId,
+            branchId: restaurantZoneDeliveryFees.branchId,
+            branchStatus: branches.status,
             deliveryFee: restaurantZoneDeliveryFees.deliveryFee,
             coverageType: restaurantZoneDeliveryFees.coverageType,
             customCoordinates: restaurantZoneDeliveryFees.customCoordinates,
@@ -1334,6 +1336,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         })
             .from(restaurantZoneDeliveryFees)
             .leftJoin(zones, eq(restaurantZoneDeliveryFees.zoneId, zones.id))
+            .leftJoin(branches, eq(restaurantZoneDeliveryFees.branchId, branches.id))
             .where(
                 and(
                     eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
@@ -1375,13 +1378,12 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     const addressesWithDeliveryInfo = userAddresses.map((addr) => {
         let isDeliverable = false;
         let applicableDeliveryFee: number | null = null;
-        let matchedZoneId: string | null = null; // 👈 generic zoneId
-        let matchedRestaurantDeliveryZoneId: string | null = null; // 👈 restaurantZoneDeliveryFees.id
+        let matchedZoneId: string | null = null;
+        let matchedRestaurantDeliveryZoneId: string | null = null;
 
         const addrLat = parseFloat(addr.lat || "0");
         const addrLng = parseFloat(addr.lng || "0");
 
-        // لو العنوان مفيش فيه إحداثيات سليمة
         if (!addrLat || !addrLng) {
             return {
                 ...addr,
@@ -1397,6 +1399,12 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
 
             // لو النطاق ده طابق موقع العميل
             if (matchesZone) {
+                const isBranchActive = !fee.branchId || fee.branchStatus === "active";
+
+                if (!isBranchActive) {
+                    continue;
+                }
+
                 isDeliverable = true;
                 const currentFee = parseFloat((fee.deliveryFee || "0") as string);
 
@@ -1404,7 +1412,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                 if (applicableDeliveryFee === null || currentFee > applicableDeliveryFee) {
                     applicableDeliveryFee = currentFee;
                     matchedZoneId = fee.zoneId;
-                    matchedRestaurantDeliveryZoneId = fee.id; // 👈 تحديث id الخاص بنطاق المطعم
+                    matchedRestaurantDeliveryZoneId = fee.id;
                 }
             }
         }
@@ -1415,7 +1423,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
             deliveryFee: applicableDeliveryFee,
             // restaurantDeliveryZoneId: matchedRestaurantDeliveryZoneId, // 👈 id الخاص بنطاق المطعم (restaurantZoneDeliveryFees)
             //zoneId: matchedZoneId, // 👈 إرجاع zoneId داخل العنوان
-            zoneId: matchedRestaurantDeliveryZoneId, // 👈 generic zoneId
+            zoneId: matchedRestaurantDeliveryZoneId,
         };
     });
 
