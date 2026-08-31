@@ -64,6 +64,94 @@ const formatDate = (date: Date | null | undefined): string | null => {
     }).format(new Date(date));
 };
 
+// Helper to format order items variations, supporting both snapshot-stored variations and old database lookup fallback
+const formatOrderItemsVariations = async (items: any[]) => {
+    const parsedItems = items.map(item => {
+        let cleanVariations = item.variations;
+        if (typeof cleanVariations === 'string') {
+            try {
+                cleanVariations = JSON.parse(cleanVariations);
+                if (typeof cleanVariations === 'string') {
+                    cleanVariations = JSON.parse(cleanVariations);
+                }
+            } catch (e) {
+                cleanVariations = [];
+            }
+        }
+        return { item, cleanVariations };
+    });
+
+    const allOldOptionIds = new Set<string>();
+    for (const { cleanVariations } of parsedItems) {
+        if (Array.isArray(cleanVariations) && cleanVariations.length > 0) {
+            const hasFullDetails = cleanVariations.every((v: any) => v.variationName && v.optionName);
+            if (!hasFullDetails) {
+                for (const v of cleanVariations) {
+                    const optId = v.optionId || v.id;
+                    if (optId) {
+                        allOldOptionIds.add(optId);
+                    }
+                }
+            }
+        }
+    }
+
+    const optionsMap = new Map<string, any>();
+    if (allOldOptionIds.size > 0) {
+        const optionsWithParent = await db
+            .select({
+                optionId: variationOptions.id,
+                optionName: variationOptions.optionName,
+                optionNameAr: variationOptions.optionNameAr,
+                optionNameFr: variationOptions.optionNameFr,
+                additionalPrice: variationOptions.additionalPrice,
+                variationId: foodVariations.id,
+                variationName: foodVariations.name,
+                variationNameAr: foodVariations.nameAr,
+                variationNameFr: foodVariations.nameFr,
+            })
+            .from(variationOptions)
+            .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
+            .where(inArray(variationOptions.id, Array.from(allOldOptionIds)));
+
+        for (const opt of optionsWithParent) {
+            optionsMap.set(opt.optionId, opt);
+        }
+    }
+
+    return parsedItems.map(({ item, cleanVariations }) => {
+        let variationDetails: any[] = [];
+        if (Array.isArray(cleanVariations) && cleanVariations.length > 0) {
+            const hasFullDetails = cleanVariations.every((v: any) => v.variationName && v.optionName);
+            if (hasFullDetails) {
+                variationDetails = cleanVariations.map((v: any) => ({
+                    optionId: v.optionId,
+                    optionName: v.optionName,
+                    optionNameAr: v.optionNameAr,
+                    optionNameFr: v.optionNameFr || '',
+                    additionalPrice: v.price || v.additionalPrice || '0',
+                    variationId: v.variationId,
+                    variationName: v.variationName,
+                    variationNameAr: v.variationNameAr,
+                    variationNameFr: v.variationNameFr || '',
+                }));
+            } else {
+                for (const v of cleanVariations) {
+                    const optId = v.optionId || v.id;
+                    const optDetails = optId ? optionsMap.get(optId) : null;
+                    if (optDetails) {
+                        variationDetails.push(optDetails);
+                    }
+                }
+            }
+        }
+        return {
+            ...item,
+            variations: variationDetails
+        };
+    });
+};
+
 // ==========================================
 // 1. إنشاء الطلب (Checkout)
 // ==========================================
@@ -254,6 +342,36 @@ export const checkout = async (req: Request | any, res: Response) => {
         return { cartItem: item, parsedVariations, parsedAddons };
     });
 
+    // Batch fetch variation details for snapshot storage
+    const allCheckoutOptionIds = new Set<string>();
+    for (const { parsedVariations } of cartParsed) {
+        for (const v of parsedVariations) {
+            if (v.optionId) {
+                allCheckoutOptionIds.add(v.optionId);
+            }
+        }
+    }
+
+    const optionsWithParent = allCheckoutOptionIds.size > 0
+        ? await db
+            .select({
+                optionId: variationOptions.id,
+                optionName: variationOptions.optionName,
+                optionNameAr: variationOptions.optionNameAr,
+                optionNameFr: variationOptions.optionNameFr,
+                additionalPrice: variationOptions.additionalPrice,
+                variationId: foodVariations.id,
+                variationName: foodVariations.name,
+                variationNameAr: foodVariations.nameAr,
+                variationNameFr: foodVariations.nameFr,
+            })
+            .from(variationOptions)
+            .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
+            .where(inArray(variationOptions.id, Array.from(allCheckoutOptionIds)))
+        : [];
+
+    const optionsWithParentMap = new Map(optionsWithParent.map(o => [o.optionId, o]));
+
     // Batch fetch addon prices (channel pricing does not cover addons)
     const addonsListDb = allAddonIds.length > 0
         ? await db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)]))
@@ -339,7 +457,11 @@ export const checkout = async (req: Request | any, res: Response) => {
                 for (const v of parsedVariations) {
                     if (v.optionId) {
                         const opt = optMap.get(v.optionId);
-                        if (opt) { varPrice += parseFloat(opt.additionalPrice as string || "0"); }
+                        if (opt) {
+                            const resolvedPrice = (opt.additionalPrice as string || "0");
+                            varPrice += parseFloat(resolvedPrice);
+                            v.additionalPrice = resolvedPrice;
+                        }
                     }
                 }
             }
@@ -364,13 +486,33 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
 
         initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * cartItem.quantity;
+
+        const detailedVariations = parsedVariations.map((v: any) => {
+            const optDetails = optionsWithParentMap.get(v.optionId);
+            if (!optDetails) return v;
+            
+            const resolvedPrice = v.additionalPrice || optDetails.additionalPrice || "0.00";
+
+            return {
+                variationId: optDetails.variationId,
+                variationName: optDetails.variationName,
+                variationNameAr: optDetails.variationNameAr,
+                variationNameFr: optDetails.variationNameFr,
+                optionId: optDetails.optionId,
+                optionName: optDetails.optionName,
+                optionNameAr: optDetails.optionNameAr,
+                optionNameFr: optDetails.optionNameFr,
+                price: Number(resolvedPrice).toFixed(2)
+            };
+        });
+
         itemsWithData.push({
             cartItem,
             foodItem,
             originalBasePrice,
             varPrice,
             addonPrice,
-            vars: parsedVariations,
+            vars: detailedVariations,
             addonsList: parsedAddons,
             itemIsAvailable,
         });
@@ -987,6 +1129,8 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             .from(orderItems)
             .leftJoin(food, eq(orderItems.foodId, food.id))
             .where(inArray(orderItems.orderId, orderIds));
+            
+        allItems = await formatOrderItemsVariations(allItems);
     }
 
     // Return branch name or address depending on orderType
@@ -1102,6 +1246,8 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             .from(orderItems)
             .leftJoin(food, eq(orderItems.foodId, food.id))
             .where(inArray(orderItems.orderId, orderIds));
+            
+        allItems = await formatOrderItemsVariations(allItems);
     }
 
     // Return branch name or address depending on orderType
@@ -1238,54 +1384,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
         .where(eq(orderItems.orderId, orderId));
 
     // 2. معالجة الـ Variations واستخراج أسماء الفارييشنز وتفاصيلها كاملة
-    const formattedItems = await Promise.all(
-        itemsRaw.map(async (item) => {
-            let cleanVariations = item.variations;
-            
-            // فك التشفير إذا كانت مفكوكة كـ String
-            if (typeof cleanVariations === 'string') {
-                try {
-                    cleanVariations = JSON.parse(cleanVariations);
-                    if (typeof cleanVariations === 'string') cleanVariations = JSON.parse(cleanVariations);
-                } catch (e) {}
-            }
-
-            let variationDetails: any[] = [];
-
-            if (Array.isArray(cleanVariations) && cleanVariations.length > 0) {
-                // استخراج جميع الـ optionIds الموجودة بالـ Item
-                const optionIds = cleanVariations
-                    .map((v: any) => v.optionId || v.id)
-                    .filter(Boolean);
-
-                if (optionIds.length > 0) {
-                    // جلب بيانات الخيار مضافًا إليها بيانات الفارييشن الأب (Variation Name) عبر Join
-                    const optionsWithParent = await db
-                        .select({
-                            optionId: variationOptions.id,
-                            optionName: variationOptions.optionName,
-                            optionNameAr: variationOptions.optionNameAr,
-                            optionNameFr: variationOptions.optionNameFr,
-                            additionalPrice: variationOptions.additionalPrice,
-                            variationId: foodVariations.id,
-                            variationName: foodVariations.name,
-                            variationNameAr: foodVariations.nameAr,
-                            variationNameFr: foodVariations.nameFr,
-                        })
-                        .from(variationOptions)
-                        .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
-                        .where(inArray(variationOptions.id, optionIds));
-
-                    variationDetails = optionsWithParent;
-                }
-            }
-
-            return {
-                ...item,
-                variations: variationDetails // إرجاع مصفوفة تفاصيل الفارييشن بالأسماء كاملة
-            };
-        })
-    );
+    const formattedItems = await formatOrderItemsVariations(itemsRaw);
 
     return SuccessResponse(res, {
         data: {
