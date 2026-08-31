@@ -17,10 +17,27 @@ const getMyNotifications = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
+    // ✅ عدم إرجاع الإشعارات المقروءة (أو التصفية بحسب isRead / unreadOnly / all)
+    const isReadParam = req.query.isRead;
+    const unreadOnlyParam = req.query.unreadOnly;
+    const conditions = [
+        (0, drizzle_orm_1.eq)(schema_1.notifications.recipientType, "superadmin"),
+        (0, drizzle_orm_1.eq)(schema_1.notifications.recipientId, "superadmin")
+    ];
+    if (isReadParam === "false" || unreadOnlyParam === "true") {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.notifications.isRead, false));
+    }
+    else if (isReadParam === "true") {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.notifications.isRead, true));
+    }
+    else if (req.query.all !== "true") {
+        // افتراضياً: استبعاد الإشعارات المقروءة (عدم إرجاع الإشعار إذا قُرئ)
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.notifications.isRead, false));
+    }
     const adminNotifications = await connection_1.db
         .select()
         .from(schema_1.notifications)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.notifications.recipientType, "superadmin"), (0, drizzle_orm_1.eq)(schema_1.notifications.recipientId, "superadmin")))
+        .where((0, drizzle_orm_1.and)(...conditions))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.notifications.createdAt))
         .limit(limit)
         .offset(offset);

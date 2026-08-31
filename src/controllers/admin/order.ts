@@ -464,37 +464,42 @@ export const getOrderDetails = async (req: Request, res: Response) => {
 
         if (Array.isArray(cleanVariations) && cleanVariations.length > 0) {
             cleanVariations = await Promise.all(cleanVariations.map(async (v: any) => {
-                let variationName = "Unknown";
-                let variationNameAr = "غير معروف";
-                let optionName = "Unknown";
-                let optionNameAr = "غير معروف";
+                let variationName = v.variationName || "Unknown";
+                let variationNameAr = v.variationNameAr || "غير معروف";
+                let optionName = v.optionName || "Unknown";
+                let optionNameAr = v.optionNameAr || "غير معروف";
+                let price = parseFloat(v.price || v.additionalPrice || "0");
 
-                if (v.variationId) {
-                    const [varDb] = await db.select().from(foodVariations).where(eq(foodVariations.id, v.variationId)).limit(1);
-                    if (varDb) {
-                        variationName = varDb.name || variationName;
-                        variationNameAr = varDb.nameAr || variationNameAr;
+                const hasSnapshotDetails = Boolean(v.variationName && v.optionName);
+
+                if (!hasSnapshotDetails) {
+                    if (v.variationId) {
+                        const [varDb] = await db.select().from(foodVariations).where(eq(foodVariations.id, v.variationId)).limit(1);
+                        if (varDb) {
+                            variationName = varDb.name || variationName;
+                            variationNameAr = varDb.nameAr || variationNameAr;
+                        }
+                    }
+
+                    if (v.optionId) {
+                        const [optDb] = await db.select().from(variationOptions).where(eq(variationOptions.id, v.optionId)).limit(1);
+                        if (optDb) {
+                            optionName = optDb.optionName || optionName;
+                            optionNameAr = optDb.optionNameAr || optionNameAr;
+                            price = parseFloat((optDb as any).price || optDb.additionalPrice || "0");
+                        }
                     }
                 }
 
-                if (v.optionId) {
-                    const [optDb] = await db.select().from(variationOptions).where(eq(variationOptions.id, v.optionId)).limit(1);
-                    if (optDb) {
-                        optionName = optDb.optionName || optionName;
-                        optionNameAr = optDb.optionNameAr || optionNameAr;
-
-                        // 💰 جلب سعر الفارييشن
-                        const price = parseFloat((optDb as any).price || optDb.additionalPrice || "0");
-                        totalCalculatedVarPrice += price;
-                    }
-                }
+                totalCalculatedVarPrice += price;
 
                 return {
                     ...v,
                     variationName,
                     variationNameAr,
                     optionName,
-                    optionNameAr
+                    optionNameAr,
+                    price: price.toString()
                 };
             }));
         }
@@ -1111,7 +1116,12 @@ export const generateOrderInvoicePDF = async (req: Request, res: Response) => {
 
         if (Array.isArray(cleanVariations) && cleanVariations.length > 0) {
             await Promise.all(cleanVariations.map(async (v: any) => {
-                if (v.optionId) {
+                if (v.optionName) {
+                    const name = v.optionName;
+                    const price = parseFloat(v.price || v.additionalPrice || "0");
+                    varDetails.push({ name, price });
+                    totalCalculatedVarPrice += price;
+                } else if (v.optionId) {
                     const [optDb] = await db.select().from(variationOptions).where(eq(variationOptions.id, v.optionId)).limit(1);
                     if (optDb) {
                         const name = optDb.optionName || "Extra";

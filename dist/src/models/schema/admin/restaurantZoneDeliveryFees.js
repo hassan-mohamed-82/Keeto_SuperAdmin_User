@@ -6,9 +6,11 @@ const drizzle_orm_1 = require("drizzle-orm");
 const zone_1 = require("./zone");
 const restaurants_1 = require("./restaurants");
 const city_1 = require("./city");
+const branches_1 = require("./branches");
 exports.restaurantZoneDeliveryFees = (0, mysql_core_1.mysqlTable)("restaurant_zone_delivery_fees", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 }).references(() => restaurants_1.restaurants.id).notNull(),
+    branchId: (0, mysql_core_1.char)("branch_id", { length: 36 }).references(() => branches_1.branches.id),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }).references(() => zone_1.zones.id).notNull(),
     cityId: (0, mysql_core_1.char)("city_id", { length: 36 }).references(() => city_1.cities.id).notNull(),
     // نوع التغطية المعتمد للمطعم في هذه الزون (نقاط أو نصف قطر)

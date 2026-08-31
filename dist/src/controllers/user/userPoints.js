@@ -150,7 +150,7 @@ const generateRedeemCode = async (req, res) => {
             userId,
             restaurantId,
             // branchId,
-            orderSource: "online_order",
+            orderSource: "online_order_web",
             paymentMethod: null,
             orderType: "takeaway",
             subtotal: "0.00",

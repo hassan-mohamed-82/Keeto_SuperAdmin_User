@@ -16,9 +16,18 @@ const client = new google_auth_library_1.OAuth2Client(process.env.GOOGLE_CLIENT_
 const verifyGoogleToken = async (req, res) => {
     const { token, restaurantId } = req.body;
     try {
+        // const ticket = await client.verifyIdToken({
+        //   idToken: token,
+        //   audience: process.env.GOOGLE_CLIENT_ID,
+        // });
+        // بدل كود client.verifyIdToken الحالي:
         const ticket = await client.verifyIdToken({
             idToken: token,
-            audience: process.env.GOOGLE_CLIENT_ID,
+            audience: [
+                process.env.GOOGLE_CLIENT_ID_WEB,
+                process.env.GOOGLE_CLIENT_ID_IOS,
+                process.env.GOOGLE_CLIENT_ID_ANDROID,
+            ],
         });
         const payload = ticket.getPayload();
         if (!payload) {
@@ -47,6 +56,7 @@ const verifyGoogleToken = async (req, res) => {
                 email,
                 name,
                 isVerified: true,
+                isProfileComplete: true,
             });
             user = {
                 id: newId,
@@ -63,6 +73,7 @@ const verifyGoogleToken = async (req, res) => {
                 createdAt: new Date(),
                 facebookId: null,
                 appleId: null,
+                isProfileComplete: true,
                 isDeleted: false,
                 deletedAt: null
             };
@@ -70,9 +81,17 @@ const verifyGoogleToken = async (req, res) => {
         else {
             // 👤 Login (existing user)
             // لو المستخدم كان موجود بالإيميل بس ومفيش googleId نخزنه
-            if (!user.googleId) {
-                await connection_1.db.update(schema_1.users).set({ googleId }).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
-                user.googleId = googleId;
+            const updates = {};
+            if (!user.googleId)
+                updates.googleId = googleId;
+            if (!user.isProfileComplete)
+                updates.isProfileComplete = true;
+            if (Object.keys(updates).length > 0) {
+                await connection_1.db.update(schema_1.users).set(updates).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
+                if (updates.googleId)
+                    user.googleId = googleId;
+                if (updates.isProfileComplete)
+                    user.isProfileComplete = true;
             }
         }
         // 🚫 Check if user is blocked
@@ -80,12 +99,17 @@ const verifyGoogleToken = async (req, res) => {
             return res.status(403).json({ success: false, message: "Your account has been blocked. Please contact support." });
         }
         // 🔗 Link to restaurant if restaurantId is provided
-        if (restaurantId && isNewUser) {
-            const existingLink = await connection_1.db.select().from(schema_1.restaurant_users)
+        if (restaurantId) {
+            const existingLink = await connection_1.db
+                .select()
+                .from(schema_1.restaurant_users)
                 .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurant_users.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurant_users.userId, user.id)))
                 .limit(1);
             if (existingLink.length === 0) {
-                await connection_1.db.insert(schema_1.restaurant_users).values({ restaurantId, userId: user.id });
+                await connection_1.db.insert(schema_1.restaurant_users).values({
+                    restaurantId,
+                    userId: user.id,
+                });
             }
         }
         // 🔑 Generate JWT (تم التعديل هنا ✅)
@@ -105,6 +129,7 @@ const verifyGoogleToken = async (req, res) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
+                isProfileComplete: user.isProfileComplete ?? true,
             },
         });
     }

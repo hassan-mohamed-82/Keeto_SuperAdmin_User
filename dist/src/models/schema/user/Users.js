@@ -21,6 +21,7 @@ exports.users = (0, mysql_core_1.mysqlTable)("users", {
     facebookId: (0, mysql_core_1.varchar)("facebook_id", { length: 255 }).unique(),
     googleId: (0, mysql_core_1.varchar)("google_id", { length: 255 }).unique(),
     isVerified: (0, mysql_core_1.boolean)("is_verified").default(false),
+    isProfileComplete: (0, mysql_core_1.boolean)("is_profile_complete").default(false),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "blocked"]).default("active"),
     isDeleted: (0, mysql_core_1.boolean)("is_deleted").default(false),
     deletedAt: (0, mysql_core_1.timestamp)("deleted_at"),

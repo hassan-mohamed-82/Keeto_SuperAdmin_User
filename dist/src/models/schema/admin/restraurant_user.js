@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.restaurant_users = void 0;
-// models/restaurantWallet.ts
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 const restaurants_1 = require("./restaurants");
@@ -13,5 +12,8 @@ exports.restaurant_users = (0, mysql_core_1.mysqlTable)("restaurant_users", {
         .notNull(),
     userId: (0, mysql_core_1.char)("user_id", { length: 36 })
         .references(() => Users_1.users.id)
-        .notNull()
+        .notNull(),
+    status: (0, mysql_core_1.mysqlEnum)("status", ["active", "blocked"]).default("active").notNull(),
+    createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
+    updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow()
 });

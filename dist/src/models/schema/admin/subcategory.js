@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.subcategories = void 0;
+exports.branchSubcategories = exports.subcategories = void 0;
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 const Category_1 = require("./Category");
 const restaurants_1 = require("./restaurants");
+const branches_1 = require("./branches");
 exports.subcategories = (0, mysql_core_1.mysqlTable)("subcategories", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 }).references(() => restaurants_1.restaurants.id),
@@ -19,3 +20,17 @@ exports.subcategories = (0, mysql_core_1.mysqlTable)("subcategories", {
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });
+exports.branchSubcategories = (0, mysql_core_1.mysqlTable)("branch_subcategories", {
+    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
+    branchId: (0, mysql_core_1.char)("branch_id", { length: 36 })
+        .references(() => branches_1.branches.id)
+        .notNull(),
+    subcategoryId: (0, mysql_core_1.char)("subcategory_id", { length: 36 })
+        .references(() => exports.subcategories.id)
+        .notNull(),
+    status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active").notNull(),
+    createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
+    updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
+}, (table) => ({
+    branchSubcategoryIdx: (0, mysql_core_1.uniqueIndex)("unique_branch_subcategory").on(table.branchId, table.subcategoryId),
+}));

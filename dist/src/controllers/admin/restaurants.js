@@ -84,7 +84,7 @@ const adjustSalesRepPoints = async (tx, salesId, delta) => {
 // ==========================================
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
-    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans, type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, cityId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans, type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor } = req.body;
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
     if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
@@ -136,6 +136,7 @@ const createRestaurant = async (req, res) => {
             addressFr: clean(addressFr),
             cuisineId: parsedCuisines,
             zoneId: zoneId ? clean(zoneId) : null,
+            cityId: cityId ? clean(cityId) : null,
             type: restaurantType, // 👈 حفظ نوع المطعم (Default C)
             salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
             ownerposition: ownerposition ? clean(ownerposition) : null, // 👈 حفظ منصب المالك
@@ -200,6 +201,9 @@ const createRestaurant = async (req, res) => {
                     annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
                     commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
                     serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
+                    // حالة المنصة (خاصة بـ food_aggregator و mykeeto)
+                    aggregatorStatus: (plan.aggregatorStatus === "inactive" ? "inactive" : "active"),
+                    mykeetoStatus: (plan.mykeetoStatus === "inactive" ? "inactive" : "active"),
                 };
                 await tx.insert(schema_1.restaurantBusinessPlans).values(newPlan);
                 plansToReturn.push(newPlan); // إضافة الخطة للمصفوفة الراجعة
@@ -209,6 +213,8 @@ const createRestaurant = async (req, res) => {
             restaurantId,
             firstColor: firstColor ? clean(firstColor) : null,
             secondColor: secondColor ? clean(secondColor) : null,
+            firstTextColor: firstTextColor ? clean(firstTextColor) : null,
+            secondTextColor: secondTextColor ? clean(secondTextColor) : null,
         });
         await adjustSalesRepPoints(tx, salesId ? clean(salesId) : null, pointsToAward);
     });
@@ -250,6 +256,7 @@ const getAllRestaurants = async (req, res) => {
         ownerposition: schema_1.restaurants.ownerposition, // 👈 استرجاع منصب المالك
         cuisineIds: schema_1.restaurants.cuisineId,
         email: schema_1.restrauntadmin.email,
+        city: { id: schema_1.cities.id, name: schema_1.cities.name, nameAr: schema_1.cities.nameAr, nameFr: schema_1.cities.nameFr },
         zone_id: schema_1.zones.id,
         zone_name: schema_1.zones.name,
         likes: schema_1.restaurants.likes,
@@ -260,6 +267,7 @@ const getAllRestaurants = async (req, res) => {
         androidApp: schema_1.restaurants.androidApp,
     })
         .from(schema_1.restaurants)
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurants.zoneId, schema_1.zones.id))
         .leftJoin(schema_1.restrauntadmin, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restrauntadmin.restaurantId), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")));
     const allCuisinesList = await connection_1.db.select({
@@ -299,6 +307,7 @@ const getAllRestaurants = async (req, res) => {
             cuisines: parsedCuisines.map((id) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
             businessPlans: plansMap.get(r.id) || [],
             zone: r.zone_id ? { id: r.zone_id, name: r.zone_name } : null,
+            city: r.city ? { id: r.city.id, name: r.city.name, nameAr: r.city.nameAr, nameFr: r.city.nameFr } : null,
             likes: r.likes,
             facebookLink: r.facebookLink || null,
             orderLink: r.orderLink || null,
@@ -319,6 +328,7 @@ const getRestaurantById = async (req, res) => {
         .select({
         restaurantObj: schema_1.restaurants,
         zoneObj: schema_1.zones,
+        cityObj: schema_1.cities,
         salesObj: schema_1.sales,
         ownerEmail: schema_1.restrauntadmin.email,
         settingsObj: schema_1.restaurantSettings,
@@ -326,6 +336,7 @@ const getRestaurantById = async (req, res) => {
         .from(schema_1.restaurants)
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurants.zoneId, schema_1.zones.id))
         .leftJoin(schema_1.sales, (0, drizzle_orm_1.eq)(schema_1.restaurants.salesId, schema_1.sales.id))
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
         .leftJoin(schema_1.restrauntadmin, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restrauntadmin.restaurantId), (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.type, "owner")))
         .leftJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantSettings.restaurantId))
         .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id))
@@ -354,8 +365,11 @@ const getRestaurantById = async (req, res) => {
         cuisines: restaurantCuisines,
         businessPlans: restaurantPlans,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
+        city: row.cityObj ? { id: row.cityObj.id, name: row.cityObj.name, nameAr: row.cityObj.nameAr, nameFr: row.cityObj.nameFr } : null,
         firstColor: row.settingsObj?.firstColor || null,
         secondColor: row.settingsObj?.secondColor || null,
+        firstTextColor: row.settingsObj?.firstTextColor || null,
+        secondTextColor: row.settingsObj?.secondTextColor || null,
     };
     delete formattedRestaurant.cuisineId;
     return (0, response_1.SuccessResponse)(res, { message: "Get restaurant by id success", data: formattedRestaurant });
@@ -367,8 +381,7 @@ exports.getRestaurantById = getRestaurantById;
 const updateRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
     const { id } = req.params;
-    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm, type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor // 👈 استلام الحقول الجديدة في الـ Update
-     } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm, type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId } = req.body;
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
     const [existingRestaurant] = await connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id)).limit(1);
     if (!existingRestaurant)
@@ -489,6 +502,10 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.iosApp = iosApp;
     if (androidApp !== undefined)
         restaurantUpdateData.androidApp = androidApp;
+    if (cityId !== undefined)
+        restaurantUpdateData.cityId = (cityId && clean(cityId)) ? clean(cityId) : null;
+    if (zoneId !== undefined)
+        restaurantUpdateData.zoneId = (zoneId && clean(zoneId)) ? clean(zoneId) : null;
     await connection_1.db.transaction(async (tx) => {
         if (Object.keys(restaurantUpdateData).length > 1) {
             await tx.update(schema_1.restaurants).set(restaurantUpdateData).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id));
@@ -496,12 +513,16 @@ const updateRestaurant = async (req, res) => {
         if (existingOwner && Object.keys(ownerUpdateData).length > 1) {
             await tx.update(schema_1.restrauntadmin).set(ownerUpdateData).where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.id, existingOwner.id));
         }
-        if (firstColor !== undefined || secondColor !== undefined) {
+        if (firstColor !== undefined || secondColor !== undefined || firstTextColor !== undefined || secondTextColor !== undefined) {
             const settingsUpdateData = {};
             if (firstColor !== undefined)
                 settingsUpdateData.firstColor = (firstColor === "" || firstColor === null) ? null : clean(firstColor);
             if (secondColor !== undefined)
                 settingsUpdateData.secondColor = (secondColor === "" || secondColor === null) ? null : clean(secondColor);
+            if (firstTextColor !== undefined)
+                settingsUpdateData.firstTextColor = (firstTextColor === "" || firstTextColor === null) ? null : clean(firstTextColor);
+            if (secondTextColor !== undefined)
+                settingsUpdateData.secondTextColor = (secondTextColor === "" || secondTextColor === null) ? null : clean(secondTextColor);
             if (Object.keys(settingsUpdateData).length > 0) {
                 const existingSettings = await tx.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, id)).limit(1);
                 if (existingSettings.length > 0) {
@@ -531,6 +552,9 @@ const updateRestaurant = async (req, res) => {
                         annuallyAmount: plan.annuallyAmount ? String(plan.annuallyAmount) : "0.00",
                         commissionRate: plan.commissionRate ? String(plan.commissionRate) : "0.00",
                         serviceFee: plan.serviceFee ? String(plan.serviceFee) : "0.00",
+                        // حالة المنصة (خاصة بـ food_aggregator و mykeeto)
+                        aggregatorStatus: plan.aggregatorStatus === "inactive" ? "inactive" : "active",
+                        mykeetoStatus: plan.mykeetoStatus === "inactive" ? "inactive" : "active",
                     });
                 }
             }
@@ -597,6 +621,7 @@ const getActiveSales = async (req, res) => {
         .select({ id: schema_1.sales.id, name: schema_1.sales.name })
         .from(schema_1.sales)
         .where((0, drizzle_orm_1.eq)(schema_1.sales.status, "active"));
+    // const allCities = await db.select({ id: cities.id, name: cities.name, nameAr: cities.nameAr, nameFr: cities.nameFr }).from(cities).where(eq(cities.status, "active"));
     return (0, response_1.SuccessResponse)(res, { message: "Get all active sales success", data: activeSales });
 };
 exports.getActiveSales = getActiveSales;

@@ -16,8 +16,10 @@ exports.addresses = (0, mysql_core_1.mysqlTable)("addresses", {
     street: (0, mysql_core_1.varchar)("street", { length: 255 }).notNull(),
     number: (0, mysql_core_1.varchar)("number", { length: 20 }).notNull(),
     floor: (0, mysql_core_1.varchar)("floor", { length: 20 }),
+    apartment: (0, mysql_core_1.varchar)("apartment", { length: 50 }),
     landmark: (0, mysql_core_1.varchar)("landmark", { length: 500 }),
     location: (0, mysql_core_1.varchar)("location", { length: 255 }),
+    fulladdress: (0, mysql_core_1.varchar)("fulladdress", { length: 500 }),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow(),
 });

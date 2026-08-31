@@ -5,6 +5,7 @@ const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 const zone_1 = require("./zone");
 const sales_1 = require("./sales");
+const city_1 = require("./city");
 exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     fcmToken: (0, mysql_core_1.text)("fcm_token"),
@@ -15,6 +16,7 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     addressAr: (0, mysql_core_1.text)("address_ar").default(''),
     addressFr: (0, mysql_core_1.text)("address_fr").default(''),
     cuisineId: (0, mysql_core_1.json)("cuisine_id").$type().default([]),
+    cityId: (0, mysql_core_1.char)("city_id", { length: 36 }).references(() => city_1.cities.id),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }).references(() => zone_1.zones.id),
     type: (0, mysql_core_1.mysqlEnum)("type", ["mega", "super", "A", "B", "C", "C-", "test"]).default("C"),
     salesId: (0, mysql_core_1.char)("sales_id", { length: 36 }).references(() => sales_1.sales.id),

@@ -14,6 +14,7 @@ const generateUserToken = (data) => {
         id: data.id,
         name: data.name,
         role: "user",
+        restaurantId: data.restaurantId || null
     }, JWT_SECRET, { expiresIn: "30d" });
 };
 exports.generateUserToken = generateUserToken;

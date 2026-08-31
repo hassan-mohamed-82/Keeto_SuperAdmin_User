@@ -11,6 +11,8 @@ const getRestaurantSettings = async (req, res) => {
     const [settings] = await connection_1.db.select({
         firstColor: schema_1.restaurantSettings.firstColor,
         secondColor: schema_1.restaurantSettings.secondColor,
+        firstTextColor: schema_1.restaurantSettings.firstTextColor,
+        secondTextColor: schema_1.restaurantSettings.secondTextColor,
     })
         .from(schema_1.restaurantSettings)
         .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))

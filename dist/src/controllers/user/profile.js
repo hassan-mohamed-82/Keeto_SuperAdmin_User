@@ -14,6 +14,7 @@ const getProfile = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
+    const restaurantId = req.query?.restaurantId;
     // 1. Fetch User Profile Info
     const [userInfo] = await connection_1.db
         .select({
@@ -24,6 +25,7 @@ const getProfile = async (req, res) => {
         alternatePhone: schema_1.users.alternatePhone,
         photo: schema_1.users.photo,
         isVerified: schema_1.users.isVerified,
+        isProfileComplete: schema_1.users.isProfileComplete,
         createdAt: schema_1.users.createdAt,
     })
         .from(schema_1.users)
@@ -44,16 +46,38 @@ const getProfile = async (req, res) => {
         street: schema_1.addresses.street,
         number: schema_1.addresses.number,
         floor: schema_1.addresses.floor,
+        apartment: schema_1.addresses.apartment,
         landmark: schema_1.addresses.landmark,
         location: schema_1.addresses.location,
+        fulladdress: schema_1.addresses.fulladdress,
+        zone: {
+            id: schema_1.zones.id,
+            name: schema_1.zones.name,
+            nameAr: schema_1.zones.nameAr,
+            nameFr: schema_1.zones.nameFr,
+            displayName: schema_1.zones.displayName,
+            displayNameAr: schema_1.zones.displayNameAr,
+            displayNameFr: schema_1.zones.displayNameFr,
+        },
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr,
+        }
     })
         .from(schema_1.addresses)
+        .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.addresses.zoneId, schema_1.zones.id))
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.zones.cityId, schema_1.cities.id))
         .where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId));
-    // 3. Fetch Orders Count
+    // 3. Fetch Orders Count (scoped to a restaurant if restaurantId query param is provided)
+    const ordersCountCondition = restaurantId
+        ? (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId))
+        : (0, drizzle_orm_1.eq)(schema_1.orders.userId, userId);
     const [ordersCount] = await connection_1.db
         .select({ count: (0, drizzle_orm_1.sql) `COUNT(*)` })
         .from(schema_1.orders)
-        .where((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId));
+        .where(ordersCountCondition);
     // 4. Fetch User Wallet Balance
     const [wallet] = await connection_1.db
         .select({
@@ -71,7 +95,7 @@ const getProfile = async (req, res) => {
     //     .from(userRestaurantPoints)
     //     .leftJoin(restaurants, eq(restaurants.id, userRestaurantPoints.restaurantId))
     //     .where(eq(userRestaurantPoints.userId, userId));
-    const isProfileComplete = !(userInfo.email && userInfo.email.endsWith("@privaterelay.appleid.com"));
+    const isProfileComplete = userInfo.isProfileComplete || !(userInfo.email && userInfo.email.endsWith("@privaterelay.appleid.com"));
     return (0, response_1.SuccessResponse)(res, {
         data: {
             user: {
@@ -129,10 +153,10 @@ const updateProfile = async (req, res) => {
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
     const { name, phone, email, photo, alternatePhone } = req.body;
-    await connection_1.db.update(schema_1.users)
-        .set({ name, phone, email, photo, alternatePhone })
-        .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
     const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
+    await connection_1.db.update(schema_1.users)
+        .set({ name, phone, email, photo, alternatePhone, isProfileComplete })
+        .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
     return (0, response_1.SuccessResponse)(res, { message: "Profile updated successfully", data: { isProfileComplete } });
 };
 exports.updateProfile = updateProfile;

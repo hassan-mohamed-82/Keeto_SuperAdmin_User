@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const platform_1 = require("../../controllers/admin/platform");
+const router = (0, express_1.Router)();
+router.post("/", platform_1.createPlatform);
+router.get("/", platform_1.getAllPlatforms);
+router.get("/:id", platform_1.getPlatformById);
+router.put("/:id", platform_1.updatePlatform);
+router.delete("/:id", platform_1.deletePlatform);
+exports.default = router;

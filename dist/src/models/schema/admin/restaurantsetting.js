@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.restaurantSchedules = exports.restaurantSettings = void 0;
+const drizzle_orm_1 = require("drizzle-orm");
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 // 1. جدول الإعدادات العامة
 exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings", {
@@ -19,6 +20,8 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     dineIn: (0, mysql_core_1.boolean)("dine_in").default(false),
     firstColor: (0, mysql_core_1.varchar)("first_color", { length: 20 }),
     secondColor: (0, mysql_core_1.varchar)("second_color", { length: 20 }),
+    firstTextColor: (0, mysql_core_1.varchar)("first_text_color", { length: 20 }),
+    secondTextColor: (0, mysql_core_1.varchar)("second_text_color", { length: 20 }),
     vegType: (0, mysql_core_1.mysqlEnum)("veg_type", ["VEG", "NON_VEG", "BOTH"]).default("BOTH"),
     canEditOrder: (0, mysql_core_1.boolean)("can_edit_order").default(false),
     minOrderAmount: (0, mysql_core_1.decimal)("min_order_amount", { precision: 10, scale: 2 }).default("0.00"),
@@ -27,6 +30,12 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     isAlwaysOpen: (0, mysql_core_1.boolean)("is_always_open").default(false),
     isSameTimeEveryDay: (0, mysql_core_1.boolean)("is_same_time_every_day").default(false),
     isTemporarilyClosed: (0, mysql_core_1.boolean)("is_temporarily_closed").default(false),
+    repeatNotification: (0, mysql_core_1.boolean)("repeat_notification").default(false),
+    repeatNotificationDuration: (0, mysql_core_1.int)("repeat_notification_duration").default(20),
+    repeatNotificationStatuses: (0, mysql_core_1.json)("repeat_notification_statuses")
+        .$type()
+        .default(["pending"]), // pending, accepted, preparing, out_for_delivery
+    resetDailyOrderNumberTime: (0, mysql_core_1.varchar)("reset_daily_order_number_time", { length: 5 }).default((0, drizzle_orm_1.sql) `NULL`),
 });
 // 2. جدول مواعيد العمل (يدعم الفترات المتعددة)
 exports.restaurantSchedules = (0, mysql_core_1.mysqlTable)("restaurant_schedules", {

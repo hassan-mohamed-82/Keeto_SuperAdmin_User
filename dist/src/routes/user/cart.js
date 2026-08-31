@@ -4,6 +4,7 @@ const express_1 = require("express");
 const cart_1 = require("../../controllers/user/cart");
 const catchAsync_1 = require("../../utils/catchAsync");
 const router = (0, express_1.Router)();
+router.post("/validate-pricing", (0, catchAsync_1.catchAsync)(cart_1.validateCartPricing));
 router.post("/", (0, catchAsync_1.catchAsync)(cart_1.addToCart));
 router.get("/", (0, catchAsync_1.catchAsync)(cart_1.getCart));
 router.put("/:cartItemId", (0, catchAsync_1.catchAsync)(cart_1.updateCartItem));

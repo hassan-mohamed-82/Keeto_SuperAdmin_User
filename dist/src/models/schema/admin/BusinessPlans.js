@@ -8,7 +8,7 @@ exports.restaurantBusinessPlans = (0, mysql_core_1.mysqlTable)("restaurant_busin
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 }).references(() => restaurants_1.restaurants.id).notNull(),
     // 💡 التعديل هنا: زودنا "pos"
-    platformType: (0, mysql_core_1.mysqlEnum)("platform_type", ["online_order", "food_aggregator", "mykeeto", "pos"]).notNull(),
+    platformType: (0, mysql_core_1.mysqlEnum)("platform_type", ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"]).notNull(),
     // الاشتراكات
     isMonthlyActive: (0, mysql_core_1.boolean)("is_monthly_active").default(false),
     monthlyAmount: (0, mysql_core_1.decimal)("monthly_amount", { precision: 10, scale: 2 }).default("0.00"),
@@ -19,6 +19,9 @@ exports.restaurantBusinessPlans = (0, mysql_core_1.mysqlTable)("restaurant_busin
     // العمولات والرسوم
     commissionRate: (0, mysql_core_1.decimal)("commission_rate", { precision: 5, scale: 2 }).default("0.00"),
     serviceFee: (0, mysql_core_1.decimal)("service_fee", { precision: 10, scale: 2 }).default("0.00"),
+    // حالة المنصة (خاص بـ food_aggregator و mykeeto فقط)
+    aggregatorStatus: (0, mysql_core_1.mysqlEnum)("aggregator_status", ["active", "inactive"]).default("active"),
+    mykeetoStatus: (0, mysql_core_1.mysqlEnum)("mykeeto_status", ["active", "inactive"]).default("active"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

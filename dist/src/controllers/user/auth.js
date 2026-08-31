@@ -25,7 +25,7 @@ const generateOTP = (length = 6) => {
 // 1. Signup
 // ===================================
 const signup = async (req, res) => {
-    const { name, email, phone, password, photo, restaurantId } = req.body;
+    const { name, email, phone, alternatePhone, password, photo, restaurantId } = req.body;
     if (!name || !email || !phone || !password) {
         throw new BadRequest_1.BadRequest("Please provide all required fields");
     }
@@ -36,7 +36,6 @@ const signup = async (req, res) => {
     // استدعاء الرابط من البيئة، وإذا لم يوجد نستخدم لوكال هوست كاحتياط
     const baseUrl = process.env.BASE_URL || "http://localhost:3000";
     const token = (0, uuid_1.v4)();
-    // ✅ الآن الرابط سيتغير تلقائياً بناءً على مكان تشغيل الكود
     const verifyLink = `${baseUrl}/api/user/auth/verify-email?token=${token}`;
     await connection_1.db.transaction(async (tx) => {
         if (existingUser) {
@@ -46,8 +45,10 @@ const signup = async (req, res) => {
             await tx.update(schema_1.users).set({
                 name,
                 phone,
+                alternatePhone,
                 password: hashedPassword,
                 photo,
+                isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
             }).where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
             // delete old tokens
             await tx.delete(schema_1.emailVerifications).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.emailVerifications.userId, userId), (0, drizzle_orm_1.eq)(schema_1.emailVerifications.purpose, "verify_email")));
@@ -58,18 +59,26 @@ const signup = async (req, res) => {
                 name,
                 email,
                 phone,
+                alternatePhone,
                 password: hashedPassword,
                 photo,
-                isVerified: false
+                isVerified: false,
+                isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
             });
         }
+        // if (restaurantId) {
+        //     const [existingLink] = await tx.select().from(restaurant_users)
+        //         .where(and(eq(restaurant_users.restaurantId, restaurantId), eq(restaurant_users.userId, userId)))
+        //         .limit(1);
+        //     if (!existingLink) {
+        //         await tx.insert(restaurant_users).values({ restaurantId, userId });
+        //     }
+        // }
+        // ✅ تحسين: إضافة مباشرة مع تجاهل التكرار لتوفير الـ Query
         if (restaurantId) {
-            const [existingLink] = await tx.select().from(schema_1.restaurant_users)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurant_users.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurant_users.userId, userId)))
-                .limit(1);
-            if (!existingLink) {
-                await tx.insert(schema_1.restaurant_users).values({ restaurantId, userId });
-            }
+            await tx.insert(schema_1.restaurant_users)
+                .ignore()
+                .values({ restaurantId, userId });
         }
         const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
         await tx.insert(schema_1.emailVerifications).values({
@@ -193,14 +202,13 @@ exports.verifyEmail = verifyEmail;
 // 3. Login
 // ===================================
 const login = async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, restaurantId } = req.body;
     if (!email || !password)
         throw new BadRequest_1.BadRequest("Email and password are required");
     const [user] = await connection_1.db.select().from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.email, email)).limit(1);
     if (!user)
         throw new BadRequest_1.BadRequest("Invalid credentials");
     if (!user.isVerified) {
-        // ممكن نعيد إرسال الكود هنا لو أردت
         throw new BadRequest_1.BadRequest("Please verify your email before logging in");
     }
     const isMatch = await bcrypt_1.default.compare(password, user.password);
@@ -209,9 +217,33 @@ const login = async (req, res) => {
     if (user.status === "blocked") {
         throw new BadRequest_1.BadRequest("Your account has been blocked. Please contact support.");
     }
-    const token = (0, jwt_1.generateUserToken)({ id: user.id, name: user.name });
-    const isProfileComplete = !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
-    return (0, response_1.SuccessResponse)(res, { message: "Login successful", data: { token, user: { id: user.id, name: user.name, email: user.email, isProfileComplete } } });
+    // 🔗 ربط المستخدم بالمطعم (يتأكد من عدم التكرار حتى لليوزرز القدامى)
+    if (restaurantId) {
+        const existingLink = await connection_1.db.select().from(schema_1.restaurant_users)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurant_users.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurant_users.userId, user.id)))
+            .limit(1);
+        if (existingLink.length === 0) {
+            await connection_1.db.insert(schema_1.restaurant_users).values({ restaurantId, userId: user.id });
+        }
+    }
+    const token = (0, jwt_1.generateUserToken)({ id: user.id, name: user.name, restaurantId });
+    // For older users where DB default might be false, fallback to checking email
+    const isProfileComplete = user.isProfileComplete || !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
+    if (!user.isProfileComplete && isProfileComplete) {
+        await connection_1.db.update(schema_1.users).set({ isProfileComplete: true }).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
+    }
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Login successful",
+        data: {
+            token,
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                isProfileComplete
+            }
+        }
+    });
 };
 exports.login = login;
 // ===================================

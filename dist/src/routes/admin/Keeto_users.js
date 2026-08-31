@@ -4,6 +4,8 @@ const express_1 = require("express");
 const catchAsync_1 = require("../../utils/catchAsync");
 const Keeto_users_1 = require("../../controllers/admin/Keeto_users");
 const router = (0, express_1.Router)();
+router.get("/blocked", (0, catchAsync_1.catchAsync)(Keeto_users_1.getBlockedUsers));
+router.post("/restaurant-block", (0, catchAsync_1.catchAsync)(Keeto_users_1.toggleRestaurantUserBlock));
 router.get("/", (0, catchAsync_1.catchAsync)(Keeto_users_1.getAllUsers));
 router.get("/:id", (0, catchAsync_1.catchAsync)(Keeto_users_1.getUserById));
 router.put("/:id", (0, catchAsync_1.catchAsync)(Keeto_users_1.updateUser));

@@ -11,7 +11,7 @@ const uuid_1 = require("uuid");
 // 1. إنشاء سبب جديد (Create)
 // ==========================================
 const createReason = async (req, res) => {
-    const { name, status, type } = req.body;
+    const { name, name_ar, name_fr, status, type } = req.body;
     if (!name || !type) {
         throw new Errors_1.BadRequest("Reason name and type are required");
     }
@@ -19,6 +19,8 @@ const createReason = async (req, res) => {
     await connection_1.db.insert(schema_1.selectReasons).values({
         id,
         name,
+        nameAr: name_ar ?? "",
+        nameFr: name_fr ?? "",
         type,
         // لو مبعتش حالة، الديفولت هيكون active زي ما أنت عامل في الداتا بيز
         status: status || "active",
@@ -63,7 +65,7 @@ exports.getReasonById = getReasonById;
 // ==========================================
 const updateReason = async (req, res) => {
     const { id } = req.params;
-    const { name, status } = req.body;
+    const { name, name_ar, name_fr, status } = req.body;
     const [existing] = await connection_1.db.select().from(schema_1.selectReasons).where((0, drizzle_orm_1.eq)(schema_1.selectReasons.id, id));
     if (!existing) {
         throw new Errors_1.NotFound("Reason not found");
@@ -72,6 +74,10 @@ const updateReason = async (req, res) => {
     const updateData = {};
     if (name)
         updateData.name = name;
+    if (name_ar !== undefined)
+        updateData.nameAr = name_ar;
+    if (name_fr !== undefined)
+        updateData.nameFr = name_fr;
     if (status)
         updateData.status = status;
     await connection_1.db.update(schema_1.selectReasons)

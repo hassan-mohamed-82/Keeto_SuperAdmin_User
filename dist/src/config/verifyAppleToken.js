@@ -104,20 +104,31 @@ const verifyAppleToken = async (req, res) => {
             const finalEmail = email || `${appleId}@privaterelay.appleid.com`;
             const finalName = fullName || finalEmail.split("@")[0];
             const newId = (0, uuid_1.v4)();
+            const isProfileComplete = !(finalEmail && finalEmail.endsWith("@privaterelay.appleid.com"));
             await connection_1.db.insert(schema_1.users).values({
                 id: newId,
                 appleId,
                 email: finalEmail,
                 name: finalName,
                 isVerified: true,
+                isProfileComplete,
             });
             user = {
                 id: newId,
                 name: finalName,
                 email: finalEmail,
                 appleId,
+                isProfileComplete,
                 status: "active",
             };
+        }
+        else {
+            // If user exists and isProfileComplete was false but now email is real, update it
+            const shouldBeComplete = !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
+            if (!user.isProfileComplete && shouldBeComplete) {
+                await connection_1.db.update(schema_1.users).set({ isProfileComplete: true }).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
+                user.isProfileComplete = true;
+            }
         }
         // 6️⃣ Check account status
         if (user.status === "blocked") {
@@ -126,7 +137,7 @@ const verifyAppleToken = async (req, res) => {
                 message: "Your account has been blocked. Please contact support."
             });
         }
-        // 7️⃣ Link user to restaurant in multi-tenant table
+        // 7️⃣ Link user to restaurant in multi-tenant table (Always checks if relation exists regardless of new/old user)
         if (restaurantId) {
             const existingLink = await connection_1.db
                 .select()
@@ -155,6 +166,7 @@ const verifyAppleToken = async (req, res) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
+                isProfileComplete: user.isProfileComplete ?? !(user.email && user.email.endsWith("@privaterelay.appleid.com")),
             },
             restaurantId: restaurantId || null,
         });

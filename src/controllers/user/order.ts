@@ -490,7 +490,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         const detailedVariations = parsedVariations.map((v: any) => {
             const optDetails = optionsWithParentMap.get(v.optionId);
             if (!optDetails) return v;
-            
+
             const resolvedPrice = v.additionalPrice || optDetails.additionalPrice || "0.00";
 
             return {
@@ -816,8 +816,19 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 10. Execute Order (Transaction)
     // ==========================================
     const now = new Date();
+
+    // ⏰ Calculate the start of the current daily order numbering cycle using resetDailyOrderNumberTime.
+    const resetTimeStr = (settings as any)?.resetDailyOrderNumberTime || "00:00";
+    const [resetHour, resetMinute] = resetTimeStr.split(":").map(Number);
+    const safeResetHour = isNaN(resetHour) ? 0 : resetHour;
+    const safeResetMinute = isNaN(resetMinute) ? 0 : resetMinute;
+
     const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
+    startOfToday.setHours(safeResetHour, safeResetMinute, 0, 0);
+
+    if (now < startOfToday) {
+        startOfToday.setDate(startOfToday.getDate() - 1);
+    }
 
     let createdDailyOrderNumber = 1;
 
@@ -853,18 +864,21 @@ export const checkout = async (req: Request | any, res: Response) => {
             });
         }
 
-        // 🔒 2. Daily order number calculation
-        const [ordersCountResult] = await tx
-            .select({ count: sql<number>`count(${orders.id})` })
+        // 🔒 2. Daily order number calculation (Safe from Race Conditions)
+        const [lastOrder] = await tx
+            .select({ dailyOrderNumber: orders.dailyOrderNumber })
             .from(orders)
             .where(
                 and(
                     eq(orders.restaurantId, restaurantId),
                     gte(orders.createdAt, startOfToday)
                 )
-            );
+            )
+            .orderBy(desc(orders.dailyOrderNumber))
+            .limit(1)
+            .for("update");
 
-        createdDailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
+        createdDailyOrderNumber = (lastOrder?.dailyOrderNumber || 0) + 1;
 
         // 3. Create order record
         await tx.insert(orders).values({
@@ -1129,7 +1143,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             .from(orderItems)
             .leftJoin(food, eq(orderItems.foodId, food.id))
             .where(inArray(orderItems.orderId, orderIds));
-            
+
         allItems = await formatOrderItemsVariations(allItems);
     }
 
@@ -1246,7 +1260,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             .from(orderItems)
             .leftJoin(food, eq(orderItems.foodId, food.id))
             .where(inArray(orderItems.orderId, orderIds));
-            
+
         allItems = await formatOrderItemsVariations(allItems);
     }
 

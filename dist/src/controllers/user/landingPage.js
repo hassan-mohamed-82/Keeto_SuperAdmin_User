@@ -8,14 +8,16 @@ const response_1 = require("../../utils/response");
 const getActiveRestaurants = async (req, res) => {
     try {
         const activeRestaurants = await connection_1.db.select({
+            id: schema_1.restaurants.id,
             name: schema_1.restaurants.name,
             nameAr: schema_1.restaurants.nameAr,
             nameFr: schema_1.restaurants.nameFr,
             orderLink: schema_1.restaurants.orderLink,
-            logo: schema_1.restaurants.logo
+            logo: schema_1.restaurants.logo,
+            type: schema_1.restaurants.type
         })
             .from(schema_1.restaurants)
-            .where((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"));
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"), (0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered")));
         return (0, response_1.SuccessResponse)(res, {
             message: "Active restaurants fetched successfully",
             data: activeRestaurants

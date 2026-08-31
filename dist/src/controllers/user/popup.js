@@ -9,6 +9,7 @@ const response_1 = require("../../utils/response");
 // ─── Get All Active Popups (filtered by date and status) ───
 const getActivePopups = async (req, res) => {
     const now = new Date();
+    const { restaurantId } = req.params;
     const activePopups = await connection_1.db
         .select({
         id: popup_1.popup.id,
@@ -26,13 +27,13 @@ const getActivePopups = async (req, res) => {
         endDate: popup_1.popup.endDate,
     })
         .from(popup_1.popup)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(popup_1.popup.status, "active"), (0, drizzle_orm_1.lte)(popup_1.popup.startDate, now), (0, drizzle_orm_1.gte)(popup_1.popup.endDate, now)));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(popup_1.popup.status, "active"), (0, drizzle_orm_1.lte)(popup_1.popup.startDate, now), (0, drizzle_orm_1.gte)(popup_1.popup.endDate, now), (0, drizzle_orm_1.eq)(popup_1.popup.restaurantId, restaurantId)));
     return (0, response_1.SuccessResponse)(res, { message: "Get active popups success", data: activePopups });
 };
 exports.getActivePopups = getActivePopups;
 // ─── Get Active Popup By ID ───
 const getPopupById = async (req, res) => {
-    const { id } = req.params;
+    const { restaurantId, id } = req.params;
     const result = await connection_1.db
         .select({
         id: popup_1.popup.id,
@@ -50,7 +51,7 @@ const getPopupById = async (req, res) => {
         endDate: popup_1.popup.endDate,
     })
         .from(popup_1.popup)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(popup_1.popup.id, id), (0, drizzle_orm_1.eq)(popup_1.popup.status, "active")))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(popup_1.popup.id, id), (0, drizzle_orm_1.eq)(popup_1.popup.status, "active"), (0, drizzle_orm_1.eq)(popup_1.popup.restaurantId, restaurantId)))
         .limit(1);
     if (!result[0]) {
         throw new Errors_1.NotFound("Popup not found");

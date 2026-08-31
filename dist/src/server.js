@@ -17,6 +17,7 @@ const socket_io_1 = require("socket.io");
 const connection_1 = require("./models/connection");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
+app.set("trust proxy", true);
 (0, connection_1.connectDB)();
 const httpServer = http_1.default.createServer(app);
 const io = new socket_io_1.Server(httpServer, {
@@ -40,8 +41,11 @@ app.use((0, helmet_1.default)({
 app.use((0, cookie_parser_1.default)());
 app.use(express_1.default.json({ limit: "20mb" }));
 app.use(express_1.default.urlencoded({ extended: true, limit: "20mb" }));
-// إعداد المسارات الثابتة (Static Files)
-app.use("/uploads", express_1.default.static(path_1.default.join(__dirname, "../uploads")));
+// إعداد المسارات الثابتة (Static Files مع التخزين المؤقت)
+app.use("/uploads", express_1.default.static(path_1.default.join(__dirname, "../uploads"), {
+    maxAge: "30d",
+    immutable: true
+}));
 app.use(express_1.default.static(path_1.default.join(process.cwd(), "public")));
 // اختبار عمل الـ API
 app.get("/api", (req, res) => {

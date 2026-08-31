@@ -12,6 +12,15 @@ const Errors_1 = require("../../Errors");
 const pdfkit_1 = __importDefault(require("pdfkit"));
 const uuid_1 = require("uuid");
 const ALL_RESTAURANT_TYPES = ["mega", "super", "A", "B", "C", "C-"];
+// Points per restaurant type (mirrors restaurants.ts logic)
+const RESTAURANT_TYPE_POINTS = {
+    mega: 50,
+    super: 25,
+    a: 10,
+    b: 5,
+    c: 2,
+    "c-": 1,
+};
 // ==========================================
 // API 1: التقرير المالي العام 
 // ==========================================
@@ -19,7 +28,7 @@ const getFinancialReport = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     // 1. استقبال متغيرات الفلترة فقط (بدون page و limit)
-    const { restaurantId, startDate, endDate, status, paymentMethod } = req.query;
+    const { restaurantId, startDate, endDate, status, paymentMethod, cityId } = req.query;
     const conditions = [];
     if (restaurantId)
         conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId));
@@ -27,6 +36,8 @@ const getFinancialReport = async (req, res) => {
         conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.status, status));
     if (paymentMethod)
         conditions.push((0, drizzle_orm_1.eq)(schema_1.paymentMethods.name, paymentMethod));
+    if (cityId)
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, cityId));
     if (startDate)
         conditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(startDate)));
     if (endDate) {
@@ -47,6 +58,7 @@ const getFinancialReport = async (req, res) => {
         cancelReasonType: schema_1.selectReasons.type,
     })
         .from(schema_1.orders)
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
         .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where(conditions.length > 0 ? (0, drizzle_orm_1.and)(...conditions) : undefined);
@@ -170,8 +182,10 @@ exports.getFinancialReport = getFinancialReport;
 const getDetailedRestaurantReport = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, cityId } = req.query;
     const conditions = [];
+    if (cityId)
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, cityId));
     if (startDate)
         conditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(startDate)));
     if (endDate) {
@@ -191,11 +205,18 @@ const getDetailedRestaurantReport = async (req, res) => {
         totalAmount: schema_1.orders.totalAmount,
         restaurantId: schema_1.restaurants.id,
         restaurantName: schema_1.restaurants.name,
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr,
+        },
         status: schema_1.orders.status,
         cancelReasonType: schema_1.selectReasons.type,
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
         .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where(conditions.length > 0 ? (0, drizzle_orm_1.and)(...conditions) : undefined);
@@ -207,6 +228,7 @@ const getDetailedRestaurantReport = async (req, res) => {
             restaurantMap[rId] = {
                 restaurantId: rId,
                 restaurantName: order.restaurantName || "Unknown",
+                city: order.city?.id ? order.city : null,
                 counts: { total: 0, cash: 0, digital: 0 },
                 sales: { totalRevenue: 0, cashCollected: 0, digitalCollected: 0 },
                 platformDues: { totalCommission: 0, totalServiceFee: 0 }, // 👈 رجعنا السيرفس فيز للمنصة
@@ -258,6 +280,7 @@ const getDetailedRestaurantReport = async (req, res) => {
         return {
             restaurantId: entry.restaurantId,
             restaurantName: entry.restaurantName,
+            city: entry.city,
             ordersCount: entry.counts,
             sales: {
                 totalRevenue: entry.sales.totalRevenue.toFixed(2),
@@ -300,12 +323,26 @@ const getSingleRestaurantReport = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const { restaurantId } = req.params;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, cityId } = req.query;
     if (!restaurantId)
         throw new Errors_1.BadRequest("Restaurant ID is required");
-    const [restaurant] = await connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId)).limit(1);
-    if (!restaurant)
+    const [restaurantData] = await connection_1.db
+        .select({
+        restaurant: schema_1.restaurants,
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr,
+        }
+    })
+        .from(schema_1.restaurants)
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId), cityId ? (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, cityId) : undefined))
+        .limit(1);
+    if (!restaurantData)
         throw new Errors_1.BadRequest("Restaurant not found");
+    const restaurant = restaurantData.restaurant;
     const conditions = [(0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId)];
     if (startDate)
         conditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(startDate)));
@@ -332,7 +369,8 @@ const getSingleRestaurantReport = async (req, res) => {
         .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where((0, drizzle_orm_1.and)(...conditions));
     const sourceMap = {
-        online_order: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
+        online_order_web: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
+        online_order_app: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
         food_aggregator: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
         mykeeto: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
         pos: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
@@ -422,7 +460,11 @@ const getSingleRestaurantReport = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, {
         message: "Single restaurant breakdown generated successfully",
         data: {
-            restaurant: { id: restaurant.id, name: restaurant.name },
+            restaurant: {
+                id: restaurant.id,
+                name: restaurant.name,
+                city: restaurantData.city?.id ? restaurantData.city : null,
+            },
             breakdownBySource: reportBySource,
             overallSummary: {
                 totalOrders: finalReport.ordersCount,
@@ -449,7 +491,7 @@ const getRestaurantInvoices = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const { restaurantId } = req.params;
-    const { status } = req.query;
+    const { status, cityId } = req.query;
     if (!restaurantId) {
         throw new Errors_1.BadRequest("Restaurant ID is required");
     }
@@ -459,11 +501,28 @@ const getRestaurantInvoices = async (req, res) => {
     if (status) {
         conditions.push((0, drizzle_orm_1.eq)(schema_1.invoices.status, status));
     }
-    const restaurantInvoices = await connection_1.db
-        .select()
+    if (cityId) {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, cityId));
+    }
+    const restaurantInvoicesRaw = await connection_1.db
+        .select({
+        invoice: schema_1.invoices,
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr,
+        }
+    })
         .from(schema_1.invoices)
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.invoices.restaurantId, schema_1.restaurants.id))
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
         .where((0, drizzle_orm_1.and)(...conditions))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.invoices.createdAt));
+    const restaurantInvoices = restaurantInvoicesRaw.map(row => ({
+        ...row.invoice,
+        city: row.city?.id ? row.city : null,
+    }));
     return (0, response_1.SuccessResponse)(res, {
         message: "Invoices retrieved successfully",
         data: restaurantInvoices
@@ -486,24 +545,34 @@ const generateRestaurantInvoicePDF = async (req, res) => {
         .limit(1);
     if (!invoice[0])
         throw new Errors_1.NotFound("Invoice not found");
-    const restaurant = await connection_1.db
-        .select()
+    const restaurantData = await connection_1.db
+        .select({
+        restaurant: schema_1.restaurants,
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr,
+        }
+    })
         .from(schema_1.restaurants)
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
         .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, invoice[0].restaurantId))
         .limit(1);
-    if (!restaurant[0])
+    if (!restaurantData[0])
         throw new Errors_1.NotFound("Restaurant not found");
+    const restaurant = restaurantData[0].restaurant;
     const invoiceData = invoice[0];
     // Build PDF
     const doc = new pdfkit_1.default({ margin: 50 });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="invoice_${restaurant[0].name.replace(/\s+/g, '_')}_${invoiceData.invoiceNumber}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="invoice_${restaurantData[0].restaurant?.name.replace(/\s+/g, '_')}_${invoiceData.invoiceNumber}.pdf"`);
     doc.pipe(res);
     // Header
     doc.fontSize(20).text('Keeto Restaurant Invoice', { align: 'center' });
     doc.moveDown();
     // Restaurant Details
-    doc.fontSize(14).fillColor('black').text(`Restaurant: ${restaurant[0].name} / ${restaurant[0].nameAr || ''}`);
+    doc.fontSize(14).fillColor('black').text(`Restaurant: ${restaurantData[0].restaurant?.name} / ${restaurantData[0].restaurant?.nameAr || ''}`);
     doc.fontSize(12).text(`Invoice Number: ${invoiceData.invoiceNumber}`);
     doc.text(`Date Range: ${new Date(invoiceData.startDate).toLocaleDateString()} to ${new Date(invoiceData.endDate).toLocaleDateString()}`);
     doc.text(`Generated At: ${new Date(invoiceData.createdAt || Date.now()).toLocaleString()}`);
@@ -648,7 +717,7 @@ exports.markInvoiceAsPaid = markInvoiceAsPaid;
 const getRestaurantOrdersReport = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
-    const { startDate, endDate, type, restaurantId, restaurantsWithOrders, restaurantsWithoutOrders } = req.query;
+    const { startDate, endDate, type, restaurantId, cityId, restaurantsWithOrders, restaurantsWithoutOrders } = req.query;
     const orderConditions = [];
     if (startDate)
         orderConditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(startDate)));
@@ -657,18 +726,34 @@ const getRestaurantOrdersReport = async (req, res) => {
         end.setHours(23, 59, 59, 999);
         orderConditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
     }
+    const restConditions = [(0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active")];
+    if (cityId)
+        restConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, cityId));
     // 1. Fetch all restaurants
     const allRestaurantsRaw = await connection_1.db
         .select({
         restaurant: schema_1.restaurants,
         sales: schema_1.sales,
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr,
+        },
     })
         .from(schema_1.restaurants)
         .leftJoin(schema_1.sales, (0, drizzle_orm_1.eq)(schema_1.restaurants.salesId, schema_1.sales.id))
-        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"));
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
+        .where((0, drizzle_orm_1.and)(...restConditions));
     const allRestaurants = allRestaurantsRaw.map(r => ({
         ...r.restaurant,
-        salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null
+        salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null,
+        city: r.city?.id ? {
+            id: r.city.id,
+            name: r.city.name,
+            nameAr: r.city.nameAr,
+            nameFr: r.city.nameFr,
+        } : null,
     }));
     let totalRestaurants = allRestaurants.length;
     let restaurantsByType = {
@@ -812,8 +897,10 @@ const getRestaurantOrdersReport = async (req, res) => {
             id: r.id,
             name: r.name,
             nameAr: r.nameAr,
+            nameFr: r.nameFr,
             type: r.type,
             status: r.status,
+            city: r.city || null,
             signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
         }));
     }
@@ -822,8 +909,10 @@ const getRestaurantOrdersReport = async (req, res) => {
             id: r.id,
             name: r.name,
             nameAr: r.nameAr,
+            nameFr: r.nameFr,
             type: r.type,
             status: r.status,
+            city: r.city || null,
             signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
         }));
     }
@@ -860,7 +949,7 @@ exports.getRestaurantOrdersReport = getRestaurantOrdersReport;
 const getSalesReport = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
-    const { startDate, endDate, salesId, type, restaurantId } = req.query;
+    const { startDate, endDate, salesId, type, restaurantId, cityId } = req.query;
     // 1. شروط فلترة السيلز
     const salesConditions = [];
     if (salesId) {
@@ -873,6 +962,9 @@ const getSalesReport = async (req, res) => {
     }
     if (restaurantId) {
         restaurantConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId));
+    }
+    if (cityId) {
+        restaurantConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, cityId));
     }
     // 💡 التعديل هنا: فلترة المطاعم بناءً على تاريخ إنشائها/تسجيلها
     if (startDate) {
@@ -888,9 +980,16 @@ const getSalesReport = async (req, res) => {
         .select({
         sales: schema_1.sales,
         restaurant: schema_1.restaurants,
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr,
+        }
     })
         .from(schema_1.sales)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.sales.id, schema_1.restaurants.salesId), restaurantConditions.length > 0 ? (0, drizzle_orm_1.and)(...restaurantConditions) : undefined))
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
         .where(salesConditions.length > 0 ? (0, drizzle_orm_1.and)(...salesConditions) : undefined);
     const salesMap = new Map();
     let totalActiveSalesPoints = 0;
@@ -907,20 +1006,30 @@ const getSalesReport = async (req, res) => {
                 name: currentSales.name,
                 phone: currentSales.phone,
                 email: currentSales.email,
-                points: currentSales.points || 0,
+                // If date range is given, start from 0 and accumulate from filtered restaurants
+                // Otherwise use the stored cumulative total
+                points: (startDate || endDate) ? 0 : (currentSales.points || 0),
                 status: currentSales.status,
                 activeRestaurantsCount: 0,
                 inactiveRestaurantsCount: 0,
                 restaurants: [],
                 typeGroups: {}
             });
-            totalActiveSalesPoints += currentSales.points || 0;
+            if (!startDate && !endDate) {
+                totalActiveSalesPoints += currentSales.points || 0;
+            }
         }
         const salesGroup = salesMap.get(currentSales.id);
         // إذا كان هناك مطعم مسجل للسيلز ده وضمن الفترة المحددة
         if (currentRest) {
             const isRestActive = currentRest.status === "active";
             const restType = currentRest.type || "C";
+            // Accumulate points from filtered restaurants when date range is provided
+            if (startDate || endDate) {
+                const typeKey = restType.toLowerCase();
+                const earnedPoints = RESTAURANT_TYPE_POINTS[typeKey] ?? 0;
+                salesGroup.points += earnedPoints;
+            }
             if (isRestActive) {
                 salesGroup.activeRestaurantsCount += 1;
                 totalActiveRestaurantsCount += 1;
@@ -929,13 +1038,17 @@ const getSalesReport = async (req, res) => {
                 salesGroup.inactiveRestaurantsCount += 1;
             }
             if (restaurantId) {
-                salesGroup.restaurants.push(currentRest);
+                salesGroup.restaurants.push({
+                    ...currentRest,
+                    city: row.city?.id ? row.city : null,
+                });
             }
             else {
                 salesGroup.restaurants.push({
                     id: currentRest.id,
                     name: currentRest.name,
                     nameAr: currentRest.nameAr,
+                    city: row.city?.id ? row.city : null,
                     createdAt: currentRest.createdAt
                 });
             }
@@ -961,6 +1074,7 @@ const getSalesReport = async (req, res) => {
                     name: currentRest.name,
                     nameAr: currentRest.nameAr,
                     status: currentRest.status,
+                    city: row.city?.id ? row.city : null,
                     createdAt: currentRest.createdAt
                 });
             }
@@ -992,10 +1106,14 @@ const getSalesReport = async (req, res) => {
         }
         return responseData;
     });
+    // When date range is provided, recalculate the summary total from filtered points
+    const finalTotalPoints = (startDate || endDate)
+        ? salesList.reduce((sum, s) => sum + (s.totalPoints || 0), 0)
+        : totalActiveSalesPoints;
     return (0, response_1.SuccessResponse)(res, {
         message: "Sales report fetched successfully",
         summary: {
-            totalActiveSalesPoints,
+            totalActiveSalesPoints: finalTotalPoints,
             totalActiveRestaurants: totalActiveRestaurantsCount,
             totalActiveSales: salesList.length
         },

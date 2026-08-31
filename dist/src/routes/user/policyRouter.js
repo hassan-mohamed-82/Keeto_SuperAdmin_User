@@ -1,0 +1,8 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const catchAsync_1 = require("../../utils/catchAsync");
+const policy_1 = require("../../controllers/user/policy");
+const router = (0, express_1.Router)();
+router.get("/:restaurantId", (0, catchAsync_1.catchAsync)(policy_1.getAllPolicy));
+exports.default = router;

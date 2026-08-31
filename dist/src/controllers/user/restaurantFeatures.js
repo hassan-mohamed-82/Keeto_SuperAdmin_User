@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getResturantSchedules = exports.getHomeRestaurants = exports.removeFromHome = exports.toggleAddHome = exports.searchRestaurants = void 0;
+exports.getRestaurantsBranches = exports.getResturantSchedules = exports.getHomeRestaurants = exports.removeFromHome = exports.toggleAddHome = exports.searchRestaurants = void 0;
 exports.calculateCurrentStatus = calculateCurrentStatus;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
@@ -226,3 +226,55 @@ function calculateCurrentStatus(settings, schedules) {
         reason: "Restaurant is open and active"
     };
 }
+// 6. Get all branches of a restaurant
+const getRestaurantsBranches = async (req, res) => {
+    const { restaurantId } = req.params;
+    // const userId = req.user?.id;
+    // if (!userId) throw new UnauthorizedError("Unauthenticated");
+    const restaurant = await connection_1.db
+        .select()
+        .from(schema_1.restaurants)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId))
+        .limit(1);
+    if (!restaurant[0]) {
+        throw new Errors_1.NotFound("Restaurant not found");
+    }
+    const allBranches = await connection_1.db
+        .select({
+        id: schema_1.branches.id,
+        restaurantId: schema_1.branches.restaurantId,
+        name: schema_1.branches.name,
+        nameAr: schema_1.branches.nameAr,
+        nameFr: schema_1.branches.nameFr,
+        address: schema_1.branches.address,
+        addressAr: schema_1.branches.addressAr,
+        addressFr: schema_1.branches.addressFr,
+        phoneNumber: schema_1.branches.phoneNumber,
+        deliveryRadiusKm: schema_1.branches.deliveryRadiusKm,
+        lat: schema_1.branches.lat,
+        lng: schema_1.branches.lng,
+        status: schema_1.branches.status,
+        createdAt: schema_1.branches.createdAt,
+        city: {
+            id: schema_1.cities.id,
+            name: schema_1.cities.name,
+            nameAr: schema_1.cities.nameAr,
+            nameFr: schema_1.cities.nameFr,
+        },
+        zone: {
+            id: schema_1.zones.id,
+            name: schema_1.zones.name,
+            nameAr: schema_1.zones.nameAr,
+            nameFr: schema_1.zones.nameFr,
+        }
+    })
+        .from(schema_1.branches)
+        .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.branches.cityId, schema_1.cities.id))
+        .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, schema_1.zones.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")));
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Restaurant branches fetched successfully",
+        data: allBranches
+    });
+};
+exports.getRestaurantsBranches = getRestaurantsBranches;
