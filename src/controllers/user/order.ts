@@ -531,17 +531,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         });
     }
 
-    // ─── 409: Price drift guard ───────────────────────────────────────────
-    if (checkoutPriceChanged) {
-        return res.status(409).json({
-            success: false,
-            message: "Prices have changed since you added items to your cart. Please review the updated prices and re-confirm your order.",
-            data: {
-                isPriceChanged: true,
-                changedItems: priceChangedItems,
-            },
-        });
-    }
+    // ─── Live branch pricing applied silently without returning 409 error ───
 
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
     const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
