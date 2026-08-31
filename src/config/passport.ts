@@ -80,7 +80,8 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         appleId: null,
         isProfileComplete: true,
         isDeleted: false,
-        deletedAt: null
+        deletedAt: null,
+        totalOrders: 0,
       };
     } else {
       // 👤 Login (existing user)

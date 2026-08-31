@@ -907,6 +907,11 @@ export const checkout = async (req: Request | any, res: Response) => {
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
         await tx.delete(cartItems).where(eq(cartItems.userId, userId));
 
+        // Increment user's total orders count
+        await tx.update(users)
+            .set({ totalOrders: sql`${users.totalOrders} + 1` })
+            .where(eq(users.id, userId));
+
         // Superadmin notification
         await tx.insert(notifications).values({
             recipientType: "superadmin",

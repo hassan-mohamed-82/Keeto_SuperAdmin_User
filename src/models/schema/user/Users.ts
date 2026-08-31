@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, text, timestamp, char, boolean, longtext, mysqlEnum } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, text, timestamp, char, boolean, longtext, mysqlEnum, int } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { countries } from "../admin/country";
 import { cities } from "../admin/city";
@@ -32,5 +32,6 @@ export const users = mysqlTable("users", {
     status: mysqlEnum("status", ["active", "blocked"]).default("active"),
     isDeleted: boolean("is_deleted").default(false),
     deletedAt: timestamp("deleted_at"),
+    totalOrders: int("total_orders").default(0),
     createdAt: timestamp("created_at").defaultNow(),
 });
