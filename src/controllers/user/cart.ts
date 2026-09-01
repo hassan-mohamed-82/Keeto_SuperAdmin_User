@@ -252,11 +252,59 @@ export const addToCart = async (req: Request | any, res: Response) => {
         unitPrice = basePrice + totalExtra + addonTotal;
     }
 
+    // ─── Build full variation snapshot with names from DB ───────────
+    // We already fetched validDbVariation & foundOption during validation above.
+    // Re-fetch them here in one batch to build the full snapshot.
+    const variationSnapshotList: any[] = [];
+    if (safeVariations.length > 0) {
+        const allOptionIds = safeVariations.map((v: any) => v.optionId).filter(Boolean);
+        const dbOptionsWithParent = allOptionIds.length > 0
+            ? await db
+                .select({
+                    optionId: variationOptions.id,
+                    optionName: variationOptions.optionName,
+                    optionNameAr: variationOptions.optionNameAr,
+                    optionNameFr: variationOptions.optionNameFr,
+                    additionalPrice: variationOptions.additionalPrice,
+                    variationId: foodVariations.id,
+                    variationName: foodVariations.name,
+                    variationNameAr: foodVariations.nameAr,
+                    variationNameFr: foodVariations.nameFr,
+                })
+                .from(variationOptions)
+                .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
+                .where(inArray(variationOptions.id, allOptionIds))
+            : [];
+
+        const optionDetailsMap = new Map(dbOptionsWithParent.map(o => [o.optionId, o]));
+
+        for (const v of safeVariations) {
+            const details = optionDetailsMap.get(v.optionId);
+            variationSnapshotList.push({
+                variationId:     details?.variationId     ?? v.variationId     ?? null,
+                variationName:   details?.variationName   ?? v.variationName   ?? null,
+                variationNameAr: details?.variationNameAr ?? v.variationNameAr ?? null,
+                variationNameFr: details?.variationNameFr ?? v.variationNameFr ?? null,
+                optionId:        details?.optionId        ?? v.optionId        ?? null,
+                optionName:      details?.optionName      ?? v.optionName      ?? null,
+                optionNameAr:    details?.optionNameAr    ?? v.optionNameAr    ?? null,
+                optionNameFr:    details?.optionNameFr    ?? v.optionNameFr    ?? null,
+                price:           Number(details?.additionalPrice ?? v.additionalPrice ?? 0).toFixed(2),
+            });
+        }
+    }
+
     // ─── Dedup existing cart item ────────────────────────────────────
-    const normalizedVariationsList = normalizeVariations(safeVariations);
+    // Key is based ONLY on optionIds + addonIds (not names, which can change in DB)
+    const normalizedVariationsList = normalizeVariations(variationSnapshotList);
     const normalizedAddonsList = normalizeAddons(addonSnapshot);
-    const key = JSON.stringify({ variations: normalizedVariationsList, addons: normalizedAddonsList });
-    const snapshot = { variations: normalizedVariationsList };
+
+    const makeDedupeKey = (vars: any[], addonsList: any[]) => JSON.stringify({
+        variations: vars.map(v => v.optionId).sort(),
+        addons: addonsList.map(a => a.addonId).sort(),
+    });
+    const key = makeDedupeKey(normalizedVariationsList, normalizedAddonsList);
+    const snapshot = { variations: variationSnapshotList };
 
     const existingItems = await db.select().from(cartItems)
         .where(and(eq(cartItems.userId, userId), eq(cartItems.foodId, foodId)));
@@ -264,12 +312,8 @@ export const addToCart = async (req: Request | any, res: Response) => {
     const existingSame = existingItems.find(item => {
         const { variations: dbVars } = parseCartSnapshot(item.variations);
         const dbAddonsParsed = deepParseJSON(item.addons);
-        const normalizedDbAddons = normalizeAddons(Array.isArray(dbAddonsParsed) ? dbAddonsParsed : []);
-        const existingKey = JSON.stringify({
-            variations: normalizeVariations(dbVars),
-            addons: normalizedDbAddons,
-        });
-        return existingKey === key;
+        const dbAddonsList = Array.isArray(dbAddonsParsed) ? dbAddonsParsed : [];
+        return makeDedupeKey(normalizeVariations(dbVars), normalizeAddons(dbAddonsList)) === key;
     });
 
     if (existingSame) {
@@ -1141,6 +1185,51 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         unitPrice = Number(itemFood.price) + totalExtra + addonTotal;
     }
 
+    // ─── Build full variation snapshot with names from DB ───────────
+    let variationSnapshotList: any[] = safeVariations; // default: keep existing snapshot as-is
+    if (variations !== undefined && safeVariations.length > 0) {
+        // Only re-enrich when the client explicitly sent new variations
+        const allOptionIds = safeVariations.map((v: any) => v.optionId).filter(Boolean);
+        const dbOptionsWithParent = allOptionIds.length > 0
+            ? await db
+                .select({
+                    optionId: variationOptions.id,
+                    optionName: variationOptions.optionName,
+                    optionNameAr: variationOptions.optionNameAr,
+                    optionNameFr: variationOptions.optionNameFr,
+                    additionalPrice: variationOptions.additionalPrice,
+                    variationId: foodVariations.id,
+                    variationName: foodVariations.name,
+                    variationNameAr: foodVariations.nameAr,
+                    variationNameFr: foodVariations.nameFr,
+                })
+                .from(variationOptions)
+                .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
+                .where(inArray(variationOptions.id, allOptionIds))
+            : [];
+
+        const optionDetailsMap = new Map(dbOptionsWithParent.map(o => [o.optionId, o]));
+
+        variationSnapshotList = safeVariations.map((v: any) => {
+            const details = optionDetailsMap.get(v.optionId);
+            return {
+                variationId:     details?.variationId     ?? v.variationId     ?? null,
+                variationName:   details?.variationName   ?? v.variationName   ?? null,
+                variationNameAr: details?.variationNameAr ?? v.variationNameAr ?? null,
+                variationNameFr: details?.variationNameFr ?? v.variationNameFr ?? null,
+                optionId:        details?.optionId        ?? v.optionId        ?? null,
+                optionName:      details?.optionName      ?? v.optionName      ?? null,
+                optionNameAr:    details?.optionNameAr    ?? v.optionNameAr    ?? null,
+                optionNameFr:    details?.optionNameFr    ?? v.optionNameFr    ?? null,
+                price:           Number(details?.additionalPrice ?? v.additionalPrice ?? v.price ?? 0).toFixed(2),
+            };
+        });
+    } else if (variations === undefined) {
+        // Client didn't send variations → keep the existing snapshot from the cart (already enriched)
+        const { variations: existingVars } = parseCartSnapshot(cartItem.variations);
+        variationSnapshotList = existingVars;
+    }
+
     const qty = quantity ?? cartItem.quantity;
 
     await db.update(cartItems)
@@ -1148,7 +1237,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
             quantity: qty,
             unitPrice: unitPrice.toString(),
             totalPrice: (unitPrice * qty).toString(),
-            variations: JSON.stringify({ variations: safeVariations }),
+            variations: JSON.stringify({ variations: variationSnapshotList }),
             addons: JSON.stringify(addonSnapshot),
             ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
             ...(resolvedServiceModule ? { serviceModule: resolvedServiceModule } : {}),

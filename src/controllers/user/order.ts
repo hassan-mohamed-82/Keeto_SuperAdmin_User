@@ -490,22 +490,40 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         const detailedVariations = parsedVariations.map((v: any) => {
             const optDetails = optionsWithParentMap.get(v.optionId);
-            if (!optDetails) return v;
 
-            const resolvedPrice = v.additionalPrice || optDetails.additionalPrice || "0.00";
+            // Always resolve price from live DB data first, then cart snapshot
+            const resolvedPrice = (optDetails?.additionalPrice ?? v.additionalPrice ?? v.price ?? "0.00");
 
+            // Build full snapshot — prefer live DB names, fall back to whatever
+            // was already stored in the cart (so deleted variations stay readable)
             return {
-                variationId: optDetails.variationId,
-                variationName: optDetails.variationName,
-                variationNameAr: optDetails.variationNameAr,
-                variationNameFr: optDetails.variationNameFr,
-                optionId: optDetails.optionId,
-                optionName: optDetails.optionName,
-                optionNameAr: optDetails.optionNameAr,
-                optionNameFr: optDetails.optionNameFr,
+                variationId:     optDetails?.variationId     ?? v.variationId     ?? null,
+                variationName:   optDetails?.variationName   ?? v.variationName   ?? null,
+                variationNameAr: optDetails?.variationNameAr ?? v.variationNameAr ?? null,
+                variationNameFr: optDetails?.variationNameFr ?? v.variationNameFr ?? null,
+                optionId:        optDetails?.optionId        ?? v.optionId        ?? null,
+                optionName:      optDetails?.optionName      ?? v.optionName      ?? null,
+                optionNameAr:    optDetails?.optionNameAr    ?? v.optionNameAr    ?? null,
+                optionNameFr:    optDetails?.optionNameFr    ?? v.optionNameFr    ?? null,
                 price: Number(resolvedPrice).toFixed(2)
             };
         });
+
+        // 🛡️ Guard: if any variation has zero name data (not in DB + not in cart snapshot),
+        // the option was fully deleted — block the order so corrupt data is never persisted.
+        const hasMissingDetails = detailedVariations.some(
+            v => !v.variationName && !v.optionName
+        );
+
+        if (hasMissingDetails) {
+            return res.status(422).json({
+                success: false,
+                message: "Some selected options are no longer available. Please refresh your cart.",
+                data: {
+                    affectedFoodId: cartItem.foodId,
+                },
+            });
+        }
 
         itemsWithData.push({
             cartItem,
