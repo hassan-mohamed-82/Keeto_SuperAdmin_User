@@ -19,7 +19,8 @@ import {
     deliveryMen,
     freeDeliveryOffers,
     branchSubcategories,
-    foodVariations
+    foodVariations,
+    userRestaurantPoints
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -911,6 +912,24 @@ export const checkout = async (req: Request | any, res: Response) => {
         await tx.update(users)
             .set({ totalOrders: sql`${users.totalOrders} + 1` })
             .where(eq(users.id, userId));
+
+        // Increment user's total orders count for this restaurant
+        const [existingPointRecord] = await tx.select().from(userRestaurantPoints)
+            .where(and(eq(userRestaurantPoints.userId, userId), eq(userRestaurantPoints.restaurantId, restaurantId))).for("update");
+
+        if (existingPointRecord) {
+            await tx.update(userRestaurantPoints)
+                .set({ totalOrders: sql`${userRestaurantPoints.totalOrders} + 1` })
+                .where(eq(userRestaurantPoints.id, existingPointRecord.id));
+        } else {
+            await tx.insert(userRestaurantPoints).values({
+                id: uuidv4(),
+                userId,
+                restaurantId,
+                totalOrders: 1,
+                points: 0
+            });
+        }
 
         // Superadmin notification
         await tx.insert(notifications).values({

@@ -16,6 +16,7 @@ export const userRestaurantPoints = mysqlTable("user_restaurant_points", {
         .notNull(),
 
     points: int("points").default(0).notNull(),
+    totalOrders: int("total_orders").default(0).notNull(),
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 }, (table) => ({
