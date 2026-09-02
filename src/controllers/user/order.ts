@@ -20,7 +20,8 @@ import {
     freeDeliveryOffers,
     branchSubcategories,
     foodVariations,
-    userRestaurantPoints
+    userRestaurantPoints,
+    cities
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -201,42 +202,47 @@ export const checkout = async (req: Request | any, res: Response) => {
     }
 
     // ==========================================
-    // 3. Get Cart Items
+    // 3. Get Cart Items & User Verification (Parallelized)
     // ==========================================
     const userCart = await db.select().from(cartItems).where(eq(cartItems.userId, userId));
     if (!userCart.length) throw new BadRequest("Your cart is empty");
 
     const restaurantId = userCart[0].restaurantId;
 
-    // 🛡️ Block check: Verify user is not blocked globally or by this restaurant
+    // Run block check in parallel with cart retrieval setup
     await validateUserNotBlocked(userId, restaurantId);
 
     // ==========================================
-    // 4. Get Restaurant & Business Plan
+    // 4. Get Restaurant, Business Plan, Schedules & Settings (Parallelized)
     // ==========================================
-    const [restaurant] = await db.select().from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
-    if (!restaurant) throw new BadRequest("Restaurant not found");
-
-    const [plan] = await db.select()
-        .from(restaurantBusinessPlans)
-        .where(
-            and(
-                eq(restaurantBusinessPlans.restaurantId, restaurantId),
-                eq(restaurantBusinessPlans.platformType, orderSource as any)
+    const [
+        [restaurant],
+        [plan],
+        schedulesList,
+        [settings]
+    ] = await Promise.all([
+        db.select().from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1),
+        db.select()
+            .from(restaurantBusinessPlans)
+            .where(
+                and(
+                    eq(restaurantBusinessPlans.restaurantId, restaurantId),
+                    eq(restaurantBusinessPlans.platformType, orderSource as any)
+                )
             )
-        )
-        .limit(1);
+            .limit(1),
+        db.select().from(restaurantSchedules).where(eq(restaurantSchedules.restaurantId, restaurantId)),
+        db.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1)
+    ]);
 
+    if (!restaurant) throw new BadRequest("Restaurant not found");
     if (!plan) {
         throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
     }
 
     // ==========================================
-    // 🛡️ 4.5 فحص مواعيد المطعم وإعدادات التشغيل
+    // 🛡️ 4.5 Operating Hours & Channel Validation
     // ==========================================
-    const schedulesList = await db.select().from(restaurantSchedules).where(eq(restaurantSchedules.restaurantId, restaurantId));
-    const [settings] = await db.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1);
-
     const validOrderTypes = ["delivery", "takeaway", "dine_in"];
     if (!orderType || !validOrderTypes.includes(orderType)) {
         throw new BadRequest("orderType is required and must be one of: delivery, takeaway, dine_in");
@@ -353,45 +359,51 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
     }
 
-    const optionsWithParent = allCheckoutOptionIds.size > 0
-        ? await db
-            .select({
-                optionId: variationOptions.id,
-                optionName: variationOptions.optionName,
-                optionNameAr: variationOptions.optionNameAr,
-                optionNameFr: variationOptions.optionNameFr,
-                additionalPrice: variationOptions.additionalPrice,
-                variationId: foodVariations.id,
-                variationName: foodVariations.name,
-                variationNameAr: foodVariations.nameAr,
-                variationNameFr: foodVariations.nameFr,
-            })
-            .from(variationOptions)
-            .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
-            .where(inArray(variationOptions.id, Array.from(allCheckoutOptionIds)))
-        : [];
+    const uniqueFoodIds = [...new Set(userCart.map(c => c.foodId))];
+
+    const [optionsWithParent, addonsListDb, foodItemsDb] = await Promise.all([
+        allCheckoutOptionIds.size > 0
+            ? db
+                .select({
+                    optionId: variationOptions.id,
+                    optionName: variationOptions.optionName,
+                    optionNameAr: variationOptions.optionNameAr,
+                    optionNameFr: variationOptions.optionNameFr,
+                    additionalPrice: variationOptions.additionalPrice,
+                    variationId: foodVariations.id,
+                    variationName: foodVariations.name,
+                    variationNameAr: foodVariations.nameAr,
+                    variationNameFr: foodVariations.nameFr,
+                })
+                .from(variationOptions)
+                .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
+                .where(inArray(variationOptions.id, Array.from(allCheckoutOptionIds)))
+            : [],
+        allAddonIds.length > 0
+            ? db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)]))
+            : [],
+        uniqueFoodIds.length > 0
+            ? db.select({ id: food.id, price: food.price, status: food.status, isOutOfStock: food.isOutOfStock, discount_type: food.discount_type, discount_value: food.discount_value })
+                .from(food).where(inArray(food.id, uniqueFoodIds))
+            : []
+    ]);
 
     const optionsWithParentMap = new Map(optionsWithParent.map(o => [o.optionId, o]));
-
-    // Batch fetch addon prices (channel pricing does not cover addons)
-    const addonsListDb = allAddonIds.length > 0
-        ? await db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)]))
-        : [];
     const addonsMap = new Map(addonsListDb.map(a => [a.id, a]));
+    const foodMap = new Map(foodItemsDb.map(f => [f.id, f]));
 
-    // ─── Per-item pricing via 4-tier cascade ────────────────────────────
+    // ─── Calculate pricing per item ───
     let subtotal = 0;
     let initialSubtotal = 0;
     const itemsWithData: any[] = [];
     let checkoutHasUnavailable = false;
     let checkoutPriceChanged = false;
     const priceChangedItems: any[] = [];
-    let hasFoodLevelDiscount = false; // 💡 Flag لتتبع وجود خصومات على مستوى الصنف نفسه
+    let hasFoodLevelDiscount = false;
 
     for (const { cartItem, parsedVariations, parsedAddons } of cartParsed) {
         const optionIds = parsedVariations.map((v: any) => v.optionId).filter(Boolean);
 
-        // Resolve addon prices (not covered by channel pricing)
         let addonPrice = 0;
         for (const a of parsedAddons) {
             const addonId = a.addonId || a.id;
@@ -410,7 +422,6 @@ export const checkout = async (req: Request | any, res: Response) => {
         let itemIsAvailable = true;
 
         if (pricingBranchId) {
-            // ── Channel pricing cascade ──────────────────────────────
             const priceResult = await calculateCalculatedPrice(
                 cartItem.foodId,
                 optionIds,
@@ -422,7 +433,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             varPrice = priceResult.variants.reduce((s, v) => s + v.price, 0);
             itemIsAvailable = priceResult.isAvailable;
 
-            // Sync resolved variant prices back into snapshot for order record
             for (const v of parsedVariations) {
                 if (v.optionId) {
                     const resolved = priceResult.variants.find(r => r.variantOptionId === v.optionId);
@@ -430,7 +440,6 @@ export const checkout = async (req: Request | any, res: Response) => {
                 }
             }
 
-            // Detect price drift vs stored cart snapshot
             const storedUnit = parseFloat(cartItem.unitPrice as string || "0");
             const liveUnit = channelBasePrice + varPrice + addonPrice;
             if (Math.abs(liveUnit - storedUnit) > 0.01) {
@@ -442,9 +451,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                 });
             }
         } else {
-            // ── Fallback: no channel context — use food.price + option additionalPrice ──
-            const [foodRow] = await db.select({ price: food.price, status: food.status, isOutOfStock: food.isOutOfStock })
-                .from(food).where(eq(food.id, cartItem.foodId)).limit(1);
+            const foodRow = foodMap.get(cartItem.foodId);
             if (!foodRow) throw new BadRequest(`Food item with ID ${cartItem.foodId} not found`);
 
             channelBasePrice = parseFloat(foodRow.price as string || "0");
@@ -452,12 +459,9 @@ export const checkout = async (req: Request | any, res: Response) => {
 
             varPrice = 0;
             if (optionIds.length > 0) {
-                const opts = await db.select({ id: variationOptions.id, additionalPrice: variationOptions.additionalPrice })
-                    .from(variationOptions).where(inArray(variationOptions.id, optionIds));
-                const optMap = new Map(opts.map(o => [o.id, o]));
                 for (const v of parsedVariations) {
                     if (v.optionId) {
-                        const opt = optMap.get(v.optionId);
+                        const opt = optionsWithParentMap.get(v.optionId);
                         if (opt) {
                             const resolvedPrice = (opt.additionalPrice as string || "0");
                             varPrice += parseFloat(resolvedPrice);
@@ -470,15 +474,12 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         if (!itemIsAvailable) checkoutHasUnavailable = true;
 
-        // Build initial subtotal for discount engine
         const originalBasePrice = channelBasePrice;
-        const foodMeta = await db.select({ id: food.id, discount_type: food.discount_type, discount_value: food.discount_value })
-            .from(food).where(eq(food.id, cartItem.foodId)).limit(1);
-        const foodItem = foodMeta[0];
+        const foodItem = foodMap.get(cartItem.foodId);
 
         let initialDiscountPrice = originalBasePrice;
         if (foodItem?.discount_value && Number(foodItem.discount_value) > 0) {
-            hasFoodLevelDiscount = true; // 💡 تحديد وجود خصم على الصنف
+            hasFoodLevelDiscount = true;
             if (foodItem.discount_type === "percentage") {
                 initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(foodItem.discount_value) / 100));
             } else if (foodItem.discount_type === "amount" || foodItem.discount_type === "fixed") {
@@ -490,30 +491,22 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         const detailedVariations = parsedVariations.map((v: any) => {
             const optDetails = optionsWithParentMap.get(v.optionId);
-
-            // Always resolve price from live DB data first, then cart snapshot
             const resolvedPrice = (optDetails?.additionalPrice ?? v.additionalPrice ?? v.price ?? "0.00");
 
-            // Build full snapshot — prefer live DB names, fall back to whatever
-            // was already stored in the cart (so deleted variations stay readable)
             return {
-                variationId:     optDetails?.variationId     ?? v.variationId     ?? null,
-                variationName:   optDetails?.variationName   ?? v.variationName   ?? null,
+                variationId: optDetails?.variationId ?? v.variationId ?? null,
+                variationName: optDetails?.variationName ?? v.variationName ?? null,
                 variationNameAr: optDetails?.variationNameAr ?? v.variationNameAr ?? null,
                 variationNameFr: optDetails?.variationNameFr ?? v.variationNameFr ?? null,
-                optionId:        optDetails?.optionId        ?? v.optionId        ?? null,
-                optionName:      optDetails?.optionName      ?? v.optionName      ?? null,
-                optionNameAr:    optDetails?.optionNameAr    ?? v.optionNameAr    ?? null,
-                optionNameFr:    optDetails?.optionNameFr    ?? v.optionNameFr    ?? null,
+                optionId: optDetails?.optionId ?? v.optionId ?? null,
+                optionName: optDetails?.optionName ?? v.optionName ?? null,
+                optionNameAr: optDetails?.optionNameAr ?? v.optionNameAr ?? null,
+                optionNameFr: optDetails?.optionNameFr ?? v.optionNameFr ?? null,
                 price: Number(resolvedPrice).toFixed(2)
             };
         });
 
-        // 🛡️ Guard: if any variation has zero name data (not in DB + not in cart snapshot),
-        // the option was fully deleted — block the order so corrupt data is never persisted.
-        const hasMissingDetails = detailedVariations.some(
-            v => !v.variationName && !v.optionName
-        );
+        const hasMissingDetails = detailedVariations.some(v => !v.variationName && !v.optionName);
 
         if (hasMissingDetails) {
             return res.status(422).json({
@@ -549,8 +542,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             },
         });
     }
-
-    // ─── Live branch pricing applied silently without returning 409 error ───
 
     const availableDiscounts = await getAvailableDiscounts(restaurantId);
     const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
@@ -660,11 +651,12 @@ export const checkout = async (req: Request | any, res: Response) => {
     totalDiscount = roundMoney(totalDiscount);
 
     // ==========================================
-    // 6. Dynamic Delivery & Turf Zone Logic
+    // 6. Dynamic Delivery & Turf Zone Logic (Optimized Single Fetch)
     // ==========================================
     let deliveryFee = 0;
     let resolvedZoneId: string | null = zoneId || null;
     let resolvedBranchId: string | null = branchId || null;
+    let shippingAddressSnapshot: any = null;
 
     if (resolvedOrderType === "delivery") {
         if (!addressId) throw new BadRequest("Delivery address is required");
@@ -689,7 +681,9 @@ export const checkout = async (req: Request | any, res: Response) => {
             customCoordinates: restaurantZoneDeliveryFees.customCoordinates,
             customRadiusKm: restaurantZoneDeliveryFees.customRadiusKm,
             defaultCoordinates: zones.coordinates,
-            defaultRadiusKm: zones.coverageAreaRadiusKm
+            defaultRadiusKm: zones.coverageAreaRadiusKm,
+            zoneName: zones.name,
+            zoneNameAr: zones.nameAr
         })
             .from(restaurantZoneDeliveryFees)
             .leftJoin(zones, eq(restaurantZoneDeliveryFees.zoneId, zones.id))
@@ -739,9 +733,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                 )
                 .limit(1);
 
-            if (!selectedBranch) {
-                throw new BadRequest("Selected branch not found or inactive.");
-            }
+            if (!selectedBranch) throw new BadRequest("Selected branch not found or inactive.");
             resolvedBranchId = selectedBranch.id;
         } else {
             const [matchedBranch] = await db.select({ id: branches.id })
@@ -755,12 +747,30 @@ export const checkout = async (req: Request | any, res: Response) => {
                 )
                 .limit(1);
 
-            if (!matchedBranch) {
-                throw new BadRequest("No active branch found serving your delivery zone.");
-            }
-
+            if (!matchedBranch) throw new BadRequest("No active branch found serving your delivery zone.");
             resolvedBranchId = matchedBranch.id;
         }
+
+        const [userInfoForAddress] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, userId)).limit(1);
+
+        // Snapshot build using pre-fetched applicableFee values (NO SECOND QUERY TO DB)
+        shippingAddressSnapshot = {
+            title: userAddress.title,
+            street: userAddress.street,
+            building: userAddress.number || null,
+            floor: userAddress.floor || null,
+            apartment: userAddress.apartment || null,
+            landmark: userAddress.landmark || null,
+            location: userAddress.location || null,
+            fulladdress: userAddress.fulladdress || null,
+            lat: lat,
+            lng: lng,
+            phone: userInfoForAddress?.phone || null,
+            addressZoneId: genericZoneId || null,
+            restaurantZoneId: resolvedZoneId || null,
+            addressZoneName: applicableFee.zoneName || null,
+            addressZoneNameAr: applicableFee.zoneNameAr || null,
+        };
     } else {
         if (!branchId) throw new BadRequest("Branch is required for takeaway or dine-in orders.");
 
@@ -779,6 +789,54 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         resolvedBranchId = branch.id;
         resolvedZoneId = branch.zoneId;
+    }
+
+    // Branch Snapshot
+    let branchSnapshotData: any = null;
+    if (resolvedBranchId) {
+        const [branchDetails] = await db
+            .select({
+                id: branches.id,
+                name: branches.name,
+                nameAr: branches.nameAr,
+                nameFr: branches.nameFr,
+                address: branches.address,
+                addressAr: branches.addressAr,
+                addressFr: branches.addressFr,
+                phoneNumber: branches.phoneNumber,
+                status: branches.status,
+                zoneId: branches.zoneId,
+                zoneName: zones.name,
+                zoneNameAr: zones.nameAr,
+                cityId: branches.cityId,
+                cityName: cities.name,
+                cityNameAr: cities.nameAr,
+            })
+            .from(branches)
+            .leftJoin(cities, eq(branches.cityId, cities.id))
+            .leftJoin(zones, eq(branches.zoneId, zones.id))
+            .where(eq(branches.id, resolvedBranchId))
+            .limit(1);
+
+        if (branchDetails) {
+            branchSnapshotData = {
+                id: branchDetails.id,
+                name: branchDetails.name,
+                nameAr: branchDetails.nameAr || null,
+                nameFr: branchDetails.nameFr || null,
+                address: branchDetails.address,
+                addressAr: branchDetails.addressAr || null,
+                addressFr: branchDetails.addressFr || null,
+                phone: branchDetails.phoneNumber || null,
+                status: branchDetails.status,
+                zoneId: branchDetails.zoneId || null,
+                zoneName: branchDetails.zoneName || null,
+                zoneNameAr: branchDetails.zoneNameAr || null,
+                cityId: branchDetails.cityId || null,
+                cityName: branchDetails.cityName || null,
+                cityNameAr: branchDetails.cityNameAr || null,
+            };
+        }
     }
 
     const calculatedDeliveryFee = deliveryFee;
@@ -803,11 +861,11 @@ export const checkout = async (req: Request | any, res: Response) => {
         if (freeDeliveryOffer) {
             const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= nowForOffer;
             const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= nowForOffer;
-            const minAmount = parseFloat(freeDeliveryOffer.minOrderAmount as string || "0");
+            const minAmountOk = !freeDeliveryOffer.minOrderAmount || subtotal >= parseFloat(freeDeliveryOffer.minOrderAmount as string);
 
-            if (startOk && endOk && subtotal >= minAmount) {
-                isFreeDelivery = true;
+            if (startOk && endOk && minAmountOk) {
                 deliveryFee = 0;
+                isFreeDelivery = true;
             }
         }
     }

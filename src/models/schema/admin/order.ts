@@ -105,6 +105,44 @@ export const orders = mysqlTable("orders", {
     rating: int("rating"),
     ratingComment: text("rating_comment"),
 
+    // 🟢 2. حفظ لقطة ثابته من بيانات العنوان وقت الأوردر (Address Snapshot)
+    shippingAddress: json("shipping_address").$type<{
+        title?: string;
+        street?: string;
+        building?: string | null;
+        floor?: string | null;
+        apartment?: string | null;
+        landmark?: string | null;
+        location?: string | null;
+        fulladdress?: string | null;
+        lat?: number;
+        lng?: number;
+        phone?: string | null;
+        addressZoneId?: string | null;
+        restaurantZoneId?: string | null;
+        addressZoneName?: string | null;
+        addressZoneNameAr?: string | null;
+    }>(),
+
+    // 🟢 3. حفظ لقطة ثابته لبيانات الفرع وقت الأوردر (Branch Snapshot)
+    branchSnapshot: json("branch_snapshot").$type<{
+        id?: string;
+        name: string;
+        nameAr?: string | null;
+        nameFr?: string | null;
+        address: string;
+        addressAr?: string | null;
+        addressFr?: string | null;
+        phone?: string | null;
+        status?: string;
+        zoneId?: string | null;
+        zoneName?: string | null;
+        zoneNameAr?: string | null;
+        cityId?: string | null;
+        cityName?: string | null;
+        cityNameAr?: string | null;
+    }>(),
+
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),
 });
