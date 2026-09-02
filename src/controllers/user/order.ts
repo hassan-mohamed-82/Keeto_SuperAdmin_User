@@ -884,18 +884,26 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     const now = new Date();
 
-    // ⏰ Calculate the start of the current daily order numbering cycle using resetDailyOrderNumberTime.
+    // ⏰ Calculate the start of the current daily order numbering cycle
     const resetTimeStr = (settings as any)?.resetDailyOrderNumberTime || "00:00";
     const [resetHour, resetMinute] = resetTimeStr.split(":").map(Number);
     const safeResetHour = isNaN(resetHour) ? 0 : resetHour;
     const safeResetMinute = isNaN(resetMinute) ? 0 : resetMinute;
 
-    const startOfToday = new Date(now);
+    // 1. استخدام وقت UTC أو تحويل الفارق الزمني للمنطقة الزمنية (مثال: Cairo / local time)
+    const nowTimestamp = new Date(now);
+
+    // إنشاء تاريخ اليوم بالوقت المحلي للـ Reset
+    const startOfToday = new Date(nowTimestamp);
     startOfToday.setHours(safeResetHour, safeResetMinute, 0, 0);
 
-    if (now < startOfToday) {
+    // إذا كان الوقت الحالي قبل وقت الـ reset، نرجع ليوم أمس
+    if (nowTimestamp < startOfToday) {
         startOfToday.setDate(startOfToday.getDate() - 1);
     }
+
+    // 2. تحويل startOfToday لـ ISO / UTC String لضمان مقارنة سليمة مع الداتابيز
+    const startOfTodayUTC = new Date(startOfToday.getTime());
 
     let createdDailyOrderNumber = 1;
 
@@ -931,14 +939,14 @@ export const checkout = async (req: Request | any, res: Response) => {
             });
         }
 
-        // 🔒 2. Daily order number calculation (Safe from Race Conditions)
+        // 🔒 Daily order number calculation
         const [lastOrder] = await tx
             .select({ dailyOrderNumber: orders.dailyOrderNumber })
             .from(orders)
             .where(
                 and(
                     eq(orders.restaurantId, restaurantId),
-                    gte(orders.createdAt, startOfToday)
+                    gte(orders.createdAt, startOfTodayUTC)
                 )
             )
             .orderBy(desc(orders.dailyOrderNumber))
