@@ -50,8 +50,7 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
     .$type<string[]>()
     .default(["pending"]), // pending, accepted, preparing, out_for_delivery
 
-  resetDailyOrderNumberTime: varchar("reset_daily_order_number_time", { length: 5 }).default(sql`NULL`),
-
+  resetDailyOrderNumberTime: varchar("reset_daily_order_number_time", { length: 5 }),
 });
 
 

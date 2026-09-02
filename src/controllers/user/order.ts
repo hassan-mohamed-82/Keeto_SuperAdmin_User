@@ -884,31 +884,33 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     const now = new Date();
 
-    // ⏰ Calculate the start of the current daily order numbering cycle
+    // ⏰ 1. Fetch value from settings (Handles real `null` gracefully)
     const resetTimeStr = (settings as any)?.resetDailyOrderNumberTime || "00:00";
-    const [resetHour, resetMinute] = resetTimeStr.split(":").map(Number);
-    const safeResetHour = isNaN(resetHour) ? 0 : resetHour;
-    const safeResetMinute = isNaN(resetMinute) ? 0 : resetMinute;
 
-    // 1. استخدام وقت UTC أو تحويل الفارق الزمني للمنطقة الزمنية (مثال: Cairo / local time)
-    const nowTimestamp = new Date(now);
+    const [resetHourRaw, resetMinuteRaw] = resetTimeStr.split(":").map(Number);
+    const resetHour = isNaN(resetHourRaw) ? 0 : resetHourRaw;
+    const resetMinute = isNaN(resetMinuteRaw) ? 0 : resetMinuteRaw;
 
-    // إنشاء تاريخ اليوم بالوقت المحلي للـ Reset
-    const startOfToday = new Date(nowTimestamp);
-    startOfToday.setHours(safeResetHour, safeResetMinute, 0, 0);
+    // 🌍 2. Timezone Handling (Egypt UTC+3)
+    const EGYPT_OFFSET_HOURS = 3;
 
-    // إذا كان الوقت الحالي قبل وقت الـ reset، نرجع ليوم أمس
-    if (nowTimestamp < startOfToday) {
-        startOfToday.setDate(startOfToday.getDate() - 1);
+    const nowUtc = new Date();
+    const nowLocal = new Date(nowUtc.getTime() + EGYPT_OFFSET_HOURS * 60 * 60 * 1000);
+
+    const startOfTodayLocal = new Date(nowLocal);
+    startOfTodayLocal.setHours(resetHour, resetMinute, 0, 0);
+
+    if (nowLocal < startOfTodayLocal) {
+        startOfTodayLocal.setDate(startOfTodayLocal.getDate() - 1);
     }
 
-    // 2. تحويل startOfToday لـ ISO / UTC String لضمان مقارنة سليمة مع الداتابيز
-    const startOfTodayUTC = new Date(startOfToday.getTime());
+    const startOfTodayQuery = new Date(startOfTodayLocal.getTime() - EGYPT_OFFSET_HOURS * 60 * 60 * 1000);
 
+    // 🔒 3. Fetch Last Order
     let createdDailyOrderNumber = 1;
 
     await db.transaction(async (tx) => {
-        // 🔒 1. Wallet deduction with FOR UPDATE
+         // 🔒 1. Wallet deduction with FOR UPDATE
         if (isWalletPayment) {
             const [userWallet] = await tx.select()
                 .from(userWallets)
@@ -946,7 +948,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             .where(
                 and(
                     eq(orders.restaurantId, restaurantId),
-                    gte(orders.createdAt, startOfTodayUTC)
+                    gte(orders.createdAt, startOfTodayQuery)
                 )
             )
             .orderBy(desc(orders.dailyOrderNumber))
