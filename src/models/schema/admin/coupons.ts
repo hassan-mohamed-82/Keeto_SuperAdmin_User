@@ -43,7 +43,13 @@ export const coupons = mysqlTable("coupons", {
     // How many times it has been used so far
     usedCount: int("used_count").default(0),
 
-    // How many times a single user can use it (null = unlimited)
+    // 'fixed'     → per-user usage is capped by perUserLimit
+    // 'unlimited' → a single user can use the coupon as many times as they want
+    userUsageType: mysqlEnum("user_usage_type", ["fixed", "unlimited"])
+        .notNull()
+        .default("fixed"),
+
+    // Only enforced when userUsageType = 'fixed' (ignored when 'unlimited')
     perUserLimit: int("per_user_limit").default(1),
 
     startDate: timestamp("start_date"),
