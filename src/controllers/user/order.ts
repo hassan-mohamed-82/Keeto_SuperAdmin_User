@@ -884,18 +884,16 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     const now = new Date();
 
-    // ⏰ 1. Fetch value from settings (Handles real `null` gracefully)
+    // ⏰ 1. Fetch value from settings
     const resetTimeStr = (settings as any)?.resetDailyOrderNumberTime || "00:00";
-
     const [resetHourRaw, resetMinuteRaw] = resetTimeStr.split(":").map(Number);
     const resetHour = isNaN(resetHourRaw) ? 0 : resetHourRaw;
     const resetMinute = isNaN(resetMinuteRaw) ? 0 : resetMinuteRaw;
 
-    // 🌍 2. Timezone Handling (Egypt UTC+3)
-    const EGYPT_OFFSET_HOURS = 3;
-
-    const nowUtc = new Date();
-    const nowLocal = new Date(nowUtc.getTime() + EGYPT_OFFSET_HOURS * 60 * 60 * 1000);
+    // 🌍 2. Dynamic Timezone Handling (Africa/Cairo)
+    // تحويل الوقت الحالي لـ String يمثل توقيت مصر بدقة مع مراعاة الصيفي/الشتوي تلقائياً
+    const egyptDateStr = now.toLocaleString("en-US", { timeZone: "Africa/Cairo" });
+    const nowLocal = new Date(egyptDateStr);
 
     const startOfTodayLocal = new Date(nowLocal);
     startOfTodayLocal.setHours(resetHour, resetMinute, 0, 0);
@@ -904,13 +902,15 @@ export const checkout = async (req: Request | any, res: Response) => {
         startOfTodayLocal.setDate(startOfTodayLocal.getDate() - 1);
     }
 
-    const startOfTodayQuery = new Date(startOfTodayLocal.getTime() - EGYPT_OFFSET_HOURS * 60 * 60 * 1000);
+    // حساب الفارق بين التوقيت المحلي ووقت UTC ديناميكياً
+    const diffMs = nowLocal.getTime() - startOfTodayLocal.getTime();
+    const startOfTodayQuery = new Date(now.getTime() - diffMs);
 
     // 🔒 3. Fetch Last Order
     let createdDailyOrderNumber = 1;
 
     await db.transaction(async (tx) => {
-         // 🔒 1. Wallet deduction with FOR UPDATE
+        // 🔒 1. Wallet deduction with FOR UPDATE
         if (isWalletPayment) {
             const [userWallet] = await tx.select()
                 .from(userWallets)
@@ -941,7 +941,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             });
         }
 
-        // 🔒 Daily order number calculation
+        // 🔒 2. Daily order number calculation
         const [lastOrder] = await tx
             .select({ dailyOrderNumber: orders.dailyOrderNumber })
             .from(orders)
