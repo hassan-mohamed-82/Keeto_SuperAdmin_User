@@ -975,6 +975,9 @@ export const checkout = async (req: Request | any, res: Response) => {
             serviceFee: serviceFee.toFixed(2),
             appCommission: appCommission.toFixed(2),
 
+            shippingAddress: shippingAddressSnapshot,
+            branchSnapshot: branchSnapshotData,
+
             discountId: orderDiscountId,
             couponId: orderCouponId,
             discountAmount: totalDiscount.toFixed(2),
