@@ -791,7 +791,8 @@ export const checkout = async (req: Request | any, res: Response) => {
         resolvedZoneId = branch.zoneId;
     }
 
-    // Branch Snapshot
+    // Branch Snapshot — zone data comes from the restaurant's own zone config
+    // (restaurantZoneDeliveryFees), not the global zones table.
     let branchSnapshotData: any = null;
     if (resolvedBranchId) {
         const [branchDetails] = await db
@@ -805,16 +806,28 @@ export const checkout = async (req: Request | any, res: Response) => {
                 addressFr: branches.addressFr,
                 phoneNumber: branches.phoneNumber,
                 status: branches.status,
-                zoneId: branches.zoneId,
-                zoneName: zones.name,
-                zoneNameAr: zones.nameAr,
                 cityId: branches.cityId,
                 cityName: cities.name,
                 cityNameAr: cities.nameAr,
+                // Zone from restaurantZoneDeliveryFees (restaurant-specific)
+                zoneId: restaurantZoneDeliveryFees.zoneId,
+                zoneName: zones.name,
+                zoneNameAr: zones.nameAr,
+                // Restaurant-specific delivery fee for this zone
+                zoneDeliveryFee: restaurantZoneDeliveryFees.deliveryFee,
             })
             .from(branches)
             .leftJoin(cities, eq(branches.cityId, cities.id))
-            .leftJoin(zones, eq(branches.zoneId, zones.id))
+            // Join restaurant zone config that matches this branch
+            .leftJoin(
+                restaurantZoneDeliveryFees,
+                and(
+                    eq(restaurantZoneDeliveryFees.branchId, branches.id),
+                    eq(restaurantZoneDeliveryFees.restaurantId, restaurantId)
+                )
+            )
+            // Then join global zones just to get the zone name/nameAr
+            .leftJoin(zones, eq(zones.id, restaurantZoneDeliveryFees.zoneId))
             .where(eq(branches.id, resolvedBranchId))
             .limit(1);
 
@@ -832,12 +845,16 @@ export const checkout = async (req: Request | any, res: Response) => {
                 zoneId: branchDetails.zoneId || null,
                 zoneName: branchDetails.zoneName || null,
                 zoneNameAr: branchDetails.zoneNameAr || null,
+                zoneDeliveryFee: branchDetails.zoneDeliveryFee
+                    ? parseFloat(branchDetails.zoneDeliveryFee as string)
+                    : null,
                 cityId: branchDetails.cityId || null,
                 cityName: branchDetails.cityName || null,
                 cityNameAr: branchDetails.cityNameAr || null,
             };
         }
     }
+
 
     const calculatedDeliveryFee = deliveryFee;
     if (isFreeDelivery) deliveryFee = 0;
