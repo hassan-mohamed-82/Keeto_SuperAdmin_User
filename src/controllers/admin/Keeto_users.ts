@@ -160,10 +160,72 @@ export const toggleRestaurantUserBlock = async (req: Request, res: Response) => 
     }, 200);
 };
 
-// Get all users
+// Get all users — each user includes the restaurant they logged in from (via restaurant_users).
+// If the user has no entry in restaurant_users (or no linked restaurant), restaurant returns "Keeto".
 export const getAllUsers = async (req: Request, res: Response) => {
-    const allUsers = await db.select().from(users);
-    return SuccessResponse(res, { message: "Users fetched successfully", data: allUsers }, 200);
+    // Fetch all users with their linked restaurant (if any)
+    const result = await db
+        .select({
+            id: users.id,
+            name: users.name,
+            email: users.email,
+            phone: users.phone,
+            photo: users.photo,
+            status: users.status,
+            isVerified: users.isVerified,
+            isProfileComplete: users.isProfileComplete,
+            totalOrders: users.totalOrders,
+            createdAt: users.createdAt,
+            // restaurant_users join fields
+            restaurantUserId: restaurant_users.id,
+            restaurantId: restaurant_users.restaurantId,
+            // restaurant fields
+            restaurantName: restaurants.name,
+            restaurantNameAr: restaurants.nameAr,
+            restaurantLogo: restaurants.logo,
+        })
+        .from(users)
+        .leftJoin(restaurant_users, eq(restaurant_users.userId, users.id))
+        .leftJoin(restaurants, eq(restaurants.id, restaurant_users.restaurantId));
+
+    // Group by userId — collect ALL restaurants for each user
+    const usersMap: Record<string, any> = {};
+
+    for (const row of result) {
+        if (!usersMap[row.id]) {
+            usersMap[row.id] = {
+                id: row.id,
+                name: row.name,
+                email: row.email,
+                phone: row.phone,
+                photo: row.photo,
+                status: row.status,
+                isVerified: row.isVerified,
+                isProfileComplete: row.isProfileComplete,
+                totalOrders: row.totalOrders,
+                createdAt: row.createdAt,
+                restaurants: [], // array to hold all linked restaurants
+            };
+        }
+
+        // Push every linked restaurant into the array
+        if (row.restaurantId && row.restaurantName) {
+            usersMap[row.id].restaurants.push({
+                id: row.restaurantId,
+                name: row.restaurantName,
+                nameAr: row.restaurantNameAr,
+                logo: row.restaurantLogo,
+            });
+        }
+    }
+
+    const allUsers = Object.values(usersMap).map((u) => ({
+        ...u,
+        // If no restaurants linked → "Keeto", otherwise return the full array
+        restaurants: u.restaurants.length > 0 ? u.restaurants : "Keeto",
+    }));
+
+    return SuccessResponse(res, { message: "Users fetched successfully", total: allUsers.length, data: allUsers }, 200);
 };
 
 // Get a single user by ID

@@ -1,9 +1,5 @@
 import { mysqlTable, varchar, text, timestamp, char, boolean, longtext, mysqlEnum, int } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
-import { countries } from "../admin/country";
-import { cities } from "../admin/city";
-import { zones } from "../admin/zone";
-import { restaurants } from "../admin/restaurants";
 
 export const users = mysqlTable("users", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
