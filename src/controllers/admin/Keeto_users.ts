@@ -8,17 +8,24 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
 import { saveBase64Image, handleImageUpdate } from "../../utils/handleImages";
 
-// Get all blocked users (globally blocked or blocked by specific restaurants)
+// Get all blocked users (globally blocked by Keeto OR blocked by specific restaurants)
 export const getBlockedUsers = async (req: Request, res: Response) => {
     const { restaurantId, search } = req.query;
 
-    // 1. Get all restaurant-level blocked records
-    const restaurantBlockConditions = [eq(restaurant_users.status, "blocked")];
+    // ─── Step 1: Always fetch globally blocked users from users table ────────────
+    // These must ALWAYS appear regardless of restaurant_users state.
+    const globallyBlockedUsersPromise = db
+        .select()
+        .from(users)
+        .where(eq(users.status, "blocked"));
+
+    // ─── Step 2: Fetch restaurant-level blocked records ──────────────────────────
+    const restaurantBlockConditions: ReturnType<typeof eq>[] = [eq(restaurant_users.status, "blocked")];
     if (restaurantId) {
         restaurantBlockConditions.push(eq(restaurant_users.restaurantId, restaurantId as string));
     }
 
-    const blockedRestaurantLinks = await db
+    const blockedRestaurantLinksPromise = db
         .select({
             id: restaurant_users.id,
             userId: restaurant_users.userId,
@@ -34,7 +41,13 @@ export const getBlockedUsers = async (req: Request, res: Response) => {
         .leftJoin(restaurants, eq(restaurant_users.restaurantId, restaurants.id))
         .where(and(...restaurantBlockConditions));
 
-    // Map of userId -> blocked restaurants array
+    // Run both in parallel
+    const [globallyBlockedUsers, blockedRestaurantLinks] = await Promise.all([
+        globallyBlockedUsersPromise,
+        blockedRestaurantLinksPromise,
+    ]);
+
+    // Build map: userId -> blocked restaurants array
     const userRestaurantBlocksMap: Record<string, any[]> = {};
     const restaurantBlockedUserIds = new Set<string>();
 
@@ -52,26 +65,24 @@ export const getBlockedUsers = async (req: Request, res: Response) => {
         });
     }
 
-    // 2. Query users:
-    const userIds = Array.from(restaurantBlockedUserIds);
-    let allBlockedUsers: any[] = [];
+    // ─── Step 3: Merge — globally blocked users + restaurant-only blocked users ──
+    // Start with all globally blocked users (always included).
+    const globallyBlockedIds = new Set(globallyBlockedUsers.map((u) => u.id));
 
-    if (userIds.length > 0) {
-        allBlockedUsers = await db
+    // Fetch users who are blocked at restaurant level but NOT globally blocked
+    // (to avoid duplicates)
+    const restaurantOnlyIds = [...restaurantBlockedUserIds].filter((id) => !globallyBlockedIds.has(id));
+
+    let restaurantOnlyUsers: any[] = [];
+    if (restaurantOnlyIds.length > 0) {
+        restaurantOnlyUsers = await db
             .select()
             .from(users)
-            .where(
-                or(
-                    eq(users.status, "blocked"),
-                    inArray(users.id, userIds)
-                )
-            );
-    } else {
-        allBlockedUsers = await db
-            .select()
-            .from(users)
-            .where(eq(users.status, "blocked"));
+            .where(inArray(users.id, restaurantOnlyIds));
     }
+
+    // All blocked users = globally blocked + restaurant-only blocked (no duplicates)
+    let allBlockedUsers: any[] = [...globallyBlockedUsers, ...restaurantOnlyUsers];
 
     // Filter by search if provided
     if (search && typeof search === "string") {
