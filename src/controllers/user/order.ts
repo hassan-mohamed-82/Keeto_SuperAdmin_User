@@ -656,6 +656,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     let deliveryFee = 0;
     let resolvedZoneId: string | null = zoneId || null;
     let resolvedBranchId: string | null = branchId || null;
+    let deliveryGenericZoneId: string | null = null;
     let shippingAddressSnapshot: any = null;
 
     if (resolvedOrderType === "delivery") {
@@ -713,6 +714,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
 
         const genericZoneId = applicableFee.zoneId;
+        deliveryGenericZoneId = genericZoneId;
         resolvedZoneId = applicableFee.id;
         if (!resolvedZoneId) {
             throw new BadRequest("No delivery zone found for this address.");
@@ -792,7 +794,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     }
 
     // Branch Snapshot — zone data comes from the restaurant's own zone config
-    // (restaurantZoneDeliveryFees), not the global zones table.
+    // (restaurantZoneDeliveryFees) matching the order delivery zone, or the branch's zone.
     let branchSnapshotData: any = null;
     if (resolvedBranchId) {
         const [branchDetails] = await db
@@ -809,8 +811,8 @@ export const checkout = async (req: Request | any, res: Response) => {
                 cityId: branches.cityId,
                 cityName: cities.name,
                 cityNameAr: cities.nameAr,
-                // Zone from restaurantZoneDeliveryFees (restaurant-specific)
-                zoneId: restaurantZoneDeliveryFees.zoneId,
+                // Zone: delivery zone if delivery order, otherwise branch physical zone
+                zoneId: deliveryGenericZoneId ? restaurantZoneDeliveryFees.zoneId : branches.zoneId,
                 zoneName: zones.name,
                 zoneNameAr: zones.nameAr,
                 // Restaurant-specific delivery fee for this zone
@@ -818,18 +820,61 @@ export const checkout = async (req: Request | any, res: Response) => {
             })
             .from(branches)
             .leftJoin(cities, eq(branches.cityId, cities.id))
-            // Join restaurant zone config that matches this branch
+            // Join restaurant zone config matching this branch and delivery zone
             .leftJoin(
                 restaurantZoneDeliveryFees,
                 and(
                     eq(restaurantZoneDeliveryFees.branchId, branches.id),
-                    eq(restaurantZoneDeliveryFees.restaurantId, restaurantId)
+                    eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
+                    deliveryGenericZoneId ? eq(restaurantZoneDeliveryFees.zoneId, deliveryGenericZoneId) : sql`1=0`
                 )
             )
-            // Then join global zones just to get the zone name/nameAr
-            .leftJoin(zones, eq(zones.id, restaurantZoneDeliveryFees.zoneId))
+            // Then join global zones to get the zone name/nameAr
+            .leftJoin(
+                zones,
+                eq(zones.id, deliveryGenericZoneId ? restaurantZoneDeliveryFees.zoneId : branches.zoneId)
+            )
             .where(eq(branches.id, resolvedBranchId))
             .limit(1);
+            
+
+        //  if (resolvedBranchId) {
+        // const [branchDetails] = await db
+        //     .select({
+        //         id: branches.id,
+        //         name: branches.name,
+        //         nameAr: branches.nameAr,
+        //         nameFr: branches.nameFr,
+        //         address: branches.address,
+        //         addressAr: branches.addressAr,
+        //         addressFr: branches.addressFr,
+        //         phoneNumber: branches.phoneNumber,
+        //         status: branches.status,
+        //         cityId: branches.cityId,
+        //         cityName: cities.name,
+        //         cityNameAr: cities.nameAr,
+        //         // Zone from restaurantZoneDeliveryFees (restaurant-specific)
+        //         zoneId: restaurantZoneDeliveryFees.zoneId,
+        //         zoneName: zones.name,
+        //         zoneNameAr: zones.nameAr,
+        //         // Restaurant-specific delivery fee for this zone
+        //         zoneDeliveryFee: restaurantZoneDeliveryFees.deliveryFee,
+        //     })
+        //     .from(branches)
+        //     .leftJoin(cities, eq(branches.cityId, cities.id))
+        //     // Join restaurant zone config that matches this branch
+        //     .leftJoin(
+        //         restaurantZoneDeliveryFees,
+        //         and(
+        //             eq(restaurantZoneDeliveryFees.branchId, branches.id),
+        //             eq(restaurantZoneDeliveryFees.restaurantId, restaurantId)
+        //         )
+        //     )
+        //     // Then join global zones just to get the zone name/nameAr
+        //     .leftJoin(zones, eq(zones.id, restaurantZoneDeliveryFees.zoneId))
+        //     .where(eq(branches.id, resolvedBranchId))
+        //     .limit(1);
+
 
         if (branchDetails) {
             branchSnapshotData = {
