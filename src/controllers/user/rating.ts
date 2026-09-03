@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { restaurantRatings, restaurants, users } from "../../models/schema";
+import { userRestaurantPoints } from "../../models/schema/user/userRestaurantPoints";
 import { eq, and, sql, avg, count } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -28,6 +29,17 @@ export const rateRestaurant = async (req: Request | any, res: Response) => {
     const [restaurant] = await db.select().from(restaurants)
         .where(eq(restaurants.id, restaurantId)).limit(1);
     if (!restaurant) throw new NotFound("Restaurant not found");
+
+    // تأكد أن اليوزر عنده طلب واحد على الأقل من المطعم
+    const [userPoints] = await db.select().from(userRestaurantPoints)
+        .where(and(
+            eq(userRestaurantPoints.userId, userId),
+            eq(userRestaurantPoints.restaurantId, restaurantId)
+        )).limit(1);
+
+    if (!userPoints || userPoints.totalOrders < 1) {
+        throw new BadRequest("You must have at least one completed order from this restaurant to rate it");
+    }
 
     // شوف لو اليوزر عامل rating قبل كده
     const [existing] = await db.select().from(restaurantRatings)
