@@ -69,6 +69,13 @@ export const getRestaurantRatingStats = async (req: Request, res: Response) => {
 // ==========================================
 export const getRestaurantRatings = async (req: Request, res: Response) => {
     const { restaurantId } = req.params;
+    //const page = parseInt(req.query.page as string) || 1;
+    // const limit = parseInt(req.query.limit as string) || 10;
+    // const offset = (page - 1) * limit;
+
+    // const [totalRatingsData] = await db.select({ count: sql`count(*)` }).from(restaurantRatings).where(eq(restaurantRatings.restaurantId, restaurantId));
+    // const totalRatings = Number(totalRatingsData.count);
+    // const totalPages = Math.ceil(totalRatings / limit);
 
     const ratings = await db.select({
         id: restaurantRatings.id,
@@ -81,11 +88,41 @@ export const getRestaurantRatings = async (req: Request, res: Response) => {
     })
         .from(restaurantRatings)
         .leftJoin(users, eq(restaurantRatings.userId, users.id))
-        .where(eq(restaurantRatings.restaurantId, restaurantId));
+        .where(eq(restaurantRatings.restaurantId, restaurantId))
+    // .limit(limit)
+    // .offset(offset);
 
     return SuccessResponse(res, { data: ratings });
 };
 
+export const getAllRestaurantRatings = async (req: Request, res: Response) => {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
+
+    const [totalRatingsData] = await db.select({ count: sql`count(*)` }).from(restaurantRatings);
+    const totalRatings = Number(totalRatingsData.count);
+    const totalPages = Math.ceil(totalRatings / limit);
+
+    const ratings = await db.select({
+        id: restaurantRatings.id,
+        rating: restaurantRatings.rating,
+        comment: restaurantRatings.comment,
+        createdAt: restaurantRatings.createdAt,
+        userName: users.name,
+        userEmail: users.email,
+        userPhoto: users.photo,
+        restaurantName: restaurants.name,
+        restaurantNameAr: restaurants.nameAr,
+    })
+        .from(restaurantRatings)
+        .leftJoin(users, eq(restaurantRatings.userId, users.id))
+        .leftJoin(restaurants, eq(restaurantRatings.restaurantId, restaurants.id))
+        .limit(limit)
+        .offset(offset);
+
+    return SuccessResponse(res, { data: ratings, pagination: { total: totalRatings, page, limit, totalPages } });
+};
 
 export const deleteRating = async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -93,7 +130,24 @@ export const deleteRating = async (req: Request, res: Response) => {
     if (!rating) throw new NotFound("Rating not found");
     await db.delete(restaurantRatings).where(eq(restaurantRatings.id, id));
     return SuccessResponse(res, { data: null });
-}
+};
+
+export const updateRating = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { rating, comment } = req.body;
+
+    const [existingRating] = await db.select().from(restaurantRatings).where(eq(restaurantRatings.id, id)).limit(1);
+    if (!existingRating) throw new NotFound("Rating not found");
+
+    await db.update(restaurantRatings)
+        .set({
+            rating: rating !== undefined ? rating : existingRating.rating,
+            comment: comment !== undefined ? comment : existingRating.comment,
+        })
+        .where(eq(restaurantRatings.id, id));
+
+    return SuccessResponse(res, { message: "Rating updated successfully" });
+};
 export const getAllCustomerRatings = async (req: Request, res: Response) => {
     const restaurantId = req.query.restaurantId as string | undefined;
 

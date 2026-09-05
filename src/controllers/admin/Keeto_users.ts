@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { users, restaurant_users, restaurants } from "../../models/schema";
-import { eq, inArray, and, or } from "drizzle-orm";
+import { eq, inArray, and, or, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -174,69 +174,76 @@ export const toggleRestaurantUserBlock = async (req: Request, res: Response) => 
 // Get all users — each user includes the restaurant they logged in from (via restaurant_users).
 // If the user has no entry in restaurant_users (or no linked restaurant), restaurant returns "Keeto".
 export const getAllUsers = async (req: Request, res: Response) => {
-    // Fetch all users with their linked restaurant (if any)
-    const result = await db
-        .select({
-            id: users.id,
-            name: users.name,
-            email: users.email,
-            phone: users.phone,
-            photo: users.photo,
-            status: users.status,
-            isVerified: users.isVerified,
-            isProfileComplete: users.isProfileComplete,
-            totalOrders: users.totalOrders,
-            createdAt: users.createdAt,
-            // restaurant_users join fields
-            restaurantUserId: restaurant_users.id,
-            restaurantId: restaurant_users.restaurantId,
-            // restaurant fields
-            restaurantName: restaurants.name,
-            restaurantNameAr: restaurants.nameAr,
-            restaurantLogo: restaurants.logo,
-        })
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
+
+    // 1. Get total users count
+    const [totalUsersData] = await db.select({ count: sql`count(*)` }).from(users);
+    const totalUsers = Number(totalUsersData.count);
+    const totalPages = Math.ceil(totalUsers / limit);
+
+    // 2. Fetch paginated users
+    const paginatedUsers = await db
+        .select()
         .from(users)
-        .leftJoin(restaurant_users, eq(restaurant_users.userId, users.id))
-        .leftJoin(restaurants, eq(restaurants.id, restaurant_users.restaurantId));
+        .limit(limit)
+        .offset(offset);
 
-    // Group by userId — collect ALL restaurants for each user
-    const usersMap: Record<string, any> = {};
+    const userIds = paginatedUsers.map(u => u.id);
 
-    for (const row of result) {
-        if (!usersMap[row.id]) {
-            usersMap[row.id] = {
-                id: row.id,
-                name: row.name,
-                email: row.email,
-                phone: row.phone,
-                photo: row.photo,
-                status: row.status,
-                isVerified: row.isVerified,
-                isProfileComplete: row.isProfileComplete,
-                totalOrders: row.totalOrders,
-                createdAt: row.createdAt,
-                restaurants: [], // array to hold all linked restaurants
-            };
-        }
-
-        // Push every linked restaurant into the array
-        if (row.restaurantId && row.restaurantName) {
-            usersMap[row.id].restaurants.push({
-                id: row.restaurantId,
-                name: row.restaurantName,
-                nameAr: row.restaurantNameAr,
-                logo: row.restaurantLogo,
-            });
-        }
+    // 3. Fetch linked restaurants for these users
+    let linkedRestaurants: any[] = [];
+    if (userIds.length > 0) {
+        linkedRestaurants = await db
+            .select({
+                userId: restaurant_users.userId,
+                restaurantId: restaurant_users.restaurantId,
+                restaurantName: restaurants.name,
+                restaurantNameAr: restaurants.nameAr,
+                restaurantLogo: restaurants.logo,
+            })
+            .from(restaurant_users)
+            .leftJoin(restaurants, eq(restaurants.id, restaurant_users.restaurantId))
+            .where(inArray(restaurant_users.userId, userIds));
     }
 
-    const allUsers = Object.values(usersMap).map((u) => ({
-        ...u,
-        // If no restaurants linked → "Keeto", otherwise return the full array
-        restaurants: u.restaurants.length > 0 ? u.restaurants : "Keeto",
-    }));
+    // 4. Map them together
+    const allUsers = paginatedUsers.map((u) => {
+        const userRestaurants = linkedRestaurants
+            .filter(lr => lr.userId === u.id && lr.restaurantId && lr.restaurantName)
+            .map(lr => ({
+                id: lr.restaurantId,
+                name: lr.restaurantName,
+                nameAr: lr.restaurantNameAr,
+                logo: lr.restaurantLogo,
+            }));
 
-    return SuccessResponse(res, { message: "Users fetched successfully", total: allUsers.length, data: allUsers }, 200);
+        return {
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            phone: u.phone,
+            photo: u.photo,
+            status: u.status,
+            isVerified: u.isVerified,
+            isProfileComplete: u.isProfileComplete,
+            totalOrders: u.totalOrders,
+            createdAt: u.createdAt,
+            restaurants: userRestaurants.length > 0 ? userRestaurants : "Keeto",
+        };
+    });
+
+    return SuccessResponse(res, { 
+        message: "Users fetched successfully", 
+        data: allUsers,
+        pagination: {
+            total: totalUsers,
+            page,
+            limit,
+            totalPages
+        }
+    }, 200);
 };
 
 // Get a single user by ID
