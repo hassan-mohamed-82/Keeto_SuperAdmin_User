@@ -1,7 +1,7 @@
 // controllers/admin/FinancialReportController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales, restaurant_users, users, zones, cities } from "../../models/schema";
+import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales, restaurant_users, users, zones, cities, cuisines } from "../../models/schema";
 import { eq, and, desc, gte, lte, inArray, count, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
@@ -822,16 +822,35 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         .leftJoin(cities, eq(restaurants.cityId, cities.id))
         .where(and(...restConditions));
 
-    const allRestaurants = allRestaurantsRaw.map(r => ({
-        ...r.restaurant,
-        salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null,
-        city: r.city?.id ? {
-            id: r.city.id,
-            name: r.city.name,
-            nameAr: r.city.nameAr,
-            nameFr: r.city.nameFr,
-        } : null,
-    }));
+    const allCuisines = await db.select().from(cuisines);
+    const cuisineMap = new Map();
+    allCuisines.forEach(c => cuisineMap.set(c.id, c));
+
+    const allRestaurants = allRestaurantsRaw.map(r => {
+        let cuisinesData = [];
+        try {
+            const cuisineIds = typeof r.restaurant.cuisineId === "string"
+                ? JSON.parse(r.restaurant.cuisineId)
+                : (r.restaurant.cuisineId || []);
+            if (Array.isArray(cuisineIds)) {
+                cuisinesData = cuisineIds.map((id: string) => cuisineMap.get(id) || null).filter(Boolean);
+            }
+        } catch (e) {
+            console.error("Error parsing cuisines JSON", e);
+        }
+
+        return {
+            ...r.restaurant,
+            cuisines: cuisinesData,
+            salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null,
+            city: r.city?.id ? {
+                id: r.city.id,
+                name: r.city.name,
+                nameAr: r.city.nameAr,
+                nameFr: r.city.nameFr,
+            } : null,
+        };
+    });
 
     let totalRestaurants = allRestaurants.length;
     let restaurantsByType: Record<string, number> = {
