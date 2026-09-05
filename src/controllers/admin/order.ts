@@ -1,4 +1,4 @@
-import { eq, desc, and, inArray, or } from "drizzle-orm";
+import { eq, desc, and, inArray, or, gte, lte } from "drizzle-orm";
 import { addons, foodVariations, addresses, branches, deliveryMen, food, orderItems, orders, paymentMethods, pointsProducts, restaurants, restaurantWallets, restaurantWalletTransactions, restaurantZoneDeliveryFees, selectReasons, userPointsTransactions, userRestaurantPoints, users, userWallets, userWalletTransactions, variationOptions, zones, restaurantSettings } from "../../models/schema";
 import { SuccessResponse } from "../../utils/response";
 import { Request, Response } from "express";
@@ -631,6 +631,34 @@ export const getOrderDetails = async (req: Request, res: Response) => {
 };
 
 export const getAllOrders = async (req: Request, res: Response) => {
+    const { status, startDate, endDate } = req.query;
+
+    const conditions = [];
+
+    if (status) {
+        conditions.push(eq(orders.status, status as any));
+    }
+
+    // Default to current date if no start or end date is provided
+    let start = new Date();
+    start.setHours(0, 0, 0, 0);
+    
+    let end = new Date();
+    end.setHours(23, 59, 59, 999);
+
+    if (startDate) {
+        start = new Date(startDate as string);
+        start.setHours(0, 0, 0, 0);
+    }
+    
+    if (endDate) {
+        end = new Date(endDate as string);
+        end.setHours(23, 59, 59, 999);
+    }
+
+    conditions.push(gte(orders.createdAt, start));
+    conditions.push(lte(orders.createdAt, end));
+
     const result = await db.select({
         orderId: orders.orderNumber,
         internalId: orders.id,
@@ -665,6 +693,7 @@ export const getAllOrders = async (req: Request, res: Response) => {
         .leftJoin(users, eq(orders.userId, users.id))
         .leftJoin(restaurantZoneDeliveryFees, eq(orders.zoneId, restaurantZoneDeliveryFees.id))
         .leftJoin(zones, or(eq(restaurantZoneDeliveryFees.zoneId, zones.id), eq(orders.zoneId, zones.id)))
+        .where(and(...conditions))
         .orderBy(desc(orders.createdAt));
     return SuccessResponse(res, {
         message: "All orders fetched successfully",
