@@ -74,11 +74,25 @@ export const getSalesById = async (req: Request, res: Response) => {
         .from(restaurants)
         .where(eq(restaurants.salesId, id));
 
+    const RESTAURANT_TYPE_POINTS: Record<string, number> = {
+        mega: 50,
+        super: 25,
+        a: 10,
+        b: 5,
+        c: 2,
+        "c-": 1,
+    };
+
+    const formattedRestaurants = registeredRestaurants.map(r => ({
+        ...r,
+        points: RESTAURANT_TYPE_POINTS[(r.type || "C").toLowerCase()] ?? 0
+    }));
+
     return SuccessResponse(res, {
         message: "Get sales details success",
         data: {
             ...salesRep,
-            restaurants: registeredRestaurants
+            restaurants: formattedRestaurants
         }
     });
 };

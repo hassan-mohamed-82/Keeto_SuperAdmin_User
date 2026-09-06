@@ -1169,11 +1169,13 @@ export const getSalesReport = async (req: Request, res: Response) => {
         if (currentRest) {
             const isRestActive = currentRest.status === "active";
             const restType = currentRest.type || "C";
+            const typeKey = restType.toLowerCase();
+            const earnedPoints = RESTAURANT_TYPE_POINTS[typeKey] ?? 0;
 
             // Accumulate points from filtered restaurants when date range is provided
             if (startDate || endDate) {
-                const typeKey = restType.toLowerCase();
-                const earnedPoints = RESTAURANT_TYPE_POINTS[typeKey] ?? 0;
+                //const typeKey = restType.toLowerCase();
+                //const earnedPoints = RESTAURANT_TYPE_POINTS[typeKey] ?? 0;
                 salesGroup.points += earnedPoints;
             }
 
@@ -1187,6 +1189,8 @@ export const getSalesReport = async (req: Request, res: Response) => {
             if (restaurantId) {
                 salesGroup.restaurants.push({
                     ...currentRest,
+                    type: restType,
+                    points: earnedPoints,
                     city: row.city?.id ? row.city : null,
                 });
             } else {
@@ -1194,6 +1198,9 @@ export const getSalesReport = async (req: Request, res: Response) => {
                     id: currentRest.id,
                     name: currentRest.name,
                     nameAr: currentRest.nameAr,
+                    type: restType,
+                    points: earnedPoints,
+                    status: currentRest.status,
                     city: row.city?.id ? row.city : null,
                     createdAt: currentRest.createdAt
                 });
@@ -1221,6 +1228,8 @@ export const getSalesReport = async (req: Request, res: Response) => {
                     id: currentRest.id,
                     name: currentRest.name,
                     nameAr: currentRest.nameAr,
+                    type: restType,
+                    points: earnedPoints,
                     status: currentRest.status,
                     city: row.city?.id ? row.city : null,
                     createdAt: currentRest.createdAt
