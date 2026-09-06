@@ -254,8 +254,15 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (resolvedOrderType === "delivery" && !status.canDeliveryNow) throw new BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) throw new BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
 
-    const defaultPreparingDuration = settings?.maxDeliveryTime ?? 30;
-
+    let defaultPreparingDuration: number;
+    if (resolvedOrderType === "takeaway") {
+        defaultPreparingDuration = settings?.maxTakeAwayTime ?? 25;
+    } else if (resolvedOrderType === "dine_in") {
+        defaultPreparingDuration = settings?.maxDineInTime ?? 25;
+    } else {
+        defaultPreparingDuration = settings?.maxDeliveryTime ?? 25;
+    }
+    
     // ==========================================
     // ⚡ 5. Channel Pricing Engine — Subtotal, Variations & Addons
     // orderType IS the serviceModule (they are the same concept)

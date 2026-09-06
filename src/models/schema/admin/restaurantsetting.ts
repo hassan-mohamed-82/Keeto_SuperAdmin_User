@@ -39,6 +39,12 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   minDeliveryTime: int("min_delivery_time").default(15),
   maxDeliveryTime: int("max_delivery_time").default(25),
 
+  minTakeAwayTime: int("min_take_away_time").default(15),
+  maxTakeAwayTime: int("max_take_away_time").default(25),
+
+  minDineInTime: int("min_dine_in_time").default(15),
+  maxDineInTime: int("max_dine_in_time").default(25),
+
   isAlwaysOpen: boolean("is_always_open").default(false),
   isSameTimeEveryDay: boolean("is_same_time_every_day").default(false),
 
