@@ -99,12 +99,22 @@ export const getAllRestaurantRatings = async (req: Request, res: Response) => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
+    const restaurantId = req.query.restaurantId as string;
 
-    const [totalRatingsData] = await db.select({ count: sql`count(*)` }).from(restaurantRatings);
+    // Define the filter condition if restaurantId is provided
+    const restaurantFilter = restaurantId ? eq(restaurantRatings.restaurantId, restaurantId) : undefined;
+
+    // 1. Get the total count based on the filter (essential for correct pagination)
+    const countQuery = db.select({ count: sql`count(*)` }).from(restaurantRatings);
+    if (restaurantFilter) {
+        countQuery.where(restaurantFilter);
+    }
+    const [totalRatingsData] = await countQuery;
     const totalRatings = Number(totalRatingsData.count);
     const totalPages = Math.ceil(totalRatings / limit);
 
-    const ratings = await db.select({
+    // 2. Build the main query with joins, optional filter, and pagination
+    const ratingsQuery = db.select({
         id: restaurantRatings.id,
         rating: restaurantRatings.rating,
         comment: restaurantRatings.comment,
@@ -117,11 +127,18 @@ export const getAllRestaurantRatings = async (req: Request, res: Response) => {
     })
         .from(restaurantRatings)
         .leftJoin(users, eq(restaurantRatings.userId, users.id))
-        .leftJoin(restaurants, eq(restaurantRatings.restaurantId, restaurants.id))
-        .limit(limit)
-        .offset(offset);
+        .leftJoin(restaurants, eq(restaurantRatings.restaurantId, restaurants.id));
 
-    return SuccessResponse(res, { data: ratings, pagination: { total: totalRatings, page, limit, totalPages } });
+    if (restaurantFilter) {
+        ratingsQuery.where(restaurantFilter);
+    }
+
+    const ratings = await ratingsQuery.limit(limit).offset(offset);
+
+    return SuccessResponse(res, { 
+        data: ratings, 
+        pagination: { total: totalRatings, page, limit, totalPages } 
+    });
 };
 
 export const deleteRating = async (req: Request, res: Response) => {
