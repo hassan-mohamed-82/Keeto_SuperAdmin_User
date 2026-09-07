@@ -163,10 +163,10 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
         const balanceAfter = currentBalance - pointsNeeded;
 
         // B. خصم النقاط من رصيد المستخدم
-        await tx
-            .update(userRestaurantPoints)
-            .set({ points: balanceAfter, updatedAt: now })
-            .where(eq(userRestaurantPoints.id, userPointsRecord.id));
+        // await tx
+        //     .update(userRestaurantPoints)
+        //     .set({ points: balanceAfter, updatedAt: now })
+        //     .where(eq(userRestaurantPoints.id, userPointsRecord.id));
 
         // C. إنشاء طلب الاستبدال في جدول redeem_requests فقط (بدون إنشاء أوردر)
         await tx.insert(redeemRequests).values({
