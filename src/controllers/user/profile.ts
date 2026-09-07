@@ -2,7 +2,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { cities, countries, orders, users, userWallets, zones, userRestaurantPoints, restaurants, addresses } from "../../models/schema";
-import { eq, sql, and } from "drizzle-orm";
+import { eq, sql, and, isNotNull } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import bcrypt from "bcrypt";
@@ -70,6 +70,25 @@ export const getProfile = async (req: Request | any, res: Response) => {
         .leftJoin(cities, eq(zones.cityId, cities.id))
         .where(eq(addresses.userId, userId));
 
+    // 🟢 2.1 Check which addresses are linked to existing orders
+    const orderConditions = [eq(orders.userId, userId), isNotNull(orders.addressId)];
+    if (restaurantId && restaurantId.trim() !== "") {
+        orderConditions.push(eq(orders.restaurantId, restaurantId.trim()));
+    }
+
+    const orderAddressRows = await db
+        .select({ addressId: orders.addressId })
+        .from(orders)
+        .where(and(...orderConditions));
+
+    const usedAddressIds = new Set(orderAddressRows.map((o) => o.addressId));
+
+    const formattedAddresses = userAddresses.map((addr) => ({
+        ...addr,
+        isRelatedToOrder: usedAddressIds.has(addr.id),
+        // hasOrders: usedAddressIds.has(addr.id),
+    }));
+
     // 3. Fetch Orders Count (scoped to a restaurant if restaurantId query param is provided)
     const ordersCountCondition = restaurantId
         ? and(eq(orders.userId, userId), eq(orders.restaurantId, restaurantId))
@@ -89,16 +108,6 @@ export const getProfile = async (req: Request | any, res: Response) => {
         .where(eq(userWallets.userId, userId))
         .limit(1);
 
-    // const userPoints = await db
-    //     .select({
-    //         restaurantId: userRestaurantPoints.restaurantId,
-    //         restaurantName: restaurants.name,
-    //         points: userRestaurantPoints.points
-    //     })
-    //     .from(userRestaurantPoints)
-    //     .leftJoin(restaurants, eq(restaurants.id, userRestaurantPoints.restaurantId))
-    //     .where(eq(userRestaurantPoints.userId, userId));
-
     const isProfileComplete = userInfo.isProfileComplete || !(userInfo.email && userInfo.email.endsWith("@privaterelay.appleid.com"));
 
     return SuccessResponse(res, {
@@ -113,11 +122,10 @@ export const getProfile = async (req: Request | any, res: Response) => {
                 isVerified: userInfo.isVerified,
                 createdAt: userInfo.createdAt,
                 isProfileComplete,
-                addresses: userAddresses,
+                addresses: formattedAddresses, // 🟢 إرجاع العناوين المنسقة مع flags الاستخدام
             },
             walletBalance: wallet?.balance || "0.00",
             ordersCount: Number(ordersCount?.count || 0),
-            // restaurantPoints: userPoints
         },
     });
 };
