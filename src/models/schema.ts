@@ -52,3 +52,4 @@ export * from "./schema/admin/SocialMedia";
 export * from "./schema/admin/recommendedFood"
 export * from "./schema/admin/freeDeliveryOffer";
 export * from "./schema/user/userFcmTokens";
+export * from "./schema/admin/redeemRequests";
