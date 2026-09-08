@@ -27,6 +27,8 @@ export const branches = mysqlTable("branches", {
     deliveryRadiusKm: decimal("delivery_radius_km", { precision: 6, scale: 2 }).default("0"),
     lat: varchar("lat", { length: 255 }),
     lng: varchar("lng", { length: 255 }),
+    cash_status: boolean("cash_status").default(true),
+    visa_status: boolean("visa_status").default(true),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),
 });
