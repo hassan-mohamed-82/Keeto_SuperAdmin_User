@@ -95,7 +95,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
         deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone,
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans,
-        type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor
+        type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor,
+        callcenterphone
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -156,6 +157,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             type: restaurantType, // 👈 حفظ نوع المطعم (Default C)
             salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
             ownerposition: ownerposition ? clean(ownerposition) : null, // 👈 حفظ منصب المالك
+            callcenterphone: callcenterphone ? clean(callcenterphone) : null,
 
             logo: logoUrl || '',
             cover: coverUrl || '',
@@ -252,6 +254,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             type: restaurantType,
             salesId: salesId || null,
             ownerposition: ownerposition || null,
+            callcenterphone: callcenterphone || null,
             businessPlans: plansToReturn
         }
     }, 201);
@@ -278,6 +281,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         type: restaurants.type, // 👈 استرجاع النوع
         salesId: restaurants.salesId, // 👈 استرجاع المندوب
         ownerposition: restaurants.ownerposition, // 👈 استرجاع منصب المالك
+        callcenterphone: restaurants.callcenterphone,
         cuisineIds: restaurants.cuisineId,
         email: restrauntadmin.email,
         city: { id: cities.id, name: cities.name, nameAr: cities.nameAr, nameFr: cities.nameFr },
@@ -332,6 +336,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             type: r.type,
             salesId: r.salesId,
             ownerposition: r.ownerposition,
+            callcenterphone: r.callcenterphone || null,
             email: r.email || null,
             deliveryRadiusKm: r.deliveryRadiusKm,
             lat: r.lat,
@@ -429,7 +434,8 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         ownerFirstName, ownerLastName, ownerPhone, tags,
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
-        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId
+        type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId,
+        callcenterphone
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -488,6 +494,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (type !== undefined) restaurantUpdateData.type = resolvedType; // 👈 تحديث النوع
     if (salesId !== undefined) restaurantUpdateData.salesId = resolvedSalesId; // 👈 تحديث المندوب
     if (ownerposition !== undefined) restaurantUpdateData.ownerposition = (ownerposition === "" || ownerposition === null) ? null : ownerposition; // 👈 تحديث منصب المالك
+    if (callcenterphone !== undefined) restaurantUpdateData.callcenterphone = (callcenterphone === "" || callcenterphone === null) ? null : clean(callcenterphone);
 
     if (logo) restaurantUpdateData.logo = await handleImageUpdate(req, existingRestaurant.logo, logo, "restaurants");
     if (cover !== undefined) {

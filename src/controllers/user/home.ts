@@ -64,6 +64,7 @@ export const getHomeScreen = async (req: Request, res: Response) => {
         addressAr: restaurants.addressAr,
         addressFr: restaurants.addressFr,
         minDeliveryTime: restaurants.minDeliveryTime,
+        callcenterphone: restaurants.callcenterphone,
     }).from(restaurants).where(eq(restaurants.status, "active"));
 
     const popularRestaurants = restaurantsData.map(r => ({
@@ -100,6 +101,7 @@ export const getRestaurantsByCuisine = async (req: Request, res: Response) => {
         addressAr: restaurants.addressAr,
         addressFr: restaurants.addressFr,
         minDeliveryTime: restaurants.minDeliveryTime,
+        callcenterphone: restaurants.callcenterphone,
     }).from(restaurants)
         .where(and(
             sql`JSON_CONTAINS(${restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`
@@ -136,7 +138,8 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         restaurantName: restaurants.name,
         restaurantNameAr: restaurants.nameAr,
         restaurantNameFr: restaurants.nameFr,
-        restaurantLogo: restaurants.logo
+        restaurantLogo: restaurants.logo,
+        callcenterphone: restaurants.callcenterphone,
     })
         .from(food)
         .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
@@ -198,6 +201,7 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
             restaurantNameAr: f.restaurantNameAr,
             restaurantNameFr: f.restaurantNameFr,
             restaurantLogo: f.restaurantLogo,
+            callcenterphone: f.callcenterphone,
             isOutOfStock: f.isOutOfStock,
             isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false,
             unavailableBranches
@@ -231,6 +235,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             cover: restaurants.cover,
             iosApp: restaurants.iosApp,
             androidApp: restaurants.androidApp,
+            callcenterphone: restaurants.callcenterphone,
         })
         .from(restaurants)
         .where(eq(restaurants.id, restaurantId));

@@ -39,6 +39,7 @@ export const restaurants = mysqlTable("restaurants", {
     ownerLastName: varchar("owner_last_name", { length: 255 }),
     ownerPhone: varchar("owner_phone", { length: 50 }).notNull(),
     ownerposition: varchar("owner_position", { length: 255 }),
+    callcenterphone: varchar("callcenterphone", { length: 50 }),
 
     tags: json("tags").$type<string[]>().default([]),
     lat: varchar("lat", { length: 255 }),

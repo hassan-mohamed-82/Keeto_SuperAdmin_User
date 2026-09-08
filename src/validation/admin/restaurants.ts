@@ -24,6 +24,7 @@ export const createRestaurantSchema = z.object({
     ownerFirstName: z.string().min(1, "Owner first name is required").max(255),
     ownerLastName: z.string().min(1, "Owner last name is required").max(255),
     ownerPhone: z.string().min(1, "Owner phone is required").max(50),
+    callcenterphone: z.string().max(50).optional(),
     
     tags: z.array(z.string()).optional(),
 
