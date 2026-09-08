@@ -53,3 +53,8 @@ export * from "./schema/admin/recommendedFood"
 export * from "./schema/admin/freeDeliveryOffer";
 export * from "./schema/user/userFcmTokens";
 export * from "./schema/admin/redeemRequests";
+export * from "./schema/admin/shifts";
+export * from "./schema/admin/serviceFees";
+export * from "./schema/admin/taxes";
+export * from "./schema/admin/offers";
+
