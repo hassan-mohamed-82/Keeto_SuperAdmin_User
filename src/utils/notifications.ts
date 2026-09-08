@@ -102,7 +102,7 @@ export const sendPushNotification = async (params: {
         recipientId,
         branchId: branchId || data?.branchId || null,
         restaurantId: data?.restaurantId || (recipientType === "restaurant" ? recipientId : null),
-        sound:'notification_sound'
+        sound: 'notification_sound.wav'
     };
 
     // If recipient is a restaurant, attach repeat notification settings
@@ -236,6 +236,9 @@ export const sendPushNotification = async (params: {
                         },
                         data: {
                             payload: JSON.stringify(payloadData),
+                        },
+                        aps: {
+                            sound: "notification_sound.wav",
                         },
                         token,
                     };
