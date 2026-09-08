@@ -237,8 +237,12 @@ export const sendPushNotification = async (params: {
                         data: {
                             payload: JSON.stringify(payloadData),
                         },
-                        aps: {
-                            sound: "notification_sound.wav",
+                        apns: {
+                            payload: {
+                                aps: {
+                                    sound: "notification_sound.wav",
+                                },
+                            },
                         },
                         token,
                     };
