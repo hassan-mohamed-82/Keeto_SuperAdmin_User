@@ -26,7 +26,7 @@ export const restrauntadmin = mysqlTable("restrauntadmins", {
     phoneNumber: varchar("phone_number", { length: 255 }).notNull(),
 
     // هيكل الأدوار واضح ومحدد
-    type: mysqlEnum("type", ["owner", "subadmin", "branch_manager", "staff"])
+    type: mysqlEnum("type", ["owner", "subadmin", "branch_manager", "staff", "cashier"])
         .notNull()
         .default("branch_manager"),
 
