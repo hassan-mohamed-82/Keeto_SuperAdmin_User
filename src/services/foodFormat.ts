@@ -13,20 +13,16 @@ import {
     getAvailableDiscounts,
     applyPriorityDiscount,
 } from "../utils/discount";
-import { getUnavailableBranchesForFoods } from "../helpers/food.helper";
+import { getUnavailableBranchesForFoods, isFoodUnavailableForBranch, type BranchInfo } from "../helpers/food.helper";
 
-export interface BranchInfo {
-    id: string;
-    name: string;
-    nameAr?: string | null;
-    nameFr?: string | null;
-}
+
 
 export const formatFoodsList = async (
     rawMenu: any[],
     restaurantId: string,
     userId?: string,
-    favoriteFoodIds: Set<string> = new Set()
+    favoriteFoodIds: Set<string> = new Set(),
+    targetBranchId?: string | null
 ) => {
     if (!rawMenu || rawMenu.length === 0) return [];
 
@@ -269,6 +265,11 @@ export const formatFoodsList = async (
             unavailableBranches = Array.from(combinedBranches.values());
         }
 
+        // If a specific branch was requested, skip foods that are unavailable there
+        if (targetBranchId && isFoodUnavailableForBranch(unavailableBranches, targetBranchId)) {
+            return null; // will be filtered out below
+        }
+
         return {
             id: foodId,
             name: row.foodName || row.name,
@@ -304,5 +305,5 @@ export const formatFoodsList = async (
                 order_level: row.order_level,
             } : null,
         };
-    });
+    }).filter(Boolean) as any[];
 };

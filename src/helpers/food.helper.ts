@@ -1,5 +1,5 @@
 // src/helpers/food.helper.ts
-import { branchIngredientLocks, branchMenuItems, foodIngredients, branches } from "../models/schema";
+import { branchIngredientLocks, branchMenuItems, foodIngredients, branches, addresses } from "../models/schema";
 import { eq, and, inArray, or, isNull } from "drizzle-orm";
 import { db } from "../models/connection";
 
@@ -127,4 +127,18 @@ export const getUnavailableBranchesForFoods = async (
     });
 
     return resultMap;
+};
+// ==========================================
+// Helper: Check if a food is unavailable for a specific branch
+// ==========================================
+/**
+ * Returns true if the food is globally out-of-stock (unavailableBranches === null)
+ * OR if the given branchId appears in the food's unavailableBranches list.
+ */
+export const isFoodUnavailableForBranch = (
+    unavailableBranches: BranchInfo[] | null,
+    branchId: string
+): boolean => {
+    if (unavailableBranches === null) return true; // globally out-of-stock
+    return unavailableBranches.some((b) => b.id === branchId);
 };

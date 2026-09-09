@@ -5,8 +5,9 @@ import { eq, and, like, or, sql, isNull, isNotNull, inArray } from "drizzle-orm"
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
-import { getUnavailableBranchesForFoods, BranchInfo } from "../../helpers/food.helper";
+import { getUnavailableBranchesForFoods, BranchInfo, isFoodUnavailableForBranch } from "../../helpers/food.helper";
 import { formatFoodsList } from "../../services/foodFormat";
+import { resolveBranchIdFromAddress } from "../../helpers/pricing.helper";
 
 // ==========================================
 // 🔥 Helper: تجهيز favorites لو اليوزر عامل login
@@ -121,6 +122,14 @@ export const getRestaurantsByCuisine = async (req: Request, res: Response) => {
 export const getFoodsByCategory = async (req: Request, res: Response) => {
     const { categoryId } = req.params;
     const userId = req.user?.id;
+    // const branchIdParam = req.query?.branchId as string | undefined;
+    // const addressIdParam = req.query?.addressId as string | undefined;
+
+    // // Resolve the target branch: direct branchId wins, else resolve from addressId
+    // let targetBranchId: string | null = branchIdParam || null;
+    // if (!targetBranchId && addressIdParam) {
+    //     targetBranchId = await resolveBranchIdFromAddress(addressIdParam);
+    // }
 
     const { favoriteFoodIds } = await getUserFavoritesSets(userId);
 
@@ -187,6 +196,11 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
             ? null
             : (unavailableBranchesMap.get(f.foodId!) ?? []);
 
+        // Filter out foods that are unavailable at the requested branch
+        // if (targetBranchId && isFoodUnavailableForBranch(unavailableBranches, targetBranchId)) {
+        //     return null;
+        // }
+
         return {
             foodId: f.foodId,
             foodName: f.foodName,
@@ -206,7 +220,8 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
             isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false,
             unavailableBranches
         };
-    });
+    })
+    //.filter(Boolean);
 
     return SuccessResponse(res, { data: result });
 };
@@ -217,6 +232,14 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
 export const getRestaurantDetails = async (req: Request, res: Response) => {
     const { restaurantId } = req.params;
     const userId = (req as any).user?.id;
+    const branchIdParam = req.query?.branchId as string | undefined;
+    const addressIdParam = req.query?.addressId as string | undefined;
+
+    // Resolve the target branch for this restaurant
+    let targetBranchId: string | null = branchIdParam || null;
+    if (!targetBranchId && addressIdParam) {
+        targetBranchId = await resolveBranchIdFromAddress(addressIdParam, restaurantId);
+    }
 
     // 1. Fetch User Favorites
     const { favoriteFoodIds, favoriteRestaurantIds } = await getUserFavoritesSets(userId);
@@ -351,7 +374,8 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         rawMenu,
         restaurantId,
         userId,
-        favoriteFoodIds
+        favoriteFoodIds,
+        targetBranchId  // ← filter foods unavailable at this branch
     );
 
     // 6. Group Formatted Foods by Category
