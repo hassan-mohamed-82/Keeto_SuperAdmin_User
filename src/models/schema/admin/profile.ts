@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../../models/connection";
-import { restrauntadmin } from "../../../models/schema";
+import { restrauntadmin, restaurants } from "../../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../../Errors";
@@ -24,10 +24,12 @@ export const getProfile = async (req: Request, res: Response) => {
             restaurantId: restrauntadmin.restaurantId,
             branchId: restrauntadmin.branchId,
             fcmToken: restrauntadmin.fcmToken,
+            callcenterphone: restaurants.callcenterphone,
             createdAt: restrauntadmin.createdAt,
             updatedAt: restrauntadmin.updatedAt,
         })
         .from(restrauntadmin)
+        .leftJoin(restaurants, eq(restrauntadmin.restaurantId, restaurants.id))
         .where(eq(restrauntadmin.id, adminId))
         .limit(1);
 

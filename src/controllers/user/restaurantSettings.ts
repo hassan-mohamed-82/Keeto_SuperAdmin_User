@@ -13,6 +13,7 @@ export const getRestaurantSettings = async (req: Request, res: Response): Promis
         secondColor: restaurantSettings.secondColor,
         firstTextColor: restaurantSettings.firstTextColor,
         secondTextColor: restaurantSettings.secondTextColor,
+        productView: restaurantSettings.productView,
     })
         .from(restaurantSettings)
         .where(eq(restaurantSettings.restaurantId, restaurantId))
