@@ -39,6 +39,7 @@ import { eq, and, isNull, inArray } from "drizzle-orm";
 import { isLocationInZone } from "../utils/geo";
 import { BadRequest } from "../Errors/BadRequest";
 import { NotFound } from "../Errors/NotFound";
+import { activeFoodCondition } from "./foodConditions";
 
 // ─────────────────────────────────────────────
 // Types
@@ -233,7 +234,7 @@ export const calculateCalculatedPrice = async (
     ] = await Promise.all([
         db.select({ price: food.price, status: food.status, isOutOfStock: food.isOutOfStock })
             .from(food)
-            .where(eq(food.id, foodId))
+            .where(and(eq(food.id, foodId), activeFoodCondition))
             .limit(1),
 
         db.select({ price: productChannelPricing.price, status: productChannelPricing.status })

@@ -12,6 +12,7 @@ import { eq, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, UnauthorizedError, BadRequest } from "../../Errors";
 import { v4 as uuidv4 } from "uuid";
+import { activeFoodCondition } from "../../helpers/foodConditions";
 
 export const getRedeemableProducts = async (req: Request, res: Response) => {
     const { restaurantId } = req.params;
@@ -59,7 +60,8 @@ export const getRedeemableProducts = async (req: Request, res: Response) => {
             and(
                 eq(pointsProducts.restaurantId, restaurantId),
                 eq(pointsProducts.isActive, true),
-                eq(food.status, "active")
+                eq(food.status, "active"),
+                activeFoodCondition
             )
         );
 
@@ -109,7 +111,8 @@ export const generateRedeemCode = async (req: Request, res: Response) => {
             and(
                 eq(pointsProducts.foodId, foodId),
                 eq(pointsProducts.restaurantId, restaurantId),
-                eq(pointsProducts.isActive, true)
+                eq(pointsProducts.isActive, true),
+                activeFoodCondition
             )
         )
         .limit(1);

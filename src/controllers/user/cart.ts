@@ -54,6 +54,7 @@ import {
     calculateCalculatedPrice,
     type ServiceModule,
 } from "../../helpers/pricing.helper";
+import { activeFoodCondition } from "../../helpers/foodConditions";
 
 /* =========================================
    Helpers
@@ -122,7 +123,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
     const safeVariations = Array.isArray(variations) ? variations : [];
     const safeAddons = Array.isArray(requestAddons) ? requestAddons : [];
 
-    const [itemFood] = await db.select().from(food).where(eq(food.id, foodId)).limit(1);
+    const [itemFood] = await db.select().from(food).where(and(eq(food.id, foodId), activeFoodCondition)).limit(1);
     if (!itemFood) throw new BadRequest("Food not found");
 
     // 🛡️ Block check
@@ -417,7 +418,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             subcategoryId: food.subcategoryid,
         })
         .from(cartItems)
-        .leftJoin(food, eq(cartItems.foodId, food.id))
+        .leftJoin(food, and(eq(cartItems.foodId, food.id), activeFoodCondition))
         .leftJoin(restaurants, eq(cartItems.restaurantId, restaurants.id))
         .where(and(...conditions));
 
@@ -854,7 +855,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     await validateUserNotBlocked(userId, cartItem.restaurantId);
 
 
-    const [itemFood] = await db.select().from(food).where(eq(food.id, cartItem.foodId)).limit(1);
+    const [itemFood] = await db.select().from(food).where(and(eq(food.id, cartItem.foodId), activeFoodCondition)).limit(1);
     if (!itemFood) throw new BadRequest("Food item not found");
 
     if (!itemFood) throw new BadRequest("Food not found");

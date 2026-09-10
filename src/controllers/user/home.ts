@@ -8,6 +8,7 @@ import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discou
 import { getUnavailableBranchesForFoods, BranchInfo, isFoodUnavailableForBranch } from "../../helpers/food.helper";
 import { formatFoodsList } from "../../services/foodFormat";
 import { resolveBranchIdFromAddress } from "../../helpers/pricing.helper";
+import { activeFoodCondition } from "../../helpers/foodConditions";
 
 // ==========================================
 // 🔥 Helper: تجهيز favorites لو اليوزر عامل login
@@ -154,7 +155,8 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
         .where(and(
             eq(food.categoryid, categoryId),
-            eq(food.status, "active")
+            eq(food.status, "active"),
+            activeFoodCondition
         ));
 
     const uniqueRestaurants = [...new Set(data.map(f => f.restaurantId))];
@@ -309,6 +311,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             and(
                 eq(food.restaurantid, restaurantId),
                 eq(food.status, "active"),
+                activeFoodCondition,
                 or(isNull(categories.id), eq(categories.status, "active")),
                 or(isNull(subcategories.id), eq(subcategories.status, "active"))
             )
@@ -486,7 +489,7 @@ export const getUserFavorites = async (req: Request, res: Response) => {
     })
         .from(favorites)
         .leftJoin(restaurants, eq(favorites.restaurantId, restaurants.id))
-        .leftJoin(food, eq(favorites.foodId, food.id))
+        .leftJoin(food, and(eq(favorites.foodId, food.id), activeFoodCondition))
         .where(and(...conditions));
 
     // Get unique restaurant IDs from both restaurant favorites and favorited foods
@@ -570,7 +573,8 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
             food,
             and(
                 eq(restaurants.id, food.restaurantid),
-                eq(food.status, "active")
+                eq(food.status, "active"),
+                activeFoodCondition
             )
         )
         .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))

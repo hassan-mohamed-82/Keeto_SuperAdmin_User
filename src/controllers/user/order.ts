@@ -37,6 +37,7 @@ import { calculateCurrentStatus } from "./restaurantFeatures";
 import * as turf from "@turf/turf";
 import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
 import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
+import { activeFoodCondition } from "../../helpers/foodConditions";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -319,7 +320,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             ? await db
                 .select({ id: food.id, subcategoryid: food.subcategoryid })
                 .from(food)
-                .where(inArray(food.id, cartFoodIds))
+                .where(and(inArray(food.id, cartFoodIds), activeFoodCondition))
             : [];
 
         const subcatIdsInCart = [...new Set(cartFoods.map(f => f.subcategoryid).filter(Boolean))] as string[];
@@ -414,7 +415,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             : [],
         uniqueFoodIds.length > 0
             ? db.select({ id: food.id, price: food.price, status: food.status, isOutOfStock: food.isOutOfStock, discount_type: food.discount_type, discount_value: food.discount_value })
-                .from(food).where(inArray(food.id, uniqueFoodIds))
+                .from(food).where(and(inArray(food.id, uniqueFoodIds), activeFoodCondition))
             : []
     ]);
 
@@ -1321,7 +1322,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             addons: orderItems.addons
         })
             .from(orderItems)
-            .leftJoin(food, eq(orderItems.foodId, food.id))
+            .leftJoin(food, and(eq(orderItems.foodId, food.id), activeFoodCondition))
             .where(inArray(orderItems.orderId, orderIds));
 
         allItems = await formatOrderItemsVariations(allItems);
@@ -1438,7 +1439,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             addons: orderItems.addons
         })
             .from(orderItems)
-            .leftJoin(food, eq(orderItems.foodId, food.id))
+            .leftJoin(food, and(eq(orderItems.foodId, food.id), activeFoodCondition))
             .where(inArray(orderItems.orderId, orderIds));
 
         allItems = await formatOrderItemsVariations(allItems);
@@ -1574,7 +1575,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             addons: orderItems.addons
         })
         .from(orderItems)
-        .leftJoin(food, eq(orderItems.foodId, food.id))
+        .leftJoin(food, and(eq(orderItems.foodId, food.id), activeFoodCondition))
         .where(eq(orderItems.orderId, orderId));
 
     // 2. معالجة الـ Variations واستخراج أسماء الفارييشنز وتفاصيلها كاملة
