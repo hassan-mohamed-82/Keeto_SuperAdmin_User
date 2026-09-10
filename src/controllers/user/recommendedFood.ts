@@ -7,6 +7,7 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { formatFoodsList } from "../../services/foodFormat";
 import { getUserFavoritesSets } from "../../services/userFavoritesFood";
+import { activeFoodCondition } from "../../helpers/foodConditions";
 
 // ==========================================
 // Get Recommended Foods for User (Storefront / App)
@@ -26,7 +27,7 @@ export const getRecommendedFoodsForUser = async (req: Request, res: Response) =>
             restaurantId: food.restaurantid,
         })
         .from(food)
-        .where(eq(food.id, foodId))
+        .where(and(eq(food.id, foodId), activeFoodCondition))
         .limit(1);
 
     if (!basicFood) {
@@ -60,6 +61,7 @@ export const getRecommendedFoodsForUser = async (req: Request, res: Response) =>
             subcategoryName: subcategories.name,
             subcategoryNameAr: subcategories.nameAr,
             subcategoryNameFr: subcategories.nameFr,
+            subcategoryImage: subcategories.image,
             order_level: subcategories.order_Level,
         })
         .from(recommendedFoods)
@@ -71,6 +73,7 @@ export const getRecommendedFoodsForUser = async (req: Request, res: Response) =>
                 eq(recommendedFoods.foodId, foodId),
                 eq(recommendedFoods.status, "active"),
                 eq(food.status, "active"),
+                activeFoodCondition,
                 // eq(food.isOutOfStock, false),
                 // or(isNull(categories.id), eq(categories.status, "active")),
                 // or(isNull(subcategories.id), eq(subcategories.status, "active"))

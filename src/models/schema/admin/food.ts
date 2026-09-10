@@ -52,6 +52,7 @@ export const food = mysqlTable("food", {
 
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     points: int("points").default(0),
+    deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

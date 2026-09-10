@@ -259,7 +259,7 @@ export const getUserById = async (req: Request, res: Response) => {
 // Update user details and status
 export const updateUser = async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { name, phone, status, photo } = req.body;
+    const { name, phone, status, photo ,email, alternatePhone } = req.body;
 
     const [existingUser] = await db.select().from(users).where(eq(users.id, id)).limit(1);
     
@@ -282,7 +282,9 @@ export const updateUser = async (req: Request, res: Response) => {
             name: name || existingUser.name,
             phone: phone || existingUser.phone,
             status: status || existingUser.status,
-            photo: photoUrl
+            photo: photoUrl,
+            email: email || existingUser.email,
+            alternatePhone: alternatePhone || existingUser.alternatePhone
         })
         .where(eq(users.id, id));
 

@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { eq, and, or, isNull, lte, gte } from "drizzle-orm";
 import { db } from "../../models/connection"; // مسار الاتصال بقاعدة البيانات
 import { discounts, discountFoods, food, restaurants, categories, subcategories, favorites } from "../../models/schema";
+import { activeFoodCondition } from "../../helpers/foodConditions";
 
 export const getRestaurantOffers = async (req: Request, res: Response) => {
     try {
@@ -44,6 +45,7 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                 subcategoryName: subcategories.name,
                 subcategoryNameAr: subcategories.nameAr,
                 subcategoryNameFr: subcategories.nameFr,
+                subcategoryImage: subcategories.image,
                 order_level: subcategories.order_Level,
             })
             .from(discountFoods)
@@ -54,6 +56,7 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
             .where(
                 and(
                     eq(food.restaurantid, restaurantId), // فلترة بالمطعم
+                    activeFoodCondition,
                     eq(discounts.isActive, true), // الخصم مفعل
 
                     // التأكد إن تاريخ الخصم ساري (لو التواريخ موجودة)
@@ -103,6 +106,7 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                     name: row.subcategoryName,
                     nameAr: row.subcategoryNameAr,
                     nameFr: row.subcategoryNameFr,
+                    image: row.subcategoryImage,
                     order_level: row.order_level,
                 } : null,
             };
@@ -171,6 +175,7 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 subcategoryName: subcategories.name,
                 subcategoryNameAr: subcategories.nameAr,
                 subcategoryNameFr: subcategories.nameFr,
+                subcategoryImage: subcategories.image,
                 order_level: subcategories.order_Level,
 
                 // تفاصيل المطعم
@@ -197,6 +202,7 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 and(
                     eq(discounts.isActive, true),
                     eq(restaurants.status, "active"),
+                    activeFoodCondition,
                     or(isNull(discounts.startDate), lte(discounts.startDate, now)),
                     or(isNull(discounts.endDate), gte(discounts.endDate, now))
                 )
@@ -243,6 +249,7 @@ export const getAllOffers = async (req: Request, res: Response) => {
                     name: row.subcategoryName,
                     nameAr: row.subcategoryNameAr,
                     nameFr: row.subcategoryNameFr,
+                    image: row.subcategoryImage,
                     order_level: row.order_level,
                 } : null,
 

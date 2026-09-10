@@ -33,6 +33,7 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   secondTextColor: varchar("second_text_color", { length: 20 }),
 
   vegType: mysqlEnum("veg_type", ["VEG", "NON_VEG", "BOTH"]).default("BOTH"),
+  productView: mysqlEnum("product_view", ["select", "normal"]).default("normal"),
   canEditOrder: boolean("can_edit_order").default(false),
   minOrderAmount: decimal("min_order_amount", { precision: 10, scale: 2 }).default("0.00"),
 

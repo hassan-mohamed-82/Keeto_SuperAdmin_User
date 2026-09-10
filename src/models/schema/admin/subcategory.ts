@@ -7,6 +7,7 @@ import {
     char,
     int,
     uniqueIndex,
+    boolean
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { categories } from "./Category";
@@ -19,11 +20,13 @@ export const subcategories = mysqlTable("subcategories", {
     name: varchar("name", { length: 255 }).notNull(),
     nameAr: varchar("name_ar", { length: 255 }),
     nameFr: varchar("name_fr", { length: 255 }),
+    image: varchar("image", { length: 500 }),
     categoryId: char("category_id", { length: 36 }).references(() => categories.id).notNull(),
     addonsIds: json("addons_ids").$type<string[]>().default([]),
     priority: mysqlEnum("priority", ["low", "medium", "high"]).default("low"),
     order_Level: int("order_level").default(0), // تم تغيير الاسم هنا
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
+    isOutOfStock: boolean("is_out_of_stock").default(false),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
@@ -39,6 +42,7 @@ export const branchSubcategories = mysqlTable(
             .references(() => subcategories.id)
             .notNull(),
         status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
+        isOutOfStock: boolean("is_out_of_stock").default(false),
         createdAt: timestamp("created_at").defaultNow(),
         updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     },

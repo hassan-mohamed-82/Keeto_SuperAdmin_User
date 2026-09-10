@@ -108,6 +108,19 @@ export const getProfile = async (req: Request | any, res: Response) => {
         .where(eq(userWallets.userId, userId))
         .limit(1);
 
+    // 5. Fetch Restaurant Call Center Phone if restaurantId is provided
+    let callcenterphone: string | null = null;
+    if (restaurantId && restaurantId.trim() !== "") {
+        const [rest] = await db
+            .select({ callcenterphone: restaurants.callcenterphone })
+            .from(restaurants)
+            .where(eq(restaurants.id, restaurantId.trim()))
+            .limit(1);
+        if (rest) {
+            callcenterphone = rest.callcenterphone || null;
+        }
+    }
+
     const isProfileComplete = userInfo.isProfileComplete || !(userInfo.email && userInfo.email.endsWith("@privaterelay.appleid.com"));
 
     return SuccessResponse(res, {
@@ -122,6 +135,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
                 isVerified: userInfo.isVerified,
                 createdAt: userInfo.createdAt,
                 isProfileComplete,
+                callcenterphone,
                 addresses: formattedAddresses, // 🟢 إرجاع العناوين المنسقة مع flags الاستخدام
             },
             walletBalance: wallet?.balance || "0.00",
