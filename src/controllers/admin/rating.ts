@@ -1,7 +1,8 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurantRatings, restaurants, users, orders } from "../../models/schema";
+import { restaurantRatings, restaurants, users, orders, ratingRequests } from "../../models/schema";
 import { eq, sql, count, avg, and, isNotNull, desc, gte, lte } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -12,6 +13,7 @@ import timezone from "dayjs/plugin/timezone";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
 
 // ==========================================
 // 1. Get Restaurant Rating Stats (Admin)
@@ -343,3 +345,238 @@ export const getAllCustomerRatings = async (req: Request, res: Response) => {
         },
     });
 };
+
+// ==========================================
+// 7. Get All Rating Moderation Requests (Pending List & History)
+// يتيح للسوبر أدمن فلترة الطلبات المعلقة (pending) والمطاعم والنوع (restaurant / order)
+// ==========================================
+export const getAllRatingModerationRequests = async (req: Request, res: Response) => {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
+    const status = (req.query.status as string) || "all";
+    const targetType = (req.query.targetType as string) || "restaurant";
+    const restaurantId = req.query.restaurantId as string | undefined;
+
+    const conditions: any[] = [];
+
+    if (status && status !== "all") {
+        conditions.push(eq(ratingRequests.status, status as any));
+    }
+
+    if (targetType && targetType !== "all") {
+        conditions.push(eq(ratingRequests.targetType, targetType as any));
+    }
+
+    if (restaurantId) {
+        conditions.push(eq(ratingRequests.restaurantId, restaurantId));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [totalData] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(ratingRequests)
+        .where(whereClause);
+
+    const total = Number(totalData?.count ?? 0);
+    const totalPages = Math.ceil(total / limit);
+
+    const customerUser = alias(users, "customer_user");
+
+    const requests = await db
+        .select({
+            id: ratingRequests.id,
+            targetType: ratingRequests.targetType,
+            requestType: ratingRequests.requestType,
+            ratingId: ratingRequests.ratingId,
+            orderId: ratingRequests.orderId,
+            newRating: ratingRequests.newRating,
+            newComment: ratingRequests.newComment,
+            reason: ratingRequests.reason,
+            status: ratingRequests.status,
+            adminNotes: ratingRequests.adminNotes,
+            resolvedAt: ratingRequests.resolvedAt,
+            createdAt: ratingRequests.createdAt,
+            restaurant: {
+                id: restaurants.id,
+                name: restaurants.name,
+                nameAr: restaurants.nameAr,
+                logo: restaurants.logo,
+            },
+            restaurantRating: {
+                id: restaurantRatings.id,
+                rating: restaurantRatings.rating,
+                comment: restaurantRatings.comment,
+                createdAt: restaurantRatings.createdAt,
+            },
+            order: {
+                id: orders.id,
+                orderNumber: orders.dailyOrderNumber,
+                orderTotalAmount: orders.totalAmount,
+                rating: orders.rating,
+                ratingComment: orders.ratingComment,
+                createdAt: orders.createdAt,
+            },
+            customer: {
+                id: customerUser.id,
+                name: customerUser.name,
+                email: customerUser.email,
+                phone: customerUser.phone,
+                photo: customerUser.photo,
+            },
+        })
+        .from(ratingRequests)
+        .leftJoin(restaurants, eq(ratingRequests.restaurantId, restaurants.id))
+        .leftJoin(restaurantRatings, eq(ratingRequests.ratingId, restaurantRatings.id))
+        .leftJoin(orders, eq(ratingRequests.orderId, orders.id))
+        .leftJoin(customerUser, sql`${customerUser.id} = COALESCE(${restaurantRatings.userId}, ${orders.userId})`)
+        .where(whereClause)
+        .orderBy(desc(ratingRequests.createdAt))
+        .limit(limit)
+        .offset(offset);
+
+    return SuccessResponse(res, {
+        message: "Rating moderation requests fetched successfully",
+        data: requests,
+        pagination: {
+            total,
+            page,
+            limit,
+            totalPages,
+        },
+    });
+};
+
+// ==========================================
+// 8. قبول طلب التعديل أو الحذف (Approve Request)
+// إذا كان الطلب حذف: يتم حذف التقييم / تصفيره
+// إذا كان الطلب تعديل: يتم تعديل التقييم والتعليق
+// ==========================================
+export const approveRatingModerationRequest = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { adminNotes } = req.body;
+
+    const [request] = await db
+        .select()
+        .from(ratingRequests)
+        .where(eq(ratingRequests.id, id))
+        .limit(1);
+
+    if (!request) throw new NotFound("Rating moderation request not found");
+
+    if (request.status !== "pending") {
+        throw new BadRequest(`This request has already been ${request.status}`);
+    }
+
+    if (request.targetType === "restaurant") {
+        if (!request.ratingId) {
+            throw new BadRequest("Rating ID is missing on this request");
+        }
+
+        const [existingRating] = await db
+            .select()
+            .from(restaurantRatings)
+            .where(eq(restaurantRatings.id, request.ratingId))
+            .limit(1);
+
+        if (existingRating) {
+            if (request.requestType === "delete") {
+                await db.delete(restaurantRatings).where(eq(restaurantRatings.id, request.ratingId));
+            } else if (request.requestType === "edit") {
+                await db
+                    .update(restaurantRatings)
+                    .set({
+                        rating: request.newRating ?? existingRating.rating,
+                        comment: request.newComment !== undefined ? request.newComment : existingRating.comment,
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(restaurantRatings.id, request.ratingId));
+            }
+        }
+    } else if (request.targetType === "order") {
+        if (!request.orderId) {
+            throw new BadRequest("Order ID is missing on this request");
+        }
+
+        const [existingOrder] = await db
+            .select({ id: orders.id, rating: orders.rating, ratingComment: orders.ratingComment })
+            .from(orders)
+            .where(eq(orders.id, request.orderId))
+            .limit(1);
+
+        if (existingOrder) {
+            if (request.requestType === "delete") {
+                await db
+                    .update(orders)
+                    .set({ rating: null, ratingComment: null })
+                    .where(eq(orders.id, request.orderId));
+            } else if (request.requestType === "edit") {
+                await db
+                    .update(orders)
+                    .set({
+                        rating: request.newRating ?? existingOrder.rating,
+                        ratingComment: request.newComment !== undefined ? request.newComment : existingOrder.ratingComment,
+                    })
+                    .where(eq(orders.id, request.orderId));
+            }
+        }
+    }
+
+    await db
+        .update(ratingRequests)
+        .set({
+            status: "approved",
+            adminNotes: adminNotes ?? null,
+            resolvedAt: new Date(),
+        })
+        .where(eq(ratingRequests.id, id));
+
+    return SuccessResponse(res, {
+        message: "Rating moderation request approved and applied successfully",
+        data: {
+            id,
+            status: "approved",
+            resolvedAt: new Date(),
+        },
+    });
+};
+
+// ==========================================
+// 9. رفض طلب التعديل أو الحذف (Reject Request)
+// يظل التقييم كما هو مع حفظ سبب الرفض
+// ==========================================
+export const rejectRatingModerationRequest = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { adminNotes } = req.body;
+
+    const [request] = await db
+        .select()
+        .from(ratingRequests)
+        .where(eq(ratingRequests.id, id))
+        .limit(1);
+
+    if (!request) throw new NotFound("Rating moderation request not found");
+
+    if (request.status !== "pending") {
+        throw new BadRequest(`This request has already been ${request.status}`);
+    }
+
+    await db
+        .update(ratingRequests)
+        .set({
+            status: "rejected",
+            adminNotes: adminNotes ?? null,
+            resolvedAt: new Date(),
+        })
+        .where(eq(ratingRequests.id, id));
+
+    return SuccessResponse(res, {
+        message: "Rating moderation request rejected successfully",
+        data: {
+            id,
+            status: "rejected",
+            resolvedAt: new Date(),
+        },
+    });
+};

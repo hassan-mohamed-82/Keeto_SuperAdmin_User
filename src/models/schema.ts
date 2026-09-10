@@ -58,4 +58,6 @@ export * from "./schema/admin/serviceFees";
 export * from "./schema/admin/taxes";
 export * from "./schema/admin/offers";
 export * from "./schema/admin/taxType";
+export * from "./schema/admin/ratingRequests";
+
 
