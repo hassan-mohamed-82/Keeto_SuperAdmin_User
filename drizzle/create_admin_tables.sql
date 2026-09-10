@@ -67,3 +67,15 @@ CREATE TABLE IF NOT EXISTS `offers` (
     CONSTRAINT `offers_id` PRIMARY KEY(`id`),
     CONSTRAINT `offers_restaurant_id_fk` FOREIGN KEY (`restaurant_id`) REFERENCES `restaurants`(`id`) ON DELETE CASCADE
 );
+
+-- 5. Tax Types Table
+CREATE TABLE IF NOT EXISTS `tax_types` (
+    `id` char(36) NOT NULL DEFAULT (UUID()),
+    `restrauntid` char(36) NOT NULL,
+    `type` enum('include', 'exclude') NOT NULL DEFAULT 'exclude',
+    `created_at` timestamp DEFAULT (now()),
+    `updated_at` timestamp DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT `tax_types_id` PRIMARY KEY(`id`),
+    CONSTRAINT `tax_types_restrauntid_fk` FOREIGN KEY (`restrauntid`) REFERENCES `restaurants`(`id`) ON DELETE CASCADE
+);
+
