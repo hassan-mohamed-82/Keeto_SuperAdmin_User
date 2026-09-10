@@ -60,6 +60,7 @@ export const getRecommendedFoodsForUser = async (req: Request, res: Response) =>
             subcategoryName: subcategories.name,
             subcategoryNameAr: subcategories.nameAr,
             subcategoryNameFr: subcategories.nameFr,
+            subcategoryImage: subcategories.image,
             order_level: subcategories.order_Level,
         })
         .from(recommendedFoods)

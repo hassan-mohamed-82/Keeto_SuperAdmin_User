@@ -44,6 +44,7 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                 subcategoryName: subcategories.name,
                 subcategoryNameAr: subcategories.nameAr,
                 subcategoryNameFr: subcategories.nameFr,
+                subcategoryImage: subcategories.image,
                 order_level: subcategories.order_Level,
             })
             .from(discountFoods)
@@ -103,6 +104,7 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                     name: row.subcategoryName,
                     nameAr: row.subcategoryNameAr,
                     nameFr: row.subcategoryNameFr,
+                    image: row.subcategoryImage,
                     order_level: row.order_level,
                 } : null,
             };
@@ -171,6 +173,7 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 subcategoryName: subcategories.name,
                 subcategoryNameAr: subcategories.nameAr,
                 subcategoryNameFr: subcategories.nameFr,
+                subcategoryImage: subcategories.image,
                 order_level: subcategories.order_Level,
 
                 // تفاصيل المطعم
@@ -243,6 +246,7 @@ export const getAllOffers = async (req: Request, res: Response) => {
                     name: row.subcategoryName,
                     nameAr: row.subcategoryNameAr,
                     nameFr: row.subcategoryNameFr,
+                    image: row.subcategoryImage,
                     order_level: row.order_level,
                 } : null,
 
