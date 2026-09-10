@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { users, restaurant_users, restaurants } from "../../models/schema";
-import { eq, inArray, and, or, sql } from "drizzle-orm";
+import { users, restaurant_users, restaurants, orders, orderItems, food, userRestaurantPoints } from "../../models/schema";
+import { eq, inArray, and, or, sql, desc } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -304,6 +304,141 @@ export const deleteUser = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, { message: "User deleted successfully", data: { id } }, 200);
 };
+
+// =======================================================
+// Get Single User Stats (SuperAdmin User Analytics Page)
+// Returns: user info, total points across restaurants,
+// total spendings, order source breakdown (pie chart),
+// top 5 items, recent orders, and list of restaurants
+// the user ordered from.
+// =======================================================
+export const getUserStats = async (req: Request, res: Response) => {
+    const { id: userId } = req.params;
+
+    // ─── 1. Verify user exists ──────────────────────────────────────────────
+    const [userRecord] = await db
+        .select({
+            id: users.id,
+            name: users.name,
+            email: users.email,
+            phone: users.phone,
+            photo: users.photo,
+            status: users.status,
+            isVerified: users.isVerified,
+            isProfileComplete: users.isProfileComplete,
+            createdAt: users.createdAt,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+    if (!userRecord) throw new NotFound("User not found");
+
+    // ─── 2. Run parallel queries ─────────────────────────────────────────────
+    const [pointsRows, aggregateRows, recentOrderRows, topItemRows, restaurantRows] = await Promise.all([
+
+        // Total Points across all restaurants
+        db.select({
+            totalPoints: sql<number>`COALESCE(SUM(${userRestaurantPoints.points}), 0)`,
+        })
+            .from(userRestaurantPoints)
+            .where(eq(userRestaurantPoints.userId, userId)),
+
+        // Aggregate: total orders & total spendings (exclude cancelled)
+        db.select({
+            totalOrders: sql<number>`COUNT(*)`,
+            totalSpendings: sql<string>`COALESCE(SUM(${orders.totalAmount}), 0)`,
+        })
+            .from(orders)
+            .where(and(eq(orders.userId, userId), sql`${orders.status} != 'cancelled'`)),
+
+        // Recent 50 orders with restaurant info
+        db.select({
+            orderNumber: orders.orderNumber,
+            totalAmount: orders.totalAmount,
+            orderSource: orders.orderSource,
+            orderType: orders.orderType,
+            paymentMethod: orders.paymentMethod,
+            status: orders.status,
+            createdAt: orders.createdAt,
+            restaurant: {
+                id: restaurants.id,
+                name: restaurants.name,
+                nameAr: restaurants.nameAr,
+                logo: restaurants.logo,
+            },
+        })
+            .from(orders)
+            .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+            .where(eq(orders.userId, userId))
+            .orderBy(desc(orders.createdAt))
+            .limit(50),
+
+        // Top 5 most ordered food items globally
+        db.select({
+            foodId: orderItems.foodId,
+            name: food.name,
+            nameAr: food.nameAr,
+            image: food.image,
+            totalQuantity: sql<number>`SUM(${orderItems.quantity})`,
+            orderCount: sql<number>`COUNT(DISTINCT ${orderItems.orderId})`,
+        })
+            .from(orderItems)
+            .innerJoin(orders, eq(orderItems.orderId, orders.id))
+            .innerJoin(food, eq(orderItems.foodId, food.id))
+            .where(eq(orders.userId, userId))
+            .groupBy(orderItems.foodId, food.name, food.nameAr, food.image)
+            .orderBy(sql`SUM(${orderItems.quantity}) DESC`)
+            .limit(5),
+
+        // Restaurants the user made orders from
+        db.select({
+            id: restaurants.id,
+            name: restaurants.name,
+            nameAr: restaurants.nameAr,
+            logo: restaurants.logo,
+            orderCount: sql<number>`COUNT(${orders.id})`,
+            totalSpent: sql<string>`COALESCE(SUM(${orders.totalAmount}), 0)`,
+        })
+            .from(orders)
+            .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+            .where(and(eq(orders.userId, userId), sql`${orders.status} != 'cancelled'`))
+            .groupBy(restaurants.id, restaurants.name, restaurants.nameAr, restaurants.logo)
+            .orderBy(sql`COUNT(${orders.id}) DESC`),
+    ]);
+
+    // ─── 3. Build order-source breakdown (for pie chart) ────────────────────
+    const sourceMap: Record<string, number> = {};
+    for (const o of recentOrderRows) {
+        const src = o.orderSource ?? "unknown";
+        sourceMap[src] = (sourceMap[src] ?? 0) + 1;
+    }
+    const orderSourceBreakdown = Object.entries(sourceMap).map(([source, count]) => ({ source, count }));
+
+    // ─── 4. Build response ──────────────────────────────────────────────────
+    const aggregate = aggregateRows[0];
+
+    return SuccessResponse(res, {
+        message: "User stats fetched successfully",
+        data: {
+            user: userRecord,
+            stats: {
+                points: Number(pointsRows[0]?.totalPoints ?? 0),
+                totalOrders: Number(aggregate?.totalOrders ?? 0),
+                totalSpendings: Number(aggregate?.totalSpendings ?? 0).toFixed(2),
+            },
+            orderSourceBreakdown,
+            topItems: topItemRows,
+            restaurants: restaurantRows.map(r => ({
+                ...r,
+                orderCount: Number(r.orderCount),
+                totalSpent: Number(r.totalSpent).toFixed(2),
+            })),
+            recentOrders: recentOrderRows,
+        },
+    }, 200);
+};
+
 
 
 
