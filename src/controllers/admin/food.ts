@@ -533,52 +533,106 @@ export const updateFood = async (req: Request, res: Response) => {
     // ===========================
     // ✅ Variations Update
     // ===========================
+    // ✅ Variations Update (Non-destructive Upsert)
+    // ===========================
     if (data.variations && Array.isArray(data.variations)) {
-
         const oldVars = await db
             .select()
             .from(foodVariations)
             .where(eq(foodVariations.foodId, id));
 
-        for (const v of oldVars) {
-            await db
-                .delete(variationOptions)
-                .where(eq(variationOptions.variationId, v.id));
-        }
+        const oldVarIds = oldVars.map(v => v.id);
+        const oldOptions = oldVarIds.length > 0
+            ? await db.select().from(variationOptions).where(inArray(variationOptions.variationId, oldVarIds))
+            : [];
 
-        await db
-            .delete(foodVariations)
-            .where(eq(foodVariations.foodId, id));
+        const incomingVarIds = new Set<string>();
+        const incomingOptIds = new Set<string>();
 
         for (const variation of data.variations) {
-            const variationId = uuidv4();
+            let variationId = variation.id;
+            const existingVar = variationId ? oldVars.find(v => v.id === variationId) : null;
 
-            await db.insert(foodVariations).values({
-                id: variationId,
-                foodId: id,
-                name: variation.name,
-                nameAr: variation.nameAr,
-                nameFr: variation.nameFr,
-                isRequired: variation.isRequired || false,
-                selectionType: variation.selectionType || "single",
-                min: variation.min ?? null,
-                max: variation.max ?? null,
-                status: variation.status !== undefined ? variation.status : true,
-            });
+            if (existingVar) {
+                // Update existing variation
+                await db.update(foodVariations).set({
+                    name: variation.name,
+                    nameAr: variation.nameAr ?? existingVar.nameAr,
+                    nameFr: variation.nameFr ?? existingVar.nameFr,
+                    isRequired: variation.isRequired !== undefined ? variation.isRequired : existingVar.isRequired,
+                    selectionType: variation.selectionType || existingVar.selectionType,
+                    min: variation.min !== undefined ? variation.min : existingVar.min,
+                    max: variation.max !== undefined ? variation.max : existingVar.max,
+                    status: variation.status !== undefined ? variation.status : existingVar.status,
+                }).where(eq(foodVariations.id, variationId));
+            } else {
+                // Insert new variation
+                variationId = variationId || uuidv4();
+                await db.insert(foodVariations).values({
+                    id: variationId,
+                    foodId: id,
+                    name: variation.name,
+                    nameAr: variation.nameAr || '',
+                    nameFr: variation.nameFr || '',
+                    isRequired: variation.isRequired || false,
+                    selectionType: variation.selectionType || "single",
+                    min: variation.min ?? null,
+                    max: variation.max ?? null,
+                    status: variation.status !== undefined ? variation.status : true,
+                });
+            }
+            incomingVarIds.add(variationId);
 
+            // Handle options for this variation
             if (variation.options && Array.isArray(variation.options)) {
                 for (const option of variation.options) {
-                    await db.insert(variationOptions).values({
-                        variationId,
-                        optionName: option.optionName,
-                        optionNameAr: option.optionNameAr,
-                        optionNameFr: option.optionNameFr,
-                        additionalPrice: option.additionalPrice ? option.additionalPrice.toString() : "0",
-                        status: option.status !== undefined ? option.status : true,
-                        isDefault: option.isDefault !== undefined ? option.isDefault : false,
-                    });
+                    let optionId = option.id;
+                    const existingOpt = optionId ? oldOptions.find(o => o.id === optionId) : null;
+
+                    const additionalPriceStr = option.additionalPrice !== undefined && option.additionalPrice !== null
+                        ? option.additionalPrice.toString()
+                        : "0";
+
+                    if (existingOpt) {
+                        // Update existing option (preserves UUID!)
+                        await db.update(variationOptions).set({
+                            variationId,
+                            optionName: option.optionName,
+                            optionNameAr: option.optionNameAr ?? existingOpt.optionNameAr,
+                            optionNameFr: option.optionNameFr ?? existingOpt.optionNameFr,
+                            additionalPrice: additionalPriceStr,
+                            status: option.status !== undefined ? option.status : existingOpt.status,
+                            isDefault: option.isDefault !== undefined ? option.isDefault : existingOpt.isDefault,
+                        }).where(eq(variationOptions.id, optionId));
+                    } else {
+                        // Insert new option
+                        optionId = optionId || uuidv4();
+                        await db.insert(variationOptions).values({
+                            id: optionId,
+                            variationId,
+                            optionName: option.optionName,
+                            optionNameAr: option.optionNameAr || '',
+                            optionNameFr: option.optionNameFr || '',
+                            additionalPrice: additionalPriceStr,
+                            status: option.status !== undefined ? option.status : true,
+                            isDefault: option.isDefault !== undefined ? option.isDefault : false,
+                        });
+                    }
+                    incomingOptIds.add(optionId);
                 }
             }
+        }
+
+        // Delete options that were explicitly removed
+        const optionsToDelete = oldOptions.filter(o => !incomingOptIds.has(o.id));
+        if (optionsToDelete.length > 0) {
+            await db.delete(variationOptions).where(inArray(variationOptions.id, optionsToDelete.map(o => o.id)));
+        }
+
+        // Delete variations that were explicitly removed
+        const varsToDelete = oldVars.filter(v => !incomingVarIds.has(v.id));
+        if (varsToDelete.length > 0) {
+            await db.delete(foodVariations).where(inArray(foodVariations.id, varsToDelete.map(v => v.id)));
         }
     }
 

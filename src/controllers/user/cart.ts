@@ -289,6 +289,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
                 optionName:      details?.optionName      ?? v.optionName      ?? null,
                 optionNameAr:    details?.optionNameAr    ?? v.optionNameAr    ?? null,
                 optionNameFr:    details?.optionNameFr    ?? v.optionNameFr    ?? null,
+                additionalPrice: Number(details?.additionalPrice ?? v.additionalPrice ?? 0).toFixed(2),
                 price:           Number(details?.additionalPrice ?? v.additionalPrice ?? 0).toFixed(2),
             });
         }
@@ -1221,6 +1222,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
                 optionName:      details?.optionName      ?? v.optionName      ?? null,
                 optionNameAr:    details?.optionNameAr    ?? v.optionNameAr    ?? null,
                 optionNameFr:    details?.optionNameFr    ?? v.optionNameFr    ?? null,
+                additionalPrice: Number(details?.additionalPrice ?? v.additionalPrice ?? v.price ?? 0).toFixed(2),
                 price:           Number(details?.additionalPrice ?? v.additionalPrice ?? v.price ?? 0).toFixed(2),
             };
         });

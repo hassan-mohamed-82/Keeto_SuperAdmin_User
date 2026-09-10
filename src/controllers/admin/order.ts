@@ -499,7 +499,8 @@ export const getOrderDetails = async (req: Request, res: Response) => {
                     variationNameAr,
                     optionName,
                     optionNameAr,
-                    price: price.toString()
+                    price: price.toString(),
+                    additionalPrice: price.toString()
                 };
             }));
         }

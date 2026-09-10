@@ -262,7 +262,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     } else {
         defaultPreparingDuration = settings?.maxDeliveryTime ?? 25;
     }
-    
+
     // ==========================================
     // ⚡ 5. Channel Pricing Engine — Subtotal, Variations & Addons
     // orderType IS the serviceModule (they are the same concept)
@@ -377,10 +377,12 @@ export const checkout = async (req: Request | any, res: Response) => {
                     optionNameAr: variationOptions.optionNameAr,
                     optionNameFr: variationOptions.optionNameFr,
                     additionalPrice: variationOptions.additionalPrice,
+                    status: variationOptions.status,
                     variationId: foodVariations.id,
                     variationName: foodVariations.name,
                     variationNameAr: foodVariations.nameAr,
                     variationNameFr: foodVariations.nameFr,
+                    variationStatus: foodVariations.status,
                 })
                 .from(variationOptions)
                 .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
@@ -416,9 +418,18 @@ export const checkout = async (req: Request | any, res: Response) => {
             const addonId = a.addonId || a.id;
             const dbAddon = addonsMap.get(addonId);
             if (dbAddon) {
+                if (dbAddon.status === "inactive") {
+                    return res.status(422).json({
+                        success: false,
+                        message: `Add-on "${dbAddon.name}" is currently unavailable.`,
+                    });
+                }
                 const p = parseFloat((dbAddon.price || "0") as string);
                 addonPrice += p;
                 a.price = p.toString();
+                a.name = dbAddon.name;
+                a.nameAr = dbAddon.nameAr;
+                a.nameFr = dbAddon.nameFr;
             } else {
                 addonPrice += parseFloat(a.price || "0");
             }
@@ -469,11 +480,23 @@ export const checkout = async (req: Request | any, res: Response) => {
                 for (const v of parsedVariations) {
                     if (v.optionId) {
                         const opt = optionsWithParentMap.get(v.optionId);
-                        if (opt) {
-                            const resolvedPrice = (opt.additionalPrice as string || "0");
-                            varPrice += parseFloat(resolvedPrice);
-                            v.additionalPrice = resolvedPrice;
+                        if (!opt) {
+                            return res.status(422).json({
+                                success: false,
+                                message: `Option '${v.optionName || 'selected'}' is no longer available. Please refresh your cart.`,
+                                data: { affectedFoodId: cartItem.foodId },
+                            });
                         }
+                        if (opt.status === false) {
+                            return res.status(422).json({
+                                success: false,
+                                message: `Option '${opt.optionName}' is currently unavailable.`,
+                                data: { affectedFoodId: cartItem.foodId },
+                            });
+                        }
+                        const resolvedPrice = (opt.additionalPrice as string || "0");
+                        varPrice += parseFloat(resolvedPrice);
+                        v.additionalPrice = resolvedPrice;
                     }
                 }
             }
@@ -509,7 +532,8 @@ export const checkout = async (req: Request | any, res: Response) => {
                 optionName: optDetails?.optionName ?? v.optionName ?? null,
                 optionNameAr: optDetails?.optionNameAr ?? v.optionNameAr ?? null,
                 optionNameFr: optDetails?.optionNameFr ?? v.optionNameFr ?? null,
-                price: Number(resolvedPrice).toFixed(2)
+                price: Number(resolvedPrice).toFixed(2),
+                additionalPrice: Number(resolvedPrice).toFixed(2)
             };
         });
 
@@ -843,7 +867,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             )
             .where(eq(branches.id, resolvedBranchId))
             .limit(1);
-            
+
 
         //  if (resolvedBranchId) {
         // const [branchDetails] = await db
