@@ -80,20 +80,20 @@ const formatOrderItemsVariations = async (items: any[]) => {
                 cleanVariations = [];
             }
         }
+        if (!Array.isArray(cleanVariations)) cleanVariations = [];
         return { item, cleanVariations };
     });
 
+    // ✅ FIX: collect option IDs per-variation, not per-item, so a single
+    // incomplete variation doesn't force a re-fetch (and possible drop) of
+    // its siblings that already have full details.
     const allOldOptionIds = new Set<string>();
     for (const { cleanVariations } of parsedItems) {
-        if (Array.isArray(cleanVariations) && cleanVariations.length > 0) {
-            const hasFullDetails = cleanVariations.every((v: any) => v.variationName && v.optionName);
+        for (const v of cleanVariations) {
+            const hasFullDetails = Boolean(v?.variationName && v?.optionName);
             if (!hasFullDetails) {
-                for (const v of cleanVariations) {
-                    const optId = v.optionId || v.id;
-                    if (optId) {
-                        allOldOptionIds.add(optId);
-                    }
-                }
+                const optId = v?.optionId || v?.id;
+                if (optId) allOldOptionIds.add(optId);
             }
         }
     }
@@ -122,11 +122,11 @@ const formatOrderItemsVariations = async (items: any[]) => {
     }
 
     return parsedItems.map(({ item, cleanVariations }) => {
-        let variationDetails: any[] = [];
-        if (Array.isArray(cleanVariations) && cleanVariations.length > 0) {
-            const hasFullDetails = cleanVariations.every((v: any) => v.variationName && v.optionName);
+        const variationDetails = cleanVariations.map((v: any) => {
+            const hasFullDetails = Boolean(v?.variationName && v?.optionName);
+
             if (hasFullDetails) {
-                variationDetails = cleanVariations.map((v: any) => ({
+                return {
                     optionId: v.optionId,
                     optionName: v.optionName,
                     optionNameAr: v.optionNameAr,
@@ -136,20 +136,40 @@ const formatOrderItemsVariations = async (items: any[]) => {
                     variationName: v.variationName,
                     variationNameAr: v.variationNameAr,
                     variationNameFr: v.variationNameFr || '',
-                }));
-            } else {
-                for (const v of cleanVariations) {
-                    const optId = v.optionId || v.id;
-                    const optDetails = optId ? optionsMap.get(optId) : null;
-                    if (optDetails) {
-                        variationDetails.push(optDetails);
-                    }
-                }
+                };
             }
-        }
+
+            const optId = v?.optionId || v?.id;
+            const optDetails = optId ? optionsMap.get(optId) : null;
+
+            if (optDetails) {
+                return optDetails;
+            }
+
+            // ✅ FIX: option/variation no longer exists in the DB (deleted after
+            // the order was placed) — fall back to the order-item snapshot
+            // instead of dropping the row, flagged as unavailable.
+            if (v && (v.optionId || v.id)) {
+                return {
+                    optionId: v.optionId || v.id || null,
+                    optionName: v.optionName || null,
+                    optionNameAr: v.optionNameAr || null,
+                    optionNameFr: v.optionNameFr || '',
+                    additionalPrice: v.price || v.additionalPrice || '0',
+                    variationId: v.variationId || null,
+                    variationName: v.variationName || null,
+                    variationNameAr: v.variationNameAr || null,
+                    variationNameFr: v.variationNameFr || '',
+                    isAvailable: false,
+                };
+            }
+
+            return null;
+        }).filter(Boolean);
+
         return {
             ...item,
-            variations: variationDetails
+            variations: variationDetails,
         };
     });
 };
@@ -160,6 +180,7 @@ const formatOrderItemsVariations = async (items: any[]) => {
 // دالة مساعدة لضمان سلامة العمليات الحسابية المالية
 
 const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
+
 export const checkout = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
@@ -431,7 +452,11 @@ export const checkout = async (req: Request | any, res: Response) => {
                 a.nameAr = dbAddon.nameAr;
                 a.nameFr = dbAddon.nameFr;
             } else {
-                addonPrice += parseFloat(a.price || "0");
+                return res.status(422).json({
+                    success: false,
+                    message: `Add-on is no longer available. Please refresh your cart.`,
+                    data: { affectedFoodId: cartItem.foodId, addonId },
+                });
             }
         }
 
@@ -868,45 +893,6 @@ export const checkout = async (req: Request | any, res: Response) => {
             .where(eq(branches.id, resolvedBranchId))
             .limit(1);
 
-
-        //  if (resolvedBranchId) {
-        // const [branchDetails] = await db
-        //     .select({
-        //         id: branches.id,
-        //         name: branches.name,
-        //         nameAr: branches.nameAr,
-        //         nameFr: branches.nameFr,
-        //         address: branches.address,
-        //         addressAr: branches.addressAr,
-        //         addressFr: branches.addressFr,
-        //         phoneNumber: branches.phoneNumber,
-        //         status: branches.status,
-        //         cityId: branches.cityId,
-        //         cityName: cities.name,
-        //         cityNameAr: cities.nameAr,
-        //         // Zone from restaurantZoneDeliveryFees (restaurant-specific)
-        //         zoneId: restaurantZoneDeliveryFees.zoneId,
-        //         zoneName: zones.name,
-        //         zoneNameAr: zones.nameAr,
-        //         // Restaurant-specific delivery fee for this zone
-        //         zoneDeliveryFee: restaurantZoneDeliveryFees.deliveryFee,
-        //     })
-        //     .from(branches)
-        //     .leftJoin(cities, eq(branches.cityId, cities.id))
-        //     // Join restaurant zone config that matches this branch
-        //     .leftJoin(
-        //         restaurantZoneDeliveryFees,
-        //         and(
-        //             eq(restaurantZoneDeliveryFees.branchId, branches.id),
-        //             eq(restaurantZoneDeliveryFees.restaurantId, restaurantId)
-        //         )
-        //     )
-        //     // Then join global zones just to get the zone name/nameAr
-        //     .leftJoin(zones, eq(zones.id, restaurantZoneDeliveryFees.zoneId))
-        //     .where(eq(branches.id, resolvedBranchId))
-        //     .limit(1);
-
-
         if (branchDetails) {
             branchSnapshotData = {
                 id: branchDetails.id,
@@ -984,7 +970,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     const resetMinute = isNaN(resetMinuteRaw) ? 0 : resetMinuteRaw;
 
     // 🌍 2. Dynamic Timezone Handling (Africa/Cairo)
-    // تحويل الوقت الحالي لـ String يمثل توقيت مصر بدقة مع مراعاة الصيفي/الشتوي تلقائياً
     const egyptDateStr = now.toLocaleString("en-US", { timeZone: "Africa/Cairo" });
     const nowLocal = new Date(egyptDateStr);
 
@@ -995,7 +980,6 @@ export const checkout = async (req: Request | any, res: Response) => {
         startOfTodayLocal.setDate(startOfTodayLocal.getDate() - 1);
     }
 
-    // حساب الفارق بين التوقيت المحلي ووقت UTC ديناميكياً
     const diffMs = nowLocal.getTime() - startOfTodayLocal.getTime();
     const startOfTodayQuery = new Date(now.getTime() - diffMs);
 
