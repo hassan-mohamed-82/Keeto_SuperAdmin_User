@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS `service_fees` (
     `restaurant_id` char(36) NULL,
     `name` varchar(255) NULL,
     `amount` decimal(10, 2) NOT NULL,
+    `amount_type` enum('percentage', 'value') NOT NULL DEFAULT 'percentage',
     `modules` json NOT NULL,
     `type` enum('web', 'app', 'all') NOT NULL DEFAULT 'all',
     `branch_ids` json NOT NULL,
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS `taxes` (
     `restaurant_id` char(36) NULL,
     `name` varchar(255) NULL,
     `amount` decimal(10, 2) NOT NULL,
+    `amount_type` enum('percentage', 'value') NOT NULL DEFAULT 'percentage',
     `modules` json NOT NULL,
     `type` enum('web', 'app', 'all') NOT NULL DEFAULT 'all',
     `food_ids` json NOT NULL,
@@ -78,4 +80,11 @@ CREATE TABLE IF NOT EXISTS `tax_types` (
     CONSTRAINT `tax_types_id` PRIMARY KEY(`id`),
     CONSTRAINT `tax_types_restrauntid_fk` FOREIGN KEY (`restrauntid`) REFERENCES `restaurants`(`id`) ON DELETE CASCADE
 );
+
+-- ==========================================================
+-- Migration for existing databases: Add amount_type column
+-- ==========================================================
+-- ALTER TABLE `service_fees` ADD COLUMN `amount_type` ENUM('percentage', 'value') NOT NULL DEFAULT 'percentage' AFTER `amount`;
+-- ALTER TABLE `taxes` ADD COLUMN `amount_type` ENUM('percentage', 'value') NOT NULL DEFAULT 'percentage' AFTER `amount`;
+
 
