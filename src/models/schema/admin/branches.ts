@@ -38,9 +38,6 @@ export const branchMenuItems = mysqlTable("branch_menu_items", {
     branchId: char("branch_id", { length: 36 }).references(() => branches.id).notNull(),
     foodId: char("food_id", { length: 36 }).references(() => food.id).notNull(),
 
-    // السعر اختياري: إذا كان NULL يعتمد basePrice من جدول food
-    price: decimal("price", { precision: 10, scale: 2 }),
-
     stockType: mysqlEnum("stock_type", ["limited", "unlimited"]).default("unlimited"),
     stockQty: int("stock_qty").default(0),
 
