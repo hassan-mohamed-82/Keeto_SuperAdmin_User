@@ -60,5 +60,6 @@ export * from "./schema/admin/offers";
 export * from "./schema/admin/taxType";
 export * from "./schema/admin/ratingRequests";
 export * from "./schema/admin/channelPricing";
+export * from "./schema/admin/restaurantGroups";
 
 
