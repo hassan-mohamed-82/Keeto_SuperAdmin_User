@@ -1,11 +1,36 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurantGroups, restaurants } from "../../models/schema";
+import { restaurantGroups, restaurants, type RestaurantGroupBanner } from "../../models/schema";
 import { eq, inArray } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
 import { v4 as uuidv4 } from "uuid";
+import { saveBase64Image } from "../../utils/handleImages";
+
+// Helper: Process and save banner images (base64 or URL) and sort by order
+const processBanners = async (req: Request, bannersList: any[]): Promise<RestaurantGroupBanner[]> => {
+    if (!Array.isArray(bannersList)) return [];
+
+    const processed: RestaurantGroupBanner[] = [];
+    for (const b of bannersList) {
+        if (!b || !b.image) continue;
+
+        let imageUrl = b.image;
+        if (typeof b.image === "string" && !b.image.startsWith("http")) {
+            const saved = await saveBase64Image(req, b.image, "restaurant_groups/banners");
+            imageUrl = saved.url || b.image;
+        }
+
+        processed.push({
+            image: imageUrl,
+            link: b.link ? String(b.link).trim() : null,
+            order: typeof b.order === "number" ? b.order : (parseInt(b.order, 10) || 0),
+        });
+    }
+
+    return processed.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+};
 
 // ==========================================
 // 1. Create Restaurant Group
@@ -19,6 +44,7 @@ export const createRestaurantGroup = async (req: Request, res: Response) => {
         coverageType,
         customCoordinates,
         customRadiusKm,
+        banners = [],
         status,
     } = req.body;
 
@@ -52,6 +78,7 @@ export const createRestaurantGroup = async (req: Request, res: Response) => {
         }
     }
 
+    const processedBanners = await processBanners(req, banners);
     const id = uuidv4();
 
     await db.insert(restaurantGroups).values({
@@ -63,6 +90,7 @@ export const createRestaurantGroup = async (req: Request, res: Response) => {
         coverageType: coverageType || "POLYGON",
         customCoordinates: customCoordinates || null,
         customRadiusKm: customRadiusKm !== undefined && customRadiusKm !== null ? String(customRadiusKm) : null,
+        banners: processedBanners,
         status: status || "active",
     });
 
@@ -90,6 +118,7 @@ export const getAllRestaurantGroups = async (req: Request, res: Response) => {
             coverageType: restaurantGroups.coverageType,
             customCoordinates: restaurantGroups.customCoordinates,
             customRadiusKm: restaurantGroups.customRadiusKm,
+            banners: restaurantGroups.banners,
             status: restaurantGroups.status,
             createdAt: restaurantGroups.createdAt,
             updatedAt: restaurantGroups.updatedAt,
@@ -155,6 +184,7 @@ export const getRestaurantGroupById = async (req: Request, res: Response) => {
             coverageType: restaurantGroups.coverageType,
             customCoordinates: restaurantGroups.customCoordinates,
             customRadiusKm: restaurantGroups.customRadiusKm,
+            banners: restaurantGroups.banners,
             status: restaurantGroups.status,
             createdAt: restaurantGroups.createdAt,
             updatedAt: restaurantGroups.updatedAt,
@@ -211,6 +241,7 @@ export const updateRestaurantGroup = async (req: Request, res: Response) => {
         coverageType,
         customCoordinates,
         customRadiusKm,
+        banners,
         status,
     } = req.body;
 
@@ -253,6 +284,9 @@ export const updateRestaurantGroup = async (req: Request, res: Response) => {
     if (customCoordinates !== undefined) updateData.customCoordinates = customCoordinates;
     if (customRadiusKm !== undefined) {
         updateData.customRadiusKm = customRadiusKm !== null ? String(customRadiusKm) : null;
+    }
+    if (banners !== undefined) {
+        updateData.banners = await processBanners(req, banners);
     }
     if (status !== undefined) updateData.status = status;
 
