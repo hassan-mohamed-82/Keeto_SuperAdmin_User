@@ -11,7 +11,16 @@ import { v4 as uuidv4 } from "uuid";
 // 1. Create Restaurant Group
 // ==========================================
 export const createRestaurantGroup = async (req: Request, res: Response) => {
-    const { name, nameAr, nameFr, restaurants: restaurantIds = [], status } = req.body;
+    const {
+        name,
+        nameAr,
+        nameFr,
+        restaurants: restaurantIds = [],
+        coverageType,
+        customCoordinates,
+        customRadiusKm,
+        status,
+    } = req.body;
 
     if (!name) {
         throw new BadRequest("Group name is required");
@@ -51,6 +60,9 @@ export const createRestaurantGroup = async (req: Request, res: Response) => {
         nameAr: nameAr ? nameAr.trim() : "",
         nameFr: nameFr ? nameFr.trim() : "",
         restaurants: validRestaurantIds,
+        coverageType: coverageType || "POLYGON",
+        customCoordinates: customCoordinates || null,
+        customRadiusKm: customRadiusKm !== undefined && customRadiusKm !== null ? String(customRadiusKm) : null,
         status: status || "active",
     });
 
@@ -75,6 +87,9 @@ export const getAllRestaurantGroups = async (req: Request, res: Response) => {
             nameAr: restaurantGroups.nameAr,
             nameFr: restaurantGroups.nameFr,
             restaurants: restaurantGroups.restaurants,
+            coverageType: restaurantGroups.coverageType,
+            customCoordinates: restaurantGroups.customCoordinates,
+            customRadiusKm: restaurantGroups.customRadiusKm,
             status: restaurantGroups.status,
             createdAt: restaurantGroups.createdAt,
             updatedAt: restaurantGroups.updatedAt,
@@ -137,6 +152,9 @@ export const getRestaurantGroupById = async (req: Request, res: Response) => {
             nameAr: restaurantGroups.nameAr,
             nameFr: restaurantGroups.nameFr,
             restaurants: restaurantGroups.restaurants,
+            coverageType: restaurantGroups.coverageType,
+            customCoordinates: restaurantGroups.customCoordinates,
+            customRadiusKm: restaurantGroups.customRadiusKm,
             status: restaurantGroups.status,
             createdAt: restaurantGroups.createdAt,
             updatedAt: restaurantGroups.updatedAt,
@@ -182,8 +200,19 @@ export const getRestaurantGroupById = async (req: Request, res: Response) => {
 // 4. Update Restaurant Group
 // ==========================================
 export const updateRestaurantGroup = async (req: Request, res: Response) => {
-    const { id } = req.params;
-    const { name, nameAr, nameFr, restaurants: restaurantIds, status } = req.body;
+    const {
+        id,
+    } = req.params;
+    const {
+        name,
+        nameAr,
+        nameFr,
+        restaurants: restaurantIds,
+        coverageType,
+        customCoordinates,
+        customRadiusKm,
+        status,
+    } = req.body;
 
     const [existing] = await db
         .select()
@@ -220,6 +249,11 @@ export const updateRestaurantGroup = async (req: Request, res: Response) => {
 
     if (nameAr !== undefined) updateData.nameAr = nameAr ? nameAr.trim() : "";
     if (nameFr !== undefined) updateData.nameFr = nameFr ? nameFr.trim() : "";
+    if (coverageType !== undefined) updateData.coverageType = coverageType;
+    if (customCoordinates !== undefined) updateData.customCoordinates = customCoordinates;
+    if (customRadiusKm !== undefined) {
+        updateData.customRadiusKm = customRadiusKm !== null ? String(customRadiusKm) : null;
+    }
     if (status !== undefined) updateData.status = status;
 
     if (restaurantIds !== undefined) {
