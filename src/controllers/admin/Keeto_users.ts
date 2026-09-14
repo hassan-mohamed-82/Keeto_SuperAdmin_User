@@ -386,6 +386,7 @@ export const getUserStats = async (req: Request, res: Response) => {
         // Recent 50 orders with restaurant info
         db.select({
             orderNumber: orders.orderNumber,
+            dailyOrderNumber: orders.dailyOrderNumber,
             totalAmount: orders.totalAmount,
             orderSource: orders.orderSource,
             orderType: orders.orderType,
