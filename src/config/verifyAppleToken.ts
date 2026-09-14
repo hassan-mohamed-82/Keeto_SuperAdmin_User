@@ -510,6 +510,13 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
       });
     }
 
+    if (user.deletedAt) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account has been deleted. Please contact support."
+      });
+    }
+
     // 7️⃣ Link user to restaurant in multi-tenant table (Always checks if relation exists regardless of new/old user)
     if (restaurantId) {
       const existingLink = await db

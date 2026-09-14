@@ -77,6 +77,10 @@ export const facebookLoginOrSignup = async (req: Request, res: Response) => {
             return res.status(403).json({ success: false, message: "Your account has been blocked. Please contact support." });
         }
 
+        if (userRecord.deletedAt) {
+            return res.status(403).json({ success: false, message: "Your account has been deleted. Please contact support." });
+        }
+
         // 6. ربط المستخدم بالمطعم في حالة وجود restaurantId
         if (restaurantId) {
             const existingLink = await db.select().from(restaurant_users)
