@@ -416,7 +416,7 @@ export const formatFoodsList = async (
                 name: row.subcategoryName,
                 nameAr: row.subcategoryNameAr,
                 nameFr: row.subcategoryNameFr,
-                image: row.subcategoryImage,
+                image: row.subcategoryImage || row.subcategoryimage || row.subcategory_image || null,
                 order_level: row.order_level,
             } : null,
         };
