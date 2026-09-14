@@ -161,13 +161,14 @@ export const getUserAddresses = async (req: Request, res: Response) => {
                 ...addr,
                 isRelatedToOrder: usedAddressIds.has(addr.id),
             }));
+            return SuccessResponse(res, { data: formattedAddresses });
 
-            return SuccessResponse(res, { 
-                data: {
-                    callcenterphone: null,
-                    addresses: formattedAddresses 
-                }
-            });
+            // return SuccessResponse(res, { 
+            //     data: {
+            //         callcenterphone: null,
+            //         addresses: formattedAddresses 
+            //     }
+            // });
         }
 
         // 4. جلب مناطق التوصيل والرسوم النشطة للمطعم المختار

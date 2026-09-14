@@ -253,6 +253,10 @@ export const login = async (req: Request, res: Response) => {
         throw new BadRequest("Your account has been blocked. Please contact support.");
     }
 
+    if(user.deletedAt){
+        throw new BadRequest("Your account has been deleted. Please contact support.");
+    }
+
     // 🔗 ربط المستخدم بالمطعم (يتأكد من عدم التكرار حتى لليوزرز القدامى)
     if (restaurantId) {
         const existingLink = await db.select().from(restaurant_users)

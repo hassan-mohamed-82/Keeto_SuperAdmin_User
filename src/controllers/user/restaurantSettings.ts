@@ -14,6 +14,7 @@ export const getRestaurantSettings = async (req: Request, res: Response): Promis
         firstTextColor: restaurantSettings.firstTextColor,
         secondTextColor: restaurantSettings.secondTextColor,
         productView: restaurantSettings.productView,
+        isTemporarilyClosed: restaurantSettings.isTemporarilyClosed,
     })
         .from(restaurantSettings)
         .where(eq(restaurantSettings.restaurantId, restaurantId))

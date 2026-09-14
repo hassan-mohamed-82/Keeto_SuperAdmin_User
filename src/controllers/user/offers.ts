@@ -72,7 +72,10 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
             .where(
                 and(
                     eq(food.restaurantid, restaurantId),
+                    eq(food.status, "active"),
                     activeFoodCondition,
+                    or(isNull(categories.id), eq(categories.status, "active")),
+                    or(isNull(subcategories.id), eq(subcategories.status, "active")),
                     eq(discounts.isActive, true),
                     or(isNull(discounts.startDate), lte(discounts.startDate, now)),
                     or(isNull(discounts.endDate), gte(discounts.endDate, now))
@@ -176,7 +179,10 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 and(
                     eq(discounts.isActive, true),
                     eq(restaurants.status, "active"),
+                    eq(food.status, "active"),
                     activeFoodCondition,
+                    or(isNull(categories.id), eq(categories.status, "active")),
+                    or(isNull(subcategories.id), eq(subcategories.status, "active")),
                     or(isNull(discounts.startDate), lte(discounts.startDate, now)),
                     or(isNull(discounts.endDate), gte(discounts.endDate, now))
                 )

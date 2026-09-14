@@ -11,6 +11,7 @@ export const createSubcategorySchema = z.object({
     // الحقول الاختيارية والـ Defaults
     nameAr: z.string().max(255).optional(),
     nameFr: z.string().max(255).optional(),
+    image: z.string().optional(),
     
     priority: z.enum(["low", "medium", "high"]).optional(),
     status: z.enum(["active", "inactive"]).optional(),

@@ -102,6 +102,10 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, message: "Your account has been blocked. Please contact support." });
     }
 
+    if (user.deletedAt) {
+      return res.status(403).json({ success: false, message: "Your account has been deleted. Please contact support." });
+    }
+
     // 🔗 Link to restaurant if restaurantId is provided
     if (restaurantId) {
       const existingLink = await db
