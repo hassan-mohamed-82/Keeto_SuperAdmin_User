@@ -40,3 +40,6 @@ export type ModuleName = (typeof MODULES)[number];
 export type ActionName = (typeof ACTION_NAMES)[number];
 
 export const BASE64_IMAGE_REGEX = /^data:image\/(jpeg|jpg|png|gif|webp);base64,/;
+
+export const LINK_TYPES = ["link", "subcategory", "product", "discount"] as const;
+export type LinkType = (typeof LINK_TYPES)[number];
