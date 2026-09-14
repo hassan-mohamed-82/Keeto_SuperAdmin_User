@@ -9,10 +9,12 @@ import {
     int,
     boolean,
     text,
-    longtext 
+    longtext,
+    time
 } from "drizzle-orm/mysql-core";
 import { relations, sql } from "drizzle-orm";
 import { addons, categories, foodVariations, restaurants, subcategories } from "../../schema";
+import { noteGroups } from "./noteGroup";
 
 export const food = mysqlTable("food", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -36,6 +38,8 @@ export const food = mysqlTable("food", {
     allergen_ingredients: text("allergen_ingredients"), 
     is_Halal: boolean("is_Halal").default(false),
     addonsId: json("addons_ids").$type<string[]>().default([]),
+    group_note_id: char("group_note_id", { length: 36 })
+        .references(() => noteGroups.id, { onDelete: "set null" }),
     startTime: varchar("start_time", { length: 255 }).notNull(),
     endTime: varchar("end_time", { length: 255 }).notNull(),
     
@@ -44,6 +48,10 @@ export const food = mysqlTable("food", {
     price: decimal("price", { precision: 10, scale: 2 }).notNull(),
     discount_type: mysqlEnum("discount_type", ["percentage", "amount"]).default("percentage"),
     discount_value: decimal("discount_value", { precision: 10, scale: 2 }),
+    offer_price: decimal("offer_price", { precision: 10, scale: 2 }),
+    offer_days: json("offer_days").$type<string[]>(),
+    offer_start: time("offer_start"),
+    offer_end: time("offer_end"),
     Maximum_Purchase: int("Maximum_Purchase"),
     
     stock_type: mysqlEnum("stock_type", ["limited", "unlimited", "daily"]).default("unlimited"),
@@ -63,4 +71,8 @@ export const foodRelations = relations(food, ({ one, many }) => ({
         references: [restaurants.id],
     }),
     variations: many(foodVariations),
+    noteGroup: one(noteGroups, {
+        fields: [food.group_note_id],
+        references: [noteGroups.id],
+    }),
 }));
