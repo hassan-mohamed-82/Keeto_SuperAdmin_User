@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { users, restaurant_users, restaurants, orders, orderItems, food, userRestaurantPoints } from "../../models/schema";
-import { eq, inArray, and, or, sql, desc } from "drizzle-orm";
+import { eq, inArray, and, or, sql, desc, like } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -90,7 +90,9 @@ export const getBlockedUsers = async (req: Request, res: Response) => {
         allBlockedUsers = allBlockedUsers.filter(u =>
             (u.name && u.name.toLowerCase().includes(query)) ||
             (u.email && u.email.toLowerCase().includes(query)) ||
-            (u.phone && u.phone.toLowerCase().includes(query))
+            (u.phone && u.phone.toLowerCase().includes(query)) ||
+            (u.alternatePhone && u.alternatePhone.toLowerCase().includes(query))
+
         );
     }
 
@@ -177,18 +179,46 @@ export const getAllUsers = async (req: Request, res: Response) => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
+    const search = ((req.query.search as string) || (req.query.query as string))?.trim();
+    const status = req.query.status as string | undefined;
+
+    const conditions: any[] = [];
+
+    if (search) {
+        const searchTerm = `%${search}%`;
+        conditions.push(
+            or(
+                like(users.name, searchTerm),
+                like(users.email, searchTerm),
+                like(users.phone, searchTerm),
+                like(users.alternatePhone, searchTerm)
+            )
+        );
+    }
+
+    if (status && ["active", "blocked"].includes(status)) {
+        conditions.push(eq(users.status, status as "active" | "blocked"));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     // 1. Get total users count
-    const [totalUsersData] = await db.select({ count: sql`count(*)` }).from(users);
-    const totalUsers = Number(totalUsersData.count);
+    const [totalUsersData] = await db
+        .select({ count: sql`count(*)` })
+        .from(users)
+        .where(whereClause);
+
+    const totalUsers = Number(totalUsersData?.count || 0);
     const totalPages = Math.ceil(totalUsers / limit);
 
     // 2. Fetch paginated users
     const paginatedUsers = await db
         .select()
         .from(users)
+        .where(whereClause)
         .limit(limit)
-        .offset(offset);
+        .offset(offset)
+        .orderBy(desc(users.createdAt));
 
     const userIds = paginatedUsers.map(u => u.id);
 
@@ -224,6 +254,7 @@ export const getAllUsers = async (req: Request, res: Response) => {
             name: u.name,
             email: u.email,
             phone: u.phone,
+            alternatePhone: u.alternatePhone,
             photo: u.photo,
             status: u.status,
             isVerified: u.isVerified,
