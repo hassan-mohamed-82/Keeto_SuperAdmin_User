@@ -5,15 +5,18 @@ import {
     addons,
     adonescategory,
     branchSubcategories,
-    branches
+    branches,
+    foodPricingOverrides,
+    variantPricingOverrides
 } from "../models/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, or, isNull } from "drizzle-orm";
 
 import {
     getAvailableDiscounts,
     applyPriorityDiscount,
 } from "../utils/discount";
 import { getUnavailableBranchesForFoods, isFoodUnavailableForBranch, type BranchInfo } from "../helpers/food.helper";
+import { pickBestOverride, parsePrice, type ServiceModule } from "../helpers/pricing.overrides";
 
 
 
@@ -22,7 +25,8 @@ export const formatFoodsList = async (
     restaurantId: string,
     userId?: string,
     favoriteFoodIds: Set<string> = new Set(),
-    targetBranchId?: string | null
+    targetBranchId?: string | null,
+    serviceModule?: ServiceModule
 ) => {
     if (!rawMenu || rawMenu.length === 0) return [];
 
@@ -52,6 +56,100 @@ export const formatFoodsList = async (
             .where(inArray(foodVariations.foodId, foodIds))
         : [];
 
+    // 1b. Fetch Food & Variant Pricing Overrides (Branch & Channel Pricing)
+    const foodOverridesMap = new Map<string, any[]>();
+    const variantOverridesMap = new Map<string, any[]>();
+
+    if (foodIds.length > 0 && (targetBranchId || serviceModule)) {
+        const conditions: any[] = [
+            inArray(foodPricingOverrides.foodId, foodIds),
+            eq(foodPricingOverrides.status, "active"),
+        ];
+
+        if (targetBranchId && serviceModule) {
+            conditions.push(
+                or(
+                    and(eq(foodPricingOverrides.branchId, targetBranchId), eq(foodPricingOverrides.serviceModule, serviceModule)),
+                    and(eq(foodPricingOverrides.branchId, targetBranchId), isNull(foodPricingOverrides.serviceModule)),
+                    and(isNull(foodPricingOverrides.branchId), eq(foodPricingOverrides.serviceModule, serviceModule))
+                )
+            );
+        } else if (targetBranchId) {
+            conditions.push(
+                and(eq(foodPricingOverrides.branchId, targetBranchId), isNull(foodPricingOverrides.serviceModule))
+            );
+        } else if (serviceModule) {
+            conditions.push(
+                and(isNull(foodPricingOverrides.branchId), eq(foodPricingOverrides.serviceModule, serviceModule))
+            );
+        }
+
+        const overrides = await db
+            .select({
+                foodId: foodPricingOverrides.foodId,
+                branchId: foodPricingOverrides.branchId,
+                serviceModule: foodPricingOverrides.serviceModule,
+                price: foodPricingOverrides.price,
+                status: foodPricingOverrides.status,
+            })
+            .from(foodPricingOverrides)
+            .where(and(...conditions));
+
+        for (const ov of overrides) {
+            if (!foodOverridesMap.has(ov.foodId)) {
+                foodOverridesMap.set(ov.foodId, []);
+            }
+            foodOverridesMap.get(ov.foodId)!.push(ov);
+        }
+
+        const allOptionIds = variationsList
+            .map((v) => v.optionId)
+            .filter(Boolean) as string[];
+
+        if (allOptionIds.length > 0) {
+            const varConditions: any[] = [
+                inArray(variantPricingOverrides.variantId, allOptionIds),
+                eq(variantPricingOverrides.status, "active"),
+            ];
+
+            if (targetBranchId && serviceModule) {
+                varConditions.push(
+                    or(
+                        and(eq(variantPricingOverrides.branchId, targetBranchId), eq(variantPricingOverrides.serviceModule, serviceModule)),
+                        and(eq(variantPricingOverrides.branchId, targetBranchId), isNull(variantPricingOverrides.serviceModule)),
+                        and(isNull(variantPricingOverrides.branchId), eq(variantPricingOverrides.serviceModule, serviceModule))
+                    )
+                );
+            } else if (targetBranchId) {
+                varConditions.push(
+                    and(eq(variantPricingOverrides.branchId, targetBranchId), isNull(variantPricingOverrides.serviceModule))
+                );
+            } else if (serviceModule) {
+                varConditions.push(
+                    and(isNull(variantPricingOverrides.branchId), eq(variantPricingOverrides.serviceModule, serviceModule))
+                );
+            }
+
+            const varOverrides = await db
+                .select({
+                    variantId: variantPricingOverrides.variantId,
+                    branchId: variantPricingOverrides.branchId,
+                    serviceModule: variantPricingOverrides.serviceModule,
+                    price: variantPricingOverrides.price,
+                    status: variantPricingOverrides.status,
+                })
+                .from(variantPricingOverrides)
+                .where(and(...varConditions));
+
+            for (const ov of varOverrides) {
+                if (!variantOverridesMap.has(ov.variantId)) {
+                    variantOverridesMap.set(ov.variantId, []);
+                }
+                variantOverridesMap.get(ov.variantId)!.push(ov);
+            }
+        }
+    }
+
     const foodVariationsMap = new Map<string, any[]>();
     for (const v of variationsList) {
         if (!v.foodId) continue;
@@ -76,12 +174,20 @@ export const formatFoodsList = async (
         }
 
         if (v.optionId) {
+            let optionPrice = Number(v.additionalPrice);
+            if (variantOverridesMap.has(v.optionId)) {
+                const bestVarOverride = pickBestOverride(variantOverridesMap.get(v.optionId)!);
+                if (bestVarOverride) {
+                    optionPrice = parsePrice(bestVarOverride.price);
+                }
+            }
+
             existingVar.options.push({
                 id: v.optionId,
                 name: v.optionName,
                 nameAr: v.optionNameAr,
                 nameFr: v.optionNameFr,
-                additionalPrice: Number(v.additionalPrice)
+                additionalPrice: optionPrice
             });
         }
     }
@@ -186,6 +292,14 @@ export const formatFoodsList = async (
     return rawMenu.map((row) => {
         const foodId = row.foodId || row.id;
 
+        let effectiveFoodPrice = Number(row.price);
+        if (foodOverridesMap.has(foodId)) {
+            const bestFoodOverride = pickBestOverride(foodOverridesMap.get(foodId)!);
+            if (bestFoodOverride) {
+                effectiveFoodPrice = parsePrice(bestFoodOverride.price);
+            }
+        }
+
         const discountState = {
             remainingMaxDiscounts: new Map<string, number>(),
             appliedDiscounts: new Set<string>()
@@ -197,7 +311,7 @@ export const formatFoodsList = async (
             discountNote
         } = applyPriorityDiscount(
             { id: foodId, discountType: row.foodDiscountType || row.discountType, discountValue: row.foodDiscountValue || row.discountValue },
-            Number(row.price),
+            effectiveFoodPrice,
             0,
             availableDiscounts,
             discountState,
@@ -278,7 +392,7 @@ export const formatFoodsList = async (
             description: row.description,
             descriptionAr: row.descriptionAr,
             descriptionFr: row.descriptionFr,
-            price: Number(row.price),
+            price: effectiveFoodPrice,
             discountType: activeDiscountInfo?.type ?? null,
             discountValue: activeDiscountInfo?.value ?? null,
             discountPrice: calculatedDiscountPrice,

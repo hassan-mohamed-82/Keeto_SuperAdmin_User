@@ -7,7 +7,7 @@ import { BadRequest, UnauthorizedError } from "../../Errors";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
 import { getUnavailableBranchesForFoods, BranchInfo, isFoodUnavailableForBranch } from "../../helpers/food.helper";
 import { formatFoodsList } from "../../services/foodFormat";
-import { resolveBranchIdFromAddress } from "../../helpers/pricing.helper";
+import { resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
 
 // ==========================================
@@ -236,10 +236,16 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
     const branchIdParam = req.query?.branchId as string | undefined;
     const addressIdParam = req.query?.addressId as string | undefined;
+    const serviceModuleParam = req.query?.serviceModule as ServiceModule | undefined;
 
-    // Resolve the target branch for this restaurant
+    // Resolve the target branch and serviceModule for this restaurant
     let targetBranchId: string | null = branchIdParam || null;
-    if (!targetBranchId && addressIdParam) {
+    let serviceModule: ServiceModule | undefined = serviceModuleParam;
+
+    if (branchIdParam) {
+        if (!serviceModule) serviceModule = "takeaway";
+    } else if (addressIdParam) {
+        if (!serviceModule) serviceModule = "delivery";
         targetBranchId = await resolveBranchIdFromAddress(addressIdParam, restaurantId);
     }
 
@@ -379,7 +385,8 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         restaurantId,
         userId,
         favoriteFoodIds,
-        targetBranchId  // ← filter foods unavailable at this branch
+        targetBranchId,  // ← filter foods unavailable at this branch
+        serviceModule    // ← apply channel/branch pricing overrides (takeaway/delivery)
     );
 
     // 6. Group Formatted Foods by Category
