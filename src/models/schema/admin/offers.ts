@@ -5,10 +5,17 @@ import {
     timestamp,
     decimal,
     mysqlEnum,
-    json
+    json,
+    int
 } from "drizzle-orm/mysql-core";
-import { sql } from "drizzle-orm";
+import { sql, relations } from "drizzle-orm";
 import { restaurants } from "./restaurants";
+import { food } from "./food";
+
+export interface OfferFoodVariationItem {
+    variationId?: string | null;
+    options: string[]; // option IDs
+}
 
 export const offers = mysqlTable("offers", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -24,5 +31,37 @@ export const offers = mysqlTable("offers", {
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
+export const offerFoods = mysqlTable("offer_foods", {
+    id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+    offerId: char("offer_id", { length: 36 })
+        .references(() => offers.id, { onDelete: "cascade" })
+        .notNull(),
+    foodId: char("food_id", { length: 36 })
+        .references(() => food.id, { onDelete: "cascade" })
+        .notNull(),
+    variations: json("variations").$type<OfferFoodVariationItem[]>().default([]).notNull(),
+    optionIds: json("option_ids").$type<string[]>().default([]).notNull(),
+    quantity: int("quantity").default(1).notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+});
+
+export const offersRelations = relations(offers, ({ many }) => ({
+    offerFoods: many(offerFoods),
+}));
+
+export const offerFoodsRelations = relations(offerFoods, ({ one }) => ({
+    offer: one(offers, {
+        fields: [offerFoods.offerId],
+        references: [offers.id],
+    }),
+    food: one(food, {
+        fields: [offerFoods.foodId],
+        references: [food.id],
+    }),
+}));
+
 export type Offer = typeof offers.$inferSelect;
 export type NewOffer = typeof offers.$inferInsert;
+export type OfferFood = typeof offerFoods.$inferSelect;
+export type NewOfferFood = typeof offerFoods.$inferInsert;

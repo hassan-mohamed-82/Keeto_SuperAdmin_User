@@ -81,10 +81,26 @@ CREATE TABLE IF NOT EXISTS `tax_types` (
     CONSTRAINT `tax_types_restrauntid_fk` FOREIGN KEY (`restrauntid`) REFERENCES `restaurants`(`id`) ON DELETE CASCADE
 );
 
+-- 6. Offer Foods Table (Food with variations and options)
+CREATE TABLE IF NOT EXISTS `offer_foods` (
+    `id` char(36) NOT NULL DEFAULT (UUID()),
+    `offer_id` char(36) NOT NULL,
+    `food_id` char(36) NOT NULL,
+    `variations` json NOT NULL,
+    `option_ids` json NOT NULL,
+    `quantity` int NOT NULL DEFAULT 1,
+    `created_at` timestamp DEFAULT (now()),
+    `updated_at` timestamp DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT `offer_foods_id` PRIMARY KEY(`id`),
+    CONSTRAINT `offer_foods_offer_id_fk` FOREIGN KEY (`offer_id`) REFERENCES `offers`(`id`) ON DELETE CASCADE,
+    CONSTRAINT `offer_foods_food_id_fk` FOREIGN KEY (`food_id`) REFERENCES `food`(`id`) ON DELETE CASCADE
+);
+
 -- ==========================================================
 -- Migration for existing databases: Add amount_type column
 -- ==========================================================
 -- ALTER TABLE `service_fees` ADD COLUMN `amount_type` ENUM('percentage', 'value') NOT NULL DEFAULT 'percentage' AFTER `amount`;
 -- ALTER TABLE `taxes` ADD COLUMN `amount_type` ENUM('percentage', 'value') NOT NULL DEFAULT 'percentage' AFTER `amount`;
+
 
 
