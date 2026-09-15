@@ -143,6 +143,8 @@ export const orders = mysqlTable("orders", {
         cityNameAr?: string | null;
     }>(),
 
+    isDelayEmailSent: boolean("is_delay_email_sent").default(false),
+
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),
 });
