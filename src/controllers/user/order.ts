@@ -464,68 +464,69 @@ export const checkout = async (req: Request | any, res: Response) => {
         let channelBasePrice: number;
         let varPrice: number;
         let itemIsAvailable = true;
+        // if (pricingBranchId) {
+        const priceResult = await calculateCalculatedPrice(
+            cartItem.foodId,
+            optionIds,
+            pricingBranchId || null,
+            serviceModule
+        );
 
-        if (pricingBranchId) {
-            const priceResult = await calculateCalculatedPrice(
-                cartItem.foodId,
-                optionIds,
-                pricingBranchId,
-                serviceModule
-            );
+        channelBasePrice = priceResult.basePrice;
+        varPrice = priceResult.variants.reduce((s, v) => s + v.price, 0);
+        itemIsAvailable = priceResult.isAvailable;
 
-            channelBasePrice = priceResult.basePrice;
-            varPrice = priceResult.variants.reduce((s, v) => s + v.price, 0);
-            itemIsAvailable = priceResult.isAvailable;
-
-            for (const v of parsedVariations) {
-                if (v.optionId) {
-                    const resolved = priceResult.variants.find(r => r.variantOptionId === v.optionId);
-                    if (resolved) v.additionalPrice = resolved.price.toString();
-                }
+        for (const v of parsedVariations) {
+            if (v.optionId) {
+                const resolved = priceResult.variants.find(r => r.variantOptionId === v.optionId);
+                if (resolved) v.additionalPrice = resolved.price.toString();
             }
+        }
 
-            const storedUnit = parseFloat(cartItem.unitPrice as string || "0");
-            const liveUnit = channelBasePrice + varPrice + addonPrice;
-            if (Math.abs(liveUnit - storedUnit) > 0.01) {
-                checkoutPriceChanged = true;
-                priceChangedItems.push({
-                    foodId: cartItem.foodId,
-                    oldUnitPrice: storedUnit,
-                    newUnitPrice: liveUnit,
-                });
-            }
-        } else {
-            const foodRow = foodMap.get(cartItem.foodId);
-            if (!foodRow) throw new BadRequest(`Food item with ID ${cartItem.foodId} not found`);
+        const storedUnit = parseFloat(cartItem.unitPrice as string || "0");
+        const liveUnit = channelBasePrice + varPrice + addonPrice;
+        if (Math.abs(liveUnit - storedUnit) > 0.01) {
+            checkoutPriceChanged = true;
+            priceChangedItems.push({
+                foodId: cartItem.foodId,
+                oldUnitPrice: storedUnit,
+                newUnitPrice: liveUnit,
+            });
 
-            channelBasePrice = parseFloat(foodRow.price as string || "0");
-            itemIsAvailable = foodRow.status !== "inactive" && !foodRow.isOutOfStock;
+        //      else {
+        //     const foodRow = foodMap.get(cartItem.foodId);
+        //     if (!foodRow) throw new BadRequest(`Food item with ID ${cartItem.foodId} not found`);
 
-            varPrice = 0;
-            if (optionIds.length > 0) {
-                for (const v of parsedVariations) {
-                    if (v.optionId) {
-                        const opt = optionsWithParentMap.get(v.optionId);
-                        if (!opt) {
-                            return res.status(422).json({
-                                success: false,
-                                message: `Option '${v.optionName || 'selected'}' is no longer available. Please refresh your cart.`,
-                                data: { affectedFoodId: cartItem.foodId },
-                            });
-                        }
-                        if (opt.status === false) {
-                            return res.status(422).json({
-                                success: false,
-                                message: `Option '${opt.optionName}' is currently unavailable.`,
-                                data: { affectedFoodId: cartItem.foodId },
-                            });
-                        }
-                        const resolvedPrice = (opt.additionalPrice as string || "0");
-                        varPrice += parseFloat(resolvedPrice);
-                        v.additionalPrice = resolvedPrice;
-                    }
-                }
-            }
+        //     channelBasePrice = parseFloat(foodRow.price as string || "0");
+        //     itemIsAvailable = foodRow.status !== "inactive" && !foodRow.isOutOfStock;
+
+        //     varPrice = 0;
+        //     if (optionIds.length > 0) {
+        //         for (const v of parsedVariations) {
+        //             if (v.optionId) {
+        //                 const opt = optionsWithParentMap.get(v.optionId);
+        //                 if (!opt) {
+        //                     return res.status(422).json({
+        //                         success: false,
+        //                         message: `Option '${v.optionName || 'selected'}' is no longer available. Please refresh your cart.`,
+        //                         data: { affectedFoodId: cartItem.foodId },
+        //                     });
+        //                 }
+        //                 if (opt.status === false) {
+        //                     return res.status(422).json({
+        //                         success: false,
+        //                         message: `Option '${opt.optionName}' is currently unavailable.`,
+        //                         data: { affectedFoodId: cartItem.foodId },
+        //                     });
+        //                 }
+        //                 const resolvedPrice = (opt.additionalPrice as string || "0");
+        //                 varPrice += parseFloat(resolvedPrice);
+        //                 v.additionalPrice = resolvedPrice;
+        //             }
+        //         }
+        //     }
+        // }
+
         }
 
         if (!itemIsAvailable) checkoutHasUnavailable = true;

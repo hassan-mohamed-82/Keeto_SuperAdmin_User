@@ -176,8 +176,8 @@ export const resolveBranchIdFromAddress = async (
 export const calculateCalculatedPrice = async (
     foodId: string,
     variantOptionIds: string[],
-    branchId: string,
-    serviceModule?: ServiceModule
+    branchId?: string | null,
+    serviceModule?: ServiceModule | string | null
 ): Promise<CalculatedPriceResult> => {
     const [foodRow, foodOverrides, branchMenuRow, variantOverrideRows, baseVariantRows] = await Promise.all([
         db.select({ price: food.price, status: food.status, isOutOfStock: food.isOutOfStock })
@@ -185,14 +185,16 @@ export const calculateCalculatedPrice = async (
             .where(and(eq(food.id, foodId), activeFoodCondition))
             .limit(1),
         fetchFoodOverrides(db, foodId, branchId, serviceModule),
-        db.select({
-            status: branchMenuItems.status,
-            stockType: branchMenuItems.stockType,
-            stockQty: branchMenuItems.stockQty,
-        })
-            .from(branchMenuItems)
-            .where(and(eq(branchMenuItems.foodId, foodId), eq(branchMenuItems.branchId, branchId)))
-            .limit(1),
+        branchId
+            ? db.select({
+                status: branchMenuItems.status,
+                stockType: branchMenuItems.stockType,
+                stockQty: branchMenuItems.stockQty,
+            })
+                .from(branchMenuItems)
+                .where(and(eq(branchMenuItems.foodId, foodId), eq(branchMenuItems.branchId, branchId)))
+                .limit(1)
+            : Promise.resolve([]),
         fetchVariantOverrides(db, variantOptionIds, branchId, serviceModule),
         variantOptionIds.length > 0
             ? db.select({

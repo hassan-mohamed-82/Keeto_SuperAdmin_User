@@ -251,25 +251,29 @@ export const addToCart = async (req: Request | any, res: Response) => {
     const optionIds = safeVariations.map((v: any) => v.optionId).filter(Boolean);
     const resolvedServiceModule = (serviceModule as ServiceModule) || null;
 
-    let unitPrice: number;
-    if (resolvedBranchId && resolvedServiceModule) {
-        const priceResult = await calculateCalculatedPrice(foodId, optionIds, resolvedBranchId, resolvedServiceModule);
-        if (!priceResult.isAvailable) {
-            throw new BadRequest("This item or one of its options is currently unavailable on this channel.");
-        }
-        const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
-        unitPrice = priceResult.totalUnitPrice + addonTotal;
-    } else {
-        const basePrice = Number(itemFood.price);
-        let totalExtra = 0;
-        for (const selected of safeVariations) {
-            const [opt] = await db.select({ additionalPrice: variationOptions.additionalPrice }).from(variationOptions).where(eq(variationOptions.id, selected.optionId)).limit(1);
-            totalExtra += Number(opt?.additionalPrice || 0);
-        }
-        const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
-        unitPrice = basePrice + totalExtra + addonTotal;
+    // let unitPrice: number;
+    // if (resolvedBranchId && resolvedServiceModule) {
+    const priceResult = await calculateCalculatedPrice(
+        foodId,
+        optionIds,
+        resolvedBranchId || null,
+        resolvedServiceModule || undefined
+    );
+    if (!priceResult.isAvailable) {
+        throw new BadRequest("This item or one of its options is currently unavailable on this channel.");
     }
-
+    const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
+    const unitPrice = priceResult.totalUnitPrice + addonTotal;
+// }else {
+//                 const basePrice = Number(itemFood.price);
+//                 let totalExtra = 0;
+//                 for (const selected of safeVariations) {
+//                     const [opt] = await db.select({ additionalPrice: variationOptions.additionalPrice }).from(variationOptions).where(eq(variationOptions.id, selected.optionId)).limit(1);
+//                     totalExtra += Number(opt?.additionalPrice || 0);
+//                 }
+//                 const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
+//                 unitPrice = basePrice + totalExtra + addonTotal;
+//             }
     // ─── Build full variation snapshot with names from DB ───────────
     const variationSnapshotList: any[] = [];
     if (safeVariations.length > 0) {
@@ -947,25 +951,29 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     // ─── Calculate unit price via pricing engine ─────────────────────
     const optionIds = safeVariations.map((v: any) => v.optionId).filter(Boolean);
     const resolvedServiceModule = (serviceModule || cartItem.serviceModule) as ServiceModule | undefined;
-
-    let unitPrice: number;
-    if (resolvedBranchId && resolvedServiceModule) {
-        const priceResult = await calculateCalculatedPrice(cartItem.foodId, optionIds, resolvedBranchId, resolvedServiceModule);
-        if (!priceResult.isAvailable) {
-            throw new BadRequest("This item or one of its options is currently unavailable on this channel.");
-        }
-        const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
-        unitPrice = priceResult.totalUnitPrice + addonTotal;
-    } else {
-        let totalExtra = 0;
-        for (const selected of safeVariations) {
-            const [opt] = await db.select({ additionalPrice: variationOptions.additionalPrice }).from(variationOptions).where(eq(variationOptions.id, selected.optionId)).limit(1);
-            totalExtra += Number(opt?.additionalPrice || 0);
-        }
-        const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
-        unitPrice = Number(itemFood.price) + totalExtra + addonTotal;
+    
+    // let unitPrice: number;
+    // if (resolvedBranchId && resolvedServiceModule) {
+    const priceResult = await calculateCalculatedPrice(
+        cartItem.foodId,
+        optionIds,
+        resolvedBranchId || null,
+        resolvedServiceModule || undefined
+    );
+    if (!priceResult.isAvailable) {
+        throw new BadRequest("This item or one of its options is currently unavailable on this channel.");
     }
-
+    const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
+    const unitPrice = priceResult.totalUnitPrice + addonTotal;
+// }else {
+//         let totalExtra = 0;
+//         for (const selected of safeVariations) {
+//             const [opt] = await db.select({ additionalPrice: variationOptions.additionalPrice }).from(variationOptions).where(eq(variationOptions.id, selected.optionId)).limit(1);
+//             totalExtra += Number(opt?.additionalPrice || 0);
+//         }
+//         const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
+//         unitPrice = Number(itemFood.price) + totalExtra + addonTotal;
+//     }
     // ─── Build full variation snapshot with names from DB ───────────
     let variationSnapshotList: any[] = safeVariations;
     if (variations !== undefined && safeVariations.length > 0) {

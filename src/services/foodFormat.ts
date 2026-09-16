@@ -16,7 +16,7 @@ import {
     applyPriorityDiscount,
 } from "../utils/discount";
 import { getUnavailableBranchesForFoods, isFoodUnavailableForBranch, type BranchInfo } from "../helpers/food.helper";
-import { pickBestOverride, parsePrice, type ServiceModule } from "../helpers/pricing.overrides";
+import { pickBestOverride, parsePrice, cascadeOverrideCondition, type ServiceModule } from "../helpers/pricing.overrides";
 
 
 
@@ -60,28 +60,14 @@ export const formatFoodsList = async (
     const foodOverridesMap = new Map<string, any[]>();
     const variantOverridesMap = new Map<string, any[]>();
 
-    if (foodIds.length > 0 && (targetBranchId || serviceModule)) {
+    if (foodIds.length > 0) {
+        const foodCond = cascadeOverrideCondition(foodPricingOverrides, targetBranchId, serviceModule);
         const conditions: any[] = [
             inArray(foodPricingOverrides.foodId, foodIds),
             eq(foodPricingOverrides.status, "active"),
         ];
-
-        if (targetBranchId && serviceModule) {
-            conditions.push(
-                or(
-                    and(eq(foodPricingOverrides.branchId, targetBranchId), eq(foodPricingOverrides.serviceModule, serviceModule)),
-                    and(eq(foodPricingOverrides.branchId, targetBranchId), isNull(foodPricingOverrides.serviceModule)),
-                    and(isNull(foodPricingOverrides.branchId), eq(foodPricingOverrides.serviceModule, serviceModule))
-                )
-            );
-        } else if (targetBranchId) {
-            conditions.push(
-                and(eq(foodPricingOverrides.branchId, targetBranchId), isNull(foodPricingOverrides.serviceModule))
-            );
-        } else if (serviceModule) {
-            conditions.push(
-                and(isNull(foodPricingOverrides.branchId), eq(foodPricingOverrides.serviceModule, serviceModule))
-            );
+        if (foodCond) {
+            conditions.push(foodCond);
         }
 
         const overrides = await db
@@ -107,27 +93,13 @@ export const formatFoodsList = async (
             .filter(Boolean) as string[];
 
         if (allOptionIds.length > 0) {
+            const varCond = cascadeOverrideCondition(variantPricingOverrides, targetBranchId, serviceModule);
             const varConditions: any[] = [
                 inArray(variantPricingOverrides.variantId, allOptionIds),
                 eq(variantPricingOverrides.status, "active"),
             ];
-
-            if (targetBranchId && serviceModule) {
-                varConditions.push(
-                    or(
-                        and(eq(variantPricingOverrides.branchId, targetBranchId), eq(variantPricingOverrides.serviceModule, serviceModule)),
-                        and(eq(variantPricingOverrides.branchId, targetBranchId), isNull(variantPricingOverrides.serviceModule)),
-                        and(isNull(variantPricingOverrides.branchId), eq(variantPricingOverrides.serviceModule, serviceModule))
-                    )
-                );
-            } else if (targetBranchId) {
-                varConditions.push(
-                    and(eq(variantPricingOverrides.branchId, targetBranchId), isNull(variantPricingOverrides.serviceModule))
-                );
-            } else if (serviceModule) {
-                varConditions.push(
-                    and(isNull(variantPricingOverrides.branchId), eq(variantPricingOverrides.serviceModule, serviceModule))
-                );
+            if (varCond) {
+                varConditions.push(varCond);
             }
 
             const varOverrides = await db

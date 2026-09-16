@@ -30,19 +30,36 @@ export function pickBestOverride<
 
 export function cascadeOverrideCondition(
     table: typeof foodPricingOverrides | typeof variantPricingOverrides,
-    branchId: string,
-    serviceModule?: ServiceModule
+    branchId?: string | null,
+    serviceModule?: ServiceModule | string | null
 ): SQL | undefined {
-    const candidates = [
-        and(eq(table.branchId, branchId), isNull(table.serviceModule)),
-    ];
-    if (serviceModule) {
+    const candidates: SQL[] = [];
+
+    if (branchId && serviceModule) {
         candidates.push(
-            and(eq(table.branchId, branchId), eq(table.serviceModule, serviceModule)),
-            and(isNull(table.branchId), eq(table.serviceModule, serviceModule))
+            and(eq(table.branchId, branchId), eq(table.serviceModule, serviceModule as ServiceModule))!,
+            and(eq(table.branchId, branchId), isNull(table.serviceModule))!,
+            and(isNull(table.branchId), eq(table.serviceModule, serviceModule as ServiceModule))!,
+            and(isNull(table.branchId), isNull(table.serviceModule))!
+        );
+    } else if (branchId) {
+        candidates.push(
+            and(eq(table.branchId, branchId), isNull(table.serviceModule))!,
+            and(isNull(table.branchId), isNull(table.serviceModule))!
+        );
+    } else if (serviceModule) {
+        candidates.push(
+            and(isNull(table.branchId), eq(table.serviceModule, serviceModule as ServiceModule))!,
+            and(isNull(table.branchId), isNull(table.serviceModule))!
+        );
+    } else {
+        candidates.push(
+            and(isNull(table.branchId), isNull(table.serviceModule))!
         );
     }
-    return or(...candidates);
+
+    const validCandidates = candidates.filter(Boolean);
+    return validCandidates.length > 0 ? or(...validCandidates) : undefined;
 }
 
 export function overrideKeyWhere(
@@ -143,9 +160,18 @@ export async function upsertVariantPricingOverride(
 export async function fetchFoodOverrides(
     dbOrTx: any,
     foodId: string,
-    branchId: string,
-    serviceModule?: ServiceModule
+    branchId?: string | null,
+    serviceModule?: ServiceModule | string | null
 ) {
+    const overrideCond = cascadeOverrideCondition(foodPricingOverrides, branchId, serviceModule);
+    const conditions = [
+        eq(foodPricingOverrides.foodId, foodId),
+        eq(foodPricingOverrides.status, "active"),
+    ];
+    if (overrideCond) {
+        conditions.push(overrideCond);
+    }
+
     return dbOrTx
         .select({
             id: foodPricingOverrides.id,
@@ -155,22 +181,26 @@ export async function fetchFoodOverrides(
             status: foodPricingOverrides.status,
         })
         .from(foodPricingOverrides)
-        .where(
-            and(
-                eq(foodPricingOverrides.foodId, foodId),
-                eq(foodPricingOverrides.status, "active"),
-                cascadeOverrideCondition(foodPricingOverrides, branchId, serviceModule)
-            )
-        );
+        .where(and(...conditions));
 }
 
 export async function fetchVariantOverrides(
     dbOrTx: any,
     variantIds: string[],
-    branchId: string,
-    serviceModule?: ServiceModule
+    branchId?: string | null,
+    serviceModule?: ServiceModule | string | null
 ) {
     if (variantIds.length === 0) return [];
+
+    const overrideCond = cascadeOverrideCondition(variantPricingOverrides, branchId, serviceModule);
+    const conditions = [
+        inArray(variantPricingOverrides.variantId, variantIds),
+        eq(variantPricingOverrides.status, "active"),
+    ];
+    if (overrideCond) {
+        conditions.push(overrideCond);
+    }
+
     return dbOrTx
         .select({
             variantId: variantPricingOverrides.variantId,
@@ -180,13 +210,7 @@ export async function fetchVariantOverrides(
             status: variantPricingOverrides.status,
         })
         .from(variantPricingOverrides)
-        .where(
-            and(
-                inArray(variantPricingOverrides.variantId, variantIds),
-                eq(variantPricingOverrides.status, "active"),
-                cascadeOverrideCondition(variantPricingOverrides, branchId, serviceModule)
-            )
-        );
+        .where(and(...conditions));
 }
 
 export function parsePrice(value: string | number | null | undefined, fallback = 0): number {
