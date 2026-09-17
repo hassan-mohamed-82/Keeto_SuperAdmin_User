@@ -55,7 +55,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             serviceFee: orders.serviceFee,
             appCommission: orders.appCommission,
             totalAmount: orders.totalAmount,
-            cancelReasonType: selectReasons.type,
+            cancelReasonType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
@@ -219,7 +219,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
                 nameFr: cities.nameFr,
             },
             status: orders.status,
-            cancelReasonType: selectReasons.type,
+            cancelReasonType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
@@ -400,7 +400,7 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             appCommission: orders.appCommission, // 👈 عمولة كيتو المئوية
             totalAmount: orders.totalAmount,
             status: orders.status,
-            cancelReasonType: selectReasons.type,
+            cancelReasonType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
         })
         .from(orders)
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
@@ -715,7 +715,7 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
             serviceFee: orders.serviceFee,
             paymentMethodName: paymentMethods.name, // 👈 الربط السليم
             status: orders.status,
-            cancelReasonType: selectReasons.type,
+            cancelReasonType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
         })
         .from(orders)
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
@@ -897,7 +897,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             restaurantName: restaurants.name,
             appCommission: orders.appCommission,
             status: orders.status,
-            cancelReasonType: selectReasons.type,
+            cancelReasonType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
@@ -960,14 +960,14 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         filteredRestaurants = filteredRestaurants.filter((r) => r.id === (restaurantId as string));
     }
 
-    // 4. Build with/without orders lists from the full active list
+    // 4. Build with/without orders lists from the full active list (including canceled orders)
     const withOrdersList = allRestaurants.filter((r) => {
         const stats = ordersStatsByRestaurant[r.id];
-        return stats && stats.validCount > 0;
+        return stats && stats.count > 0;
     });
     const withoutOrdersList = allRestaurants.filter((r) => {
         const stats = ordersStatsByRestaurant[r.id];
-        return !stats || stats.validCount === 0;
+        return !stats || stats.count === 0;
     });
 
     // ─── Signup Users ────────────────────────────────────────────────────────
@@ -1047,7 +1047,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             orderId: o.orderId,
             restaurantId: o.restaurantId,
             restaurantName: o.restaurantName || "Unknown",
-            cancelType: o.cancelReasonType || "other",
+            cancelType: o.cancelReasonType || null,
         }));
 
     const responseData: any = {
