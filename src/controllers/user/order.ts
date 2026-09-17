@@ -38,6 +38,7 @@ import * as turf from "@turf/turf";
 import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
 import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
+import { KashierService } from "../../services/kashier.service";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -214,6 +215,12 @@ export const checkout = async (req: Request | any, res: Response) => {
     const paymentMethodNameAr = selectedPayment.nameAr;
     const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
     const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
+    
+    // Visa payment check using VISA_PAYMENT_METHOD_ID from database schema
+    const isVisaPayment = 
+        paymentMethod === selectedPayment.id || 
+        paymentMethodName?.toLowerCase() === "visa" || 
+        paymentMethodNameAr === "بطاقة";
 
     // ==========================================
     // 2. Idempotency Check
@@ -1214,14 +1221,42 @@ export const checkout = async (req: Request | any, res: Response) => {
     });
 
     // ==========================================
+    // 12. Create Kashier Payment Session (if Visa)
+    // ==========================================
+    // let paymentSessionData: any = null;
+    // if (isVisaPayment) {
+    //     try {
+    //         paymentSessionData = await KashierService.createPaymentSession({
+    //             orderId: orderId,
+    //             amount: totalAmount,
+    //             currency: "EGP",
+    //             customerEmail: userInfo?.email || undefined,
+    //         });
+    //     } catch (paymentErr: any) {
+    //         console.error(`[Checkout] Kashier session creation failed for order ${orderId}:`, paymentErr?.message);
+    //         paymentSessionData = {
+    //             error: paymentErr?.message || "Failed to create Kashier payment session.",
+    //         };
+    //     }
+    // }
+
+    // ==========================================
     // 📤 إرجاع البيانات في الـ Response
     // ==========================================
     return SuccessResponse(res, {
         message: "Order created successfully",
+        // payment: paymentSessionData ? {
+        //     sessionId: paymentSessionData.sessionId,
+        //     sessionUrl: paymentSessionData.sessionUrl,
+        //     status: paymentSessionData.status,
+        //     expireAt: paymentSessionData.expireAt,
+        //     error: paymentSessionData.error,
+        // } : null,
         order_level: {
             orderDetails: {
                 orderId,
                 orderNumber,
+                // paymentSessionUrl: paymentSessionData?.sessionUrl || null,
                 zoneId: resolvedZoneId,
                 subtotal,
                 deliveryFee,

@@ -70,6 +70,7 @@ app.get("/", (req, res) => {
 
 // مسارات الـ API
 app.use("/api", ApiRoute);
+app.use("/api/v1", ApiRoute);
 
 // معالج مسارات 404 - تم تعديله لتجنب خطأ ENOENT
 app.use((req, res, next) => {

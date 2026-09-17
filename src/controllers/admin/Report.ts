@@ -210,7 +210,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             serviceFee: orders.serviceFee, // 👈 دي الرسوم الثابتة بتاعة كيتو (الـ 5 جنيه)
             appCommission: orders.appCommission, // 👈 دي العمولة المئوية بتاعة كيتو
             totalAmount: orders.totalAmount,
-            restaurantId: restaurants.id,
+            restaurantId: orders.restaurantId,
             restaurantName: restaurants.name,
             city: {
                 id: cities.id,
@@ -219,7 +219,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
                 nameFr: cities.nameFr,
             },
             status: orders.status,
-            cancelReasonType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
+            cancelReasonType: sql<string | null>`COALESCE(NULLIF(${orders.cancelReasonType}, ''), ${selectReasons.type})`,
         })
         .from(orders)
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
@@ -250,8 +250,9 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
 
         if (order.status === "cancelled") {
             entry.counts.canceled += 1;
-            if (order.cancelReasonType === "user") entry.canceledBreakdown.user += 1;
-            else if (order.cancelReasonType === "restaurant") {
+            const cancelType = (order.cancelReasonType || "").toLowerCase().trim();
+            if (cancelType === "user") entry.canceledBreakdown.user += 1;
+            else if (cancelType === "restaurant") {
                 entry.canceledBreakdown.restaurant += 1;
                 const commission = parseFloat(order.appCommission as string || "0");
                 entry.platformDues.totalCommission += commission;
@@ -307,7 +308,8 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             restaurantName: entry.restaurantName,
             city: entry.city,
             ordersCount: {
-                total: entry.counts.total,
+                total: entry.counts.total + entry.counts.canceled,
+                valid: entry.counts.total,
                 cash: entry.counts.cash,
                 digital: entry.counts.digital,
                 canceled: entry.counts.canceled,
