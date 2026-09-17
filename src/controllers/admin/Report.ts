@@ -238,7 +238,8 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
                 restaurantId: rId,
                 restaurantName: order.restaurantName || "Unknown",
                 city: order.city?.id ? order.city : null,
-                counts: { total: 0, cash: 0, digital: 0 },
+                counts: { total: 0, cash: 0, digital: 0, canceled: 0 },
+                canceledBreakdown: { user: 0, restaurant: 0 },
                 sales: { totalRevenue: 0, cashCollected: 0, digitalCollected: 0 },
                 platformDues: { totalCommission: 0, totalServiceFee: 0 }, // 👈 رجعنا السيرفس فيز للمنصة
                 settlementRaw: { cashCommission: 0, cashServiceFee: 0, digitalCommission: 0, digitalServiceFee: 0 }
@@ -248,7 +249,10 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         const entry = restaurantMap[rId];
 
         if (order.status === "cancelled") {
-            if (order.cancelReasonType === "restaurant") {
+            entry.counts.canceled += 1;
+            if (order.cancelReasonType === "user") entry.canceledBreakdown.user += 1;
+            else if (order.cancelReasonType === "restaurant") {
+                entry.canceledBreakdown.restaurant += 1;
                 const commission = parseFloat(order.appCommission as string || "0");
                 entry.platformDues.totalCommission += commission;
                 grandTotalPlatformCommission += commission;
@@ -302,12 +306,18 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             restaurantId: entry.restaurantId,
             restaurantName: entry.restaurantName,
             city: entry.city,
-            ordersCount: entry.counts,
+            ordersCount: {
+                total: entry.counts.total,
+                cash: entry.counts.cash,
+                digital: entry.counts.digital,
+                canceled: entry.counts.canceled,
+            },
             sales: {
                 totalRevenue: entry.sales.totalRevenue.toFixed(2),
                 cashInRestaurantDrawer: entry.sales.cashCollected.toFixed(2),
                 digitalInPlatformBank: entry.sales.digitalCollected.toFixed(2),
             },
+            canceledBreakdown: entry.canceledBreakdown,
             platformDues: {
                 // هنجمع العمولة المئوية + الرسوم الثابتة عشان تظهر كلها في عمود App Commission في الفرونت إند
                 totalAppCommission: (entry.platformDues.totalCommission + entry.platformDues.totalServiceFee).toFixed(2),
@@ -882,12 +892,15 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
 
     const ordersData = await db
         .select({
+            orderId: orders.id,
             restaurantId: orders.restaurantId,
+            restaurantName: restaurants.name,
             appCommission: orders.appCommission,
             status: orders.status,
             cancelReasonType: selectReasons.type,
         })
         .from(orders)
+        .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .where(allOrderConditions.length > 0 ? and(...allOrderConditions) : undefined);
 
@@ -913,7 +926,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         if (isCanceled) {
             totalCanceledOrders += 1;
             if (o.cancelReasonType === "user") totalCanceledByUser += 1;
-            if (o.cancelReasonType === "restaurant") totalCanceledByRestaurant += 1;
+            else if (o.cancelReasonType === "restaurant") totalCanceledByRestaurant += 1;
         } else {
             totalValidOrders += 1;
         }
@@ -931,7 +944,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             if (isCanceled) {
                 ordersStatsByRestaurant[o.restaurantId].canceledCount += 1;
                 if (o.cancelReasonType === "user") ordersStatsByRestaurant[o.restaurantId].canceledByUser += 1;
-                if (o.cancelReasonType === "restaurant") ordersStatsByRestaurant[o.restaurantId].canceledByRestaurant += 1;
+                else if (o.cancelReasonType === "restaurant") ordersStatsByRestaurant[o.restaurantId].canceledByRestaurant += 1;
             } else {
                 ordersStatsByRestaurant[o.restaurantId].validCount += 1;
             }
@@ -983,9 +996,6 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
         // If a specific restaurantId is requested, return full restaurant details; otherwise return slim info
         const restaurantInfo = r
-        // const restaurantInfo = restaurantId
-        //     ? r
-        //     : { id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status };
         return {
             restaurantDetails: restaurantInfo,
             ordersCount: stats.count,
@@ -993,6 +1003,10 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             canceledOrders: stats.canceledCount,
             canceledByUser: stats.canceledByUser,
             canceledByRestaurant: stats.canceledByRestaurant,
+            canceledBreakdown: {
+                user: stats.canceledByUser,
+                restaurant: stats.canceledByRestaurant,
+            },
             total_commission: stats.commission,
             signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
         };
@@ -1026,6 +1040,16 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         restaurantsResult = restaurantDetails; // already has signupUsersCount
     }
 
+    // Build flat list of all canceled orders with restaurant name and cancel type
+    const canceledOrdersList = ordersData
+        .filter((o) => o.status === "cancelled")
+        .map((o) => ({
+            orderId: o.orderId,
+            restaurantId: o.restaurantId,
+            restaurantName: o.restaurantName || "Unknown",
+            cancelType: o.cancelReasonType || "other",
+        }));
+
     const responseData: any = {
         summary: {
             totalOrders,
@@ -1033,7 +1057,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             canceledOrders: totalCanceledOrders,
             canceledBreakdown: {
                 user: totalCanceledByUser,
-                restaurant: totalCanceledByRestaurant
+                restaurant: totalCanceledByRestaurant,
             },
             totalRestaurants,
             restaurantsWithOrders: withOrdersList.length,
@@ -1043,6 +1067,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             totalSignupUsers,
         },
         restaurants: restaurantsResult,
+        canceledOrders: canceledOrdersList,
     };
 
     return SuccessResponse(res, {
