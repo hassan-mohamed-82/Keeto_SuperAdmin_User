@@ -39,6 +39,7 @@ import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModul
 import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
 import { KashierService } from "../../services/kashier.service";
+import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -215,11 +216,11 @@ export const checkout = async (req: Request | any, res: Response) => {
     const paymentMethodNameAr = selectedPayment.nameAr;
     const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
     const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
-    
+
     // Visa payment check using VISA_PAYMENT_METHOD_ID from database schema
-    const isVisaPayment = 
-        paymentMethod === selectedPayment.id || 
-        paymentMethodName?.toLowerCase() === "visa" || 
+    const isVisaPayment =
+        paymentMethod === selectedPayment.id ||
+        paymentMethodName?.toLowerCase() === "visa" ||
         paymentMethodNameAr === "بطاقة";
 
     // ==========================================
@@ -500,39 +501,39 @@ export const checkout = async (req: Request | any, res: Response) => {
                 newUnitPrice: liveUnit,
             });
 
-        //      else {
-        //     const foodRow = foodMap.get(cartItem.foodId);
-        //     if (!foodRow) throw new BadRequest(`Food item with ID ${cartItem.foodId} not found`);
+            //      else {
+            //     const foodRow = foodMap.get(cartItem.foodId);
+            //     if (!foodRow) throw new BadRequest(`Food item with ID ${cartItem.foodId} not found`);
 
-        //     channelBasePrice = parseFloat(foodRow.price as string || "0");
-        //     itemIsAvailable = foodRow.status !== "inactive" && !foodRow.isOutOfStock;
+            //     channelBasePrice = parseFloat(foodRow.price as string || "0");
+            //     itemIsAvailable = foodRow.status !== "inactive" && !foodRow.isOutOfStock;
 
-        //     varPrice = 0;
-        //     if (optionIds.length > 0) {
-        //         for (const v of parsedVariations) {
-        //             if (v.optionId) {
-        //                 const opt = optionsWithParentMap.get(v.optionId);
-        //                 if (!opt) {
-        //                     return res.status(422).json({
-        //                         success: false,
-        //                         message: `Option '${v.optionName || 'selected'}' is no longer available. Please refresh your cart.`,
-        //                         data: { affectedFoodId: cartItem.foodId },
-        //                     });
-        //                 }
-        //                 if (opt.status === false) {
-        //                     return res.status(422).json({
-        //                         success: false,
-        //                         message: `Option '${opt.optionName}' is currently unavailable.`,
-        //                         data: { affectedFoodId: cartItem.foodId },
-        //                     });
-        //                 }
-        //                 const resolvedPrice = (opt.additionalPrice as string || "0");
-        //                 varPrice += parseFloat(resolvedPrice);
-        //                 v.additionalPrice = resolvedPrice;
-        //             }
-        //         }
-        //     }
-        // }
+            //     varPrice = 0;
+            //     if (optionIds.length > 0) {
+            //         for (const v of parsedVariations) {
+            //             if (v.optionId) {
+            //                 const opt = optionsWithParentMap.get(v.optionId);
+            //                 if (!opt) {
+            //                     return res.status(422).json({
+            //                         success: false,
+            //                         message: `Option '${v.optionName || 'selected'}' is no longer available. Please refresh your cart.`,
+            //                         data: { affectedFoodId: cartItem.foodId },
+            //                     });
+            //                 }
+            //                 if (opt.status === false) {
+            //                     return res.status(422).json({
+            //                         success: false,
+            //                         message: `Option '${opt.optionName}' is currently unavailable.`,
+            //                         data: { affectedFoodId: cartItem.foodId },
+            //                     });
+            //                 }
+            //                 const resolvedPrice = (opt.additionalPrice as string || "0");
+            //                 varPrice += parseFloat(resolvedPrice);
+            //                 v.additionalPrice = resolvedPrice;
+            //             }
+            //         }
+            //     }
+            // }
 
         }
 
@@ -973,24 +974,24 @@ export const checkout = async (req: Request | any, res: Response) => {
     const now = new Date();
 
     // ⏰ 1. Fetch value from settings
-    const resetTimeStr = (settings as any)?.resetDailyOrderNumberTime || "00:00";
-    const [resetHourRaw, resetMinuteRaw] = resetTimeStr.split(":").map(Number);
-    const resetHour = isNaN(resetHourRaw) ? 0 : resetHourRaw;
-    const resetMinute = isNaN(resetMinuteRaw) ? 0 : resetMinuteRaw;
+    // const resetTimeStr = (settings as any)?.resetDailyOrderNumberTime || "00:00";
+    // const [resetHourRaw, resetMinuteRaw] = resetTimeStr.split(":").map(Number);
+    // const resetHour = isNaN(resetHourRaw) ? 0 : resetHourRaw;
+    // const resetMinute = isNaN(resetMinuteRaw) ? 0 : resetMinuteRaw;
 
-    // 🌍 2. Dynamic Timezone Handling (Africa/Cairo)
-    const egyptDateStr = now.toLocaleString("en-US", { timeZone: "Africa/Cairo" });
-    const nowLocal = new Date(egyptDateStr);
+    // // 🌍 2. Dynamic Timezone Handling (Africa/Cairo)
+    // const egyptDateStr = now.toLocaleString("en-US", { timeZone: "Africa/Cairo" });
+    // const nowLocal = new Date(egyptDateStr);
 
-    const startOfTodayLocal = new Date(nowLocal);
-    startOfTodayLocal.setHours(resetHour, resetMinute, 0, 0);
+    // const startOfTodayLocal = new Date(nowLocal);
+    // startOfTodayLocal.setHours(resetHour, resetMinute, 0, 0);
 
-    if (nowLocal < startOfTodayLocal) {
-        startOfTodayLocal.setDate(startOfTodayLocal.getDate() - 1);
-    }
+    // if (nowLocal < startOfTodayLocal) {
+    //     startOfTodayLocal.setDate(startOfTodayLocal.getDate() - 1);
+    // }
 
-    const diffMs = nowLocal.getTime() - startOfTodayLocal.getTime();
-    const startOfTodayQuery = new Date(now.getTime() - diffMs);
+    // const diffMs = nowLocal.getTime() - startOfTodayLocal.getTime();
+    // const startOfTodayQuery = new Date(now.getTime() - diffMs);
 
     // 🔒 3. Fetch Last Order
     let createdDailyOrderNumber = 1;
@@ -1028,20 +1029,20 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
 
         // 🔒 2. Daily order number calculation
-        const [lastOrder] = await tx
-            .select({ dailyOrderNumber: orders.dailyOrderNumber })
-            .from(orders)
-            .where(
-                and(
-                    eq(orders.restaurantId, restaurantId),
-                    gte(orders.createdAt, startOfTodayQuery)
-                )
-            )
-            .orderBy(desc(orders.dailyOrderNumber))
-            .limit(1)
-            .for("update");
+        // const [lastOrder] = await tx
+        //     .select({ dailyOrderNumber: orders.dailyOrderNumber })
+        //     .from(orders)
+        //     .where(
+        //         and(
+        //             eq(orders.restaurantId, restaurantId),
+        //             gte(orders.createdAt, startOfTodayQuery)
+        //         )
+        //     )
+        //     .orderBy(desc(orders.dailyOrderNumber))
+        //     .limit(1)
+        //     .for("update");
 
-        createdDailyOrderNumber = (lastOrder?.dailyOrderNumber || 0) + 1;
+        createdDailyOrderNumber = await getNextDailyOrderNumber(tx, restaurantId, settings, now);
 
         // 3. Create order record
         await tx.insert(orders).values({
