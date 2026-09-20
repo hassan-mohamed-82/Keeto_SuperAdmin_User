@@ -14,7 +14,7 @@ import { sql, relations } from "drizzle-orm";
 import { restaurants } from "./restaurants";
 import { food } from "./food";
 import { users } from "../user/Users";
-import { branches, coupons, discounts } from "../../schema";
+import { branches, coupons, discounts, offers } from "../../schema";
 import { addresses } from "../user/address";
 import { selectReasons } from "./selectReasons";
 import { deliveryMen } from "./delivery_man";
@@ -144,6 +144,9 @@ export const orders = mysqlTable("orders", {
     }>(),
 
     isDelayEmailSent: boolean("is_delay_email_sent").default(false),
+
+    offerId: char("offer_id", { length: 36 })
+        .references(() => offers.id, { onDelete: "set null" }),
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),

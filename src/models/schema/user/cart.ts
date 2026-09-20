@@ -4,6 +4,7 @@ import { users } from "./Users";
 import { food } from "../admin/food";
 import { restaurants } from "../admin/restaurants";
 import { branches } from "../admin/branches";
+import { offers } from "../admin/offers";
 
 export const cartItems = mysqlTable("cart_items", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -39,6 +40,11 @@ export const cartItems = mysqlTable("cart_items", {
     // Used by GET /cart to detect price drift and by checkout for final validation.
     branchId: char("branch_id", { length: 36 }).references(() => branches.id),
     serviceModule: mysqlEnum("service_module", ["takeaway", "dine_in", "delivery"]),
+
+    // ─── Bundle Offer Reference ────────────────────────────────────────
+    // Nullable: only set when this cart item represents a bundle offer.
+    // When set, checkout uses offers.price directly (fixed price, no channel math).
+    offerId: char("offer_id", { length: 36 }).references(() => offers.id, { onDelete: "set null" }),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
