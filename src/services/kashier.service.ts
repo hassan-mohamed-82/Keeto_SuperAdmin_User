@@ -51,7 +51,6 @@ export interface PaymentSessionResponse {
     expireAt: string;
 }
 
-
 export class KashierService {
     /**
      * Creates a hosted payment session via Kashier Payment Sessions API.
@@ -65,9 +64,9 @@ export class KashierService {
         const currency = (input.currency || "EGP").toUpperCase();
         const amount = input.amount.toFixed(2);
 
-        if (!config.mid || !config.secretKey) {
+        if (!config.mid || !config.apiKey || !config.secretKey) {
             throw new BadRequest(
-                "Kashier KASHIER_MID or KASHIER_SECRET_KEY is missing in environment variables."
+                "Kashier credentials (KASHIER_MID, KASHIER_API_KEY, or KASHIER_SECRET_KEY) are missing in environment variables."
             );
         }
 
@@ -90,11 +89,12 @@ export class KashierService {
             display: "en",
             maxFailureAttempts: 3,
             allowedMethods: "card,wallet",
+            // Kashier requires customer field on every session
+            customer: {
+                email: input.customerEmail || "customer@example.com",
+                reference: `CUST-${input.orderId}`,
+            },
         };
-
-        if (input.customerEmail) {
-            body.customer = { email: input.customerEmail };
-        }
 
         console.log(`[Kashier Session] Creating session for order ${input.orderId}, amount: ${amount} ${currency}`);
 
@@ -105,7 +105,8 @@ export class KashierService {
                 {
                     headers: {
                         "Content-Type": "application/json",
-                        Authorization: `Bearer ${config.secretKey}`,
+                        Authorization: config.secretKey, // Raw secretKey without "Bearer " prefix
+                        "api-key": config.apiKey,         // Separate required header
                     },
                     timeout: 15000,
                 }
@@ -147,7 +148,6 @@ export class KashierService {
 
     /**
      * Executes a server-to-server Direct Charge request to Kashier.
-
      */
     static async executeDirectCharge(input: DirectChargeInput): Promise<ChargeResponse> {
         const config = getKashierConfig();
