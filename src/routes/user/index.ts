@@ -24,6 +24,8 @@ import policyRouter from "./policyRouter";
 import popupRouter from "./popup";
 import couponRouter from "./coupon";
 import restaurantGroupsRouter from "./restaurantGroups";
+import bundleRouter from "./bundles";
+
 
 const router = Router();
 
@@ -39,6 +41,7 @@ router.use("/recommended-foods", recommendedFoodRouter);
 router.use("/policy",policyRouter)
 router.use("/popup", popupRouter);
 router.use("/offers", offersRouter);
+router.use('/bundles' , bundleRouter)
 router.use("/restaurant-groups", restaurantGroupsRouter);
 
 router.use("/restaurants", restaurantFeaturesRouter);
