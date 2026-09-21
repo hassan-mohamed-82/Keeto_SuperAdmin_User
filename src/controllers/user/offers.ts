@@ -485,18 +485,6 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
                 order_level: subcategories.order_Level,
 
                 restaurantId: restaurants.id,
-                restaurant: {
-                    id: restaurants.id,
-                    name: restaurants.name,
-                    nameAr: restaurants.nameAr,
-                    nameFr: restaurants.nameFr,
-                    logo: restaurants.logo,
-                    cover: restaurants.cover,
-                    address: restaurants.address,
-                    minDeliveryTime: restaurants.minDeliveryTime,
-                    maxDeliveryTime: restaurants.maxDeliveryTime,
-                    deliveryTimeUnit: restaurants.deliveryTimeUnit,
-                },
             })
             .from(discountFoods)
             .innerJoin(food, eq(discountFoods.foodId, food.id))
@@ -505,19 +493,16 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
             .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
             .where(and(...foodWhereConditions));
 
-        const discountProductsMap = new Map<string, Map<string, { restaurant: any; rows: any[] }>>();
+        const discountProductsMap = new Map<string, Map<string, any[]>>();
         for (const row of productsRows) {
             if (!discountProductsMap.has(row.discountId)) {
                 discountProductsMap.set(row.discountId, new Map());
             }
             const restMap = discountProductsMap.get(row.discountId)!;
             if (!restMap.has(row.restaurantId)) {
-                restMap.set(row.restaurantId, {
-                    restaurant: row.restaurant,
-                    rows: [],
-                });
+                restMap.set(row.restaurantId, []);
             }
-            restMap.get(row.restaurantId)!.rows.push(row);
+            restMap.get(row.restaurantId)!.push(row);
         }
 
         const result: any[] = [];
@@ -540,11 +525,9 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
 
             const restMap = discountProductsMap.get(d.id);
             const allProductsForDiscount: any[] = [];
-            const uniqueRestaurants: any[] = [];
 
             if (restMap) {
-                for (const [rId, { restaurant, rows }] of restMap.entries()) {
-                    uniqueRestaurants.push(restaurant);
+                for (const [rId, rows] of restMap.entries()) {
                     const formatted = await formatFoodsList(
                         rows,
                         rId,
@@ -555,10 +538,35 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
                     );
 
                     for (const item of formatted) {
-                        const enrichedItem = attachDiscountDetails(item, meta);
-                        allProductsForDiscount.push({
-                            ...enrichedItem,
+                        let discountPrice = item.discountPrice;
+                        if (meta.discountType === "percentage" && meta.discountValue) {
+                            let discountAmount = item.price * (meta.discountValue / 100);
+                            if (meta.maxDiscount && meta.maxDiscount > 0) {
+                                discountAmount = Math.min(discountAmount, meta.maxDiscount);
+                            }
+                            discountPrice = Math.max(0, item.price - discountAmount);
+                        } else if (["fixed_amount", "amount", "fixed"].includes(meta.discountType) && meta.discountValue) {
+                            discountPrice = Math.max(0, item.price - meta.discountValue);
+                        }
+
+                        const {
+                            discountDetails,
+                            discount,
+                            discountId,
+                            discountName,
+                            discountNameAr,
+                            discountNameFr,
+                            discountLogo,
+                            discountType,
+                            discountValue,
+                            isGlobal,
                             restaurant,
+                            ...cleanItem
+                        } = item;
+
+                        allProductsForDiscount.push({
+                            ...cleanItem,
+                            discountPrice,
                         });
                     }
                 }
