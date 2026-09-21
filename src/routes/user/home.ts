@@ -17,6 +17,12 @@ import {
 
 import { catchAsync } from "../../utils/catchAsync";
 import { optionalAuth, authenticated } from "../../middlewares/authenticated";
+import { validate } from "../../middlewares/validation";
+import { getProductById } from "../../controllers/user/food";
+import {
+    getFoodByIdParamsSchema,
+    getFoodByIdQuerySchema,
+} from "../../validation/user/food";
 
 const router = Router();
 
@@ -41,6 +47,16 @@ router.get("/categories/:categoryId/items", optionalAuth, catchAsync(getFoodsByC
 // 4. جلب تفاصيل مطعم معين والمنيو بتاعه
 // 🟢 GET: /api/user/explore/restaurants/:restaurantId
 router.get("/restaurants/:restaurantId", optionalAuth, catchAsync(getRestaurantDetails));
+
+// 4b. جلب تفاصيل وجبة معينة مع تفاصيل الخصم
+// 🟢 GET: /api/user/home/foods/:id
+router.get(
+    "/foods/:id",
+    optionalAuth,
+    validate(getFoodByIdParamsSchema, "params"),
+    validate(getFoodByIdQuerySchema, "query"),
+    catchAsync(getProductById)
+);
 
 // ==========================================
 // 🔍 راوتس البحث (Search)
