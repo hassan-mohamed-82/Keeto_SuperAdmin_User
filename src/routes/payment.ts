@@ -2,14 +2,10 @@ import { Router } from "express";
 import { validate } from "../middlewares/validation";
 import {
     sessionSchema,
-    generateHashSchema,
-    directChargeSchema,
     webhookSchema,
 } from "../validation/payment/kashier.validation";
 import {
     generatePaymentSession,
-    generateOrderHash,
-    processDirectCharge,
     handleKashierWebhook,
 } from "../controllers/payment.controller";
 
@@ -24,28 +20,6 @@ router.post(
     "/kashier/session",
     validate(sessionSchema),
     generatePaymentSession
-);
-
-/**
- * @route   POST /api/payments/kashier/hash
- * @desc    Generate HMAC-SHA256 signature hash for an order
- * @access  Public / Authenticated
- */
-router.post(
-    "/kashier/hash",
-    validate(generateHashSchema),
-    generateOrderHash
-);
-
-/**
- * @route   POST /api/payments/kashier/charge
- * @desc    Direct card charge via Kashier Checkout
- * @access  Public / Authenticated
- */
-router.post(
-    "/kashier/charge",
-    validate(directChargeSchema),
-    processDirectCharge
 );
 
 /**

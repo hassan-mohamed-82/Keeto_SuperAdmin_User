@@ -1,45 +1,12 @@
 import { Request, Response } from "express";
 import { SuccessResponse } from "../utils/response";
 import { BadRequest } from "../Errors";
-import {
-    getKashierConfig,
-    generateKashierOrderHash,
-    verifyKashierWebhookSignature,
-} from "../utils/kashier";
+import { verifyKashierWebhookSignature } from "../utils/kashier";
 import { KashierService } from "../services/kashier.service";
 import { db } from "../models/connection";
 import { orders, users } from "../models/schema";
 import { eq } from "drizzle-orm";
 
-
-/**
- * Controller: Generate Order Hash
- * Endpoint: POST /api/payments/kashier/hash
- */
-export const generateOrderHash = async (req: Request, res: Response) => {
-    const { orderId, amount, currency = "EGP" } = req.body;
-    const config = getKashierConfig();
-
-    if (!config.mid || !config.apiKey) {
-        throw new BadRequest("Kashier merchant configuration is missing. Please check server environment.");
-    }
-
-    const hash = generateKashierOrderHash({
-        mid: config.mid,
-        orderId,
-        amount,
-        currency,
-    });
-
-    return SuccessResponse(res, {
-        hash,
-        mid: config.mid,
-        orderId,
-        amount: typeof amount === "number" ? amount.toFixed(2) : String(amount),
-        currency: currency.toUpperCase(),
-        mode: config.mode,
-    });
-};
 
 /**
  * Controller: Create Kashier Payment Session
@@ -91,37 +58,6 @@ export const generatePaymentSession = async (req: Request, res: Response) => {
     return SuccessResponse(res, session);
 };
 
-/**
- * Controller: Process Direct Card Charge
- * Endpoint: POST /api/payments/kashier/charge
- */
-export const processDirectCharge = async (req: Request, res: Response) => {
-    const {
-        orderId,
-        amount,
-        currency = "EGP",
-        cardNumber,
-        expiryMonth,
-        expiryYear,
-        cvv,
-        cardHolderName,
-        saveCard,
-    } = req.body;
-
-    const chargeResult = await KashierService.executeDirectCharge({
-        orderId,
-        amount,
-        currency,
-        cardNumber,
-        expiryMonth,
-        expiryYear,
-        cvv,
-        cardHolderName,
-        saveCard,
-    });
-
-    return SuccessResponse(res, chargeResult);
-};
 
 /**
  * Controller: Handle Kashier Webhooks
