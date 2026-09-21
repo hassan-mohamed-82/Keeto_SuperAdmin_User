@@ -25,6 +25,7 @@ import popupRouter from "./popup";
 import couponRouter from "./coupon";
 import restaurantGroupsRouter from "./restaurantGroups";
 import bundleRouter from "./bundles";
+import foodRouter from "./food";
 
 
 const router = Router();
@@ -43,6 +44,7 @@ router.use("/popup", popupRouter);
 router.use("/offers", offersRouter);
 router.use('/bundles' , bundleRouter)
 router.use("/restaurant-groups", restaurantGroupsRouter);
+router.use("/foods", foodRouter);
 
 router.use("/restaurants", restaurantFeaturesRouter);
 router.use(authenticated,authorizeRoles("user"));
