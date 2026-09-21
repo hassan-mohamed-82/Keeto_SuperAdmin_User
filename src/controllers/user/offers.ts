@@ -14,6 +14,80 @@ import { formatFoodsList } from "../../services/foodFormat";
 import { getUserFavoritesSets } from "../../services/userFavoritesFood";
 import { resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
 
+interface OfferDiscountMeta {
+    discountId: string;
+    discountName: string;
+    discountNameAr: string | null;
+    discountNameFr: string | null;
+    discountType: string;
+    discountValue: number | null;
+    maxDiscount: number | null;
+    minOrderAmount: number | null;
+    startDate: Date | null;
+    endDate: Date | null;
+    isGlobal: boolean;
+    discountLogo: string | null;
+    restaurant?: any;
+}
+
+const attachDiscountDetails = (item: any, meta?: OfferDiscountMeta) => {
+    const discountDetails = meta
+        ? {
+            id: meta.discountId,
+            name: meta.discountName,
+            nameAr: meta.discountNameAr ?? null,
+            nameFr: meta.discountNameFr ?? null,
+            type: meta.discountType,
+            value: meta.discountValue,
+            discountType: meta.discountType,
+            discountValue: meta.discountValue,
+            maxDiscount: meta.maxDiscount,
+            minOrderAmount: meta.minOrderAmount,
+            startDate: meta.startDate,
+            endDate: meta.endDate,
+            isGlobal: meta.isGlobal,
+            logo: meta.discountLogo,
+            source: meta.isGlobal ? "global_discount" : "restaurant_discount",
+        }
+        : item.discountDetails ?? null;
+
+    let discountPrice = item.discountPrice;
+    let discountType = item.discountType;
+    let discountValue = item.discountValue;
+
+    // If formatFoodsList didn't calculate a discount price but meta discount exists
+    if (meta && (discountPrice === item.price || discountPrice === null || discountPrice === undefined)) {
+        if (meta.discountType === "percentage" && meta.discountValue) {
+            let discountAmount = item.price * (meta.discountValue / 100);
+            if (meta.maxDiscount && meta.maxDiscount > 0) {
+                discountAmount = Math.min(discountAmount, meta.maxDiscount);
+            }
+            discountPrice = Math.max(0, item.price - discountAmount);
+            discountType = meta.discountType;
+            discountValue = meta.discountValue;
+        } else if (["fixed_amount", "amount", "fixed"].includes(meta.discountType) && meta.discountValue) {
+            discountPrice = Math.max(0, item.price - meta.discountValue);
+            discountType = meta.discountType;
+            discountValue = meta.discountValue;
+        }
+    }
+
+    return {
+        ...item,
+        discountPrice,
+        discountType: discountType ?? meta?.discountType ?? null,
+        discountValue: discountValue ?? meta?.discountValue ?? null,
+        discountId: meta?.discountId ?? item.discountDetails?.id ?? null,
+        discountName: meta?.discountName ?? item.discountDetails?.name ?? null,
+        discountNameAr: meta?.discountNameAr ?? item.discountDetails?.nameAr ?? null,
+        discountNameFr: meta?.discountNameFr ?? null,
+        isGlobal: meta ? meta.isGlobal : (item.discountDetails?.isGlobal ?? false),
+        discountLogo: meta?.discountLogo ?? null,
+        discountDetails,
+        discount: discountDetails,
+    };
+};
+
 export const getRestaurantOffers = async (req: Request, res: Response) => {
     try {
         const { restaurantId } = req.params;
@@ -51,6 +125,20 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                 image: food.image,
                 points: food.points,
                 addonsId: food.addonsId,
+
+                // تفاصيل الخصم
+                discountId: discounts.id,
+                discountName: discounts.name,
+                discountNameAr: discounts.nameAr,
+                discountNameFr: discounts.nameFr,
+                discountType: discounts.discountType,
+                discountValue: discounts.discountValue,
+                maxDiscount: discounts.maxDiscount,
+                minOrderAmount: discounts.minOrderAmount,
+                startDate: discounts.startDate,
+                endDate: discounts.endDate,
+                isGlobal: discounts.isGlobal,
+                logo: discounts.logo,
 
                 categoryId: categories.id,
                 categoryName: categories.name,
@@ -90,6 +178,24 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
             });
         }
 
+        const offerMetadataMap = new Map<string, OfferDiscountMeta>();
+        for (const row of offersData) {
+            offerMetadataMap.set(row.foodId, {
+                discountId: row.discountId,
+                discountName: row.discountName,
+                discountNameAr: row.discountNameAr ?? null,
+                discountNameFr: row.discountNameFr ?? null,
+                discountType: row.discountType,
+                discountValue: row.discountValue !== null ? Number(row.discountValue) : null,
+                maxDiscount: row.maxDiscount !== null ? Number(row.maxDiscount) : null,
+                minOrderAmount: row.minOrderAmount !== null ? Number(row.minOrderAmount) : null,
+                startDate: row.startDate,
+                endDate: row.endDate,
+                isGlobal: Boolean(row.isGlobal),
+                discountLogo: row.logo ?? null,
+            });
+        }
+
         const formattedOffers = await formatFoodsList(
             offersData,
             restaurantId,
@@ -99,10 +205,15 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
             serviceModule
         );
 
+        const formattedResults = formattedOffers.map((item) => {
+            const meta = offerMetadataMap.get(item.id);
+            return attachDiscountDetails(item, meta);
+        });
+
         return res.status(200).json({
             success: true,
             message: "Restaurant offers retrieved successfully",
-            data: formattedOffers,
+            data: formattedResults,
         });
 
     } catch (error) {
@@ -137,8 +248,14 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 // تفاصيل الخصم
                 discountId: discounts.id,
                 discountName: discounts.name,
+                discountNameAr: discounts.nameAr,
+                discountNameFr: discounts.nameFr,
                 discountType: discounts.discountType,
                 discountValue: discounts.discountValue,
+                maxDiscount: discounts.maxDiscount,
+                minOrderAmount: discounts.minOrderAmount,
+                startDate: discounts.startDate,
+                endDate: discounts.endDate,
                 isGlobal: discounts.isGlobal,
                 logo: discounts.logo,
 
@@ -198,7 +315,7 @@ export const getAllOffers = async (req: Request, res: Response) => {
 
         // Group foods by restaurant to run formatFoodsList per restaurant
         const offersByRestaurant = new Map<string, any[]>();
-        const offerMetadataMap = new Map<string, { discountId: string; discountName: string; isGlobal: boolean; discountLogo: string | null; restaurant: any }>();
+        const offerMetadataMap = new Map<string, OfferDiscountMeta>();
 
         for (const row of globalOffers) {
             if (!offersByRestaurant.has(row.restaurantId)) {
@@ -208,8 +325,16 @@ export const getAllOffers = async (req: Request, res: Response) => {
             offerMetadataMap.set(row.foodId, {
                 discountId: row.discountId,
                 discountName: row.discountName,
+                discountNameAr: row.discountNameAr ?? null,
+                discountNameFr: row.discountNameFr ?? null,
+                discountType: row.discountType,
+                discountValue: row.discountValue !== null ? Number(row.discountValue) : null,
+                maxDiscount: row.maxDiscount !== null ? Number(row.maxDiscount) : null,
+                minOrderAmount: row.minOrderAmount !== null ? Number(row.minOrderAmount) : null,
+                startDate: row.startDate,
+                endDate: row.endDate,
                 isGlobal: Boolean(row.isGlobal),
-                discountLogo: row.logo,
+                discountLogo: row.logo ?? null,
                 restaurant: row.restaurant,
             });
         }
@@ -224,12 +349,9 @@ export const getAllOffers = async (req: Request, res: Response) => {
             );
             for (const item of formatted) {
                 const meta = offerMetadataMap.get(item.id);
+                const enrichedItem = attachDiscountDetails(item, meta);
                 formattedResults.push({
-                    ...item,
-                    discountId: meta?.discountId ?? null,
-                    discountName: meta?.discountName ?? null,
-                    isGlobal: meta?.isGlobal ?? false,
-                    discountLogo: meta?.discountLogo ?? null,
+                    ...enrichedItem,
                     restaurant: meta?.restaurant ?? null,
                 });
             }
@@ -246,281 +368,3 @@ export const getAllOffers = async (req: Request, res: Response) => {
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
-
-
-
-// import { Request, Response } from "express";
-// import { eq, and, or, isNull, lte, gte } from "drizzle-orm";
-// import { db } from "../../models/connection"; // مسار الاتصال بقاعدة البيانات
-// import { discounts, discountFoods, food, restaurants, categories, subcategories, favorites } from "../../models/schema";
-// import { activeFoodCondition } from "../../helpers/foodConditions";
-
-// export const getRestaurantOffers = async (req: Request, res: Response) => {
-//     try {
-//         const { restaurantId } = req.params;
-//         const now = new Date();
-//         const userId = (req as any).user?.id || (req as any).user?._id;
-
-//         const favoriteFoodIds = new Set();
-//         if (userId) {
-//             const userFavorites = await db
-//                 .select({ foodId: favorites.foodId })
-//                 .from(favorites)
-//                 .where(eq(favorites.userId, userId));
-//             userFavorites.forEach(f => {
-//                 if (f.foodId) favoriteFoodIds.add(f.foodId);
-//             });
-//         }
-
-//         const offersData = await db
-//             .select({
-//                 foodId: food.id,
-//                 foodName: food.name,
-//                 foodNameAr: food.nameAr,
-//                 foodNameFr: food.nameFr,
-//                 description: food.description,
-//                 descriptionAr: food.descriptionAr,
-//                 descriptionFr: food.descriptionFr,
-//                 price: food.price,
-//                 foodDiscountType: food.discount_type,
-//                 foodDiscountValue: food.discount_value,
-//                 image: food.image,
-//                 points: food.points,
-
-//                 categoryId: categories.id,
-//                 categoryName: categories.name,
-//                 categoryNameAr: categories.nameAr,
-//                 categoryNameFr: categories.nameFr,
-
-//                 subcategoryId: subcategories.id,
-//                 subcategoryName: subcategories.name,
-//                 subcategoryNameAr: subcategories.nameAr,
-//                 subcategoryNameFr: subcategories.nameFr,
-//                 subcategoryImage: subcategories.image,
-//                 order_level: subcategories.order_Level,
-//             })
-//             .from(discountFoods)
-//             .innerJoin(discounts, eq(discountFoods.discountId, discounts.id))
-//             .innerJoin(food, eq(discountFoods.foodId, food.id))
-//             .leftJoin(categories, eq(food.categoryid, categories.id))
-//             .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
-//             .where(
-//                 and(
-//                     eq(food.restaurantid, restaurantId), // فلترة بالمطعم
-//                     activeFoodCondition,
-//                     eq(discounts.isActive, true), // الخصم مفعل
-
-//                     // التأكد إن تاريخ الخصم ساري (لو التواريخ موجودة)
-//                     or(isNull(discounts.startDate), lte(discounts.startDate, now)),
-//                     or(isNull(discounts.endDate), gte(discounts.endDate, now))
-//                 )
-//             );
-
-//         const formattedOffers = offersData.map(row => {
-//             let calculatedDiscountPrice = Number(row.price);
-//             let discountNote = "";
-
-//             if (row.foodDiscountType === "percentage" && row.foodDiscountValue) {
-//                 calculatedDiscountPrice = Number(row.price) - (Number(row.price) * Number(row.foodDiscountValue) / 100);
-//             } else if (row.foodDiscountType === "amount" && row.foodDiscountValue) {
-//                 calculatedDiscountPrice = Math.max(0, Number(row.price) - Number(row.foodDiscountValue));
-//             }
-
-//             return {
-//                 id: row.foodId,
-//                 name: row.foodName,
-//                 nameAr: row.foodNameAr,
-//                 nameFr: row.foodNameFr,
-//                 description: row.description,
-//                 descriptionAr: row.descriptionAr,
-//                 descriptionFr: row.descriptionFr,
-//                 price: Number(row.price),
-//                 discountType: row.foodDiscountType ?? null,
-//                 discountValue: row.foodDiscountValue !== null ? Number(row.foodDiscountValue) : null,
-//                 discountPrice: calculatedDiscountPrice,
-//                 discountNote,
-//                 image: row.image,
-//                 points: userId ? row.points : null,
-//                 isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
-                
-//                 variations: {}, 
-//                 addons: {}, 
-                
-//                 category: row.categoryId ? {
-//                     id: row.categoryId,
-//                     name: row.categoryName,
-//                     nameAr: row.categoryNameAr,
-//                     nameFr: row.categoryNameFr,
-//                 } : null,
-//                 subcategory: row.subcategoryId ? {
-//                     id: row.subcategoryId,
-//                     name: row.subcategoryName,
-//                     nameAr: row.subcategoryNameAr,
-//                     nameFr: row.subcategoryNameFr,
-//                     image: row.subcategoryImage,
-//                     order_level: row.order_level,
-//                 } : null,
-//             };
-//         });
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "Restaurant offers retrieved successfully",
-//             data: formattedOffers,
-//         });
-
-//     } catch (error) {
-//         console.error("Error fetching restaurant offers:", error);
-//         return res.status(500).json({ success: false, message: "Internal server error" });
-//     }
-// };
-
-
-
-
-// export const getAllOffers = async (req: Request, res: Response) => {
-//     try {
-//         const now = new Date();
-//         const userId = (req as any).user?.id || (req as any).user?._id;
-
-//         const favoriteFoodIds = new Set();
-//         if (userId) {
-//             const userFavorites = await db
-//                 .select({ foodId: favorites.foodId })
-//                 .from(favorites)
-//                 .where(eq(favorites.userId, userId));
-//             userFavorites.forEach(f => {
-//                 if (f.foodId) favoriteFoodIds.add(f.foodId);
-//             });
-//         }
-
-//         const globalOffers = await db
-//             .select({
-//                 foodId: food.id,
-//                 foodName: food.name,
-//                 foodNameAr: food.nameAr,
-//                 foodNameFr: food.nameFr,
-//                 description: food.description,
-//                 descriptionAr: food.descriptionAr,
-//                 descriptionFr: food.descriptionFr,
-//                 price: food.price,
-//                 foodDiscountType: food.discount_type,
-//                 foodDiscountValue: food.discount_value,
-//                 image: food.image,
-//                 points: food.points,
-
-//                 // تفاصيل الخصم
-//                 discountId: discounts.id,
-//                 discountName: discounts.name,
-//                 discountType: discounts.discountType,
-//                 discountValue: discounts.discountValue,
-//                 isGlobal: discounts.isGlobal,
-//                 logo: discounts.logo,
-
-//                 categoryId: categories.id,
-//                 categoryName: categories.name,
-//                 categoryNameAr: categories.nameAr,
-//                 categoryNameFr: categories.nameFr,
-
-//                 subcategoryId: subcategories.id,
-//                 subcategoryName: subcategories.name,
-//                 subcategoryNameAr: subcategories.nameAr,
-//                 subcategoryNameFr: subcategories.nameFr,
-//                 subcategoryImage: subcategories.image,
-//                 order_level: subcategories.order_Level,
-
-//                 // تفاصيل المطعم
-//                 restaurant: {
-//                     id: restaurants.id,
-//                     name: restaurants.name,
-//                     nameAr: restaurants.nameAr,
-//                     nameFr: restaurants.nameFr,
-//                     logo: restaurants.logo,
-//                     cover: restaurants.cover,
-//                     address: restaurants.address,
-//                     minDeliveryTime: restaurants.minDeliveryTime,
-//                     maxDeliveryTime: restaurants.maxDeliveryTime,
-//                     deliveryTimeUnit: restaurants.deliveryTimeUnit,
-//                 }
-//             })
-//             .from(discountFoods)
-//             .innerJoin(discounts, eq(discountFoods.discountId, discounts.id))
-//             .innerJoin(food, eq(discountFoods.foodId, food.id))
-//             .innerJoin(restaurants, eq(food.restaurantid, restaurants.id))
-//             .leftJoin(categories, eq(food.categoryid, categories.id))
-//             .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
-//             .where(
-//                 and(
-//                     eq(discounts.isActive, true),
-//                     eq(restaurants.status, "active"),
-//                     activeFoodCondition,
-//                     or(isNull(discounts.startDate), lte(discounts.startDate, now)),
-//                     or(isNull(discounts.endDate), gte(discounts.endDate, now))
-//                 )
-//             );
-
-//         const formattedOffers = globalOffers.map(row => {
-//             let calculatedDiscountPrice = Number(row.price);
-//             let discountNote = "";
-
-//             if (row.foodDiscountType === "percentage" && row.foodDiscountValue) {
-//                 calculatedDiscountPrice = Number(row.price) - (Number(row.price) * Number(row.foodDiscountValue) / 100);
-//             } else if (row.foodDiscountType === "amount" && row.foodDiscountValue) {
-//                 calculatedDiscountPrice = Math.max(0, Number(row.price) - Number(row.foodDiscountValue));
-//             }
-
-//             return {
-//                 id: row.foodId,
-//                 name: row.foodName,
-//                 nameAr: row.foodNameAr,
-//                 nameFr: row.foodNameFr,
-//                 description: row.description,
-//                 descriptionAr: row.descriptionAr,
-//                 descriptionFr: row.descriptionFr,
-//                 price: Number(row.price),
-//                 discountType: row.foodDiscountType ?? null,
-//                 discountValue: row.foodDiscountValue !== null ? Number(row.foodDiscountValue) : null,
-//                 discountPrice: calculatedDiscountPrice,
-//                 discountNote,
-//                 image: row.image,
-//                 points: userId ? row.points : null,
-//                 isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
-
-//                 variations: {},
-//                 addons: {},
-
-//                 category: row.categoryId ? {
-//                     id: row.categoryId,
-//                     name: row.categoryName,
-//                     nameAr: row.categoryNameAr,
-//                     nameFr: row.categoryNameFr,
-//                 } : null,
-//                 subcategory: row.subcategoryId ? {
-//                     id: row.subcategoryId,
-//                     name: row.subcategoryName,
-//                     nameAr: row.subcategoryNameAr,
-//                     nameFr: row.subcategoryNameFr,
-//                     image: row.subcategoryImage,
-//                     order_level: row.order_level,
-//                 } : null,
-
-//                 discountId: row.discountId,
-//                 discountName: row.discountName,
-//                 isGlobal: row.isGlobal,
-//                 discountLogo: row.logo,
-
-//                 restaurant: row.restaurant,
-//             };
-//         });
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "All platform offers retrieved successfully",
-//             data: formattedOffers,
-//         });
-
-//     } catch (error) {
-//         console.error("Error fetching all offers:", error);
-//         return res.status(500).json({ success: false, message: "Internal server error" });
-//     }
-// };
