@@ -538,24 +538,6 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
                 discountLogo: d.logo ?? null,
             };
 
-            const discountDetailsObj = {
-                id: d.id,
-                name: d.name,
-                nameAr: d.nameAr,
-                nameFr: d.nameFr,
-                type: d.discountType,
-                value: meta.discountValue,
-                discountType: d.discountType,
-                discountValue: meta.discountValue,
-                maxDiscount: meta.maxDiscount,
-                minOrderAmount: meta.minOrderAmount,
-                startDate: d.startDate,
-                endDate: d.endDate,
-                isGlobal: Boolean(d.isGlobal),
-                logo: d.logo ?? null,
-                source: d.isGlobal ? "global_discount" : "restaurant_discount",
-            };
-
             const restMap = discountProductsMap.get(d.id);
             const allProductsForDiscount: any[] = [];
             const uniqueRestaurants: any[] = [];
@@ -595,9 +577,7 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
                 endDate: d.endDate,
                 isGlobal: Boolean(d.isGlobal),
                 logo: d.logo ?? null,
-                restaurant: uniqueRestaurants.length === 1 ? uniqueRestaurants[0] : null,
-                discount: discountDetailsObj,
-                products: allProductsForDiscount,
+                source: d.isGlobal ? "global_discount" : "restaurant_discount",
                 foods: allProductsForDiscount,
             });
         }
