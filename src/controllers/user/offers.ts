@@ -1,9 +1,10 @@
 import { Request, Response } from "express";
-import { eq, and, or, isNull, lte, gte } from "drizzle-orm";
+import { eq, and, or, isNull, lte, gte, inArray } from "drizzle-orm";
 import { db } from "../../models/connection";
 import {
     discounts,
     discountFoods,
+    discountRestaurants,
     food,
     restaurants,
     categories,
@@ -368,3 +369,248 @@ export const getAllOffers = async (req: Request, res: Response) => {
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
+
+export const getAllDiscountsWithProducts = async (req: Request, res: Response) => {
+    try {
+        const now = new Date();
+        const userId = (req as any).user?.id || (req as any).user?._id;
+        const restaurantIdFilter = (req.params?.restaurantId || req.query?.restaurantId) as string | undefined;
+        const branchIdParam = req.query?.branchId as string | undefined;
+        const addressIdParam = req.query?.addressId as string | undefined;
+        const serviceModuleParam = req.query?.serviceModule as ServiceModule | undefined;
+
+        let targetBranchId: string | null = branchIdParam || null;
+        let serviceModule: ServiceModule | undefined = serviceModuleParam;
+
+        if (branchIdParam) {
+            if (!serviceModule) serviceModule = "takeaway";
+        } else if (addressIdParam && restaurantIdFilter) {
+            if (!serviceModule) serviceModule = "delivery";
+            targetBranchId = await resolveBranchIdFromAddress(addressIdParam, restaurantIdFilter);
+        }
+
+        const { favoriteFoodIds } = await getUserFavoritesSets(userId);
+
+        const nowConditions = and(
+            eq(discounts.isActive, true),
+            or(isNull(discounts.startDate), lte(discounts.startDate, now)),
+            or(isNull(discounts.endDate), gte(discounts.endDate, now))
+        );
+
+        let activeDiscountsRows: any[] = [];
+        if (restaurantIdFilter) {
+            const restDiscounts = await db
+                .select({ discount: discounts })
+                .from(discounts)
+                .innerJoin(discountRestaurants, eq(discounts.id, discountRestaurants.discountId))
+                .where(and(eq(discountRestaurants.restaurantId, restaurantIdFilter), nowConditions));
+
+            const globalDiscounts = await db
+                .select({ discount: discounts })
+                .from(discounts)
+                .where(and(eq(discounts.isGlobal, true), nowConditions));
+
+            const foodLinkedDiscounts = await db
+                .select({ discount: discounts })
+                .from(discounts)
+                .innerJoin(discountFoods, eq(discounts.id, discountFoods.discountId))
+                .innerJoin(food, eq(discountFoods.foodId, food.id))
+                .where(and(eq(food.restaurantid, restaurantIdFilter), nowConditions));
+
+            const discountMap = new Map<string, any>();
+            [...restDiscounts, ...globalDiscounts, ...foodLinkedDiscounts].forEach((d) => {
+                if (!discountMap.has(d.discount.id)) {
+                    discountMap.set(d.discount.id, d.discount);
+                }
+            });
+            activeDiscountsRows = Array.from(discountMap.values());
+        } else {
+            activeDiscountsRows = await db
+                .select()
+                .from(discounts)
+                .where(nowConditions);
+        }
+
+        if (activeDiscountsRows.length === 0) {
+            return res.status(200).json({
+                success: true,
+                message: "Discounts with products retrieved successfully",
+                data: [],
+            });
+        }
+
+        const discountIds = activeDiscountsRows.map((d) => d.id);
+
+        const foodWhereConditions = [
+            inArray(discountFoods.discountId, discountIds),
+            eq(food.status, "active"),
+            eq(restaurants.status, "active"),
+            activeFoodCondition,
+            or(isNull(categories.id), eq(categories.status, "active")),
+            or(isNull(subcategories.id), eq(subcategories.status, "active")),
+        ];
+
+        if (restaurantIdFilter) {
+            foodWhereConditions.push(eq(food.restaurantid, restaurantIdFilter));
+        }
+
+        const productsRows = await db
+            .select({
+                discountId: discountFoods.discountId,
+                foodId: food.id,
+                foodName: food.name,
+                foodNameAr: food.nameAr,
+                foodNameFr: food.nameFr,
+                description: food.description,
+                descriptionAr: food.descriptionAr,
+                descriptionFr: food.descriptionFr,
+                price: food.price,
+                foodDiscountType: food.discount_type,
+                foodDiscountValue: food.discount_value,
+                isOutOfStock: food.isOutOfStock,
+                image: food.image,
+                points: food.points,
+                addonsId: food.addonsId,
+
+                categoryId: categories.id,
+                categoryName: categories.name,
+                categoryNameAr: categories.nameAr,
+                categoryNameFr: categories.nameFr,
+
+                subcategoryId: subcategories.id,
+                subcategoryName: subcategories.name,
+                subcategoryNameAr: subcategories.nameAr,
+                subcategoryNameFr: subcategories.nameFr,
+                subcategoryImage: subcategories.image,
+                order_level: subcategories.order_Level,
+
+                restaurantId: restaurants.id,
+                restaurant: {
+                    id: restaurants.id,
+                    name: restaurants.name,
+                    nameAr: restaurants.nameAr,
+                    nameFr: restaurants.nameFr,
+                    logo: restaurants.logo,
+                    cover: restaurants.cover,
+                    address: restaurants.address,
+                    minDeliveryTime: restaurants.minDeliveryTime,
+                    maxDeliveryTime: restaurants.maxDeliveryTime,
+                    deliveryTimeUnit: restaurants.deliveryTimeUnit,
+                },
+            })
+            .from(discountFoods)
+            .innerJoin(food, eq(discountFoods.foodId, food.id))
+            .innerJoin(restaurants, eq(food.restaurantid, restaurants.id))
+            .leftJoin(categories, eq(food.categoryid, categories.id))
+            .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
+            .where(and(...foodWhereConditions));
+
+        const discountProductsMap = new Map<string, Map<string, { restaurant: any; rows: any[] }>>();
+        for (const row of productsRows) {
+            if (!discountProductsMap.has(row.discountId)) {
+                discountProductsMap.set(row.discountId, new Map());
+            }
+            const restMap = discountProductsMap.get(row.discountId)!;
+            if (!restMap.has(row.restaurantId)) {
+                restMap.set(row.restaurantId, {
+                    restaurant: row.restaurant,
+                    rows: [],
+                });
+            }
+            restMap.get(row.restaurantId)!.rows.push(row);
+        }
+
+        const result: any[] = [];
+
+        for (const d of activeDiscountsRows) {
+            const meta: OfferDiscountMeta = {
+                discountId: d.id,
+                discountName: d.name,
+                discountNameAr: d.nameAr ?? null,
+                discountNameFr: d.nameFr ?? null,
+                discountType: d.discountType,
+                discountValue: d.discountValue !== null ? Number(d.discountValue) : null,
+                maxDiscount: d.maxDiscount !== null ? Number(d.maxDiscount) : null,
+                minOrderAmount: d.minOrderAmount !== null ? Number(d.minOrderAmount) : null,
+                startDate: d.startDate,
+                endDate: d.endDate,
+                isGlobal: Boolean(d.isGlobal),
+                discountLogo: d.logo ?? null,
+            };
+
+            const discountDetailsObj = {
+                id: d.id,
+                name: d.name,
+                nameAr: d.nameAr,
+                nameFr: d.nameFr,
+                type: d.discountType,
+                value: meta.discountValue,
+                discountType: d.discountType,
+                discountValue: meta.discountValue,
+                maxDiscount: meta.maxDiscount,
+                minOrderAmount: meta.minOrderAmount,
+                startDate: d.startDate,
+                endDate: d.endDate,
+                isGlobal: Boolean(d.isGlobal),
+                logo: d.logo ?? null,
+                source: d.isGlobal ? "global_discount" : "restaurant_discount",
+            };
+
+            const restMap = discountProductsMap.get(d.id);
+            const allProductsForDiscount: any[] = [];
+            const uniqueRestaurants: any[] = [];
+
+            if (restMap) {
+                for (const [rId, { restaurant, rows }] of restMap.entries()) {
+                    uniqueRestaurants.push(restaurant);
+                    const formatted = await formatFoodsList(
+                        rows,
+                        rId,
+                        userId,
+                        favoriteFoodIds,
+                        targetBranchId,
+                        serviceModule
+                    );
+
+                    for (const item of formatted) {
+                        const enrichedItem = attachDiscountDetails(item, meta);
+                        allProductsForDiscount.push({
+                            ...enrichedItem,
+                            restaurant,
+                        });
+                    }
+                }
+            }
+
+            result.push({
+                id: d.id,
+                name: d.name,
+                nameAr: d.nameAr,
+                nameFr: d.nameFr,
+                discountType: d.discountType,
+                discountValue: meta.discountValue,
+                maxDiscount: meta.maxDiscount,
+                minOrderAmount: meta.minOrderAmount,
+                startDate: d.startDate,
+                endDate: d.endDate,
+                isGlobal: Boolean(d.isGlobal),
+                logo: d.logo ?? null,
+                restaurant: uniqueRestaurants.length === 1 ? uniqueRestaurants[0] : null,
+                discount: discountDetailsObj,
+                products: allProductsForDiscount,
+                foods: allProductsForDiscount,
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Discounts with products retrieved successfully",
+            data: result,
+        });
+
+    } catch (error) {
+        console.error("Error fetching discounts with products:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+};
+
