@@ -6,7 +6,7 @@ import {
     restaurantZoneDeliveryFees, zoneDeliveryFees, restaurantSettings,
     restaurantSchedules, cartItems, users, addresses, branches,
     userWallets, userWalletTransactions, paymentMethods,
-    coupons, couponUsages, couponRestaurants, discounts, discountRestaurants, discountFoods,
+    coupons, couponUsages, couponRestaurants, discounts,
     selectReasons,
     orders,
     restaurants,
@@ -34,7 +34,7 @@ import { v4 as uuidv4 } from "uuid";
 import { UnauthorizedError } from "../../Errors";
 import { sendPushNotification } from "../../utils/notifications";
 import { calculateDistance, isLocationInZone } from "../../utils/geo";
-import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
+import { formatProductsWithDiscounts } from "../../services/discount.service";
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
 import { calculateCurrentStatus } from "./restaurantFeatures";
 import * as turf from "@turf/turf";
@@ -511,7 +511,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             ? db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)]))
             : [],
         uniqueFoodIds.length > 0
-            ? db.select({ id: food.id, price: food.price, status: food.status, isOutOfStock: food.isOutOfStock, discount_type: food.discount_type, discount_value: food.discount_value })
+            ? db.select({ id: food.id, price: food.price, status: food.status, isOutOfStock: food.isOutOfStock, discountId: food.discountId, discount_type: food.discount_type, discount_value: food.discount_value })
                 .from(food).where(and(inArray(food.id, uniqueFoodIds), activeFoodCondition))
             : []
     ]);
@@ -756,8 +756,24 @@ export const checkout = async (req: Request | any, res: Response) => {
         });
     }
 
-    const availableDiscounts = await getAvailableDiscounts(restaurantId);
-    const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+    const resolvedOrderProducts = await formatProductsWithDiscounts(
+        itemsWithData
+            .filter(data => !data.isOffer && data.foodItem)
+            .map(data => ({
+                id: data.foodItem.id,
+                price: data.originalBasePrice,
+                discountId: data.foodItem.discountId,
+                discountType: data.foodItem.discount_type,
+                discountValue: data.foodItem.discount_value,
+            })),
+        restaurantId,
+    );
+    const resolvedOrderProductMap = new Map(resolvedOrderProducts.map(product => [product.id, product]));
+    const appliedDiscountIds = new Set(
+        resolvedOrderProducts
+            .map(product => product.appliedDiscountId)
+            .filter((id): id is string => Boolean(id))
+    );
     const itemsToInsert: any[] = [];
 
     for (const data of itemsWithData) {
@@ -785,14 +801,8 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         const { cartItem, foodItem, originalBasePrice, varPrice, addonPrice, vars, addonsList } = data;
 
-        const { price: discountedBasePrice } = applyPriorityDiscount(
-            { id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value },
-            originalBasePrice,
-            initialSubtotal,
-            availableDiscounts,
-            discountState,
-            true
-        );
+        const resolvedProduct = resolvedOrderProductMap.get(foodItem.id);
+        const discountedBasePrice = resolvedProduct?.finalPrice ?? originalBasePrice;
 
         const itemTotal = roundMoney((discountedBasePrice + varPrice + addonPrice) * cartItem.quantity);
         subtotal += itemTotal;
@@ -833,25 +843,16 @@ export const checkout = async (req: Request | any, res: Response) => {
     let orderDiscountValue: string | null = null;
     let orderDiscountSource: "food_level" | "restaurant_discount" | "global_discount" | "coupon" | null = null;
 
-    // 1️⃣ تتبع الخصم المطبق (إما خصم عام/مطعم أو خصم مباشر على الصنف)
-    if (discountState.appliedDiscounts.size > 0) {
-        const appliedDiscountId = Array.from(discountState.appliedDiscounts)[0];
-        const matchedItem = availableDiscounts.find(item => item.discount.id === appliedDiscountId);
-
-        if (matchedItem) {
-            const activeDiscount = matchedItem.discount as any;
-
-            orderDiscountId = activeDiscount.id;
-            const isGlobalDiscount = Boolean(activeDiscount.isGlobal);
-            orderDiscountSource = isGlobalDiscount ? "global_discount" : "restaurant_discount";
-            orderDiscountType = activeDiscount.discountType === "percentage" ? "percentage" : "fixed_amount";
-            orderDiscountValue = activeDiscount.discountValue ? activeDiscount.discountValue.toString() : "0";
-        }
+    const appliedProduct = resolvedOrderProducts.find(product => product.discountAmount > 0);
+    if (appliedProduct?.discountDetails) {
+        orderDiscountId = appliedProduct.discountDetails.id;
+        orderDiscountSource = appliedProduct.discountDetails.source === "product"
+            ? "food_level"
+            : appliedProduct.discountDetails.source === "global" ? "global_discount" : "restaurant_discount";
+        orderDiscountType = appliedProduct.discountDetails.type === "percentage" ? "percentage" : "fixed_amount";
+        orderDiscountValue = String(appliedProduct.discountDetails.value);
     } else if (hasFoodLevelDiscount) {
-        // حالة الخصم المباشر من الصنف نفسه
-        orderDiscountId = null;
         orderDiscountSource = "food_level";
-        orderDiscountType = null;
         orderDiscountValue = roundMoney(initialSubtotal - subtotal).toFixed(2);
     }
 
@@ -1303,8 +1304,8 @@ export const checkout = async (req: Request | any, res: Response) => {
                 .where(eq(coupons.id, appliedCoupon.id));
         }
 
-        if (discountState.appliedDiscounts.size > 0) {
-            for (const dId of Array.from(discountState.appliedDiscounts)) {
+        if (appliedDiscountIds.size > 0) {
+            for (const dId of appliedDiscountIds) {
                 await tx.update(discounts)
                     .set({ usedCount: sql`used_count + 1` })
                     .where(eq(discounts.id, dId));

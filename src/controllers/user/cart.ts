@@ -45,7 +45,7 @@ import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { v4 as uuidv4 } from "uuid";
-import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
+import { formatProductsWithDiscounts } from "../../services/discount.service";
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
 import { type BranchInfo, getUnavailableBranchesForFoods } from "../../helpers/food.helper";
 import { resolveBranchIdForCart, validateFoodAvailabilityForCart } from "../../helpers/cart.helper";
@@ -405,6 +405,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             descriptionFr: food.descriptionFr,
             image: food.image,
             price: food.price,
+            discountId: food.discountId,
             discountType: food.discount_type,
             discountValue: food.discount_value,
             isOutOfStock: food.isOutOfStock,
@@ -641,8 +642,18 @@ export const getCart = async (req: Request | any, res: Response) => {
     }));
 
     // ─── Discount Calculations ───────────────────────────────────────
-    const availableDiscounts = await getAvailableDiscounts(restaurantId!);
-    const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+    const resolvedCartItems = await formatProductsWithDiscounts(
+        itemsPrepped.map(data => ({
+            ...data.item,
+            id: data.item.foodId ?? undefined,
+            price: data.currentBasePrice,
+            discountId: data.item.discountId,
+            discountType: data.item.discountType,
+            discountValue: data.item.discountValue,
+        })),
+        restaurantId!,
+    );
+    const resolvedByCartId = new Map(resolvedCartItems.map((item, index) => [itemsPrepped[index].item.cartId, item]));
 
     let finalSubtotal = 0;
     let totalOriginalSubtotal = 0;
@@ -719,22 +730,11 @@ export const getCart = async (req: Request | any, res: Response) => {
 
         const itemIsAvailable = channelAvailable && !hasUnresolvedVariation && !hasUnresolvedAddon;
 
-        // Apply Priority Discount on current base price
-        const discountResult = applyPriorityDiscount(
-            {
-                id: item.foodId ?? "",
-                discountType: item.discountType,
-                discountValue: item.discountValue
-            },
-            currentBasePrice,
-            initialSubtotal,
-            availableDiscounts,
-            discountState,
-            true
-        );
-
-        const discountedBasePrice = discountResult.price;
-        const appliedDiscount = discountResult.appliedDiscount;
+        const resolvedPrice = resolvedByCartId.get(item.cartId);
+        const discountedBasePrice = resolvedPrice?.finalPrice ?? currentBasePrice;
+        const appliedDiscount = resolvedPrice?.appliedDiscountId
+            ? { id: resolvedPrice.appliedDiscountId }
+            : null;
 
         const originalUnitPrice = currentBasePrice + varPrice;
         const finalUnitPrice = discountedBasePrice + varPrice;

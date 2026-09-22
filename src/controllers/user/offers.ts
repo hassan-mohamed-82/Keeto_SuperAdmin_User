@@ -3,7 +3,6 @@ import { eq, and, or, isNull, lte, gte, inArray } from "drizzle-orm";
 import { db } from "../../models/connection";
 import {
     discounts,
-    discountFoods,
     discountRestaurants,
     food,
     restaurants,
@@ -32,7 +31,9 @@ interface OfferDiscountMeta {
 }
 
 const attachDiscountDetails = (item: any, meta?: OfferDiscountMeta) => {
-    const discountDetails = meta
+    const hasResolvedProductDiscount = item.discountSource === "product"
+        || item.discountDetails?.source === "product";
+    const discountDetails = item.discountDetails ?? (meta
         ? {
             id: meta.discountId,
             name: meta.discountName,
@@ -50,14 +51,14 @@ const attachDiscountDetails = (item: any, meta?: OfferDiscountMeta) => {
             logo: meta.discountLogo,
             source: meta.isGlobal ? "global_discount" : "restaurant_discount",
         }
-        : item.discountDetails ?? null;
+        : null);
 
     let discountPrice = item.discountPrice;
     let discountType = item.discountType;
     let discountValue = item.discountValue;
 
     // If formatFoodsList didn't calculate a discount price but meta discount exists
-    if (meta && (discountPrice === item.price || discountPrice === null || discountPrice === undefined)) {
+    if (!item.discountDetails && meta && (discountPrice === item.price || discountPrice === null || discountPrice === undefined)) {
         if (meta.discountType === "percentage" && meta.discountValue) {
             let discountAmount = item.price * (meta.discountValue / 100);
             if (meta.maxDiscount && meta.maxDiscount > 0) {
@@ -78,12 +79,24 @@ const attachDiscountDetails = (item: any, meta?: OfferDiscountMeta) => {
         discountPrice,
         discountType: discountType ?? meta?.discountType ?? null,
         discountValue: discountValue ?? meta?.discountValue ?? null,
-        discountId: meta?.discountId ?? item.discountDetails?.id ?? null,
-        discountName: meta?.discountName ?? item.discountDetails?.name ?? null,
-        discountNameAr: meta?.discountNameAr ?? item.discountDetails?.nameAr ?? null,
-        discountNameFr: meta?.discountNameFr ?? null,
-        isGlobal: meta ? meta.isGlobal : (item.discountDetails?.isGlobal ?? false),
-        discountLogo: meta?.discountLogo ?? null,
+        discountId: hasResolvedProductDiscount
+            ? (item.discountDetails?.id ?? null)
+            : (meta?.discountId ?? item.discountDetails?.id ?? null),
+        discountName: hasResolvedProductDiscount
+            ? (item.discountDetails?.name ?? "Product discount")
+            : (meta?.discountName ?? item.discountDetails?.name ?? null),
+        discountNameAr: hasResolvedProductDiscount
+            ? (item.discountDetails?.nameAr ?? null)
+            : (meta?.discountNameAr ?? item.discountDetails?.nameAr ?? null),
+        discountNameFr: hasResolvedProductDiscount
+            ? (item.discountDetails?.nameFr ?? null)
+            : (meta?.discountNameFr ?? item.discountDetails?.nameFr ?? null),
+        isGlobal: hasResolvedProductDiscount
+            ? false
+            : (meta ? meta.isGlobal : (item.discountDetails?.isGlobal ?? false)),
+        discountLogo: hasResolvedProductDiscount
+            ? (item.discountDetails?.logo ?? null)
+            : (meta?.discountLogo ?? null),
         discountDetails,
         discount: discountDetails,
     };
@@ -153,9 +166,8 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                 subcategoryImage: subcategories.image,
                 order_level: subcategories.order_Level,
             })
-            .from(discountFoods)
-            .innerJoin(discounts, eq(discountFoods.discountId, discounts.id))
-            .innerJoin(food, eq(discountFoods.foodId, food.id))
+            .from(food)
+            .innerJoin(discounts, eq(food.discountId, discounts.id))
             .leftJoin(categories, eq(food.categoryid, categories.id))
             .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
             .where(
@@ -287,9 +299,8 @@ export const getAllOffers = async (req: Request, res: Response) => {
                     deliveryTimeUnit: restaurants.deliveryTimeUnit,
                 }
             })
-            .from(discountFoods)
-            .innerJoin(discounts, eq(discountFoods.discountId, discounts.id))
-            .innerJoin(food, eq(discountFoods.foodId, food.id))
+            .from(food)
+            .innerJoin(discounts, eq(food.discountId, discounts.id))
             .innerJoin(restaurants, eq(food.restaurantid, restaurants.id))
             .leftJoin(categories, eq(food.categoryid, categories.id))
             .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
@@ -410,15 +421,8 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
                 .from(discounts)
                 .where(and(eq(discounts.isGlobal, true), nowConditions));
 
-            const foodLinkedDiscounts = await db
-                .select({ discount: discounts })
-                .from(discounts)
-                .innerJoin(discountFoods, eq(discounts.id, discountFoods.discountId))
-                .innerJoin(food, eq(discountFoods.foodId, food.id))
-                .where(and(eq(food.restaurantid, restaurantIdFilter), nowConditions));
-
             const discountMap = new Map<string, any>();
-            [...restDiscounts, ...globalDiscounts, ...foodLinkedDiscounts].forEach((d) => {
+            [...restDiscounts, ...globalDiscounts].forEach((d) => {
                 if (!discountMap.has(d.discount.id)) {
                     discountMap.set(d.discount.id, d.discount);
                 }
@@ -442,7 +446,7 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
         const discountIds = activeDiscountsRows.map((d) => d.id);
 
         const foodWhereConditions = [
-            inArray(discountFoods.discountId, discountIds),
+            inArray(food.discountId, discountIds),
             eq(food.status, "active"),
             eq(restaurants.status, "active"),
             activeFoodCondition,
@@ -456,7 +460,7 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
 
         const productsRows = await db
             .select({
-                discountId: discountFoods.discountId,
+                discountId: food.discountId,
                 foodId: food.id,
                 foodName: food.name,
                 foodNameAr: food.nameAr,
@@ -486,8 +490,7 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
 
                 restaurantId: restaurants.id,
             })
-            .from(discountFoods)
-            .innerJoin(food, eq(discountFoods.foodId, food.id))
+            .from(food)
             .innerJoin(restaurants, eq(food.restaurantid, restaurants.id))
             .leftJoin(categories, eq(food.categoryid, categories.id))
             .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
@@ -495,10 +498,12 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
 
         const discountProductsMap = new Map<string, Map<string, any[]>>();
         for (const row of productsRows) {
-            if (!discountProductsMap.has(row.discountId)) {
-                discountProductsMap.set(row.discountId, new Map());
+            const discountId = row.discountId;
+            if (!discountId) continue;
+            if (!discountProductsMap.has(discountId)) {
+                discountProductsMap.set(discountId, new Map());
             }
-            const restMap = discountProductsMap.get(row.discountId)!;
+            const restMap = discountProductsMap.get(discountId)!;
             if (!restMap.has(row.restaurantId)) {
                 restMap.set(row.restaurantId, []);
             }

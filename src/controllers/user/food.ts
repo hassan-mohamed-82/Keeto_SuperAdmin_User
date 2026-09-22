@@ -6,8 +6,6 @@ import {
     restaurants,
     categories,
     subcategories,
-    discounts,
-    discountFoods,
 } from "../../models/schema";
 import { activeFoodCondition } from "../../helpers/foodConditions";
 import { formatFoodsList } from "../../services/foodFormat";
@@ -38,8 +36,9 @@ export const getProductById = async (req: Request, res: Response) => {
                 descriptionAr: food.descriptionAr,
                 descriptionFr: food.descriptionFr,
                 price: food.price,
-                foodDiscountType: food.discount_type,
-                foodDiscountValue: food.discount_value,
+                discountId: food.discountId,
+                discountType: food.discount_type,
+                discountValue: food.discount_value,
                 isOutOfStock: food.isOutOfStock,
                 image: food.image,
                 points: food.points,
@@ -114,35 +113,7 @@ export const getProductById = async (req: Request, res: Response) => {
 
         const { favoriteFoodIds, favoriteRestaurantIds } = await getUserFavoritesSets(userId);
 
-        // 3. Check if there is an active discount on this food from discountFoods
-        const [specificDiscount] = await db
-            .select({
-                discountId: discounts.id,
-                discountName: discounts.name,
-                discountNameAr: discounts.nameAr,
-                discountNameFr: discounts.nameFr,
-                discountType: discounts.discountType,
-                discountValue: discounts.discountValue,
-                maxDiscount: discounts.maxDiscount,
-                minOrderAmount: discounts.minOrderAmount,
-                startDate: discounts.startDate,
-                endDate: discounts.endDate,
-                isGlobal: discounts.isGlobal,
-                logo: discounts.logo,
-            })
-            .from(discountFoods)
-            .innerJoin(discounts, eq(discountFoods.discountId, discounts.id))
-            .where(
-                and(
-                    eq(discountFoods.foodId, foodId),
-                    eq(discounts.isActive, true),
-                    or(isNull(discounts.startDate), lte(discounts.startDate, now)),
-                    or(isNull(discounts.endDate), gte(discounts.endDate, now))
-                )
-            )
-            .limit(1);
-
-        // 4. Format food using formatFoodsList (handles variations, addons, pricing overrides, branch unavailability)
+        // 3. Format food using the shared direct-first discount resolver.
         const formattedFoods = await formatFoodsList(
             [rawFood],
             restaurantId,
@@ -161,68 +132,10 @@ export const getProductById = async (req: Request, res: Response) => {
 
         const formattedFood = formattedFoods[0];
 
-        // 5. Build discount details
-        let discountDetails: any = null;
-        let discountPrice = formattedFood.discountPrice;
-        let discountType = formattedFood.discountType;
-        let discountValue = formattedFood.discountValue;
-
-        if (specificDiscount) {
-            const val = specificDiscount.discountValue !== null ? Number(specificDiscount.discountValue) : null;
-            const maxDisc = specificDiscount.maxDiscount !== null ? Number(specificDiscount.maxDiscount) : null;
-            const minOrder = specificDiscount.minOrderAmount !== null ? Number(specificDiscount.minOrderAmount) : null;
-
-            discountDetails = {
-                id: specificDiscount.discountId,
-                name: specificDiscount.discountName,
-                nameAr: specificDiscount.discountNameAr ?? null,
-                nameFr: specificDiscount.discountNameFr ?? null,
-                type: specificDiscount.discountType,
-                value: val,
-                discountType: specificDiscount.discountType,
-                discountValue: val,
-                maxDiscount: maxDisc,
-                minOrderAmount: minOrder,
-                startDate: specificDiscount.startDate,
-                endDate: specificDiscount.endDate,
-                isGlobal: Boolean(specificDiscount.isGlobal),
-                logo: specificDiscount.logo ?? null,
-                source: specificDiscount.isGlobal ? "global_discount" : "food_discount",
-            };
-
-            // Calculate discount price if not already applied
-            if (discountPrice === formattedFood.price || !discountPrice) {
-                if (specificDiscount.discountType === "percentage" && val) {
-                    let discountAmount = formattedFood.price * (val / 100);
-                    if (maxDisc && maxDisc > 0) {
-                        discountAmount = Math.min(discountAmount, maxDisc);
-                    }
-                    discountPrice = Math.max(0, formattedFood.price - discountAmount);
-                    discountType = specificDiscount.discountType;
-                    discountValue = val;
-                } else if (["fixed_amount", "amount", "fixed"].includes(specificDiscount.discountType) && val) {
-                    discountPrice = Math.max(0, formattedFood.price - val);
-                    discountType = specificDiscount.discountType;
-                    discountValue = val;
-                }
-            }
-        } else if (formattedFood.discountDetails) {
-            discountDetails = formattedFood.discountDetails;
-        }
-
-        const result = {
-            ...formattedFood,
-            discountPrice,
-            discountType: discountType ?? discountDetails?.discountType ?? null,
-            discountValue: discountValue ?? discountDetails?.discountValue ?? null,
-            discountDetails,
-            // discount: discountDetails,
-        };
-
         return res.status(200).json({
             success: true,
             message: "Product details retrieved successfully",
-            data: result,
+            data: formattedFood,
         });
 
     } catch (error) {

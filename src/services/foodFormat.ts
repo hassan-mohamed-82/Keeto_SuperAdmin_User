@@ -11,10 +11,7 @@ import {
 } from "../models/schema";
 import { eq, and, inArray, or, isNull } from "drizzle-orm";
 
-import {
-    getAvailableDiscounts,
-    applyPriorityDiscount,
-} from "../utils/discount";
+import { formatProductsWithDiscounts } from "./discount.service";
 import { getUnavailableBranchesForFoods, isFoodUnavailableForBranch, type BranchInfo } from "../helpers/food.helper";
 import { pickBestOverride, parsePrice, cascadeOverrideCondition, type ServiceModule } from "../helpers/pricing.overrides";
 
@@ -258,10 +255,10 @@ export const formatFoodsList = async (
         }
     }
 
-    // 4. Calculate Discounts & Format Output
-    const availableDiscounts = await getAvailableDiscounts(restaurantId);
+    // 4. Calculate discounts through the shared product resolver.
+    const productsWithDiscounts = await formatProductsWithDiscounts(rawMenu, restaurantId);
 
-    return rawMenu.map((row) => {
+    return productsWithDiscounts.map((row) => {
         const foodId = row.foodId || row.id;
 
         let effectiveFoodPrice = Number(row.price);
@@ -272,49 +269,8 @@ export const formatFoodsList = async (
             }
         }
 
-        const discountState = {
-            remainingMaxDiscounts: new Map<string, number>(),
-            appliedDiscounts: new Set<string>()
-        };
-
-        const {
-            price: calculatedDiscountPrice,
-            appliedDiscount,
-            discountNote
-        } = applyPriorityDiscount(
-            { id: foodId, discountType: row.foodDiscountType || row.discountType, discountValue: row.foodDiscountValue || row.discountValue },
-            effectiveFoodPrice,
-            0,
-            availableDiscounts,
-            discountState,
-            false
-        );
-
-        let activeDiscountInfo = null;
-
-        if (appliedDiscount && appliedDiscount.id) {
-            activeDiscountInfo = {
-                id: appliedDiscount.id,
-                name: appliedDiscount.name,
-                nameAr: appliedDiscount.nameAr,
-                type: appliedDiscount.discountType,
-                value: Number(appliedDiscount.discountValue),
-                maxDiscount: appliedDiscount.maxDiscount ? Number(appliedDiscount.maxDiscount) : null,
-                isGlobal: Boolean(appliedDiscount.isGlobal),
-                source: appliedDiscount.isGlobal ? "global_discount" : "restaurant_discount"
-            };
-        } else if ((row.foodDiscountType || row.discountType) && Number(row.foodDiscountValue || row.discountValue) > 0) {
-            activeDiscountInfo = {
-                id: null,
-                name: "Item Discount",
-                nameAr: "خصم على الصنف",
-                type: row.foodDiscountType || row.discountType,
-                value: Number(row.foodDiscountValue || row.discountValue),
-                maxDiscount: null,
-                isGlobal: false,
-                source: "food_level"
-            };
-        }
+        const calculatedDiscountPrice = row.finalPrice;
+        const discountNote = row.discountNote;
 
         // Parse Addons IDs
         let foodAddonIds: string[] = [];
@@ -365,11 +321,16 @@ export const formatFoodsList = async (
             descriptionAr: row.descriptionAr,
             descriptionFr: row.descriptionFr,
             price: effectiveFoodPrice,
-            discountType: activeDiscountInfo?.type ?? null,
-            discountValue: activeDiscountInfo?.value ?? null,
+            originalPrice: row.originalPrice,
+            finalPrice: row.finalPrice,
+            discountAmount: row.discountAmount,
+            appliedDiscountId: row.appliedDiscountId,
+            discountSource: row.discountSource,
+            discountType: row.discountDetails?.type ?? null,
+            discountValue: row.discountAmount,
             discountPrice: calculatedDiscountPrice,
             discountNote,
-            discountDetails: activeDiscountInfo,
+            discountDetails: row.discountDetails,
             image: row.image,
             isOutOfStock: row.isOutOfStock,
             points: userId ? (row.points ?? 0) : null,
