@@ -1,7 +1,7 @@
 import { Router } from "express";
 import adminRouter from './admin/index';
 import userRouter from './user/index';
-import paymentRouter from './payment';
+import paymentRouter from './payments/index';
 
 const route = Router();
 

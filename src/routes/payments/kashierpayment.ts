@@ -1,13 +1,13 @@
 import { Router } from "express";
-import { validate } from "../middlewares/validation";
+import { validate } from "../../middlewares/validation";
 import {
     sessionSchema,
     webhookSchema,
-} from "../validation/payment/kashier.validation";
+} from "../../validation/payment/kashier.validation";
 import {
     generatePaymentSession,
     handleKashierWebhook,
-} from "../controllers/payment.controller";
+} from "../../controllers/payments/kashierpayment";
 
 const router = Router();
 
@@ -17,7 +17,7 @@ const router = Router();
  * @access  Public / Authenticated
  */
 router.post(
-    "/kashier/session",
+    "/session",
     validate(sessionSchema),
     generatePaymentSession
 );
@@ -28,7 +28,7 @@ router.post(
  * @access  Public (Signature Verified)
  */
 router.post(
-    "/kashier/webhook",
+    "/webhook",
     validate(webhookSchema),
     handleKashierWebhook
 );

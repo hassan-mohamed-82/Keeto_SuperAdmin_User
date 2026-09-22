@@ -40,7 +40,7 @@ import * as turf from "@turf/turf";
 import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
 import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
-import { KashierService } from "../../services/kashier.service";
+import { KashierService } from "../../services/payments/kashier/kashier.service";
 import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
