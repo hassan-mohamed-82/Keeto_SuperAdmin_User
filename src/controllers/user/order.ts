@@ -24,6 +24,7 @@ import {
     cities,
     offers,
     offerFoods,
+    restaurantPaymentCredentials,
 } from "../../models/schema";
 import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -41,6 +42,8 @@ import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModul
 import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
 import { KashierService } from "../../services/payments/kashier/kashier.service";
+import { PaymobService } from "../../services/payments/paymob/paymob.service";
+import { decryptSecret } from "../../utils/encryption";
 import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
@@ -1305,22 +1308,104 @@ export const checkout = async (req: Request | any, res: Response) => {
     });
 
     // ==========================================
-    // 12. Create Kashier Payment Session (if Visa)
+    // 12. Create Payment Session (if Visa/Online)
+    // Supports SYSTEM (Kashier) or CUSTOM (Paymob from restaurant_payment_credentials)
     // ==========================================
     let paymentSessionData: any = null;
     if (isVisaPayment) {
-        try {
-            paymentSessionData = await KashierService.createPaymentSession({
-                orderId: orderId,
-                amount: totalAmount,
-                currency: "EGP",
-                customerEmail: userInfo?.email || undefined,
-            });
-        } catch (paymentErr: any) {
-            console.error(`[Checkout] Kashier session creation failed for order ${orderId}:`, paymentErr?.message);
-            paymentSessionData = {
-                error: paymentErr?.message || "Failed to create Kashier payment session.",
-            };
+        const gatewayType = settings?.paymentGatewayType || "SYSTEM";
+
+        if (gatewayType === "CUSTOM") {
+            try {
+                // Find active PAYMOB credentials for this restaurant
+                const [paymobCredsRecord] = await db
+                    .select()
+                    .from(restaurantPaymentCredentials)
+                    .where(
+                        and(
+                            eq(restaurantPaymentCredentials.restaurantId, restaurantId),
+                            eq(restaurantPaymentCredentials.provider, "PAYMOB"),
+                            eq(restaurantPaymentCredentials.isActive, true)
+                        )
+                    )
+                    .limit(1);
+
+                if (!paymobCredsRecord || !paymobCredsRecord.credentials) {
+                    throw new BadRequest("Restaurant is configured for custom gateway, but active Paymob credentials were not found.");
+                }
+
+                const rawCreds = paymobCredsRecord.credentials;
+                const decryptedCredentials = {
+                    ...rawCreds,
+                    apiKey: decryptSecret(rawCreds.apiKey),
+                    hmac: decryptSecret(rawCreds.hmac),
+                };
+
+                const nameParts = (userInfo?.name || "Customer User").trim().split(" ");
+                const firstName = nameParts[0] || "Customer";
+                const lastName = nameParts.slice(1).join(" ") || "User";
+
+                const paymobSession = await PaymobService.createPaymentSession({
+                    credentials: decryptedCredentials,
+                    orderId: orderId,
+                    orderNumber: orderNumber,
+                    amountCents: Math.round(totalAmount * 100),
+                    currency: "EGP",
+                    customer: {
+                        firstName,
+                        lastName,
+                        email: userInfo?.email || "customer@example.com",
+                        phone: userInfo?.phone || "+201000000000",
+                    },
+                });
+
+                // Update order with paymobOrderId
+                await db
+                    .update(orders)
+                    .set({
+                        paymobOrderId: String(paymobSession.paymobOrderId),
+                        paymentStatus: "pending_payment",
+                    })
+                    .where(eq(orders.id, orderId));
+
+                paymentSessionData = {
+                    gateway: "PAYMOB",
+                    sessionId: paymobSession.sessionId,
+                    sessionUrl: paymobSession.sessionUrl,
+                    status: "CREATED",
+                    paymobOrderId: paymobSession.paymobOrderId,
+                };
+            } catch (paymentErr: any) {
+                console.error(`[Checkout] Paymob session creation failed for order ${orderId}:`, paymentErr?.message);
+                paymentSessionData = {
+                    gateway: "PAYMOB",
+                    error: paymentErr?.message || "Failed to create Paymob payment session.",
+                };
+            }
+        } else {
+            // SYSTEM gateway -> Kashier
+            try {
+                const kashierSession = await KashierService.createPaymentSession({
+                    orderId: orderId,
+                    amount: totalAmount,
+                    currency: "EGP",
+                    customerEmail: userInfo?.email || undefined,
+                });
+
+                paymentSessionData = {
+                    gateway: "KASHIER",
+                    sessionId: kashierSession.sessionId,
+                    sessionUrl: kashierSession.sessionUrl,
+                    status: kashierSession.status,
+                    expireAt: kashierSession.expireAt,
+                };
+            } catch (paymentErr: any) {
+                console.error(`[Checkout] Kashier session creation failed for order ${orderId}:`, paymentErr?.message);
+                paymentSessionData = {
+                    gateway: "KASHIER",
+                    error: paymentErr?.message || "Failed to create Kashier payment session.",
+                };
+            }
         }
     }
 

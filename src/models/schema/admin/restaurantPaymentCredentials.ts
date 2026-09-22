@@ -1,0 +1,48 @@
+import {
+    mysqlTable,
+    varchar,
+    char,
+    boolean,
+    timestamp,
+    mysqlEnum,
+    json
+} from "drizzle-orm/mysql-core";
+import { sql } from "drizzle-orm";
+import { restaurants } from "./restaurants";
+
+// ==========================================
+// 1. تعريف واجهات البيانات (Interfaces) لكل بوابة
+// ==========================================
+
+export interface PaymobCredentials {
+    apiKey: string;
+    integrationId: string;
+    iframeId: string;
+    hmac: string;
+    callbackUrl?: string;
+}
+
+// ==========================================
+// 3. تعريف الجدول باستخدام الـ Type المعرّف
+// ==========================================
+
+export const restaurantPaymentCredentials = mysqlTable("restaurant_payment_credentials", {
+    id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+
+    restaurantId: char("restaurant_id", { length: 36 })
+        .notNull()
+        .references(() => restaurants.id, { onDelete: "cascade" }),
+
+    provider: mysqlEnum("provider", ["PAYMOB"]).notNull(),
+
+    title: varchar("title", { length: 255 }).notNull(),
+    environment: mysqlEnum("environment", ["LIVE", "TEST"]).default("LIVE"),
+
+    // 💡 استخدام Type المخصص هنا بدل Generic Record
+    credentials: json("credentials").$type<PaymobCredentials>().notNull(),
+
+    logoUrl: varchar("logo_url", { length: 500 }),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+});

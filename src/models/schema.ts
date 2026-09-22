@@ -63,5 +63,6 @@ export * from "./schema/admin/channelPricing";
 export * from "./schema/admin/restaurantGroups";
 export * from "./schema/admin/noteGroup";
 export * from "./schema/admin/orderDelayAlertGroup";
+export * from "./schema/admin/restaurantPaymentCredentials";
 
 

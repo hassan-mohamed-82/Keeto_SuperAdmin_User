@@ -30,6 +30,9 @@ export const createRestaurantSettingsSchema = z.object({
     
     minDeliveryTime: z.coerce.number().int().min(0).optional(),
     maxDeliveryTime: z.coerce.number().int().min(0).optional(),
+
+    paymentGatewayType: z.enum(["SYSTEM", "CUSTOM"]).optional(),
+    enableOnlinePayment: z.boolean().optional(),
 });
 
 export const updateRestaurantSettingsSchema = createRestaurantSettingsSchema.partial();

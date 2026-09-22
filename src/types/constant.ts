@@ -32,6 +32,7 @@ export const MODULES = [
     "Reasons",
     "Discounts",
     "delivery_man",
+    "restaurantPaymentCredentials"
 ] as const;
 
 export const ACTION_NAMES = ["View", "Add", "Edit", "Delete", "Status"] as const;

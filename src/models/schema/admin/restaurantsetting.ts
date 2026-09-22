@@ -58,6 +58,11 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
     .default(["pending"]), // pending, accepted, preparing, out_for_delivery
 
   resetDailyOrderNumberTime: varchar("reset_daily_order_number_time", { length: 5 }),
+
+  // نوع حساب بوابات الدفع (حساب المنصة ولا حساب خاص بالمطعم)
+  paymentGatewayType: mysqlEnum("payment_gateway_type", ["SYSTEM", "CUSTOM"]).default("SYSTEM"),
+  // تمكين/تعطيل دفع الفيزا أونلاين للمطعم
+  enableOnlinePayment: boolean("enable_online_payment").default(true),
 });
 
 
