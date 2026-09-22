@@ -191,7 +191,8 @@ const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
 
 export const checkout = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
-    const userId = req.user.id;
+
+    const isGuestUser = Boolean(req.user.isGuest);
 
     const {
         orderSource,
@@ -200,10 +201,88 @@ export const checkout = async (req: Request | any, res: Response) => {
         idempotencyKey,
         zoneId,
         branchId,
-        addressId,
+        addressId: inputAddressId,
         note,
-        couponCode
+        couponCode,
+        guestInfo,
+        guestAddress,
     } = req.body;
+
+    let addressId: string | null = inputAddressId || null;
+    let effectiveUserId = req.user.id;
+
+    // ==========================================
+    // 🛡️ Guest Checkout & Phone Deduplication (Find-or-Create)
+    // ==========================================
+    if (isGuestUser || guestInfo) {
+        const guestName = guestInfo?.name || req.user.name || "Guest";
+        const rawPhone = guestInfo?.phone;
+
+        if (!rawPhone && isGuestUser) {
+            throw new BadRequest("Phone number is required for guest checkout.");
+        }
+
+        if (rawPhone) {
+            const normalizedPhone = rawPhone.replace(/[\s\-\(\)]/g, "");
+
+            // Query existing user by phone
+            const [existingUser] = await db
+                .select()
+                .from(users)
+                .where(
+                    and(
+                        eq(users.phone, normalizedPhone),
+                        eq(users.isDeleted, false)
+                    )
+                )
+                .limit(1);
+
+            if (existingUser && existingUser.id !== effectiveUserId) {
+                // An account already exists with this phone number.
+                // Reassign checkout and guest cart items to the existing user.
+                const guestSessionId = req.user.id;
+                effectiveUserId = existingUser.id;
+
+                await db
+                    .update(cartItems)
+                    .set({ userId: effectiveUserId })
+                    .where(eq(cartItems.userId, guestSessionId));
+            } else {
+                // Update current shadow user record with provided name and phone
+                await db
+                    .update(users)
+                    .set({
+                        name: guestName,
+                        phone: normalizedPhone,
+                    })
+                    .where(eq(users.id, effectiveUserId));
+            }
+        }
+    }
+
+    const userId = effectiveUserId;
+
+    // ==========================================
+    // 🏠 Guest Address Creation (Delivery)
+    // ==========================================
+    if (orderType === "delivery" && !addressId && guestAddress) {
+        const newAddressId = uuidv4();
+        await db.insert(addresses).values({
+            id: newAddressId,
+            userId,
+            title: guestAddress.title || "Guest Address",
+            street: guestAddress.street,
+            number: String(guestAddress.number),
+            floor: guestAddress.floor ? String(guestAddress.floor) : null,
+            apartment: guestAddress.apartment ? String(guestAddress.apartment) : null,
+            landmark: guestAddress.landmark || null,
+            location: guestAddress.location || null,
+            fulladdress: guestAddress.fulladdress || `${guestAddress.number} ${guestAddress.street}`,
+            lat: String(guestAddress.lat),
+            lng: String(guestAddress.lng),
+        });
+        addressId = newAddressId;
+    }
 
     // ==========================================
     // 🛡️ 1. Validation
@@ -221,6 +300,11 @@ export const checkout = async (req: Request | any, res: Response) => {
     const paymentMethodNameAr = selectedPayment.nameAr;
     const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
     const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
+
+    // 🛡️ Prevent wallet payment for unverified guest accounts
+    if (isGuestUser && isWalletPayment) {
+        throw new BadRequest("Wallet payment is only available for registered accounts.");
+    }
 
     // Visa payment check using VISA_PAYMENT_METHOD_ID from database schema
     const isVisaPayment =

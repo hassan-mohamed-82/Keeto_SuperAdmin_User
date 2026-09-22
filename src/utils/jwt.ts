@@ -86,6 +86,26 @@ export const generateSalesToken = (data: {
 };
 
 // =======================
+// Generate Guest Token
+// =======================
+export const generateGuestToken = (data: {
+    id: string;
+    restaurantId?: string | null;
+}): string => {
+    return jwt.sign(
+        {
+            id: data.id,
+            name: "Guest",
+            role: "user",
+            isGuest: true,
+            restaurantId: data.restaurantId || null,
+        },
+        JWT_SECRET,
+        { expiresIn: "30d" }
+    );
+};
+
+// =======================
 // Verify Token
 // =======================
 export const verifyToken = (token: string): TokenPayload => {

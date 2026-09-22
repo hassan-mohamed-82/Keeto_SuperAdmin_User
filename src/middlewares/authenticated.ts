@@ -35,6 +35,7 @@ export const authenticated = (
         type: decoded.type as AppUser["type"],
         restaurantId: decoded.restaurantId,
         branchId: decoded.branchId,
+        isGuest: Boolean(decoded.isGuest),
     };
 
     next();
@@ -63,6 +64,7 @@ export const optionalAuth = (
                 type: decoded.type as AppUser["type"],
                 restaurantId: decoded.restaurantId,
                 branchId: decoded.branchId,
+                isGuest: Boolean(decoded.isGuest),
             };
         }
     } catch (err) {

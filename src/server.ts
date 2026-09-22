@@ -9,13 +9,17 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import http from "http";
 import { Server } from "socket.io";
-import { connectDB } from './models/connection'; 
+import { connectDB } from './models/connection';
+// import { initAbandonedCartCron } from "./services/abandonedCartCron";
+// import { initOrderNotificationCron } from "./services/orderNotificationCron";
 
 dotenv.config();
 
 const app = express();
 app.set("trust proxy", true);
-connectDB(); 
+connectDB();
+// initAbandonedCartCron();
+// initOrderNotificationCron();
 
 const httpServer = http.createServer(app);
 

@@ -26,12 +26,14 @@ import couponRouter from "./coupon";
 import restaurantGroupsRouter from "./restaurantGroups";
 import bundleRouter from "./bundles";
 import foodRouter from "./food";
+import zoneDeliveryFeeRouter from "./zoneDeliveryFee";
 
 
 const router = Router();
 
 router.use("/home", homeRouter);
 router.use("/auth", authRouter);
+router.use("/zone-delivery-fee", zoneDeliveryFeeRouter);
 router.use("/socialmedia", SocialMediaRouter);
 router.use("/slider", sliderRouter);
 router.use("/image", imageRouter);

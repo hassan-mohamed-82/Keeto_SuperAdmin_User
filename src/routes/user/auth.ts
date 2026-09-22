@@ -7,6 +7,7 @@ import {
     forgotPassword,
     verifyResetCode,
     resetPassword,
+    initGuestSession,
 } from "../../controllers/user/auth";
 import { facebookLoginOrSignup } from "../../config/facebook";
 import { verifyGoogleToken } from "../../config/passport";
@@ -20,6 +21,9 @@ router.post("/login", catchAsync(login));
 router.post("/forgot-password", catchAsync(forgotPassword));
 router.post("/verify-reset-code", catchAsync(verifyResetCode));
 router.post("/reset-password", catchAsync(resetPassword));
+
+// 🌐 Public: initialize a guest session — no auth required
+router.post("/guest-session", catchAsync(initGuestSession));
 
 router.post("/google", catchAsync(verifyGoogleToken));
 router.post("/facebook", catchAsync(facebookLoginOrSignup));

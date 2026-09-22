@@ -82,6 +82,8 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         isDeleted: false,
         deletedAt: null,
         totalOrders: 0,
+        isGuest: false,
+        authProvider: "google",
       };
     } else {
       // 👤 Login (existing user)
