@@ -15,6 +15,7 @@ exports.userRestaurantPoints = (0, mysql_core_1.mysqlTable)("user_restaurant_poi
         .references(() => restaurants_1.restaurants.id, { onDelete: "cascade" })
         .notNull(),
     points: (0, mysql_core_1.int)("points").default(0).notNull(),
+    totalOrders: (0, mysql_core_1.int)("total_orders").default(0).notNull(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 }, (table) => ({
     userRestIdx: (0, mysql_core_1.uniqueIndex)("unique_user_restaurant_points").on(table.userId, table.restaurantId),

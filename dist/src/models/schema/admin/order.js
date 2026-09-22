@@ -76,6 +76,13 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     dailyOrderNumber: (0, mysql_core_1.int)("daily_order_number").default(1),
     rating: (0, mysql_core_1.int)("rating"),
     ratingComment: (0, mysql_core_1.text)("rating_comment"),
+    // 🟢 2. حفظ لقطة ثابته من بيانات العنوان وقت الأوردر (Address Snapshot)
+    shippingAddress: (0, mysql_core_1.json)("shipping_address").$type(),
+    // 🟢 3. حفظ لقطة ثابته لبيانات الفرع وقت الأوردر (Branch Snapshot)
+    branchSnapshot: (0, mysql_core_1.json)("branch_snapshot").$type(),
+    isDelayEmailSent: (0, mysql_core_1.boolean)("is_delay_email_sent").default(false),
+    offerId: (0, mysql_core_1.char)("offer_id", { length: 36 })
+        .references(() => schema_1.offers.id, { onDelete: "set null" }),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });

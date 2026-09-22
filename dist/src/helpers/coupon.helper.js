@@ -57,15 +57,19 @@ const validateAndCalculateCoupon = async (couponCode, userId, restaurantId, subt
         }
     }
     // 5. Per-user usage limit
-    if (coupon.perUserLimit) {
+    // 'unlimited' → skip this check entirely — user can use it as many times as they want
+    // 'fixed'     → enforce perUserLimit
+    if (coupon.userUsageType === "fixed") {
+        const userLimit = coupon.perUserLimit ?? 1;
         const [usageCount] = await connection_1.db
             .select({ count: (0, drizzle_orm_1.sql) `count(*)` })
             .from(schema_1.couponUsages)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.couponUsages.couponId, coupon.id), (0, drizzle_orm_1.eq)(schema_1.couponUsages.userId, userId)));
-        if (Number(usageCount?.count || 0) >= coupon.perUserLimit) {
-            throw new BadRequest_1.BadRequest(`You have reached the maximum usage limit (${coupon.perUserLimit} time(s)) for this coupon.`);
+        if (Number(usageCount?.count || 0) >= userLimit) {
+            throw new BadRequest_1.BadRequest(`You have reached the maximum usage limit (${userLimit} time(s)) for this coupon.`);
         }
     }
+    // userUsageType === 'unlimited' → no per-user check needed
     // 6. Minimum order amount check
     const minRequired = parseFloat(coupon.minOrderAmount || "0");
     if (minRequired > 0 && subtotal < minRequired) {
@@ -119,7 +123,8 @@ const getAvailableCouponsForUser = async (userId, restaurantId) => {
         minOrderAmount: schema_1.coupons.minOrderAmount,
         usageLimit: schema_1.coupons.usageLimit,
         usedCount: schema_1.coupons.usedCount,
-        perUserLimit: schema_1.coupons.perUserLimit,
+        userUsageType: schema_1.coupons.userUsageType, // 'fixed' | 'unlimited'
+        perUserLimit: schema_1.coupons.perUserLimit, // only enforced when userUsageType = 'fixed'
         startDate: schema_1.coupons.startDate,
         endDate: schema_1.coupons.endDate,
         isGlobal: schema_1.coupons.isGlobal,
@@ -149,13 +154,19 @@ const getAvailableCouponsForUser = async (userId, restaurantId) => {
     // 3. Filter out exhausted coupons
     const availableCoupons = [];
     for (const c of uniqueCouponsMap.values()) {
-        // Global limit check
+        // Global usage limit check (applies regardless of userUsageType)
         if (c.usageLimit && (c.usedCount ?? 0) >= c.usageLimit)
             continue;
-        // Per user limit check
         const userUsed = userUsagesMap.get(c.id) || 0;
-        if (c.perUserLimit && userUsed >= c.perUserLimit)
-            continue;
+        // Per-user limit check:
+        // 'unlimited' → user can use it any number of times, skip this check
+        // 'fixed'     → enforce perUserLimit (default 1 if not set)
+        if (c.userUsageType === "fixed") {
+            const userLimit = c.perUserLimit ?? 1;
+            if (userUsed >= userLimit)
+                continue;
+        }
+        // userUsageType === 'unlimited' → always available regardless of how many times used
         availableCoupons.push({
             id: c.id,
             code: c.code,
@@ -167,7 +178,12 @@ const getAvailableCouponsForUser = async (userId, restaurantId) => {
             maxDiscount: c.maxDiscount ? parseFloat(c.maxDiscount || "0") : null,
             minOrderAmount: parseFloat(c.minOrderAmount || "0"),
             endDate: c.endDate,
-            remainingUserUsages: c.perUserLimit ? c.perUserLimit - userUsed : null,
+            userUsageType: c.userUsageType,
+            perUserLimit: c.userUsageType === "fixed" ? (c.perUserLimit ?? 1) : null,
+            // null = unlimited; number = max times this user can use it
+            remainingUserUsages: c.userUsageType === "fixed"
+                ? (c.perUserLimit ?? 1) - userUsed
+                : null,
         });
     }
     return availableCoupons;

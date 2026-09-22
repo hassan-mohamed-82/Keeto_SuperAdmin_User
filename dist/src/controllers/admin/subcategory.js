@@ -9,7 +9,7 @@ const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const uuid_1 = require("uuid");
 const createSubcategory = async (req, res) => {
-    const { name, nameAr, nameFr, categoryId, priority, status, restaurantId } = req.body;
+    const { name, nameAr, nameFr, image, categoryId, priority, status, restaurantId } = req.body;
     if (!name || !nameAr || !nameFr || !categoryId) {
         throw new BadRequest_1.BadRequest("Subcategory name, nameAr, nameFr, and category ID are required");
     }
@@ -28,6 +28,7 @@ const createSubcategory = async (req, res) => {
         name,
         nameAr,
         nameFr,
+        image: image || null,
         categoryId,
         priority: priority || "low",
         status: status || "active",
@@ -43,6 +44,7 @@ const getAllSubcategories = async (req, res) => {
         name: schema_1.subcategories.name,
         nameAr: schema_1.subcategories.nameAr,
         nameFr: schema_1.subcategories.nameFr,
+        image: schema_1.subcategories.image,
         categoryId: schema_1.subcategories.categoryId,
         restaurantId: schema_1.subcategories.restaurantId,
         priority: schema_1.subcategories.priority,
@@ -78,6 +80,7 @@ const getSubcategoryById = async (req, res) => {
         name: schema_1.subcategories.name,
         nameAr: schema_1.subcategories.nameAr,
         nameFr: schema_1.subcategories.nameFr,
+        image: schema_1.subcategories.image,
         categoryId: schema_1.subcategories.categoryId,
         restaurantId: schema_1.subcategories.restaurantId,
         priority: schema_1.subcategories.priority,
@@ -112,7 +115,7 @@ const getSubcategoryById = async (req, res) => {
 exports.getSubcategoryById = getSubcategoryById;
 const updateSubcategory = async (req, res) => {
     const { id } = req.params;
-    const { name, nameAr, nameFr, categoryId, priority, status, restaurantId } = req.body;
+    const { name, nameAr, nameFr, image, categoryId, priority, status, restaurantId } = req.body;
     const existingSubcategory = await connection_1.db
         .select()
         .from(schema_1.subcategories)
@@ -146,19 +149,21 @@ const updateSubcategory = async (req, res) => {
     const updateData = {
         updatedAt: new Date(),
     };
-    if (name)
+    if (name !== undefined)
         updateData.name = name;
-    if (nameAr)
+    if (nameAr !== undefined)
         updateData.nameAr = nameAr;
-    if (nameFr)
+    if (nameFr !== undefined)
         updateData.nameFr = nameFr;
-    if (categoryId)
+    if (image !== undefined)
+        updateData.image = image;
+    if (categoryId !== undefined)
         updateData.categoryId = categoryId;
-    if (priority)
+    if (priority !== undefined)
         updateData.priority = priority;
-    if (status)
+    if (status !== undefined)
         updateData.status = status;
-    if (restaurantId)
+    if (restaurantId !== undefined)
         updateData.restaurantId = restaurantId;
     if (Object.keys(updateData).length === 1) {
         throw new BadRequest_1.BadRequest("No data to update");

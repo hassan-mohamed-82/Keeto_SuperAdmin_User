@@ -84,7 +84,7 @@ const adjustSalesRepPoints = async (tx, salesId, delta) => {
 // ==========================================
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
-    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, cityId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans, type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, cityId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans, type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, callcenterphone } = req.body;
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
     if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
@@ -140,6 +140,7 @@ const createRestaurant = async (req, res) => {
             type: restaurantType, // 👈 حفظ نوع المطعم (Default C)
             salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
             ownerposition: ownerposition ? clean(ownerposition) : null, // 👈 حفظ منصب المالك
+            callcenterphone: callcenterphone ? clean(callcenterphone) : null,
             logo: logoUrl || '',
             cover: coverUrl || '',
             lat: lat || '',
@@ -228,6 +229,7 @@ const createRestaurant = async (req, res) => {
             type: restaurantType,
             salesId: salesId || null,
             ownerposition: ownerposition || null,
+            callcenterphone: callcenterphone || null,
             businessPlans: plansToReturn
         }
     }, 201);
@@ -254,6 +256,7 @@ const getAllRestaurants = async (req, res) => {
         type: schema_1.restaurants.type, // 👈 استرجاع النوع
         salesId: schema_1.restaurants.salesId, // 👈 استرجاع المندوب
         ownerposition: schema_1.restaurants.ownerposition, // 👈 استرجاع منصب المالك
+        callcenterphone: schema_1.restaurants.callcenterphone,
         cuisineIds: schema_1.restaurants.cuisineId,
         email: schema_1.restrauntadmin.email,
         city: { id: schema_1.cities.id, name: schema_1.cities.name, nameAr: schema_1.cities.nameAr, nameFr: schema_1.cities.nameFr },
@@ -300,6 +303,7 @@ const getAllRestaurants = async (req, res) => {
             type: r.type,
             salesId: r.salesId,
             ownerposition: r.ownerposition,
+            callcenterphone: r.callcenterphone || null,
             email: r.email || null,
             deliveryRadiusKm: r.deliveryRadiusKm,
             lat: r.lat,
@@ -381,7 +385,7 @@ exports.getRestaurantById = getRestaurantById;
 const updateRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
     const { id } = req.params;
-    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm, type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm, type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId, callcenterphone } = req.body;
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
     const [existingRestaurant] = await connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id)).limit(1);
     if (!existingRestaurant)
@@ -450,6 +454,8 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.salesId = resolvedSalesId; // 👈 تحديث المندوب
     if (ownerposition !== undefined)
         restaurantUpdateData.ownerposition = (ownerposition === "" || ownerposition === null) ? null : ownerposition; // 👈 تحديث منصب المالك
+    if (callcenterphone !== undefined)
+        restaurantUpdateData.callcenterphone = (callcenterphone === "" || callcenterphone === null) ? null : clean(callcenterphone);
     if (logo)
         restaurantUpdateData.logo = await (0, handleImages_1.handleImageUpdate)(req, existingRestaurant.logo, logo, "restaurants");
     if (cover !== undefined) {

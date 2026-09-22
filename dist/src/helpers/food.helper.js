@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getUnavailableBranchesForFoods = void 0;
+exports.isFoodUnavailableForBranch = exports.getUnavailableBranchesForFoods = void 0;
 // src/helpers/food.helper.ts
 const schema_1 = require("../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -99,3 +99,16 @@ const getUnavailableBranchesForFoods = async (foodIds) => {
     return resultMap;
 };
 exports.getUnavailableBranchesForFoods = getUnavailableBranchesForFoods;
+// ==========================================
+// Helper: Check if a food is unavailable for a specific branch
+// ==========================================
+/**
+ * Returns true if the food is globally out-of-stock (unavailableBranches === null)
+ * OR if the given branchId appears in the food's unavailableBranches list.
+ */
+const isFoodUnavailableForBranch = (unavailableBranches, branchId) => {
+    if (unavailableBranches === null)
+        return true; // globally out-of-stock
+    return unavailableBranches.some((b) => b.id === branchId);
+};
+exports.isFoodUnavailableForBranch = isFoodUnavailableForBranch;

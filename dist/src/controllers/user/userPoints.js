@@ -7,6 +7,7 @@ const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
 const uuid_1 = require("uuid");
+const foodConditions_1 = require("../../helpers/foodConditions");
 const getRedeemableProducts = async (req, res) => {
     const { restaurantId } = req.params;
     const userId = req.user?.id;
@@ -34,11 +35,12 @@ const getRedeemableProducts = async (req, res) => {
         nameFr: schema_1.food.nameFr,
         image: schema_1.food.image,
         price: schema_1.food.price,
-        pointsEarned: schema_1.food.points, // النقاط التي يكسبها العميل عند الشراء العادي
+        pointsEarned: schema_1.food.points,
+        isOutOfStock: schema_1.food.isOutOfStock,
     })
         .from(schema_1.pointsProducts)
         .innerJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.pointsProducts.foodId, schema_1.food.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.pointsProducts.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.pointsProducts.isActive, true), (0, drizzle_orm_1.eq)(schema_1.food.status, "active")));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.pointsProducts.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.pointsProducts.isActive, true), (0, drizzle_orm_1.eq)(schema_1.food.status, "active"), foodConditions_1.activeFoodCondition));
     // 3. إضافة حالة إمكانية الاستبدال (canRedeem) لكل منتج بناءً على رصيد العميل
     const formattedProducts = products.map((item) => ({
         ...item,
@@ -69,20 +71,6 @@ const generateRedeemCode = async (req, res) => {
         throw new Errors_1.BadRequest("restaurantId is required");
     if (!foodId)
         throw new Errors_1.BadRequest("foodId is required");
-    // 🟢 1. التأكد أن الفرع موجود ومملوك لنفس المطعم
-    // const [branch] = await db
-    //     .select({ id: branches.id })
-    //     .from(branches)
-    //     .where(
-    //         and(
-    //             eq(branches.id, branchId),
-    //             eq(branches.restaurantId, restaurantId)
-    //         )
-    //     )
-    //     .limit(1);
-    // if (!branch) {
-    //     throw new BadRequest("Invalid branch selected or does not belong to this restaurant");
-    // }
     // 1.1 التأكد من أن المنتج مسجل ونشط في برنامج النقاط
     const [pointsProd] = await connection_1.db
         .select({
@@ -94,7 +82,7 @@ const generateRedeemCode = async (req, res) => {
     })
         .from(schema_1.pointsProducts)
         .innerJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.pointsProducts.foodId, schema_1.food.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.pointsProducts.foodId, foodId), (0, drizzle_orm_1.eq)(schema_1.pointsProducts.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.pointsProducts.isActive, true)))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.pointsProducts.foodId, foodId), (0, drizzle_orm_1.eq)(schema_1.pointsProducts.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.pointsProducts.isActive, true), foodConditions_1.activeFoodCondition))
         .limit(1);
     if (!pointsProd) {
         throw new Errors_1.NotFound("This product is not available for points redemption");
@@ -110,15 +98,12 @@ const generateRedeemCode = async (req, res) => {
         .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId))
         .limit(1);
     // ==========================================
-    // 🛡️ 2. Execute Order (Transaction)
+    // 🛡️ 2. Execute Redeem Request (Transaction)
     // ==========================================
     const now = new Date();
-    const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
-    const newOrderId = (0, uuid_1.v4)();
+    const redeemRequestId = (0, uuid_1.v4)();
     const redeemCode = generate6DigitCode();
-    const redeemExpiresAt = new Date(now.getTime() + 3 * 60 * 1000);
-    const orderNumber = `ORD-${Date.now()}`;
+    const redeemExpiresAt = new Date(now.getTime() + 3 * 60 * 1000); // 3 دقائق
     const result = await connection_1.db.transaction(async (tx) => {
         // A. قفل صف النقاط للعميل لمنع الـ Race Condition
         const [userPointsRecord] = await tx
@@ -133,51 +118,24 @@ const generateRedeemCode = async (req, res) => {
         }
         const balanceAfter = currentBalance - pointsNeeded;
         // B. خصم النقاط من رصيد المستخدم
-        await tx
-            .update(schema_1.userRestaurantPoints)
-            .set({ points: balanceAfter, updatedAt: now })
-            .where((0, drizzle_orm_1.eq)(schema_1.userRestaurantPoints.id, userPointsRecord.id));
-        // C. حساب رقم الطلب اليومي للمطعم
-        const [ordersCountResult] = await tx
-            .select({ count: (0, drizzle_orm_1.sql) `count(${schema_1.orders.id})` })
-            .from(schema_1.orders)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.gte)(schema_1.orders.createdAt, startOfToday)));
-        const createdDailyOrderNumber = Number(ordersCountResult?.count || 0) + 1;
-        // D. إنشاء الطلب الرئيسي
-        await tx.insert(schema_1.orders).values({
-            id: newOrderId,
-            orderNumber,
+        // await tx
+        //     .update(userRestaurantPoints)
+        //     .set({ points: balanceAfter, updatedAt: now })
+        //     .where(eq(userRestaurantPoints.id, userPointsRecord.id));
+        // C. إنشاء طلب الاستبدال في جدول redeem_requests فقط (بدون إنشاء أوردر)
+        await tx.insert(schema_1.redeemRequests).values({
+            id: redeemRequestId,
             userId,
             restaurantId,
-            // branchId,
-            orderSource: "online_order_web",
-            paymentMethod: null,
-            orderType: "takeaway",
-            subtotal: "0.00",
-            deliveryFee: "0.00",
-            serviceFee: "0.00",
-            appCommission: "0.00",
-            discountAmount: "0.00",
-            totalAmount: "0.00",
+            foodId,
+            code: redeemCode,
+            pointsDeducted: pointsNeeded,
             status: "pending",
-            isPointsRedeemed: true,
-            redeemCode,
-            redeemCodeExpiresAt: redeemExpiresAt,
-            dailyOrderNumber: createdDailyOrderNumber,
+            expiresAt: redeemExpiresAt,
             createdAt: now,
             updatedAt: now,
         });
-        // E. إنشاء عنصر الطلب (Order Item)
-        await tx.insert(schema_1.orderItems).values({
-            id: (0, uuid_1.v4)(),
-            orderId: newOrderId,
-            foodId,
-            quantity: 1,
-            basePrice: "0.00",
-            variationsPrice: "0.00",
-            totalPrice: "0.00",
-        });
-        // F. تسجيل المعاملة في سجل النقاط
+        // D. تسجيل المعاملة في سجل النقاط (مرتبطة بـ redeemRequestId بدلاً من orderId)
         await tx.insert(schema_1.userPointsTransactions).values({
             id: (0, uuid_1.v4)(),
             userId,
@@ -186,33 +144,29 @@ const generateRedeemCode = async (req, res) => {
             points: pointsNeeded,
             balanceBefore: currentBalance,
             balanceAfter,
-            orderId: newOrderId,
             note: `Redeemed points for item: ${pointsProd.foodName} (Code: ${redeemCode})`,
             createdAt: now,
         });
         return {
-            orderId: newOrderId,
-            orderNumber,
+            redeemRequestId,
             redeemCode,
             pointsDeducted: pointsNeeded,
             remainingPoints: balanceAfter,
             productName: pointsProd.foodName,
-            dailyOrderNumber: createdDailyOrderNumber,
             redeemCodeExpiresAt: redeemExpiresAt,
         };
     });
     return (0, response_1.SuccessResponse)(res, {
-        message: "Redemption order created successfully",
+        message: "Redemption code generated successfully",
         order_level: {
             orderDetails: {
-                orderId: result.orderId,
-                orderNumber: result.orderNumber,
+                redeemRequestId: result.redeemRequestId,
                 redeemCode: result.redeemCode,
-                redeemCodeExpiresAt: result.redeemCodeExpiresAt.toISOString(), pointsDeducted: result.pointsDeducted,
+                redeemCodeExpiresAt: result.redeemCodeExpiresAt.toISOString(),
+                pointsDeducted: result.pointsDeducted,
                 remainingPoints: result.remainingPoints,
                 productName: result.productName,
                 createdAt: now.toISOString(),
-                dailyOrderNumber: result.dailyOrderNumber,
             },
             customerDetails: userInfo,
         },

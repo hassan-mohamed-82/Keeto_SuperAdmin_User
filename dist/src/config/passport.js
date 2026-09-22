@@ -75,7 +75,8 @@ const verifyGoogleToken = async (req, res) => {
                 appleId: null,
                 isProfileComplete: true,
                 isDeleted: false,
-                deletedAt: null
+                deletedAt: null,
+                totalOrders: 0,
             };
         }
         else {
@@ -97,6 +98,9 @@ const verifyGoogleToken = async (req, res) => {
         // 🚫 Check if user is blocked
         if (user.status === "blocked") {
             return res.status(403).json({ success: false, message: "Your account has been blocked. Please contact support." });
+        }
+        if (user.deletedAt) {
+            return res.status(403).json({ success: false, message: "Your account has been deleted. Please contact support." });
         }
         // 🔗 Link to restaurant if restaurantId is provided
         if (restaurantId) {

@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.restaurantSchedules = exports.restaurantSettings = void 0;
-const drizzle_orm_1 = require("drizzle-orm");
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 // 1. جدول الإعدادات العامة
 exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings", {
@@ -23,10 +22,15 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     firstTextColor: (0, mysql_core_1.varchar)("first_text_color", { length: 20 }),
     secondTextColor: (0, mysql_core_1.varchar)("second_text_color", { length: 20 }),
     vegType: (0, mysql_core_1.mysqlEnum)("veg_type", ["VEG", "NON_VEG", "BOTH"]).default("BOTH"),
+    productView: (0, mysql_core_1.mysqlEnum)("product_view", ["select", "normal"]).default("normal"),
     canEditOrder: (0, mysql_core_1.boolean)("can_edit_order").default(false),
     minOrderAmount: (0, mysql_core_1.decimal)("min_order_amount", { precision: 10, scale: 2 }).default("0.00"),
     minDeliveryTime: (0, mysql_core_1.int)("min_delivery_time").default(15),
     maxDeliveryTime: (0, mysql_core_1.int)("max_delivery_time").default(25),
+    minTakeAwayTime: (0, mysql_core_1.int)("min_take_away_time").default(15),
+    maxTakeAwayTime: (0, mysql_core_1.int)("max_take_away_time").default(25),
+    minDineInTime: (0, mysql_core_1.int)("min_dine_in_time").default(15),
+    maxDineInTime: (0, mysql_core_1.int)("max_dine_in_time").default(25),
     isAlwaysOpen: (0, mysql_core_1.boolean)("is_always_open").default(false),
     isSameTimeEveryDay: (0, mysql_core_1.boolean)("is_same_time_every_day").default(false),
     isTemporarilyClosed: (0, mysql_core_1.boolean)("is_temporarily_closed").default(false),
@@ -35,7 +39,7 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     repeatNotificationStatuses: (0, mysql_core_1.json)("repeat_notification_statuses")
         .$type()
         .default(["pending"]), // pending, accepted, preparing, out_for_delivery
-    resetDailyOrderNumberTime: (0, mysql_core_1.varchar)("reset_daily_order_number_time", { length: 5 }).default((0, drizzle_orm_1.sql) `NULL`),
+    resetDailyOrderNumberTime: (0, mysql_core_1.varchar)("reset_daily_order_number_time", { length: 5 }),
 });
 // 2. جدول مواعيد العمل (يدعم الفترات المتعددة)
 exports.restaurantSchedules = (0, mysql_core_1.mysqlTable)("restaurant_schedules", {

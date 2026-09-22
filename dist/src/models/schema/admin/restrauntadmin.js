@@ -22,7 +22,7 @@ exports.restrauntadmin = (0, mysql_core_1.mysqlTable)("restrauntadmins", {
     password: (0, mysql_core_1.varchar)("password", { length: 255 }).notNull(),
     phoneNumber: (0, mysql_core_1.varchar)("phone_number", { length: 255 }).notNull(),
     // هيكل الأدوار واضح ومحدد
-    type: (0, mysql_core_1.mysqlEnum)("type", ["owner", "subadmin", "branch_manager", "staff"])
+    type: (0, mysql_core_1.mysqlEnum)("type", ["owner", "subadmin", "branch_manager", "staff", "cashier"])
         .notNull()
         .default("branch_manager"),
     // نظام الصلاحيات المفضل (عبر الـ Role)

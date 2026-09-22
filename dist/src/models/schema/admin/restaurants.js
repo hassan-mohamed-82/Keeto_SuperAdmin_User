@@ -34,6 +34,7 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     ownerLastName: (0, mysql_core_1.varchar)("owner_last_name", { length: 255 }),
     ownerPhone: (0, mysql_core_1.varchar)("owner_phone", { length: 50 }).notNull(),
     ownerposition: (0, mysql_core_1.varchar)("owner_position", { length: 255 }),
+    callcenterphone: (0, mysql_core_1.varchar)("callcenterphone", { length: 50 }),
     tags: (0, mysql_core_1.json)("tags").$type().default([]),
     lat: (0, mysql_core_1.varchar)("lat", { length: 255 }),
     lng: (0, mysql_core_1.varchar)("lng", { length: 255 }),

@@ -137,6 +137,12 @@ const verifyAppleToken = async (req, res) => {
                 message: "Your account has been blocked. Please contact support."
             });
         }
+        if (user.deletedAt) {
+            return res.status(403).json({
+                success: false,
+                message: "Your account has been deleted. Please contact support."
+            });
+        }
         // 7️⃣ Link user to restaurant in multi-tenant table (Always checks if relation exists regardless of new/old user)
         if (restaurantId) {
             const existingLink = await connection_1.db

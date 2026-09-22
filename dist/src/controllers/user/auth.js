@@ -217,6 +217,9 @@ const login = async (req, res) => {
     if (user.status === "blocked") {
         throw new BadRequest_1.BadRequest("Your account has been blocked. Please contact support.");
     }
+    if (user.deletedAt) {
+        throw new BadRequest_1.BadRequest("Your account has been deleted. Please contact support.");
+    }
     // 🔗 ربط المستخدم بالمطعم (يتأكد من عدم التكرار حتى لليوزرز القدامى)
     if (restaurantId) {
         const existingLink = await connection_1.db.select().from(schema_1.restaurant_users)

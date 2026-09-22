@@ -1,40 +1,116 @@
 "use strict";
+// import nodemailer from "nodemailer";
+// import { Resend } from "resend";
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendEmail = void 0;
+// const getFromEmail = () =>
+//   process.env.EMAIL_FROM || process.env.EMAIL_USER || "no-reply@keeto.app";
+// const getResendClient = () => {
+//   if (!process.env.RESEND_API_KEY) return null;
+//   return new Resend(process.env.RESEND_API_KEY);
+// };
+// const getSmtpTransporter = () => {
+//   const SMTP_USER = process.env.SMTP_USER || process.env.EMAIL_USER;
+//   const SMTP_PASS = process.env.SMTP_PASS || process.env.EMAIL_PASS;
+//   if (!SMTP_USER || !SMTP_PASS) {
+//     console.log("❌ SMTP not configured");
+//     return null;
+//   }
+//   return nodemailer.createTransport({
+//     service: "gmail",
+//     auth: {
+//       user: SMTP_USER,
+//       pass: SMTP_PASS,
+//     },
+//   });
+// };
+// export const sendEmail = async ({
+//   to,
+//   subject,
+//   html,
+// }: {
+//   to: string;
+//   subject: string;
+//   html: string;
+// }) => {
+//   console.log("📧 Sending email to:", to);
+//   const resend = getResendClient();
+//   // ===== Resend =====
+//   if (resend) {
+//     try {
+//       await resend.emails.send({
+//         from: getFromEmail(),
+//         to,
+//         subject,
+//         html,
+//       });
+//       console.log("✅ Email sent via Resend");
+//       return;
+//     } catch (err) {
+//       console.log("❌ Resend error:", err);
+//     }
+//   }
+//   // ===== SMTP (Gmail) =====
+//   const transporter = getSmtpTransporter();
+//   if (transporter) {
+//     try {
+//       await transporter.sendMail({
+//         from: getFromEmail(),
+//         to,
+//         subject,
+//         html,
+//       });
+//       console.log("✅ Email sent via SMTP");
+//       return;
+//     } catch (err) {
+//       console.log("❌ SMTP error:", err);
+//     }
+//   }
+//   console.log("⚠️ No email provider configured. Email not sent.");
+// };
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const resend_1 = require("resend");
-const getFromEmail = () => process.env.EMAIL_FROM || process.env.EMAIL_USER || "no-reply@keeto.app";
+const getFromEmail = () => process.env.EMAIL_FROM ||
+    process.env.SMTP_USER ||
+    "Keeto <keetofoodapp@keeto.org>";
 const getResendClient = () => {
     if (!process.env.RESEND_API_KEY)
         return null;
     return new resend_1.Resend(process.env.RESEND_API_KEY);
 };
 const getSmtpTransporter = () => {
-    const SMTP_USER = process.env.SMTP_USER || process.env.EMAIL_USER;
-    const SMTP_PASS = process.env.SMTP_PASS || process.env.EMAIL_PASS;
-    if (!SMTP_USER || !SMTP_PASS) {
-        console.log("❌ SMTP not configured");
+    const host = process.env.SMTP_HOST || "mail.keeto.org";
+    const port = Number(process.env.SMTP_PORT) || 587;
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    if (!user || !pass) {
+        console.log("❌ SMTP not configured — SMTP_USER or SMTP_PASS missing");
         return null;
     }
     return nodemailer_1.default.createTransport({
-        service: "gmail",
+        host,
+        port,
+        secure: false, // Must be false for port 587 (uses STARTTLS)
         auth: {
-            user: SMTP_USER,
-            pass: SMTP_PASS,
+            user,
+            pass,
+        },
+        tls: {
+            rejectUnauthorized: false, // Prevents failures with self-signed certificates on Plesk
         },
     });
 };
 const sendEmail = async ({ to, subject, html, }) => {
-    console.log("📧 Sending email to:", to);
+    console.log("📧 Sending email to:", to, "| Subject:", subject);
     const resend = getResendClient();
-    // ===== Resend =====
+    // ===== 1. Try Resend First =====
     if (resend) {
         try {
             await resend.emails.send({
-                from: getFromEmail(),
+                from: process.env.EMAIL_FROM || "onboarding@resend.dev",
                 to,
                 subject,
                 html,
@@ -43,26 +119,30 @@ const sendEmail = async ({ to, subject, html, }) => {
             return;
         }
         catch (err) {
-            console.log("❌ Resend error:", err);
+            console.error("❌ Resend error, falling back to SMTP:", err);
         }
     }
-    // ===== SMTP (Gmail) =====
+    // ===== 2. Fallback: Custom Plesk SMTP =====
     const transporter = getSmtpTransporter();
     if (transporter) {
         try {
-            await transporter.sendMail({
+            const info = await transporter.sendMail({
                 from: getFromEmail(),
                 to,
                 subject,
                 html,
             });
-            console.log("✅ Email sent via SMTP");
-            return;
+            console.log("✅ Email sent via Plesk SMTP — Message ID:", info.messageId);
+            return info;
         }
         catch (err) {
-            console.log("❌ SMTP error:", err);
+            console.error("❌ SMTP Error:", err?.message || err);
+            throw new Error(`Failed to send email via SMTP: ${err?.message}`);
         }
     }
-    console.log("⚠️ No email provider configured. Email not sent.");
+    // ===== 3. No Provider Configured =====
+    const msg = "⚠️ No email provider configured. Check SMTP_USER and SMTP_PASS in .env";
+    console.error(msg);
+    throw new Error(msg);
 };
 exports.sendEmail = sendEmail;

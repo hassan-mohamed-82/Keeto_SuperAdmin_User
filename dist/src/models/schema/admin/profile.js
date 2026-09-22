@@ -26,10 +26,12 @@ const getProfile = async (req, res) => {
         restaurantId: schema_1.restrauntadmin.restaurantId,
         branchId: schema_1.restrauntadmin.branchId,
         fcmToken: schema_1.restrauntadmin.fcmToken,
+        callcenterphone: schema_1.restaurants.callcenterphone,
         createdAt: schema_1.restrauntadmin.createdAt,
         updatedAt: schema_1.restrauntadmin.updatedAt,
     })
         .from(schema_1.restrauntadmin)
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restrauntadmin.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.id, adminId))
         .limit(1);
     if (!adminUser) {

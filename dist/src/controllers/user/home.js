@@ -9,6 +9,8 @@ const Errors_1 = require("../../Errors");
 const discount_1 = require("../../utils/discount");
 const food_helper_1 = require("../../helpers/food.helper");
 const foodFormat_1 = require("../../services/foodFormat");
+const pricing_helper_1 = require("../../helpers/pricing.helper");
+const foodConditions_1 = require("../../helpers/foodConditions");
 // ==========================================
 // 🔥 Helper: تجهيز favorites لو اليوزر عامل login
 // ==========================================
@@ -60,6 +62,7 @@ const getHomeScreen = async (req, res) => {
         addressAr: schema_1.restaurants.addressAr,
         addressFr: schema_1.restaurants.addressFr,
         minDeliveryTime: schema_1.restaurants.minDeliveryTime,
+        callcenterphone: schema_1.restaurants.callcenterphone,
     }).from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"));
     const popularRestaurants = restaurantsData.map(r => ({
         ...r,
@@ -92,6 +95,7 @@ const getRestaurantsByCuisine = async (req, res) => {
         addressAr: schema_1.restaurants.addressAr,
         addressFr: schema_1.restaurants.addressFr,
         minDeliveryTime: schema_1.restaurants.minDeliveryTime,
+        callcenterphone: schema_1.restaurants.callcenterphone,
     }).from(schema_1.restaurants)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.sql) `JSON_CONTAINS(${schema_1.restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`));
     const result = data.map(r => ({
@@ -114,74 +118,208 @@ const getFoodsByCategory = async (req, res) => {
         foodNameAr: schema_1.food.nameAr,
         foodNameFr: schema_1.food.nameFr,
         foodImage: schema_1.food.image,
+        description: schema_1.food.description,
+        descriptionAr: schema_1.food.descriptionAr,
+        descriptionFr: schema_1.food.descriptionFr,
         price: schema_1.food.price,
         foodDiscountType: schema_1.food.discount_type,
         foodDiscountValue: schema_1.food.discount_value,
         isOutOfStock: schema_1.food.isOutOfStock,
+        points: schema_1.food.points,
+        addonsId: schema_1.food.addonsId,
+        categoryId: schema_1.categories.id,
+        categoryName: schema_1.categories.name,
+        categoryNameAr: schema_1.categories.nameAr,
+        categoryNameFr: schema_1.categories.nameFr,
+        subcategoryId: schema_1.subcategories.id,
+        subcategoryName: schema_1.subcategories.name,
+        subcategoryNameAr: schema_1.subcategories.nameAr,
+        subcategoryNameFr: schema_1.subcategories.nameFr,
+        subcategoryImage: schema_1.subcategories.image,
+        order_level: schema_1.subcategories.order_Level,
         restaurantId: schema_1.restaurants.id,
         restaurantName: schema_1.restaurants.name,
         restaurantNameAr: schema_1.restaurants.nameAr,
         restaurantNameFr: schema_1.restaurants.nameFr,
-        restaurantLogo: schema_1.restaurants.logo
+        restaurantLogo: schema_1.restaurants.logo,
+        callcenterphone: schema_1.restaurants.callcenterphone,
     })
         .from(schema_1.food)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.food.restaurantid, schema_1.restaurants.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.categoryid, categoryId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active")));
-    const uniqueRestaurants = [...new Set(data.map(f => f.restaurantId))];
-    const discountsByRestaurant = new Map();
-    for (const rId of uniqueRestaurants) {
-        if (rId)
-            discountsByRestaurant.set(rId, await (0, discount_1.getAvailableDiscounts)(rId));
+        .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.food.categoryid, schema_1.categories.id))
+        .leftJoin(schema_1.subcategories, (0, drizzle_orm_1.eq)(schema_1.food.subcategoryid, schema_1.subcategories.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.categoryid, categoryId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active"), (0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"), foodConditions_1.activeFoodCondition));
+    if (data.length === 0) {
+        return (0, response_1.SuccessResponse)(res, { data: [] });
     }
-    // ==========================================
-    // حساب الفروع غير المتاحة لكل وجبة
-    // ==========================================
-    // الوجبات النشطة فقط (status == active) هي التي وصلت هنا،
-    // لكن isOutOfStock ممكن تكون true → غير متاحة في كل الفروع
-    const activeFoodIds = data
-        .filter(f => !f.isOutOfStock)
-        .map(f => f.foodId)
-        .filter(Boolean);
-    const unavailableBranchesMap = activeFoodIds.length > 0
-        ? await (0, food_helper_1.getUnavailableBranchesForFoods)(activeFoodIds)
-        : new Map();
-    const result = data.map(f => {
-        const availableDiscounts = discountsByRestaurant.get(f.restaurantId) || [];
-        const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
-        const { price: finalDiscountPrice, discountNote } = (0, discount_1.applyPriorityDiscount)({ id: f.foodId, discountType: f.foodDiscountType, discountValue: f.foodDiscountValue }, Number(f.price), 0, availableDiscounts, discountState, false);
-        // إذا كانت الوجبة isOutOfStock → غير متاحة في جميع الفروع (null)
-        // وإلا → قائمة الفروع غير المتاحة بالتحديد
-        const unavailableBranches = f.isOutOfStock
-            ? null
-            : (unavailableBranchesMap.get(f.foodId) ?? []);
-        return {
-            foodId: f.foodId,
-            foodName: f.foodName,
-            foodNameAr: f.foodNameAr,
-            foodNameFr: f.foodNameFr,
-            foodImage: f.foodImage,
-            price: Number(f.price),
-            discountPrice: finalDiscountPrice,
-            discountNote,
-            restaurantId: f.restaurantId,
-            restaurantName: f.restaurantName,
-            restaurantNameAr: f.restaurantNameAr,
-            restaurantNameFr: f.restaurantNameFr,
-            restaurantLogo: f.restaurantLogo,
-            isOutOfStock: f.isOutOfStock,
-            isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false,
-            unavailableBranches
-        };
-    });
+    const foodsByRestaurant = new Map();
+    const restaurantMetaMap = new Map();
+    for (const row of data) {
+        if (!row.restaurantId)
+            continue;
+        if (!foodsByRestaurant.has(row.restaurantId)) {
+            foodsByRestaurant.set(row.restaurantId, []);
+        }
+        foodsByRestaurant.get(row.restaurantId).push(row);
+        restaurantMetaMap.set(row.foodId, {
+            restaurantId: row.restaurantId,
+            restaurantName: row.restaurantName,
+            restaurantNameAr: row.restaurantNameAr,
+            restaurantNameFr: row.restaurantNameFr,
+            restaurantLogo: row.restaurantLogo,
+            callcenterphone: row.callcenterphone,
+        });
+    }
+    const result = [];
+    for (const [rId, rFoods] of foodsByRestaurant.entries()) {
+        const formatted = await (0, foodFormat_1.formatFoodsList)(rFoods, rId, userId, favoriteFoodIds);
+        for (const item of formatted) {
+            const rest = restaurantMetaMap.get(item.id);
+            result.push({
+                foodId: item.id,
+                foodName: item.name,
+                foodNameAr: item.nameAr,
+                foodNameFr: item.nameFr,
+                foodImage: item.image,
+                price: Number(item.price),
+                discountPrice: item.discountPrice,
+                discountNote: item.discountNote,
+                restaurantId: rest?.restaurantId,
+                restaurantName: rest?.restaurantName,
+                restaurantNameAr: rest?.restaurantNameAr,
+                restaurantNameFr: rest?.restaurantNameFr,
+                restaurantLogo: rest?.restaurantLogo,
+                callcenterphone: rest?.callcenterphone,
+                isOutOfStock: item.isOutOfStock,
+                isFavorite: item.isFavorite,
+                unavailableBranches: item.unavailableBranches,
+                variations: item.variations,
+                addons: item.addons,
+            });
+        }
+    }
     return (0, response_1.SuccessResponse)(res, { data: result });
 };
 exports.getFoodsByCategory = getFoodsByCategory;
+// ==========================================
+// 3. Foods by Category before edit
+// ==========================================
+// export const getFoodsByCategory = async (req: Request, res: Response) => {
+//     const { categoryId } = req.params;
+//     const userId = req.user?.id;
+//     // const branchIdParam = req.query?.branchId as string | undefined;
+//     // const addressIdParam = req.query?.addressId as string | undefined;
+//     // // Resolve the target branch: direct branchId wins, else resolve from addressId
+//     // let targetBranchId: string | null = branchIdParam || null;
+//     // if (!targetBranchId && addressIdParam) {
+//     //     targetBranchId = await resolveBranchIdFromAddress(addressIdParam);
+//     // }
+//     const { favoriteFoodIds } = await getUserFavoritesSets(userId);
+//     const data = await db.select({
+//         foodId: food.id,
+//         foodName: food.name,
+//         foodNameAr: food.nameAr,
+//         foodNameFr: food.nameFr,
+//         foodImage: food.image,
+//         price: food.price,
+//         foodDiscountType: food.discount_type,
+//         foodDiscountValue: food.discount_value,
+//         isOutOfStock: food.isOutOfStock,
+//         restaurantId: restaurants.id,
+//         restaurantName: restaurants.name,
+//         restaurantNameAr: restaurants.nameAr,
+//         restaurantNameFr: restaurants.nameFr,
+//         restaurantLogo: restaurants.logo,
+//         callcenterphone: restaurants.callcenterphone,
+//     })
+//         .from(food)
+//         .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
+//         .where(and(
+//             eq(food.categoryid, categoryId),
+//             eq(food.status, "active"),
+//             activeFoodCondition
+//         ));
+//     const uniqueRestaurants = [...new Set(data.map(f => f.restaurantId))];
+//     const discountsByRestaurant = new Map();
+//     for (const rId of uniqueRestaurants) {
+//         if (rId) discountsByRestaurant.set(rId, await getAvailableDiscounts(rId));
+//     }
+//     // ==========================================
+//     // حساب الفروع غير المتاحة لكل وجبة
+//     // ==========================================
+//     // الوجبات النشطة فقط (status == active) هي التي وصلت هنا،
+//     // لكن isOutOfStock ممكن تكون true → غير متاحة في كل الفروع
+//     const activeFoodIds = data
+//         .filter(f => !f.isOutOfStock)
+//         .map(f => f.foodId)
+//         .filter(Boolean) as string[];
+//     const unavailableBranchesMap = activeFoodIds.length > 0
+//         ? await getUnavailableBranchesForFoods(activeFoodIds)
+//         : new Map<string, BranchInfo[]>();
+//     const result = data.map(f => {
+//         const availableDiscounts = discountsByRestaurant.get(f.restaurantId) || [];
+//         const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
+//         const { price: finalDiscountPrice, discountNote } = applyPriorityDiscount(
+//             { id: f.foodId, discountType: f.foodDiscountType, discountValue: f.foodDiscountValue },
+//             Number(f.price),
+//             0,
+//             availableDiscounts,
+//             discountState,
+//             false
+//         );
+//         // إذا كانت الوجبة isOutOfStock → غير متاحة في جميع الفروع (null)
+//         // وإلا → قائمة الفروع غير المتاحة بالتحديد
+//         const unavailableBranches: BranchInfo[] | null = f.isOutOfStock
+//             ? null
+//             : (unavailableBranchesMap.get(f.foodId!) ?? []);
+//         // Filter out foods that are unavailable at the requested branch
+//         // if (targetBranchId && isFoodUnavailableForBranch(unavailableBranches, targetBranchId)) {
+//         //     return null;
+//         // }
+//         return {
+//             foodId: f.foodId,
+//             foodName: f.foodName,
+//             foodNameAr: f.foodNameAr,
+//             foodNameFr: f.foodNameFr,
+//             foodImage: f.foodImage,
+//             price: Number(f.price),
+//             discountPrice: finalDiscountPrice,
+//             discountNote,
+//             restaurantId: f.restaurantId,
+//             restaurantName: f.restaurantName,
+//             restaurantNameAr: f.restaurantNameAr,
+//             restaurantNameFr: f.restaurantNameFr,
+//             restaurantLogo: f.restaurantLogo,
+//             callcenterphone: f.callcenterphone,
+//             isOutOfStock: f.isOutOfStock,
+//             isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false,
+//             unavailableBranches
+//         };
+//     })
+//     //.filter(Boolean);
+//     return SuccessResponse(res, { data: result });
+// };
 // ==========================================
 // 4. Restaurant Details + Menu
 // ==========================================
 const getRestaurantDetails = async (req, res) => {
     const { restaurantId } = req.params;
     const userId = req.user?.id;
+    const branchIdParam = req.query?.branchId;
+    const addressIdParam = req.query?.addressId;
+    const serviceModuleParam = req.query?.serviceModule;
+    // Resolve the target branch and serviceModule for this restaurant
+    let targetBranchId = branchIdParam || null;
+    let serviceModule = serviceModuleParam;
+    if (branchIdParam) {
+        if (!serviceModule)
+            serviceModule = "takeaway";
+    }
+    else if (addressIdParam) {
+        if (!serviceModule)
+            serviceModule = "delivery";
+        targetBranchId = await (0, pricing_helper_1.resolveBranchIdFromAddress)(addressIdParam, restaurantId);
+    }
     // 1. Fetch User Favorites
     const { favoriteFoodIds, favoriteRestaurantIds } = await getUserFavoritesSets(userId);
     // 2. Fetch Restaurant Info
@@ -198,6 +336,7 @@ const getRestaurantDetails = async (req, res) => {
         cover: schema_1.restaurants.cover,
         iosApp: schema_1.restaurants.iosApp,
         androidApp: schema_1.restaurants.androidApp,
+        callcenterphone: schema_1.restaurants.callcenterphone,
     })
         .from(schema_1.restaurants)
         .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId));
@@ -233,12 +372,13 @@ const getRestaurantDetails = async (req, res) => {
         subcategoryName: schema_1.subcategories.name,
         subcategoryNameAr: schema_1.subcategories.nameAr,
         subcategoryNameFr: schema_1.subcategories.nameFr,
+        subcategoryImage: schema_1.subcategories.image,
         order_level: schema_1.subcategories.order_Level,
     })
         .from(schema_1.food)
         .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.food.categoryid, schema_1.categories.id))
         .leftJoin(schema_1.subcategories, (0, drizzle_orm_1.eq)(schema_1.food.subcategoryid, schema_1.subcategories.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active"), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.categories.id), (0, drizzle_orm_1.eq)(schema_1.categories.status, "active")), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.subcategories.id), (0, drizzle_orm_1.eq)(schema_1.subcategories.status, "active"))));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active"), foodConditions_1.activeFoodCondition, (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.categories.id), (0, drizzle_orm_1.eq)(schema_1.categories.status, "active")), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.subcategories.id), (0, drizzle_orm_1.eq)(schema_1.subcategories.status, "active"))));
     // 4. Fetch Restaurant General Addons
     const rawAddons = await connection_1.db
         .select({
@@ -288,7 +428,9 @@ const getRestaurantDetails = async (req, res) => {
         });
     }
     // 5. Format All Foods using formatFoodsList Service
-    const formattedFoods = await (0, foodFormat_1.formatFoodsList)(rawMenu, restaurantId, userId, favoriteFoodIds);
+    const formattedFoods = await (0, foodFormat_1.formatFoodsList)(rawMenu, restaurantId, userId, favoriteFoodIds, targetBranchId, // ← filter foods unavailable at this branch
+    serviceModule // ← apply channel/branch pricing overrides (takeaway/delivery)
+    );
     // 6. Group Formatted Foods by Category
     const categoriesMap = new Map();
     for (const foodItem of formattedFoods) {
@@ -313,358 +455,6 @@ const getRestaurantDetails = async (req, res) => {
     });
 };
 exports.getRestaurantDetails = getRestaurantDetails;
-// export const getRestaurantDetails = async (req: Request, res: Response) => {
-//     const { restaurantId } = req.params;
-//     const userId = req.user?.id;
-//     const { favoriteFoodIds, favoriteRestaurantIds } = await getUserFavoritesSets(userId);
-//     const [restaurantInfo] = await db.select({
-//         id: restaurants.id,
-//         name: restaurants.name,
-//         nameAr: restaurants.nameAr,
-//         nameFr: restaurants.nameFr,
-//         minDeliveryTime: restaurants.minDeliveryTime,
-//         maxDeliveryTime: restaurants.maxDeliveryTime,
-//         deliveryTimeUnit: restaurants.deliveryTimeUnit,
-//         logo: restaurants.logo,
-//         cover: restaurants.cover,
-//         iosApp: restaurants.iosApp,
-//         androidApp: restaurants.androidApp,
-//     }).from(restaurants)
-//         .where(eq(restaurants.id, restaurantId));
-//     if (!restaurantInfo) throw new Error("Restaurant not found");
-//     const { ...safeRestaurantInfo } = restaurantInfo;
-//     const restaurantWithFav = {
-//         ...safeRestaurantInfo,
-//         isFavorite: userId ? favoriteRestaurantIds.has(restaurantId) : false
-//     };
-//     const rawMenu = await db.select({
-//         foodId: food.id,
-//         foodName: food.name,
-//         foodNameAr: food.nameAr,
-//         foodNameFr: food.nameFr,
-//         description: food.description,
-//         descriptionAr: food.descriptionAr,
-//         descriptionFr: food.descriptionFr,
-//         price: food.price,
-//         foodDiscountType: food.discount_type,
-//         foodDiscountValue: food.discount_value,
-//         isOutOfStock: food.isOutOfStock,
-//         image: food.image,
-//         points: food.points,
-//         categoryId: categories.id,
-//         categoryName: categories.name,
-//         categoryNameAr: categories.nameAr,
-//         categoryNameFr: categories.nameFr,
-//         subcategoryId: subcategories.id,
-//         subcategoryName: subcategories.name,
-//         subcategoryNameAr: subcategories.nameAr,
-//         subcategoryNameFr: subcategories.nameFr,
-//         order_level: subcategories.order_Level,
-//         variationId: foodVariations.id,
-//         variationName: foodVariations.name,
-//         variationNameAr: foodVariations.nameAr,
-//         variationNameFr: foodVariations.nameFr,
-//         isRequired: foodVariations.isRequired,
-//         selectionType: foodVariations.selectionType,
-//         min: foodVariations.min,
-//         max: foodVariations.max,
-//         optionId: variationOptions.id,
-//         optionName: variationOptions.optionName,
-//         optionNameAr: variationOptions.optionNameAr,
-//         optionNameFr: variationOptions.optionNameFr,
-//         additionalPrice: variationOptions.additionalPrice,
-//         addonId: addons.id,
-//         addonName: addons.name,
-//         addonNameAr: addons.nameAr,
-//         addonNameFr: addons.nameFr,
-//         addonPrice: addons.price,
-//         addonStatus: addons.status,
-//         addonStockType: addons.stock_type,
-//         addonRestaurantId: addons.restaurantid,
-//         addonCreatedAt: addons.createdAt,
-//         addonUpdatedAt: addons.updatedAt,
-//         addonCategoryId: adonescategory.id,
-//         addonCategoryName: adonescategory.name,
-//         addonCategoryNameAr: adonescategory.nameAr,
-//         addonCategoryNameFr: adonescategory.nameFr,
-//     })
-//         .from(food)
-//         .leftJoin(categories, eq(food.categoryid, categories.id))
-//         .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
-//         .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))
-//         .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
-//         .leftJoin(addons, sql`JSON_CONTAINS(${food.addonsId}, JSON_QUOTE(${addons.id}))`)
-//         .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
-//         .where(and(
-//             eq(food.restaurantid, restaurantId),
-//             eq(food.status, "active"),
-//             or(isNull(categories.id), eq(categories.status, "active")),
-//             or(isNull(subcategories.id), eq(subcategories.status, "active"))
-//         ));
-//     const availableDiscounts = await getAvailableDiscounts(restaurantId);
-//     const groupedMenuObj = rawMenu.reduce((acc: any, row) => {
-//         const catId = row.categoryId || "uncategorized";
-//         // 1. تجميع الكاتيجوري
-//         if (!acc[catId]) {
-//             acc[catId] = {
-//                 id: catId === "uncategorized" ? null : catId,
-//                 name: row.categoryName || "Other",
-//                 nameAr: row.categoryNameAr || "أخرى",
-//                 nameFr: row.categoryNameFr || "Autre",
-//                 foods: {}
-//             };
-//         }
-//         // 2. تجميع الأكل داخل الكاتيجوري مع حساب الخصم المباشر
-//         if (row.foodId) {
-//             if (!acc[catId].foods[row.foodId]) {
-//                 const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
-//                 const { price: calculatedDiscountPrice, discountNote } = applyPriorityDiscount(
-//                     { id: row.foodId, discountType: row.foodDiscountType, discountValue: row.foodDiscountValue },
-//                     Number(row.price),
-//                     0,
-//                     availableDiscounts,
-//                     discountState,
-//                     false
-//                 );
-//                 acc[catId].foods[row.foodId] = {
-//                     id: row.foodId,
-//                     name: row.foodName,
-//                     nameAr: row.foodNameAr,
-//                     nameFr: row.foodNameFr,
-//                     description: row.description,
-//                     descriptionAr: row.descriptionAr,
-//                     descriptionFr: row.descriptionFr,
-//                     price: Number(row.price),
-//                     discountType: row.foodDiscountType ?? null,
-//                     discountValue: row.foodDiscountValue !== null ? Number(row.foodDiscountValue) : null,
-//                     discountPrice: calculatedDiscountPrice,
-//                     discountNote,
-//                     image: row.image,
-//                     isOutOfStock: row.isOutOfStock,
-//                     points: userId ? row.points : null,
-//                     isFavorite: userId ? favoriteFoodIds.has(row.foodId) : false,
-//                     variations: {},
-//                     addons: {},
-//                     category: row.categoryId ? {
-//                         id: row.categoryId,
-//                         name: row.categoryName,
-//                         nameAr: row.categoryNameAr,
-//                         nameFr: row.categoryNameFr,
-//                     } : null,
-//                     subcategory: row.subcategoryId ? {
-//                         id: row.subcategoryId,
-//                         name: row.subcategoryName,
-//                         nameAr: row.subcategoryNameAr,
-//                         nameFr: row.subcategoryNameFr,
-//                         order_level: row.order_level,
-//                     } : null,
-//                 };
-//             }
-//             // 3. تجميع الـ Variations داخل الأكل
-//             if (row.variationId) {
-//                 if (!acc[catId].foods[row.foodId].variations[row.variationId]) {
-//                     acc[catId].foods[row.foodId].variations[row.variationId] = {
-//                         id: row.variationId,
-//                         name: row.variationName,
-//                         nameAr: row.variationNameAr,
-//                         nameFr: row.variationNameFr,
-//                         isRequired: row.isRequired,
-//                         selectionType: row.selectionType,
-//                         min: row.min,
-//                         max: row.max,
-//                         options: {}
-//                     };
-//                 }
-//                 // 4. تجميع الـ Options داخل الـ Variations
-//                 if (row.optionId) {
-//                     if (!acc[catId].foods[row.foodId].variations[row.variationId].options[row.optionId]) {
-//                         acc[catId].foods[row.foodId].variations[row.variationId].options[row.optionId] = {
-//                             id: row.optionId,
-//                             name: row.optionName,
-//                             nameAr: row.optionNameAr,
-//                             nameFr: row.optionNameFr,
-//                             additionalPrice: row.additionalPrice
-//                         };
-//                     }
-//                 }
-//             }
-//             // 5. تجميع الـ Addons داخل الأكل
-//             if (row.addonId) {
-//                 if (!acc[catId].foods[row.foodId].addons[row.addonId]) {
-//                     acc[catId].foods[row.foodId].addons[row.addonId] = {
-//                         id: row.addonId,
-//                         name: row.addonName,
-//                         nameAr: row.addonNameAr,
-//                         nameFr: row.addonNameFr,
-//                         price: row.addonPrice,
-//                         status: row.addonStatus,
-//                         stockType: row.addonStockType,
-//                         restaurantId: row.addonRestaurantId,
-//                         createdAt: row.addonCreatedAt,
-//                         updatedAt: row.addonUpdatedAt,
-//                         category: row.addonCategoryId ? {
-//                             id: row.addonCategoryId,
-//                             name: row.addonCategoryName,
-//                             nameAr: row.addonCategoryNameAr,
-//                             nameFr: row.addonCategoryNameFr,
-//                         } : null
-//                     };
-//                 }
-//             }
-//         }
-//         return acc;
-//     }, {});
-//     // 👇 تحويل الكاتيجوريز، الأكلات، الـ Variations، الـ Options، والـ Addons من Objects إلى Arrays
-//     // ثم حساب الفروع غير المتاحة لكل وجبة
-//     const allMenuFoods = Object.values(groupedMenuObj).flatMap((cat: any) => Object.values(cat.foods)) as any[];
-//     // الوجبات التي status == active لكن isOutOfStock == false هي المرشحة للفحص
-//     const menuActiveFoodIds = allMenuFoods
-//         .filter((f: any) => !f.isOutOfStock)
-//         .map((f: any) => f.id)
-//         .filter(Boolean) as string[];
-//     const menuUnavailableBranchesMap = menuActiveFoodIds.length > 0
-//         ? await getUnavailableBranchesForFoods(menuActiveFoodIds)
-//         : new Map<string, BranchInfo[]>();
-//     // ─── جلب الفروع غير المتاحة بناءً على الـ subcategories ───
-//     const activeSubcategoryIds = [...new Set(
-//         allMenuFoods
-//             .filter((f: any) => !f.isOutOfStock && f.subcategory?.id)
-//             .map((f: any) => f.subcategory.id)
-//     )] as string[];
-//     const subcategoryUnavailableBranchesMap = new Map<string, BranchInfo[]>();
-//     if (activeSubcategoryIds.length > 0) {
-//         const inactiveSubcats = await db
-//             .select({
-//                 subcategoryId: branchSubcategories.subcategoryId,
-//                 branchId: branches.id,
-//                 branchName: branches.name,
-//                 branchNameAr: branches.nameAr,
-//                 branchNameFr: branches.nameFr,
-//             })
-//             .from(branchSubcategories)
-//             .leftJoin(branches, eq(branchSubcategories.branchId, branches.id))
-//             .where(and(
-//                 inArray(branchSubcategories.subcategoryId, activeSubcategoryIds),
-//                 eq(branchSubcategories.status, "inactive")
-//             ));
-//         for (const row of inactiveSubcats) {
-//             if (!row.branchId) continue;
-//             if (!subcategoryUnavailableBranchesMap.has(row.subcategoryId)) {
-//                 subcategoryUnavailableBranchesMap.set(row.subcategoryId, []);
-//             }
-//             subcategoryUnavailableBranchesMap.get(row.subcategoryId)!.push({
-//                 id: row.branchId,
-//                 name: row.branchName || "",
-//                 nameAr: row.branchNameAr,
-//                 nameFr: row.branchNameFr,
-//             });
-//         }
-//     }
-//     const finalMenu = Object.values(groupedMenuObj).map((category: any) => {
-//         return {
-//             id: category.id,
-//             name: category.name,
-//             nameAr: category.nameAr,
-//             nameFr: category.nameFr,
-//             foods: Object.values(category.foods).map((f: any) => {
-//                 // تحويل الـ variations والـ options
-//                 f.variations = Object.values(f.variations).map((v: any) => {
-//                     v.options = Object.values(v.options);
-//                     return v;
-//                 });
-//                 // تحويل الـ Addons
-//                 f.addons = Object.values(f.addons);
-//                 // // إرفاق الفروع غير المتاحة
-//                 // // null → الوجبة غير متاحة في جميع الفروع (isOutOfStock)
-//                 // // [] أو [...] → قائمة الفروع غير المتاحة بالتحديد
-//                 if (f.isOutOfStock) {
-//                     f.unavailableBranches = null;
-//                 } else {
-//                     const foodUnavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
-//                     const subcatUnavailableBranches = f.subcategory?.id
-//                         ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || [])
-//                         : [];
-//                     // دمج الفرعين بدون تكرار
-//                     const combinedBranches = new Map<string, BranchInfo>();
-//                     [...foodUnavailableBranches, ...subcatUnavailableBranches].forEach(b => {
-//                         combinedBranches.set(b.id, b);
-//                     });
-//                     f.unavailableBranches = Array.from(combinedBranches.values());
-//                 }
-//                 //  if (f.isOutOfStock) {
-//                 //     f.unavailableBranches = null;
-//                 //     f.subcatUnavailableBranches = null;
-//                 // } else {
-//                 //     f.unavailableBranches = menuUnavailableBranchesMap.get(f.id) || [];
-//                 //     f.subcatUnavailableBranches = f.subcategory?.id
-//                 //         ? (subcategoryUnavailableBranchesMap.get(f.subcategory.id) || [])
-//                 //         : [];
-//                 // }
-//                 return f;
-//             })
-//         };
-//     });
-//     // ==========================================
-//     // جلب الـ Addons مع الـ Categories (للقائمة العامة)
-//     // ==========================================
-//     const rawAddons = await db.select({
-//         addonId: addons.id,
-//         addonName: addons.name,
-//         addonNameAr: addons.nameAr,
-//         addonNameFr: addons.nameFr,
-//         addonPrice: addons.price,
-//         addonStockType: addons.stock_type,
-//         categoryId: adonescategory.id,
-//         categoryName: adonescategory.name,
-//         categoryNameAr: adonescategory.nameAr,
-//         categoryNameFr: adonescategory.nameFr,
-//     })
-//         .from(addons)
-//         .leftJoin(adonescategory, eq(addons.adonescategoryid, adonescategory.id))
-//         .where(and(
-//             eq(addons.restaurantid, restaurantId),
-//             eq(addons.status, "active")
-//         ));
-//     const groupedAddonsObj = rawAddons.reduce((acc: any, row) => {
-//         const catId = row.categoryId || "uncategorized";
-//         if (!acc[catId]) {
-//             acc[catId] = {
-//                 id: catId === "uncategorized" ? null : catId,
-//                 name: row.categoryName || "Other",
-//                 nameAr: row.categoryNameAr || "أخرى",
-//                 nameFr: row.categoryNameFr || "Autre",
-//                 addons: []
-//             };
-//         }
-//         if (row.addonId) {
-//             acc[catId].addons.push({
-//                 id: row.addonId,
-//                 name: row.addonName,
-//                 nameAr: row.addonNameAr,
-//                 nameFr: row.addonNameFr,
-//                 price: row.addonPrice,
-//                 stockType: row.addonStockType
-//             });
-//         }
-//         return acc;
-//     }, {});
-//     const finalAddons = Object.values(groupedAddonsObj).map((category: any) => {
-//         return {
-//             id: category.id,
-//             name: category.name,
-//             nameAr: category.nameAr,
-//             nameFr: category.nameFr,
-//             addons: category.addons
-//         };
-//     });
-//     return SuccessResponse(res, {
-//         data: {
-//             restaurant: restaurantWithFav,
-//             menu: finalMenu,
-//             addons: finalAddons
-//         }
-//     });
-// };
 // ==========================================
 // 5. Toggle Favorite
 // ==========================================
@@ -735,7 +525,7 @@ const getUserFavorites = async (req, res) => {
     })
         .from(schema_1.favorites)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.favorites.restaurantId, schema_1.restaurants.id))
-        .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.favorites.foodId, schema_1.food.id))
+        .leftJoin(schema_1.food, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.foodId, schema_1.food.id), foodConditions_1.activeFoodCondition))
         .where((0, drizzle_orm_1.and)(...conditions));
     // Get unique restaurant IDs from both restaurant favorites and favorited foods
     const uniqueRestaurants = [
@@ -767,113 +557,6 @@ const getUserFavorites = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { data: result });
 };
 exports.getUserFavorites = getUserFavorites;
-// export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
-//     const { query } = req.query;
-//     if (!query || typeof query !== "string") {
-//         throw new BadRequest("please enter your search term");
-//     }
-//     const searchTerm = `%${query}%`;
-//     // 1. Fetch flat data
-//     const flatResults = await db
-//         .select({
-//             restaurant: restaurants,
-//             food: food,
-//             variation: foodVariations,
-//             option: variationOptions
-//         })
-//         .from(restaurants)
-//         .leftJoin(
-//             food,
-//             and(
-//                 eq(restaurants.id, food.restaurantid),
-//                 eq(food.status, "active")
-//             )
-//         )
-//         .leftJoin(
-//             foodVariations,
-//             eq(food.id, foodVariations.foodId)
-//         )
-//         .leftJoin(
-//             variationOptions,
-//             eq(foodVariations.id, variationOptions.variationId)
-//         )
-//         .where(
-//             and(
-//                 eq(restaurants.status, "active"),
-//                 or(
-//                     like(restaurants.name, searchTerm),
-//                     like(restaurants.nameAr, searchTerm),
-//                     like(restaurants.nameFr, searchTerm)
-//                 )
-//             )
-//         );
-//     // 2. Grouping
-//     const restaurantsMap = new Map();
-//     for (const row of flatResults) {
-//         const r = row.restaurant;
-//         const f = row.food;
-//         const v = row.variation;
-//         const o = row.option;
-//         if (!r || !r.id) continue;
-//         // Restaurant
-//         if (!restaurantsMap.has(r.id)) {
-//             restaurantsMap.set(r.id, {
-//                 ...r,
-//                 food: new Map()
-//             });
-//         }
-//         const currentRestaurant = restaurantsMap.get(r.id);
-//         // Food
-//         if (f && f.id) {
-//             if (!currentRestaurant.food.has(f.id)) {
-//                 currentRestaurant.food.set(f.id, {
-//                     ...f,
-//                     variations: new Map()
-//                 });
-//             }
-//             const currentFood = currentRestaurant.food.get(f.id);
-//             // Variation
-//             if (v && v.id) {
-//                 if (!currentFood.variations.has(v.id)) {
-//                     currentFood.variations.set(v.id, {
-//                         ...v,
-//                         options: []
-//                     });
-//                 }
-//                 const currentVariation =
-//                     currentFood.variations.get(v.id);
-//                 // Option
-//                 if (o && o.id) {
-//                     const exists =
-//                         currentVariation.options.some(
-//                             (opt: any) => opt.id === o.id
-//                         );
-//                     if (!exists) {
-//                         currentVariation.options.push(o);
-//                     }
-//                 }
-//             }
-//         }
-//     }
-//     // 3. Convert Maps → Arrays
-//     const formattedData = Array.from(
-//         restaurantsMap.values()
-//     ).map((restaurant: any) => ({
-//         ...restaurant,
-//         food: Array.from(
-//             restaurant.food.values()
-//         ).map((foodItem: any) => ({
-//             ...foodItem,
-//             variations: Array.from(
-//                 foodItem.variations.values()
-//             )
-//         }))
-//     }));
-//     return SuccessResponse(res, {
-//         message: "Fetched restaurant and menu data successfully",
-//         data: formattedData
-//     });
-// };
 // ==========================================
 // 7. Search Restaurant With Menu (البحث الذكي الصارم عن المطعم والمنيو)
 // ==========================================
@@ -903,7 +586,7 @@ const searchRestaurantWithMenu = async (req, res) => {
         option: schema_1.variationOptions
     })
         .from(schema_1.restaurants)
-        .leftJoin(schema_1.food, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.food.restaurantid), (0, drizzle_orm_1.eq)(schema_1.food.status, "active")))
+        .leftJoin(schema_1.food, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.food.restaurantid), (0, drizzle_orm_1.eq)(schema_1.food.status, "active"), foodConditions_1.activeFoodCondition))
         .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.food.id, schema_1.foodVariations.foodId))
         .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId))
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"), (0, drizzle_orm_1.or)(...restaurantConditions)));

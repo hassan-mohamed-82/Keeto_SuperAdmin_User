@@ -9,6 +9,7 @@ const BadRequest_1 = require("../../Errors/BadRequest");
 const NotFound_1 = require("../../Errors/NotFound");
 const foodFormat_1 = require("../../services/foodFormat");
 const userFavoritesFood_1 = require("../../services/userFavoritesFood");
+const foodConditions_1 = require("../../helpers/foodConditions");
 // ==========================================
 // Get Recommended Foods for User (Storefront / App)
 // ==========================================
@@ -25,7 +26,7 @@ const getRecommendedFoodsForUser = async (req, res) => {
         restaurantId: schema_1.food.restaurantid,
     })
         .from(schema_1.food)
-        .where((0, drizzle_orm_1.eq)(schema_1.food.id, foodId))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.id, foodId), foodConditions_1.activeFoodCondition))
         .limit(1);
     if (!basicFood) {
         throw new NotFound_1.NotFound("Food item not found");
@@ -55,13 +56,14 @@ const getRecommendedFoodsForUser = async (req, res) => {
         subcategoryName: schema_1.subcategories.name,
         subcategoryNameAr: schema_1.subcategories.nameAr,
         subcategoryNameFr: schema_1.subcategories.nameFr,
+        subcategoryImage: schema_1.subcategories.image,
         order_level: schema_1.subcategories.order_Level,
     })
         .from(schema_1.recommendedFoods)
         .innerJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.recommendedFoods.recommendedFoodId, schema_1.food.id))
         .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.food.categoryid, schema_1.categories.id))
         .leftJoin(schema_1.subcategories, (0, drizzle_orm_1.eq)(schema_1.food.subcategoryid, schema_1.subcategories.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.recommendedFoods.foodId, foodId), (0, drizzle_orm_1.eq)(schema_1.recommendedFoods.status, "active"), (0, drizzle_orm_1.eq)(schema_1.food.status, "active")))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.recommendedFoods.foodId, foodId), (0, drizzle_orm_1.eq)(schema_1.recommendedFoods.status, "active"), (0, drizzle_orm_1.eq)(schema_1.food.status, "active"), foodConditions_1.activeFoodCondition))
         .orderBy((0, drizzle_orm_1.asc)(schema_1.recommendedFoods.sortOrder));
     if (rawRecommendations.length === 0) {
         return (0, response_1.SuccessResponse)(res, {

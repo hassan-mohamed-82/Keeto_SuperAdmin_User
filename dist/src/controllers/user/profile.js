@@ -70,6 +70,21 @@ const getProfile = async (req, res) => {
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.addresses.zoneId, schema_1.zones.id))
         .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.zones.cityId, schema_1.cities.id))
         .where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId));
+    // 🟢 2.1 Check which addresses are linked to existing orders
+    const orderConditions = [(0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.isNotNull)(schema_1.orders.addressId)];
+    if (restaurantId && restaurantId.trim() !== "") {
+        orderConditions.push((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId.trim()));
+    }
+    const orderAddressRows = await connection_1.db
+        .select({ addressId: schema_1.orders.addressId })
+        .from(schema_1.orders)
+        .where((0, drizzle_orm_1.and)(...orderConditions));
+    const usedAddressIds = new Set(orderAddressRows.map((o) => o.addressId));
+    const formattedAddresses = userAddresses.map((addr) => ({
+        ...addr,
+        isRelatedToOrder: usedAddressIds.has(addr.id),
+        // hasOrders: usedAddressIds.has(addr.id),
+    }));
     // 3. Fetch Orders Count (scoped to a restaurant if restaurantId query param is provided)
     const ordersCountCondition = restaurantId
         ? (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId))
@@ -86,15 +101,18 @@ const getProfile = async (req, res) => {
         .from(schema_1.userWallets)
         .where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId))
         .limit(1);
-    // const userPoints = await db
-    //     .select({
-    //         restaurantId: userRestaurantPoints.restaurantId,
-    //         restaurantName: restaurants.name,
-    //         points: userRestaurantPoints.points
-    //     })
-    //     .from(userRestaurantPoints)
-    //     .leftJoin(restaurants, eq(restaurants.id, userRestaurantPoints.restaurantId))
-    //     .where(eq(userRestaurantPoints.userId, userId));
+    // 5. Fetch Restaurant Call Center Phone if restaurantId is provided
+    let callcenterphone = null;
+    if (restaurantId && restaurantId.trim() !== "") {
+        const [rest] = await connection_1.db
+            .select({ callcenterphone: schema_1.restaurants.callcenterphone })
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId.trim()))
+            .limit(1);
+        if (rest) {
+            callcenterphone = rest.callcenterphone || null;
+        }
+    }
     const isProfileComplete = userInfo.isProfileComplete || !(userInfo.email && userInfo.email.endsWith("@privaterelay.appleid.com"));
     return (0, response_1.SuccessResponse)(res, {
         data: {
@@ -108,11 +126,11 @@ const getProfile = async (req, res) => {
                 isVerified: userInfo.isVerified,
                 createdAt: userInfo.createdAt,
                 isProfileComplete,
-                addresses: userAddresses,
+                callcenterphone,
+                addresses: formattedAddresses, // 🟢 إرجاع العناوين المنسقة مع flags الاستخدام
             },
             walletBalance: wallet?.balance || "0.00",
             ordersCount: Number(ordersCount?.count || 0),
-            // restaurantPoints: userPoints
         },
     });
 };

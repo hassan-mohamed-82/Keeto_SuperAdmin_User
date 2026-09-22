@@ -2,11 +2,14 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const catchAsync_1 = require("../../utils/catchAsync");
+const validation_1 = require("../../middlewares/validation");
+const user_1 = require("../../validation/admin/user");
 const Keeto_users_1 = require("../../controllers/admin/Keeto_users");
 const router = (0, express_1.Router)();
 router.get("/blocked", (0, catchAsync_1.catchAsync)(Keeto_users_1.getBlockedUsers));
 router.post("/restaurant-block", (0, catchAsync_1.catchAsync)(Keeto_users_1.toggleRestaurantUserBlock));
 router.get("/", (0, catchAsync_1.catchAsync)(Keeto_users_1.getAllUsers));
+router.get("/:id/stats", (0, validation_1.validate)(user_1.getUserStatsParamsSchema, "params"), (0, catchAsync_1.catchAsync)(Keeto_users_1.getUserStats));
 router.get("/:id", (0, catchAsync_1.catchAsync)(Keeto_users_1.getUserById));
 router.put("/:id", (0, catchAsync_1.catchAsync)(Keeto_users_1.updateUser));
 router.delete("/:id", (0, catchAsync_1.catchAsync)(Keeto_users_1.deleteUser));

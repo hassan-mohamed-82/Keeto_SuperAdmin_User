@@ -11,6 +11,7 @@ exports.createSubcategorySchema = zod_1.z.object({
     // الحقول الاختيارية والـ Defaults
     nameAr: zod_1.z.string().max(255).optional(),
     nameFr: zod_1.z.string().max(255).optional(),
+    image: zod_1.z.string().optional(),
     priority: zod_1.z.enum(["low", "medium", "high"]).optional(),
     status: zod_1.z.enum(["active", "inactive"]).optional(),
 });

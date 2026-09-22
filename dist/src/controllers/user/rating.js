@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getRestaurantRatings = exports.getMyRating = exports.rateRestaurant = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
+const userRestaurantPoints_1 = require("../../models/schema/user/userRestaurantPoints");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
@@ -28,6 +29,12 @@ const rateRestaurant = async (req, res) => {
         .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId)).limit(1);
     if (!restaurant)
         throw new NotFound_1.NotFound("Restaurant not found");
+    // تأكد أن اليوزر عنده طلب واحد على الأقل من المطعم
+    const [userPoints] = await connection_1.db.select().from(userRestaurantPoints_1.userRestaurantPoints)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(userRestaurantPoints_1.userRestaurantPoints.userId, userId), (0, drizzle_orm_1.eq)(userRestaurantPoints_1.userRestaurantPoints.restaurantId, restaurantId))).limit(1);
+    if (!userPoints || userPoints.totalOrders < 1) {
+        throw new BadRequest_1.BadRequest("You must have at least one completed order from this restaurant to rate it");
+    }
     // شوف لو اليوزر عامل rating قبل كده
     const [existing] = await connection_1.db.select().from(schema_1.restaurantRatings)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantRatings.userId, userId), (0, drizzle_orm_1.eq)(schema_1.restaurantRatings.restaurantId, restaurantId))).limit(1);

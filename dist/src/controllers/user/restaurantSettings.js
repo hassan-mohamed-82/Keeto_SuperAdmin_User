@@ -13,6 +13,9 @@ const getRestaurantSettings = async (req, res) => {
         secondColor: schema_1.restaurantSettings.secondColor,
         firstTextColor: schema_1.restaurantSettings.firstTextColor,
         secondTextColor: schema_1.restaurantSettings.secondTextColor,
+        productView: schema_1.restaurantSettings.productView,
+        isTemporarilyClosed: schema_1.restaurantSettings.isTemporarilyClosed,
+        instantOrder: schema_1.restaurantSettings.instantOrder
     })
         .from(schema_1.restaurantSettings)
         .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))

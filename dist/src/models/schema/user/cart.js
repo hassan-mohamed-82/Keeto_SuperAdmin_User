@@ -7,6 +7,7 @@ const Users_1 = require("./Users");
 const food_1 = require("../admin/food");
 const restaurants_1 = require("../admin/restaurants");
 const branches_1 = require("../admin/branches");
+const offers_1 = require("../admin/offers");
 exports.cartItems = (0, mysql_core_1.mysqlTable)("cart_items", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     userId: (0, mysql_core_1.char)("user_id", { length: 36 })
@@ -31,6 +32,10 @@ exports.cartItems = (0, mysql_core_1.mysqlTable)("cart_items", {
     // Used by GET /cart to detect price drift and by checkout for final validation.
     branchId: (0, mysql_core_1.char)("branch_id", { length: 36 }).references(() => branches_1.branches.id),
     serviceModule: (0, mysql_core_1.mysqlEnum)("service_module", ["takeaway", "dine_in", "delivery"]),
+    // ─── Bundle Offer Reference ────────────────────────────────────────
+    // Nullable: only set when this cart item represents a bundle offer.
+    // When set, checkout uses offers.price directly (fixed price, no channel math).
+    offerId: (0, mysql_core_1.char)("offer_id", { length: 36 }).references(() => offers_1.offers.id, { onDelete: "set null" }),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

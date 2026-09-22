@@ -27,7 +27,12 @@ exports.coupons = (0, mysql_core_1.mysqlTable)("coupons", {
     usageLimit: (0, mysql_core_1.int)("usage_limit"),
     // How many times it has been used so far
     usedCount: (0, mysql_core_1.int)("used_count").default(0),
-    // How many times a single user can use it (null = unlimited)
+    // 'fixed'     → per-user usage is capped by perUserLimit
+    // 'unlimited' → a single user can use the coupon as many times as they want
+    userUsageType: (0, mysql_core_1.mysqlEnum)("user_usage_type", ["fixed", "unlimited"])
+        .notNull()
+        .default("fixed"),
+    // Only enforced when userUsageType = 'fixed' (ignored when 'unlimited')
     perUserLimit: (0, mysql_core_1.int)("per_user_limit").default(1),
     startDate: (0, mysql_core_1.timestamp)("start_date"),
     endDate: (0, mysql_core_1.timestamp)("end_date"),

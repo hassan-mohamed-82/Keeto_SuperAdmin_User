@@ -55,7 +55,7 @@ const getFinancialReport = async (req, res) => {
         serviceFee: schema_1.orders.serviceFee,
         appCommission: schema_1.orders.appCommission,
         totalAmount: schema_1.orders.totalAmount,
-        cancelReasonType: schema_1.selectReasons.type,
+        cancelReasonType: (0, drizzle_orm_1.sql) `COALESCE(${schema_1.orders.cancelReasonType}, ${schema_1.selectReasons.type})`,
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
@@ -203,7 +203,7 @@ const getDetailedRestaurantReport = async (req, res) => {
         serviceFee: schema_1.orders.serviceFee, // 👈 دي الرسوم الثابتة بتاعة كيتو (الـ 5 جنيه)
         appCommission: schema_1.orders.appCommission, // 👈 دي العمولة المئوية بتاعة كيتو
         totalAmount: schema_1.orders.totalAmount,
-        restaurantId: schema_1.restaurants.id,
+        restaurantId: schema_1.orders.restaurantId,
         restaurantName: schema_1.restaurants.name,
         city: {
             id: schema_1.cities.id,
@@ -212,7 +212,7 @@ const getDetailedRestaurantReport = async (req, res) => {
             nameFr: schema_1.cities.nameFr,
         },
         status: schema_1.orders.status,
-        cancelReasonType: schema_1.selectReasons.type,
+        cancelReasonType: (0, drizzle_orm_1.sql) `COALESCE(NULLIF(${schema_1.orders.cancelReasonType}, ''), ${schema_1.selectReasons.type})`,
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
@@ -229,7 +229,8 @@ const getDetailedRestaurantReport = async (req, res) => {
                 restaurantId: rId,
                 restaurantName: order.restaurantName || "Unknown",
                 city: order.city?.id ? order.city : null,
-                counts: { total: 0, cash: 0, digital: 0 },
+                counts: { total: 0, cash: 0, digital: 0, canceled: 0 },
+                canceledBreakdown: { user: 0, restaurant: 0 },
                 sales: { totalRevenue: 0, cashCollected: 0, digitalCollected: 0 },
                 platformDues: { totalCommission: 0, totalServiceFee: 0 }, // 👈 رجعنا السيرفس فيز للمنصة
                 settlementRaw: { cashCommission: 0, cashServiceFee: 0, digitalCommission: 0, digitalServiceFee: 0 }
@@ -237,7 +238,12 @@ const getDetailedRestaurantReport = async (req, res) => {
         }
         const entry = restaurantMap[rId];
         if (order.status === "cancelled") {
-            if (order.cancelReasonType === "restaurant") {
+            entry.counts.canceled += 1;
+            const cancelType = (order.cancelReasonType || "").toLowerCase().trim();
+            if (cancelType === "user")
+                entry.canceledBreakdown.user += 1;
+            else if (cancelType === "restaurant") {
+                entry.canceledBreakdown.restaurant += 1;
                 const commission = parseFloat(order.appCommission || "0");
                 entry.platformDues.totalCommission += commission;
                 grandTotalPlatformCommission += commission;
@@ -281,12 +287,19 @@ const getDetailedRestaurantReport = async (req, res) => {
             restaurantId: entry.restaurantId,
             restaurantName: entry.restaurantName,
             city: entry.city,
-            ordersCount: entry.counts,
+            ordersCount: {
+                total: entry.counts.total + entry.counts.canceled,
+                valid: entry.counts.total,
+                cash: entry.counts.cash,
+                digital: entry.counts.digital,
+                canceled: entry.counts.canceled,
+            },
             sales: {
                 totalRevenue: entry.sales.totalRevenue.toFixed(2),
                 cashInRestaurantDrawer: entry.sales.cashCollected.toFixed(2),
                 digitalInPlatformBank: entry.sales.digitalCollected.toFixed(2),
             },
+            canceledBreakdown: entry.canceledBreakdown,
             platformDues: {
                 // هنجمع العمولة المئوية + الرسوم الثابتة عشان تظهر كلها في عمود App Commission في الفرونت إند
                 totalAppCommission: (entry.platformDues.totalCommission + entry.platformDues.totalServiceFee).toFixed(2),
@@ -362,7 +375,7 @@ const getSingleRestaurantReport = async (req, res) => {
         appCommission: schema_1.orders.appCommission, // 👈 عمولة كيتو المئوية
         totalAmount: schema_1.orders.totalAmount,
         status: schema_1.orders.status,
-        cancelReasonType: schema_1.selectReasons.type,
+        cancelReasonType: (0, drizzle_orm_1.sql) `COALESCE(${schema_1.orders.cancelReasonType}, ${schema_1.selectReasons.type})`,
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
@@ -639,7 +652,7 @@ const generateAndSaveInvoice = async (req, res) => {
         serviceFee: schema_1.orders.serviceFee,
         paymentMethodName: schema_1.paymentMethods.name, // 👈 الربط السليم
         status: schema_1.orders.status,
-        cancelReasonType: schema_1.selectReasons.type,
+        cancelReasonType: (0, drizzle_orm_1.sql) `COALESCE(${schema_1.orders.cancelReasonType}, ${schema_1.selectReasons.type})`,
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
@@ -745,16 +758,34 @@ const getRestaurantOrdersReport = async (req, res) => {
         .leftJoin(schema_1.sales, (0, drizzle_orm_1.eq)(schema_1.restaurants.salesId, schema_1.sales.id))
         .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
         .where((0, drizzle_orm_1.and)(...restConditions));
-    const allRestaurants = allRestaurantsRaw.map(r => ({
-        ...r.restaurant,
-        salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null,
-        city: r.city?.id ? {
-            id: r.city.id,
-            name: r.city.name,
-            nameAr: r.city.nameAr,
-            nameFr: r.city.nameFr,
-        } : null,
-    }));
+    const allCuisines = await connection_1.db.select().from(schema_1.cuisines);
+    const cuisineMap = new Map();
+    allCuisines.forEach(c => cuisineMap.set(c.id, c));
+    const allRestaurants = allRestaurantsRaw.map(r => {
+        let cuisinesData = [];
+        try {
+            const cuisineIds = typeof r.restaurant.cuisineId === "string"
+                ? JSON.parse(r.restaurant.cuisineId)
+                : (r.restaurant.cuisineId || []);
+            if (Array.isArray(cuisineIds)) {
+                cuisinesData = cuisineIds.map((id) => cuisineMap.get(id) || null).filter(Boolean);
+            }
+        }
+        catch (e) {
+            console.error("Error parsing cuisines JSON", e);
+        }
+        return {
+            ...r.restaurant,
+            cuisines: cuisinesData,
+            salesObj: r.sales ? { id: r.sales.id, name: r.sales.name } : null,
+            city: r.city?.id ? {
+                id: r.city.id,
+                name: r.city.name,
+                nameAr: r.city.nameAr,
+                nameFr: r.city.nameFr,
+            } : null,
+        };
+    });
     let totalRestaurants = allRestaurants.length;
     let restaurantsByType = {
         "mega": 0,
@@ -782,12 +813,15 @@ const getRestaurantOrdersReport = async (req, res) => {
     }
     const ordersData = await connection_1.db
         .select({
+        orderId: schema_1.orders.id,
         restaurantId: schema_1.orders.restaurantId,
+        restaurantName: schema_1.restaurants.name,
         appCommission: schema_1.orders.appCommission,
         status: schema_1.orders.status,
-        cancelReasonType: schema_1.selectReasons.type,
+        cancelReasonType: (0, drizzle_orm_1.sql) `COALESCE(${schema_1.orders.cancelReasonType}, ${schema_1.selectReasons.type})`,
     })
         .from(schema_1.orders)
+        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
         .where(allOrderConditions.length > 0 ? (0, drizzle_orm_1.and)(...allOrderConditions) : undefined);
     let totalOrders = ordersData.length;
@@ -810,7 +844,7 @@ const getRestaurantOrdersReport = async (req, res) => {
             totalCanceledOrders += 1;
             if (o.cancelReasonType === "user")
                 totalCanceledByUser += 1;
-            if (o.cancelReasonType === "restaurant")
+            else if (o.cancelReasonType === "restaurant")
                 totalCanceledByRestaurant += 1;
         }
         else {
@@ -828,7 +862,7 @@ const getRestaurantOrdersReport = async (req, res) => {
                 ordersStatsByRestaurant[o.restaurantId].canceledCount += 1;
                 if (o.cancelReasonType === "user")
                     ordersStatsByRestaurant[o.restaurantId].canceledByUser += 1;
-                if (o.cancelReasonType === "restaurant")
+                else if (o.cancelReasonType === "restaurant")
                     ordersStatsByRestaurant[o.restaurantId].canceledByRestaurant += 1;
             }
             else {
@@ -844,14 +878,14 @@ const getRestaurantOrdersReport = async (req, res) => {
     if (restaurantId) {
         filteredRestaurants = filteredRestaurants.filter((r) => r.id === restaurantId);
     }
-    // 4. Build with/without orders lists from the full active list
+    // 4. Build with/without orders lists from the full active list (including canceled orders)
     const withOrdersList = allRestaurants.filter((r) => {
         const stats = ordersStatsByRestaurant[r.id];
-        return stats && stats.validCount > 0;
+        return stats && stats.count > 0;
     });
     const withoutOrdersList = allRestaurants.filter((r) => {
         const stats = ordersStatsByRestaurant[r.id];
-        return !stats || stats.validCount === 0;
+        return !stats || stats.count === 0;
     });
     // ─── Signup Users ────────────────────────────────────────────────────────
     // 1. Total number of users who signed up
@@ -876,9 +910,6 @@ const getRestaurantOrdersReport = async (req, res) => {
         const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
         // If a specific restaurantId is requested, return full restaurant details; otherwise return slim info
         const restaurantInfo = r;
-        // const restaurantInfo = restaurantId
-        //     ? r
-        //     : { id: r.id, name: r.name, nameAr: r.nameAr, type: r.type, status: r.status };
         return {
             restaurantDetails: restaurantInfo,
             ordersCount: stats.count,
@@ -886,6 +917,10 @@ const getRestaurantOrdersReport = async (req, res) => {
             canceledOrders: stats.canceledCount,
             canceledByUser: stats.canceledByUser,
             canceledByRestaurant: stats.canceledByRestaurant,
+            canceledBreakdown: {
+                user: stats.canceledByUser,
+                restaurant: stats.canceledByRestaurant,
+            },
             total_commission: stats.commission,
             signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
         };
@@ -919,6 +954,15 @@ const getRestaurantOrdersReport = async (req, res) => {
     else {
         restaurantsResult = restaurantDetails; // already has signupUsersCount
     }
+    // Build flat list of all canceled orders with restaurant name and cancel type
+    const canceledOrdersList = ordersData
+        .filter((o) => o.status === "cancelled")
+        .map((o) => ({
+        orderId: o.orderId,
+        restaurantId: o.restaurantId,
+        restaurantName: o.restaurantName || "Unknown",
+        cancelType: o.cancelReasonType || null,
+    }));
     const responseData = {
         summary: {
             totalOrders,
@@ -926,7 +970,7 @@ const getRestaurantOrdersReport = async (req, res) => {
             canceledOrders: totalCanceledOrders,
             canceledBreakdown: {
                 user: totalCanceledByUser,
-                restaurant: totalCanceledByRestaurant
+                restaurant: totalCanceledByRestaurant,
             },
             totalRestaurants,
             restaurantsWithOrders: withOrdersList.length,
@@ -936,6 +980,7 @@ const getRestaurantOrdersReport = async (req, res) => {
             totalSignupUsers,
         },
         restaurants: restaurantsResult,
+        canceledOrders: canceledOrdersList,
     };
     return (0, response_1.SuccessResponse)(res, {
         message: "Restaurant orders report generated successfully",
@@ -1024,10 +1069,12 @@ const getSalesReport = async (req, res) => {
         if (currentRest) {
             const isRestActive = currentRest.status === "active";
             const restType = currentRest.type || "C";
+            const typeKey = restType.toLowerCase();
+            const earnedPoints = RESTAURANT_TYPE_POINTS[typeKey] ?? 0;
             // Accumulate points from filtered restaurants when date range is provided
             if (startDate || endDate) {
-                const typeKey = restType.toLowerCase();
-                const earnedPoints = RESTAURANT_TYPE_POINTS[typeKey] ?? 0;
+                //const typeKey = restType.toLowerCase();
+                //const earnedPoints = RESTAURANT_TYPE_POINTS[typeKey] ?? 0;
                 salesGroup.points += earnedPoints;
             }
             if (isRestActive) {
@@ -1040,6 +1087,8 @@ const getSalesReport = async (req, res) => {
             if (restaurantId) {
                 salesGroup.restaurants.push({
                     ...currentRest,
+                    type: restType,
+                    points: earnedPoints,
                     city: row.city?.id ? row.city : null,
                 });
             }
@@ -1048,6 +1097,9 @@ const getSalesReport = async (req, res) => {
                     id: currentRest.id,
                     name: currentRest.name,
                     nameAr: currentRest.nameAr,
+                    type: restType,
+                    points: earnedPoints,
+                    status: currentRest.status,
                     city: row.city?.id ? row.city : null,
                     createdAt: currentRest.createdAt
                 });
@@ -1073,6 +1125,8 @@ const getSalesReport = async (req, res) => {
                     id: currentRest.id,
                     name: currentRest.name,
                     nameAr: currentRest.nameAr,
+                    type: restType,
+                    points: earnedPoints,
                     status: currentRest.status,
                     city: row.city?.id ? row.city : null,
                     createdAt: currentRest.createdAt

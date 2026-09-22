@@ -4,6 +4,7 @@ exports.foodRelations = exports.food = void 0;
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 const schema_1 = require("../../schema");
+const noteGroup_1 = require("./noteGroup");
 exports.food = (0, mysql_core_1.mysqlTable)("food", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     name: (0, mysql_core_1.varchar)("name", { length: 255 }).notNull(),
@@ -24,17 +25,24 @@ exports.food = (0, mysql_core_1.mysqlTable)("food", {
     allergen_ingredients: (0, mysql_core_1.text)("allergen_ingredients"),
     is_Halal: (0, mysql_core_1.boolean)("is_Halal").default(false),
     addonsId: (0, mysql_core_1.json)("addons_ids").$type().default([]),
+    group_note_id: (0, mysql_core_1.char)("group_note_id", { length: 36 })
+        .references(() => noteGroup_1.noteGroups.id, { onDelete: "set null" }),
     startTime: (0, mysql_core_1.varchar)("start_time", { length: 255 }).notNull(),
     endTime: (0, mysql_core_1.varchar)("end_time", { length: 255 }).notNull(),
     search_tags: (0, mysql_core_1.varchar)("search_tags", { length: 255 }),
     price: (0, mysql_core_1.decimal)("price", { precision: 10, scale: 2 }).notNull(),
     discount_type: (0, mysql_core_1.mysqlEnum)("discount_type", ["percentage", "amount"]).default("percentage"),
     discount_value: (0, mysql_core_1.decimal)("discount_value", { precision: 10, scale: 2 }),
+    offer_price: (0, mysql_core_1.decimal)("offer_price", { precision: 10, scale: 2 }),
+    offer_days: (0, mysql_core_1.json)("offer_days").$type(),
+    offer_start: (0, mysql_core_1.time)("offer_start"),
+    offer_end: (0, mysql_core_1.time)("offer_end"),
     Maximum_Purchase: (0, mysql_core_1.int)("Maximum_Purchase"),
     stock_type: (0, mysql_core_1.mysqlEnum)("stock_type", ["limited", "unlimited", "daily"]).default("unlimited"),
     isOutOfStock: (0, mysql_core_1.boolean)("is_out_of_stock").default(false),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     points: (0, mysql_core_1.int)("points").default(0),
+    deletedAt: (0, mysql_core_1.timestamp)("deleted_at"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });
@@ -44,4 +52,8 @@ exports.foodRelations = (0, drizzle_orm_1.relations)(exports.food, ({ one, many 
         references: [schema_1.restaurants.id],
     }),
     variations: many(schema_1.foodVariations),
+    noteGroup: one(noteGroup_1.noteGroups, {
+        fields: [exports.food.group_note_id],
+        references: [noteGroup_1.noteGroups.id],
+    }),
 }));

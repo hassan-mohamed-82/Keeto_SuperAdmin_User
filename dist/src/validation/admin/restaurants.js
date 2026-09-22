@@ -21,6 +21,7 @@ exports.createRestaurantSchema = zod_1.z.object({
     ownerFirstName: zod_1.z.string().min(1, "Owner first name is required").max(255),
     ownerLastName: zod_1.z.string().min(1, "Owner last name is required").max(255),
     ownerPhone: zod_1.z.string().min(1, "Owner phone is required").max(50),
+    callcenterphone: zod_1.z.string().max(50).optional(),
     tags: zod_1.z.array(zod_1.z.string()).optional(),
     taxNumber: zod_1.z.string().max(255).optional(),
     taxExpireDate: zod_1.z.coerce.date().optional(),

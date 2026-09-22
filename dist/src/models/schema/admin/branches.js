@@ -19,6 +19,8 @@ exports.branches = (0, mysql_core_1.mysqlTable)("branches", {
     deliveryRadiusKm: (0, mysql_core_1.decimal)("delivery_radius_km", { precision: 6, scale: 2 }).default("0"),
     lat: (0, mysql_core_1.varchar)("lat", { length: 255 }),
     lng: (0, mysql_core_1.varchar)("lng", { length: 255 }),
+    cash_status: (0, mysql_core_1.boolean)("cash_status").default(true),
+    visa_status: (0, mysql_core_1.boolean)("visa_status").default(true),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });
@@ -26,8 +28,6 @@ exports.branchMenuItems = (0, mysql_core_1.mysqlTable)("branch_menu_items", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     branchId: (0, mysql_core_1.char)("branch_id", { length: 36 }).references(() => exports.branches.id).notNull(),
     foodId: (0, mysql_core_1.char)("food_id", { length: 36 }).references(() => schema_1.food.id).notNull(),
-    // السعر اختياري: إذا كان NULL يعتمد basePrice من جدول food
-    price: (0, mysql_core_1.decimal)("price", { precision: 10, scale: 2 }),
     stockType: (0, mysql_core_1.mysqlEnum)("stock_type", ["limited", "unlimited"]).default("unlimited"),
     stockQty: (0, mysql_core_1.int)("stock_qty").default(0),
     // حالة الأكلة يدويًا في هذا الفرع (نشط أو موقوف بقرار مدير الفرع)

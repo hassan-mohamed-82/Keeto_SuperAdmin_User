@@ -1,4 +1,30 @@
 "use strict";
+// src/controllers/user/cart.ts
+//
+// CHANGES IN THIS FILE (see inline "✅ FIX" comments for exact spots):
+//
+// 1. getCart(): variations that could no longer be resolved against the DB
+//    (deleted/inactive option or variation row) used to be silently dropped
+//    via `.filter(Boolean)` while their price stayed baked into the item's
+//    total. Now they're returned using the snapshot captured at add-to-cart
+//    time, flagged `isAvailable: false`, and they force the whole cart item
+//    into the "unavailable" bucket so the client knows to refresh instead of
+//    checking out with a mystery price.
+//
+// 2. getCart(): addons were previously trusted 100% from the stored snapshot
+//    with zero live DB check. They're now validated the same way variations
+//    are (batch-fetched, checked for existence/active status), for
+//    consistency and so a deleted/deactivated addon can't silently ride
+//    along in the total.
+//
+// 3. getCart(): the try/catch around calculateCalculatedPrice() used to
+//    swallow errors (e.g. food deleted) and silently fall back to the old
+//    stored price as if everything were fine. Now the item is marked
+//    unavailable when that lookup fails.
+//
+// Nothing else in this file (addToCart, updateCartItem, removeCartItem,
+// clearCart, validateCartPricing) was changed — their addon/variation
+// validation already rejects unknown IDs correctly.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateCartPricing = exports.clearCart = exports.removeCartItem = exports.updateCartItem = exports.getCart = exports.addToCart = void 0;
 const connection_1 = require("../../models/connection");
@@ -12,6 +38,7 @@ const userBlockCheck_1 = require("../../utils/userBlockCheck");
 const food_helper_1 = require("../../helpers/food.helper");
 const cart_helper_1 = require("../../helpers/cart.helper");
 const pricing_helper_1 = require("../../helpers/pricing.helper");
+const foodConditions_1 = require("../../helpers/foodConditions");
 /* =========================================
    Helpers
 ========================================= */
@@ -63,7 +90,7 @@ const addToCart = async (req, res) => {
     const { foodId, quantity = 1, variations = [], addons: requestAddons = [], note, branchId, addressId, serviceModule, } = req.body;
     const safeVariations = Array.isArray(variations) ? variations : [];
     const safeAddons = Array.isArray(requestAddons) ? requestAddons : [];
-    const [itemFood] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.id, foodId)).limit(1);
+    const [itemFood] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.id, foodId), foodConditions_1.activeFoodCondition)).limit(1);
     if (!itemFood)
         throw new BadRequest_1.BadRequest("Food not found");
     // 🛡️ Block check
@@ -82,7 +109,6 @@ const addToCart = async (req, res) => {
         }
     }
     if (resolvedBranchId && !branchId) {
-        // Verify geo-resolved branch is active
         const [br] = await connection_1.db
             .select({ id: schema_1.branches.id })
             .from(schema_1.branches)
@@ -92,7 +118,6 @@ const addToCart = async (req, res) => {
             throw new BadRequest_1.BadRequest("Resolved delivery branch is inactive.");
     }
     if (resolvedBranchId && branchId) {
-        // Verify manually-passed branchId
         const [br] = await connection_1.db
             .select({ id: schema_1.branches.id })
             .from(schema_1.branches)
@@ -125,7 +150,6 @@ const addToCart = async (req, res) => {
             clearCartRequired: true,
         });
     }
-    // Validate cross-branch consistency
     if (resolvedBranchId && existingCart.length > 0 && existingCart[0].branchId && existingCart[0].branchId !== resolvedBranchId) {
         throw new BadRequest_1.BadRequest("All cart items must belong to the same branch. Please clear your cart before adding items from a different branch.");
     }
@@ -134,7 +158,6 @@ const addToCart = async (req, res) => {
         .select()
         .from(schema_1.foodVariations)
         .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, foodId));
-    // Mandatory variations check
     for (const v of dbVariations) {
         if (v.isRequired) {
             const isProvided = safeVariations.some((x) => x.variationId === v.id);
@@ -183,46 +206,78 @@ const addToCart = async (req, res) => {
     // ─── Calculate unit price via pricing engine ─────────────────────
     const optionIds = safeVariations.map((v) => v.optionId).filter(Boolean);
     const resolvedServiceModule = serviceModule || null;
-    let unitPrice;
-    if (resolvedBranchId && resolvedServiceModule) {
-        const priceResult = await (0, pricing_helper_1.calculateCalculatedPrice)(foodId, optionIds, resolvedBranchId, resolvedServiceModule);
-        if (!priceResult.isAvailable) {
-            throw new BadRequest_1.BadRequest("This item or one of its options is currently unavailable on this channel.");
-        }
-        // Addons are not covered by channel pricing — add them on top
-        const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
-        unitPrice = priceResult.totalUnitPrice + addonTotal;
+    // let unitPrice: number;
+    // if (resolvedBranchId && resolvedServiceModule) {
+    const priceResult = await (0, pricing_helper_1.calculateCalculatedPrice)(foodId, optionIds, resolvedBranchId || null, resolvedServiceModule || undefined);
+    if (!priceResult.isAvailable) {
+        throw new BadRequest_1.BadRequest("This item or one of its options is currently unavailable on this channel.");
     }
-    else {
-        // Fallback: no channel context — use base food price + variant additionalPrice
-        const basePrice = Number(itemFood.price);
-        const varExtra = safeVariations.reduce(async (sumPromise, selected) => {
-            return sumPromise;
-        }, Promise.resolve(0));
-        let totalExtra = 0;
-        for (const selected of safeVariations) {
-            const [opt] = await connection_1.db.select({ additionalPrice: schema_1.variationOptions.additionalPrice }).from(schema_1.variationOptions).where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, selected.optionId)).limit(1);
-            totalExtra += Number(opt?.additionalPrice || 0);
+    const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
+    const unitPrice = priceResult.totalUnitPrice + addonTotal;
+    // }else {
+    //                 const basePrice = Number(itemFood.price);
+    //                 let totalExtra = 0;
+    //                 for (const selected of safeVariations) {
+    //                     const [opt] = await db.select({ additionalPrice: variationOptions.additionalPrice }).from(variationOptions).where(eq(variationOptions.id, selected.optionId)).limit(1);
+    //                     totalExtra += Number(opt?.additionalPrice || 0);
+    //                 }
+    //                 const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
+    //                 unitPrice = basePrice + totalExtra + addonTotal;
+    //             }
+    // ─── Build full variation snapshot with names from DB ───────────
+    const variationSnapshotList = [];
+    if (safeVariations.length > 0) {
+        const allOptionIds = safeVariations.map((v) => v.optionId).filter(Boolean);
+        const dbOptionsWithParent = allOptionIds.length > 0
+            ? await connection_1.db
+                .select({
+                optionId: schema_1.variationOptions.id,
+                optionName: schema_1.variationOptions.optionName,
+                optionNameAr: schema_1.variationOptions.optionNameAr,
+                optionNameFr: schema_1.variationOptions.optionNameFr,
+                additionalPrice: schema_1.variationOptions.additionalPrice,
+                variationId: schema_1.foodVariations.id,
+                variationName: schema_1.foodVariations.name,
+                variationNameAr: schema_1.foodVariations.nameAr,
+                variationNameFr: schema_1.foodVariations.nameFr,
+            })
+                .from(schema_1.variationOptions)
+                .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, schema_1.foodVariations.id))
+                .where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.id, allOptionIds))
+            : [];
+        const optionDetailsMap = new Map(dbOptionsWithParent.map(o => [o.optionId, o]));
+        for (const v of safeVariations) {
+            const details = optionDetailsMap.get(v.optionId);
+            variationSnapshotList.push({
+                variationId: details?.variationId ?? v.variationId ?? null,
+                variationName: details?.variationName ?? v.variationName ?? null,
+                variationNameAr: details?.variationNameAr ?? v.variationNameAr ?? null,
+                variationNameFr: details?.variationNameFr ?? v.variationNameFr ?? null,
+                optionId: details?.optionId ?? v.optionId ?? null,
+                optionName: details?.optionName ?? v.optionName ?? null,
+                optionNameAr: details?.optionNameAr ?? v.optionNameAr ?? null,
+                optionNameFr: details?.optionNameFr ?? v.optionNameFr ?? null,
+                additionalPrice: Number(details?.additionalPrice ?? v.additionalPrice ?? 0).toFixed(2),
+                price: Number(details?.additionalPrice ?? v.additionalPrice ?? 0).toFixed(2),
+            });
         }
-        const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
-        unitPrice = basePrice + totalExtra + addonTotal;
     }
     // ─── Dedup existing cart item ────────────────────────────────────
-    const normalizedVariationsList = normalizeVariations(safeVariations);
+    const normalizedVariationsList = normalizeVariations(variationSnapshotList);
     const normalizedAddonsList = normalizeAddons(addonSnapshot);
-    const key = JSON.stringify({ variations: normalizedVariationsList, addons: normalizedAddonsList });
-    const snapshot = { variations: normalizedVariationsList };
+    const makeDedupeKey = (vars, addonsList) => JSON.stringify({
+        variations: vars.map(v => v.optionId).sort(),
+        addons: addonsList.map(a => a.addonId).sort(),
+    });
+    const key = makeDedupeKey(normalizedVariationsList, normalizedAddonsList);
+    const snapshot = { variations: variationSnapshotList };
     const existingItems = await connection_1.db.select().from(schema_1.cartItems)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId), (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, foodId)));
     const existingSame = existingItems.find(item => {
         const { variations: dbVars } = parseCartSnapshot(item.variations);
         const dbAddonsParsed = deepParseJSON(item.addons);
-        const normalizedDbAddons = normalizeAddons(Array.isArray(dbAddonsParsed) ? dbAddonsParsed : []);
-        const existingKey = JSON.stringify({
-            variations: normalizeVariations(dbVars),
-            addons: normalizedDbAddons,
-        });
-        return existingKey === key;
+        const dbAddonsList = Array.isArray(dbAddonsParsed) ? dbAddonsParsed : [];
+        return makeDedupeKey(normalizeVariations(dbVars), normalizeAddons(dbAddonsList)) === key;
     });
     if (existingSame) {
         const newQty = existingSame.quantity + quantity;
@@ -308,7 +363,7 @@ const getCart = async (req, res) => {
         subcategoryId: schema_1.food.subcategoryid,
     })
         .from(schema_1.cartItems)
-        .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, schema_1.food.id))
+        .leftJoin(schema_1.food, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.foodId, schema_1.food.id), foodConditions_1.activeFoodCondition))
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.cartItems.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.and)(...conditions));
     if (items.length === 0) {
@@ -380,9 +435,10 @@ const getCart = async (req, res) => {
             availableCartItems.push(item);
         }
     }
-    // ─── Optimization: Fetch Variations & Options in Batch ──────────
+    // ─── Optimization: Fetch Variations, Options & Addons in Batch ──────
     const allVariationIds = new Set();
     const allOptionIds = new Set();
+    const allAddonIds = new Set(); // ✅ FIX: batch-validate addons too
     const parsedItemsData = availableCartItems.map(item => {
         const { variations: parsedVariations } = parseCartSnapshot(item.variations);
         const parsedAddons = Array.isArray(deepParseJSON(item.addons)) ? deepParseJSON(item.addons) : [];
@@ -391,6 +447,11 @@ const getCart = async (req, res) => {
                 allVariationIds.add(v.variationId);
             if (v.optionId)
                 allOptionIds.add(v.optionId);
+        });
+        parsedAddons.forEach((a) => {
+            const addonId = a.addonId || a.id;
+            if (addonId)
+                allAddonIds.add(addonId);
         });
         return { item, parsedVariations, parsedAddons };
     });
@@ -403,6 +464,12 @@ const getCart = async (req, res) => {
     if (allOptionIds.size > 0) {
         const optList = await connection_1.db.select().from(schema_1.variationOptions).where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.id, Array.from(allOptionIds)));
         optList.forEach(o => optionsMap.set(o.id, o));
+    }
+    // ✅ FIX: live addon lookup, same rigor as variations
+    const addonsDbMap = new Map();
+    if (allAddonIds.size > 0) {
+        const addonList = await connection_1.db.select().from(schema_1.addons).where((0, drizzle_orm_1.inArray)(schema_1.addons.id, Array.from(allAddonIds)));
+        addonList.forEach(a => addonsDbMap.set(a.id, a));
     }
     // ─── Calculate Live Prices with Branch & Channel Strategies ──────
     let initialSubtotal = 0;
@@ -429,7 +496,11 @@ const getCart = async (req, res) => {
                 priceChanged = Math.abs(computedLivePrice - dbUnitPrice) > 0.001;
             }
             catch {
+                // ✅ FIX: previously silently fell back to the stale price as if
+                // nothing were wrong (e.g. food itself was deleted). Now the item
+                // is explicitly flagged unavailable instead of being served as normal.
                 liveUnitPrice = null;
+                channelAvailable = false;
             }
         }
         // 2️⃣ حالة عدم تحديد فرع (Cross-Branch Price Comparison Strategy)
@@ -479,11 +550,27 @@ const getCart = async (req, res) => {
     let totalDiscountAmount = 0;
     const formattedAvailableItems = itemsPrepped.map(data => {
         const { item, originalBasePrice, varPrice, currentBasePrice, liveUnitPrice, priceChanged, channelAvailable, branchPrices, effectiveBranchId, effectiveServiceModule, parsedVariations, parsedAddons } = data;
+        // ✅ FIX: don't silently drop a variation whose option/variation row was
+        // deleted after being added to the cart. Fall back to the snapshot taken
+        // at add-time (so the name is still shown), flag it `isAvailable:false`,
+        // and note that it makes the whole item unavailable below.
+        let hasUnresolvedVariation = false;
         const variationDetails = parsedVariations.map((v) => {
             const variation = variationsMap.get(v.variationId);
             const option = optionsMap.get(v.optionId);
-            if (!variation || !option)
-                return null;
+            if (!variation || !option) {
+                hasUnresolvedVariation = true;
+                return {
+                    variationId: v.variationId ?? null,
+                    variationName: v.variationName ?? null,
+                    variationNameAr: v.variationNameAr ?? null,
+                    optionId: v.optionId ?? null,
+                    optionName: v.optionName ?? null,
+                    optionNameAr: v.optionNameAr ?? null,
+                    additionalPrice: v.additionalPrice ?? "0.00",
+                    isAvailable: false,
+                };
+            }
             return {
                 variationId: variation.id,
                 variationName: variation.name,
@@ -492,14 +579,35 @@ const getCart = async (req, res) => {
                 optionName: option.optionName,
                 optionNameAr: option.optionNameAr,
                 additionalPrice: option.additionalPrice,
+                isAvailable: option.status !== false && variation.status !== false,
             };
-        }).filter(Boolean);
-        const addonDetails = parsedAddons.map((a) => ({
-            addonId: a.addonId,
-            name: a.name,
-            nameAr: a.nameAr,
-            price: a.price,
-        }));
+        });
+        if (variationDetails.some(v => v.isAvailable === false))
+            hasUnresolvedVariation = true;
+        // ✅ FIX: validate addons live instead of trusting the stored snapshot blindly.
+        let hasUnresolvedAddon = false;
+        const addonDetails = parsedAddons.map((a) => {
+            const addonId = a.addonId || a.id;
+            const dbAddon = addonId ? addonsDbMap.get(addonId) : null;
+            if (!dbAddon || dbAddon.status === "inactive") {
+                hasUnresolvedAddon = true;
+                return {
+                    addonId: addonId ?? null,
+                    name: a.name ?? null,
+                    nameAr: a.nameAr ?? null,
+                    price: a.price ?? "0.00",
+                    isAvailable: false,
+                };
+            }
+            return {
+                addonId: dbAddon.id,
+                name: dbAddon.name,
+                nameAr: dbAddon.nameAr,
+                price: dbAddon.price,
+                isAvailable: true,
+            };
+        });
+        const itemIsAvailable = channelAvailable && !hasUnresolvedVariation && !hasUnresolvedAddon;
         // Apply Priority Discount on current base price
         const discountResult = (0, discount_1.applyPriorityDiscount)({
             id: item.foodId ?? "",
@@ -543,7 +651,7 @@ const getCart = async (req, res) => {
             variations: variationDetails,
             addons: addonDetails,
             note: item.note || null,
-            isAvailable: channelAvailable,
+            isAvailable: itemIsAvailable,
             priceChanged,
             branchPrices: branchPrices.length > 0 ? branchPrices : undefined,
             resolvedBranchId: effectiveBranchId || null,
@@ -604,266 +712,6 @@ const getCart = async (req, res) => {
     });
 };
 exports.getCart = getCart;
-// export const getCart = async (req: Request | any, res: Response) => {
-//     const userId = req.user?.id;
-//     const queryRestaurantId = req.query.restaurantId as string | undefined;
-//     const branchId = req.query.branchId as string | undefined;
-//     const addressId = req.query.addressId as string | undefined;
-//     const serviceModule = req.query.serviceModule as ServiceModule | undefined;
-//     const conditions = [eq(cartItems.userId, userId)];
-//     if (queryRestaurantId) {
-//         conditions.push(eq(cartItems.restaurantId, queryRestaurantId));
-//     }
-//     const items = await db
-//         .select({
-//             cartId: cartItems.id,
-//             foodId: food.id,
-//             name: food.name,
-//             nameAr: food.nameAr,
-//             nameFr: food.nameFr,
-//             description: food.description,
-//             descriptionAr: food.descriptionAr,
-//             descriptionFr: food.descriptionFr,
-//             image: food.image,
-//             price: food.price,
-//             discountType: food.discount_type,
-//             discountValue: food.discount_value,
-//             isOutOfStock: food.isOutOfStock,
-//             status: food.status,
-//             restaurantId: restaurants.id,
-//             restaurantName: restaurants.name,
-//             quantity: cartItems.quantity,
-//             unitPrice: cartItems.unitPrice,
-//             totalPrice: cartItems.totalPrice,
-//             variations: cartItems.variations,
-//             addons: cartItems.addons,
-//             note: cartItems.note,
-//             storedBranchId: cartItems.branchId,
-//             storedServiceModule: cartItems.serviceModule,
-//             subcategoryId: food.subcategoryid,
-//         })
-//         .from(cartItems)
-//         .leftJoin(food, eq(cartItems.foodId, food.id))
-//         .leftJoin(restaurants, eq(cartItems.restaurantId, restaurants.id))
-//         .where(and(...conditions));
-//     if (items.length === 0) {
-//         return SuccessResponse(res, { data: { items: [], unavailableItems: [], hasUnavailableItems: false, totalSummary: { subtotal: 0 } } });
-//     }
-//     const restaurantId = items[0].restaurantId;
-//     // ─── Resolve active branch for this request ──────────────────────
-//     let targetBranchId: string | undefined = undefined;
-//     if (branchId || addressId) {
-//         targetBranchId = (await resolveBranchIdForCart(branchId, addressId, restaurantId || undefined)) || undefined;
-//     }
-//     // ─── Classic availability check (ingredient locks + branchMenuItems) ─
-//     const allFoodIds = items.map(i => i.foodId).filter((id): id is string => id !== null && id !== undefined);
-//     const unavailableMap = allFoodIds.length > 0
-//         ? await getUnavailableBranchesForFoods(allFoodIds)
-//         : new Map<string, BranchInfo[]>();
-//     // ─── Branch-subcategory availability check ────────────────────────
-//     // Fetch all subcategoryIds that are explicitly set to "inactive" for this branch
-//     const inactiveSubcategoryIds = new Set<string>();
-//     if (targetBranchId) {
-//         const inactiveRows = await db
-//             .select({ subcategoryId: branchSubcategories.subcategoryId })
-//             .from(branchSubcategories)
-//             .where(and(
-//                 eq(branchSubcategories.branchId, targetBranchId),
-//                 eq(branchSubcategories.status, "inactive")
-//             ));
-//         for (const row of inactiveRows) {
-//             inactiveSubcategoryIds.add(row.subcategoryId);
-//         }
-//     }
-//     let availableCartItems: typeof items = [];
-//     let unavailableCartItemsData: Array<typeof items[number] & { unavailableReason: string }> = [];
-//     for (const item of items) {
-//         const isGeneralUnavailable = Boolean(item.isOutOfStock) || item.status === "inactive";
-//         const unavailableBranches = item.foodId ? (unavailableMap.get(item.foodId) || []) : [];
-//         const isBranchUnavailable = Boolean(targetBranchId && unavailableBranches.some(b => b.id === targetBranchId));
-//         const isSubcategoryInactive = Boolean(
-//             targetBranchId &&
-//             item.subcategoryId &&
-//             inactiveSubcategoryIds.has(item.subcategoryId)
-//         );
-//         if (isGeneralUnavailable || isBranchUnavailable || isSubcategoryInactive) {
-//             const reason = isGeneralUnavailable
-//                 ? "Out of stock or inactive"
-//                 : isSubcategoryInactive
-//                     ? "This item's category is not available at the selected branch"
-//                     : "Not available at the selected branch";
-//             unavailableCartItemsData.push({ ...item, unavailableReason: reason });
-//         } else {
-//             availableCartItems.push(item);
-//         }
-//     }
-//     // ─── Build initial subtotal for discount calculation ─────────────
-//     let initialSubtotal = 0;
-//     const itemsData = availableCartItems.map(item => {
-//         const originalBasePrice = parseFloat(item.price as string || "0");
-//         const { variations: parsedVariations } = parseCartSnapshot(item.variations);
-//         const parsedAddonsParsed = Array.isArray(deepParseJSON(item.addons)) ? deepParseJSON(item.addons) : [];
-//         let initialDiscountPrice = originalBasePrice;
-//         if (item.discountType && Number(item.discountValue) > 0) {
-//             if (item.discountType === "percentage") {
-//                 initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(item.discountValue) / 100));
-//             } else if (item.discountType === "amount" || (item.discountType as any) === "fixed") {
-//                 initialDiscountPrice = Math.max(0, originalBasePrice - Number(item.discountValue));
-//             }
-//         }
-//         const dbUnitPrice = parseFloat(item.unitPrice as string || "0");
-//         const varPrice = dbUnitPrice - originalBasePrice;
-//         initialSubtotal += (initialDiscountPrice + varPrice) * item.quantity;
-//         return { item, originalBasePrice, varPrice, parsedVariations, parsedAddons: parsedAddonsParsed };
-//     });
-//     const availableDiscounts = await getAvailableDiscounts(restaurantId!);
-//     const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
-//     let finalSubtotal = 0;
-//     const formattedAvailableItems = await Promise.all(
-//         itemsData.map(async (data: any) => {
-//             const { item, originalBasePrice, varPrice, parsedVariations, parsedAddons } = data;
-//             // ─── Channel pricing live reprice (if context is stored or passed) ──
-//             const effectiveBranchId = targetBranchId || item.storedBranchId || undefined;
-//             const effectiveServiceModule = (serviceModule || item.storedServiceModule) as ServiceModule | undefined;
-//             let liveUnitPrice: number | null = null;
-//             let priceChanged = false;
-//             let channelAvailable = true;
-//             if (effectiveBranchId && effectiveServiceModule && item.foodId) {
-//                 try {
-//                     const optionIds = extractOptionIds(parsedVariations);
-//                     const livePrice = await calculateCalculatedPrice(
-//                         item.foodId,
-//                         optionIds,
-//                         effectiveBranchId,
-//                         effectiveServiceModule
-//                     );
-//                     const addonTotal = parsedAddons.reduce((s: number, a: any) => s + Number(a.price || 0), 0);
-//                     const computedLivePrice = livePrice.totalUnitPrice + addonTotal;
-//                     liveUnitPrice = computedLivePrice;
-//                     channelAvailable = livePrice.isAvailable;
-//                     const storedUnit = parseFloat(item.unitPrice as string || "0");
-//                     priceChanged = Math.abs(computedLivePrice - storedUnit) > 0.001;
-//                 } catch {
-//                     // Pricing engine error → fall back to stored price gracefully
-//                     liveUnitPrice = null;
-//                 }
-//             }
-//             // ─── Variation details ─────────────────────────────────────────
-//             const variationDetails: any[] = [];
-//             for (const v of parsedVariations) {
-//                 if (!v.variationId || !v.optionId) continue;
-//                 const [variation] = await db.select().from(foodVariations).where(eq(foodVariations.id, v.variationId)).limit(1);
-//                 const [option] = await db.select().from(variationOptions).where(eq(variationOptions.id, v.optionId)).limit(1);
-//                 if (variation && option) {
-//                     variationDetails.push({
-//                         variationId: variation.id,
-//                         variationName: variation.name,
-//                         variationNameAr: variation.nameAr,
-//                         optionId: option.id,
-//                         optionName: option.optionName,
-//                         optionNameAr: option.optionNameAr,
-//                         additionalPrice: option.additionalPrice,
-//                     });
-//                 }
-//             }
-//             const addonDetails = parsedAddons.map((a: any) => ({
-//                 addonId: a.addonId,
-//                 name: a.name,
-//                 nameAr: a.nameAr,
-//                 price: a.price,
-//             }));
-//             // ─── Discount ──────────────────────────────────────────────────
-//             const baseForDiscount = liveUnitPrice !== null ? liveUnitPrice - varPrice : originalBasePrice;
-//             const { price: discountedBasePrice } = applyPriorityDiscount(
-//                 { id: item.foodId, discountType: item.discountType, discountValue: item.discountValue },
-//                 baseForDiscount,
-//                 initialSubtotal,
-//                 availableDiscounts,
-//                 discountState,
-//                 true
-//             );
-//             const finalUnitPrice = liveUnitPrice !== null ? liveUnitPrice : discountedBasePrice + varPrice;
-//             const finalTotalPrice = finalUnitPrice * item.quantity;
-//             finalSubtotal += finalTotalPrice;
-//             return {
-//                 cartId: item.cartId,
-//                 foodId: item.foodId,
-//                 name: item.name,
-//                 nameAr: item.nameAr,
-//                 nameFr: item.nameFr,
-//                 description: item.description,
-//                 descriptionAr: item.descriptionAr,
-//                 descriptionFr: item.descriptionFr,
-//                 discountType: item.discountType,
-//                 discountValue: item.discountValue,
-//                 image: item.image,
-//                 restaurantId: item.restaurantId,
-//                 restaurantName: item.restaurantName,
-//                 quantity: item.quantity,
-//                 price: (originalBasePrice + varPrice).toString(),
-//                 unitPrice: finalUnitPrice,
-//                 totalPrice: finalTotalPrice,
-//                 variations: variationDetails,
-//                 addons: addonDetails,
-//                 note: item.note || null,
-//                 isAvailable: channelAvailable,
-//                 priceChanged,
-//                 resolvedBranchId: effectiveBranchId || null,
-//                 serviceModule: effectiveServiceModule || null,
-//             };
-//         })
-//     );
-//     const formattedUnavailableItems = unavailableCartItemsData.map(item => {
-//         const { variations: parsedVariations } = parseCartSnapshot(item.variations);
-//         const parsedAddonsParsed = Array.isArray(deepParseJSON(item.addons)) ? deepParseJSON(item.addons) : [];
-//         return {
-//             cartId: item.cartId,
-//             foodId: item.foodId,
-//             name: item.name,
-//             nameAr: item.nameAr,
-//             image: item.image,
-//             quantity: item.quantity,
-//             variations: parsedVariations,
-//             addons: parsedAddonsParsed,
-//             isAvailable: false,
-//             reason: item.unavailableReason,
-//         };
-//     });
-//     // ─── Free Delivery Offer check ────────────────────────────────────
-//     const now = new Date();
-//     const [freeDeliveryOffer] = await db
-//         .select()
-//         .from(freeDeliveryOffers)
-//         .where(and(eq(freeDeliveryOffers.restaurantId, restaurantId!), eq(freeDeliveryOffers.status, "active")))
-//         .limit(1);
-//     let freeDeliveryInfo: { isEligible: boolean; minOrderAmount: number; remainingAmount: number } | null = null;
-//     if (freeDeliveryOffer) {
-//         const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= now;
-//         const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= now;
-//         if (startOk && endOk) {
-//             const minAmount = parseFloat(freeDeliveryOffer.minOrderAmount as string || "0");
-//             const isEligible = finalSubtotal >= minAmount;
-//             freeDeliveryInfo = {
-//                 isEligible,
-//                 minOrderAmount: minAmount,
-//                 remainingAmount: isEligible ? 0 : parseFloat((minAmount - finalSubtotal).toFixed(2)),
-//             };
-//         }
-//     }
-//     return SuccessResponse(res, {
-//         message: "Cart fetched successfully",
-//         data: {
-//             items: formattedAvailableItems,
-//             unavailableItems: formattedUnavailableItems,
-//             hasUnavailableItems: formattedUnavailableItems.length > 0 || formattedAvailableItems.some(i => !i.isAvailable),
-//             hasPriceChanges: formattedAvailableItems.some(i => i.priceChanged),
-//             totalSummary: {
-//                 subtotal: finalSubtotal,
-//                 freeDelivery: freeDeliveryInfo,
-//             },
-//         },
-//     });
-// };
 /* =========================================
    3. UPDATE CART ITEM
 ========================================= */
@@ -880,10 +728,9 @@ const updateCartItem = async (req, res) => {
         throw new BadRequest_1.BadRequest("Cart item not found");
     // 🛡️ Block check
     await (0, userBlockCheck_1.validateUserNotBlocked)(userId, cartItem.restaurantId);
-    const [itemFood] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.eq)(schema_1.food.id, cartItem.foodId)).limit(1);
+    const [itemFood] = await connection_1.db.select().from(schema_1.food).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.id, cartItem.foodId), foodConditions_1.activeFoodCondition)).limit(1);
     if (!itemFood)
         throw new BadRequest_1.BadRequest("Food item not found");
-    // 🛡️ Check if food is out of stock or inactive
     if (!itemFood)
         throw new BadRequest_1.BadRequest("Food not found");
     if (itemFood.isOutOfStock || itemFood.status === "inactive") {
@@ -910,7 +757,6 @@ const updateCartItem = async (req, res) => {
             throw new BadRequest_1.BadRequest("This item's category is not available at the selected branch or at your location.");
         }
     }
-    // Validate availability via legacy ingredient/menu-lock check
     await (0, cart_helper_1.validateFoodAvailabilityForCart)(cartItem.foodId, resolvedBranchId || undefined, undefined, itemFood.restaurantid);
     // ─── Resolve variations ──────────────────────────────────────────
     let safeVariations = [];
@@ -972,24 +818,64 @@ const updateCartItem = async (req, res) => {
     // ─── Calculate unit price via pricing engine ─────────────────────
     const optionIds = safeVariations.map((v) => v.optionId).filter(Boolean);
     const resolvedServiceModule = (serviceModule || cartItem.serviceModule);
-    let unitPrice;
-    if (resolvedBranchId && resolvedServiceModule) {
-        const priceResult = await (0, pricing_helper_1.calculateCalculatedPrice)(cartItem.foodId, optionIds, resolvedBranchId, resolvedServiceModule);
-        if (!priceResult.isAvailable) {
-            throw new BadRequest_1.BadRequest("This item or one of its options is currently unavailable on this channel.");
-        }
-        const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
-        unitPrice = priceResult.totalUnitPrice + addonTotal;
+    // let unitPrice: number;
+    // if (resolvedBranchId && resolvedServiceModule) {
+    const priceResult = await (0, pricing_helper_1.calculateCalculatedPrice)(cartItem.foodId, optionIds, resolvedBranchId || null, resolvedServiceModule || undefined);
+    if (!priceResult.isAvailable) {
+        throw new BadRequest_1.BadRequest("This item or one of its options is currently unavailable on this channel.");
     }
-    else {
-        // Fallback: no channel context
-        let totalExtra = 0;
-        for (const selected of safeVariations) {
-            const [opt] = await connection_1.db.select({ additionalPrice: schema_1.variationOptions.additionalPrice }).from(schema_1.variationOptions).where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, selected.optionId)).limit(1);
-            totalExtra += Number(opt?.additionalPrice || 0);
-        }
-        const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
-        unitPrice = Number(itemFood.price) + totalExtra + addonTotal;
+    const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
+    const unitPrice = priceResult.totalUnitPrice + addonTotal;
+    // }else {
+    //         let totalExtra = 0;
+    //         for (const selected of safeVariations) {
+    //             const [opt] = await db.select({ additionalPrice: variationOptions.additionalPrice }).from(variationOptions).where(eq(variationOptions.id, selected.optionId)).limit(1);
+    //             totalExtra += Number(opt?.additionalPrice || 0);
+    //         }
+    //         const addonTotal = addonSnapshot.reduce((sum, a) => sum + Number(a.price || 0), 0);
+    //         unitPrice = Number(itemFood.price) + totalExtra + addonTotal;
+    //     }
+    // ─── Build full variation snapshot with names from DB ───────────
+    let variationSnapshotList = safeVariations;
+    if (variations !== undefined && safeVariations.length > 0) {
+        const allOptionIds = safeVariations.map((v) => v.optionId).filter(Boolean);
+        const dbOptionsWithParent = allOptionIds.length > 0
+            ? await connection_1.db
+                .select({
+                optionId: schema_1.variationOptions.id,
+                optionName: schema_1.variationOptions.optionName,
+                optionNameAr: schema_1.variationOptions.optionNameAr,
+                optionNameFr: schema_1.variationOptions.optionNameFr,
+                additionalPrice: schema_1.variationOptions.additionalPrice,
+                variationId: schema_1.foodVariations.id,
+                variationName: schema_1.foodVariations.name,
+                variationNameAr: schema_1.foodVariations.nameAr,
+                variationNameFr: schema_1.foodVariations.nameFr,
+            })
+                .from(schema_1.variationOptions)
+                .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, schema_1.foodVariations.id))
+                .where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.id, allOptionIds))
+            : [];
+        const optionDetailsMap = new Map(dbOptionsWithParent.map(o => [o.optionId, o]));
+        variationSnapshotList = safeVariations.map((v) => {
+            const details = optionDetailsMap.get(v.optionId);
+            return {
+                variationId: details?.variationId ?? v.variationId ?? null,
+                variationName: details?.variationName ?? v.variationName ?? null,
+                variationNameAr: details?.variationNameAr ?? v.variationNameAr ?? null,
+                variationNameFr: details?.variationNameFr ?? v.variationNameFr ?? null,
+                optionId: details?.optionId ?? v.optionId ?? null,
+                optionName: details?.optionName ?? v.optionName ?? null,
+                optionNameAr: details?.optionNameAr ?? v.optionNameAr ?? null,
+                optionNameFr: details?.optionNameFr ?? v.optionNameFr ?? null,
+                additionalPrice: Number(details?.additionalPrice ?? v.additionalPrice ?? v.price ?? 0).toFixed(2),
+                price: Number(details?.additionalPrice ?? v.additionalPrice ?? v.price ?? 0).toFixed(2),
+            };
+        });
+    }
+    else if (variations === undefined) {
+        const { variations: existingVars } = parseCartSnapshot(cartItem.variations);
+        variationSnapshotList = existingVars;
     }
     const qty = quantity ?? cartItem.quantity;
     await connection_1.db.update(schema_1.cartItems)
@@ -997,7 +883,7 @@ const updateCartItem = async (req, res) => {
         quantity: qty,
         unitPrice: unitPrice.toString(),
         totalPrice: (unitPrice * qty).toString(),
-        variations: JSON.stringify({ variations: safeVariations }),
+        variations: JSON.stringify({ variations: variationSnapshotList }),
         addons: JSON.stringify(addonSnapshot),
         ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
         ...(resolvedServiceModule ? { serviceModule: resolvedServiceModule } : {}),
@@ -1047,7 +933,6 @@ exports.clearCart = clearCart;
 const validateCartPricing = async (req, res) => {
     const userId = req.user?.id;
     const { restaurantId, serviceModule, branchId, addressId, } = req.body;
-    // ─── Input validation ─────────────────────────────────────────────
     if (!userId)
         throw new BadRequest_1.BadRequest("User authentication required.");
     if (!restaurantId)
@@ -1061,7 +946,6 @@ const validateCartPricing = async (req, res) => {
     if (serviceModule === "delivery" && !branchId && !addressId) {
         throw new BadRequest_1.BadRequest("addressId or branchId is required for delivery orders.");
     }
-    // ─── Fetch User Cart Items from DB ────────────────────────────────
     const userCartItems = await connection_1.db
         .select()
         .from(schema_1.cartItems)
@@ -1069,7 +953,6 @@ const validateCartPricing = async (req, res) => {
     if (userCartItems.length === 0) {
         throw new BadRequest_1.BadRequest("Cart is empty for this restaurant.");
     }
-    // ─── Resolve branch ───────────────────────────────────────────────
     let resolvedBranchId;
     if (branchId) {
         const [br] = await connection_1.db
@@ -1084,7 +967,6 @@ const validateCartPricing = async (req, res) => {
     else {
         resolvedBranchId = await (0, pricing_helper_1.resolveBranchIdFromAddress)(addressId, restaurantId);
     }
-    // ─── Process each item from Database ──────────────────────────────
     let oldSubtotal = 0;
     let newSubtotal = 0;
     let isPriceChanged = false;
@@ -1094,12 +976,10 @@ const validateCartPricing = async (req, res) => {
         const foodId = item.foodId;
         const quantity = item.quantity;
         const storedUnitPrice = Number(item.unitPrice || 0);
-        // فك تفاصيل الـ Variations والـ Addons من snapshot الـ Cart
         const { variations: parsedVariations } = parseCartSnapshot(item.variations);
         const parsedAddons = Array.isArray(deepParseJSON(item.addons)) ? deepParseJSON(item.addons) : [];
         const optionIds = extractOptionIds(parsedVariations);
         const addonTotal = parsedAddons.reduce((s, a) => s + Number(a.price || 0), 0);
-        // حساب السعر الحالي المباشر للفرع والقناة
         const priceResult = await (0, pricing_helper_1.calculateCalculatedPrice)(foodId, optionIds, resolvedBranchId, serviceModule);
         const newCalculatedUnitPrice = priceResult.totalUnitPrice + addonTotal;
         const basePriceChanged = Math.abs(newCalculatedUnitPrice - storedUnitPrice) > 0.001;

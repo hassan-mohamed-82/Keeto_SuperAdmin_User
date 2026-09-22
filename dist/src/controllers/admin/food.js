@@ -433,46 +433,99 @@ const updateFood = async (req, res) => {
     // ===========================
     // ✅ Variations Update
     // ===========================
+    // ✅ Variations Update (Non-destructive Upsert)
+    // ===========================
     if (data.variations && Array.isArray(data.variations)) {
         const oldVars = await connection_1.db
             .select()
             .from(schema_1.foodVariations)
             .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, id));
-        for (const v of oldVars) {
-            await connection_1.db
-                .delete(schema_1.variationOptions)
-                .where((0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, v.id));
-        }
-        await connection_1.db
-            .delete(schema_1.foodVariations)
-            .where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, id));
+        const oldVarIds = oldVars.map(v => v.id);
+        const oldOptions = oldVarIds.length > 0
+            ? await connection_1.db.select().from(schema_1.variationOptions).where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.variationId, oldVarIds))
+            : [];
+        const incomingVarIds = new Set();
+        const incomingOptIds = new Set();
         for (const variation of data.variations) {
-            const variationId = (0, uuid_1.v4)();
-            await connection_1.db.insert(schema_1.foodVariations).values({
-                id: variationId,
-                foodId: id,
-                name: variation.name,
-                nameAr: variation.nameAr,
-                nameFr: variation.nameFr,
-                isRequired: variation.isRequired || false,
-                selectionType: variation.selectionType || "single",
-                min: variation.min ?? null,
-                max: variation.max ?? null,
-                status: variation.status !== undefined ? variation.status : true,
-            });
+            let variationId = variation.id;
+            const existingVar = variationId ? oldVars.find(v => v.id === variationId) : null;
+            if (existingVar) {
+                // Update existing variation
+                await connection_1.db.update(schema_1.foodVariations).set({
+                    name: variation.name,
+                    nameAr: variation.nameAr ?? existingVar.nameAr,
+                    nameFr: variation.nameFr ?? existingVar.nameFr,
+                    isRequired: variation.isRequired !== undefined ? variation.isRequired : existingVar.isRequired,
+                    selectionType: variation.selectionType || existingVar.selectionType,
+                    min: variation.min !== undefined ? variation.min : existingVar.min,
+                    max: variation.max !== undefined ? variation.max : existingVar.max,
+                    status: variation.status !== undefined ? variation.status : existingVar.status,
+                }).where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, variationId));
+            }
+            else {
+                // Insert new variation
+                variationId = variationId || (0, uuid_1.v4)();
+                await connection_1.db.insert(schema_1.foodVariations).values({
+                    id: variationId,
+                    foodId: id,
+                    name: variation.name,
+                    nameAr: variation.nameAr || '',
+                    nameFr: variation.nameFr || '',
+                    isRequired: variation.isRequired || false,
+                    selectionType: variation.selectionType || "single",
+                    min: variation.min ?? null,
+                    max: variation.max ?? null,
+                    status: variation.status !== undefined ? variation.status : true,
+                });
+            }
+            incomingVarIds.add(variationId);
+            // Handle options for this variation
             if (variation.options && Array.isArray(variation.options)) {
                 for (const option of variation.options) {
-                    await connection_1.db.insert(schema_1.variationOptions).values({
-                        variationId,
-                        optionName: option.optionName,
-                        optionNameAr: option.optionNameAr,
-                        optionNameFr: option.optionNameFr,
-                        additionalPrice: option.additionalPrice ? option.additionalPrice.toString() : "0",
-                        status: option.status !== undefined ? option.status : true,
-                        isDefault: option.isDefault !== undefined ? option.isDefault : false,
-                    });
+                    let optionId = option.id;
+                    const existingOpt = optionId ? oldOptions.find(o => o.id === optionId) : null;
+                    const additionalPriceStr = option.additionalPrice !== undefined && option.additionalPrice !== null
+                        ? option.additionalPrice.toString()
+                        : "0";
+                    if (existingOpt) {
+                        // Update existing option (preserves UUID!)
+                        await connection_1.db.update(schema_1.variationOptions).set({
+                            variationId,
+                            optionName: option.optionName,
+                            optionNameAr: option.optionNameAr ?? existingOpt.optionNameAr,
+                            optionNameFr: option.optionNameFr ?? existingOpt.optionNameFr,
+                            additionalPrice: additionalPriceStr,
+                            status: option.status !== undefined ? option.status : existingOpt.status,
+                            isDefault: option.isDefault !== undefined ? option.isDefault : existingOpt.isDefault,
+                        }).where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, optionId));
+                    }
+                    else {
+                        // Insert new option
+                        optionId = optionId || (0, uuid_1.v4)();
+                        await connection_1.db.insert(schema_1.variationOptions).values({
+                            id: optionId,
+                            variationId,
+                            optionName: option.optionName,
+                            optionNameAr: option.optionNameAr || '',
+                            optionNameFr: option.optionNameFr || '',
+                            additionalPrice: additionalPriceStr,
+                            status: option.status !== undefined ? option.status : true,
+                            isDefault: option.isDefault !== undefined ? option.isDefault : false,
+                        });
+                    }
+                    incomingOptIds.add(optionId);
                 }
             }
+        }
+        // Delete options that were explicitly removed
+        const optionsToDelete = oldOptions.filter(o => !incomingOptIds.has(o.id));
+        if (optionsToDelete.length > 0) {
+            await connection_1.db.delete(schema_1.variationOptions).where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.id, optionsToDelete.map(o => o.id)));
+        }
+        // Delete variations that were explicitly removed
+        const varsToDelete = oldVars.filter(v => !incomingVarIds.has(v.id));
+        if (varsToDelete.length > 0) {
+            await connection_1.db.delete(schema_1.foodVariations).where((0, drizzle_orm_1.inArray)(schema_1.foodVariations.id, varsToDelete.map(v => v.id)));
         }
     }
     const updatedFood = await connection_1.db

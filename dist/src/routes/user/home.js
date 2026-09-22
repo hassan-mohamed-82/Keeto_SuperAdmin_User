@@ -7,6 +7,9 @@ const home_1 = require("../../controllers/user/home");
 const home_2 = require("../../controllers/user/home");
 const catchAsync_1 = require("../../utils/catchAsync");
 const authenticated_1 = require("../../middlewares/authenticated");
+const validation_1 = require("../../middlewares/validation");
+const food_1 = require("../../controllers/user/food");
+const food_2 = require("../../validation/user/food");
 const router = (0, express_1.Router)();
 // ==========================================
 // 🏠 راوتس التصفح والشاشة الرئيسية (Explore & Home)
@@ -24,6 +27,9 @@ router.get("/categories/:categoryId/items", authenticated_1.optionalAuth, (0, ca
 // 4. جلب تفاصيل مطعم معين والمنيو بتاعه
 // 🟢 GET: /api/user/explore/restaurants/:restaurantId
 router.get("/restaurants/:restaurantId", authenticated_1.optionalAuth, (0, catchAsync_1.catchAsync)(home_1.getRestaurantDetails));
+// 4b. جلب تفاصيل وجبة معينة مع تفاصيل الخصم
+// 🟢 GET: /api/user/home/foods/:id
+router.get("/foods/:id", authenticated_1.optionalAuth, (0, validation_1.validate)(food_2.getFoodByIdParamsSchema, "params"), (0, validation_1.validate)(food_2.getFoodByIdQuerySchema, "query"), (0, catchAsync_1.catchAsync)(food_1.getProductById));
 // ==========================================
 // 🔍 راوتس البحث (Search)
 // =========================================

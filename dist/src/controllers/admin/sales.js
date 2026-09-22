@@ -70,11 +70,23 @@ const getSalesById = async (req, res) => {
     })
         .from(schema_1.restaurants)
         .where((0, drizzle_orm_1.eq)(schema_1.restaurants.salesId, id));
+    const RESTAURANT_TYPE_POINTS = {
+        mega: 50,
+        super: 25,
+        a: 10,
+        b: 5,
+        c: 2,
+        "c-": 1,
+    };
+    const formattedRestaurants = registeredRestaurants.map(r => ({
+        ...r,
+        points: RESTAURANT_TYPE_POINTS[(r.type || "C").toLowerCase()] ?? 0
+    }));
     return (0, response_1.SuccessResponse)(res, {
         message: "Get sales details success",
         data: {
             ...salesRep,
-            restaurants: registeredRestaurants
+            restaurants: formattedRestaurants
         }
     });
 };

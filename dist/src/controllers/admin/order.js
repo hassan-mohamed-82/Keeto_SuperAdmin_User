@@ -445,7 +445,8 @@ const getOrderDetails = async (req, res) => {
                     variationNameAr,
                     optionName,
                     optionNameAr,
-                    price: price.toString()
+                    price: price.toString(),
+                    additionalPrice: price.toString()
                 };
             }));
         }
@@ -574,6 +575,26 @@ const getOrderDetails = async (req, res) => {
 };
 exports.getOrderDetails = getOrderDetails;
 const getAllOrders = async (req, res) => {
+    const { status, startDate, endDate } = req.query;
+    const conditions = [];
+    if (status) {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.status, status));
+    }
+    // Default to current date if no start or end date is provided
+    let start = new Date();
+    start.setHours(0, 0, 0, 0);
+    let end = new Date();
+    end.setHours(23, 59, 59, 999);
+    if (startDate) {
+        start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+    }
+    if (endDate) {
+        end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+    }
+    conditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, start));
+    conditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
     const result = await connection_1.db.select({
         orderId: schema_1.orders.orderNumber,
         internalId: schema_1.orders.id,
@@ -608,6 +629,7 @@ const getAllOrders = async (req, res) => {
         .leftJoin(schema_1.users, (0, drizzle_orm_1.eq)(schema_1.orders.userId, schema_1.users.id))
         .leftJoin(schema_1.restaurantZoneDeliveryFees, (0, drizzle_orm_1.eq)(schema_1.orders.zoneId, schema_1.restaurantZoneDeliveryFees.id))
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, schema_1.zones.id), (0, drizzle_orm_1.eq)(schema_1.orders.zoneId, schema_1.zones.id)))
+        .where((0, drizzle_orm_1.and)(...conditions))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
     return (0, response_1.SuccessResponse)(res, {
         message: "All orders fetched successfully",
