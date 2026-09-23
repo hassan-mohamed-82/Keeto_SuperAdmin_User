@@ -3,7 +3,7 @@ import { db } from "../../models/connection";
 import { sliders } from "../../models/schema";
 import { subcategories } from "../../models/schema/admin/subcategory";
 import { food } from "../../models/schema/admin/food";
-import { discounts } from "../../models/schema/admin/discount";
+import { discounts, discountGroups } from "../../models/schema/admin/discount";
 import { eq } from "drizzle-orm";
 import { NotFound } from "../../Errors";
 import { SuccessResponse } from "../../utils/response";
@@ -56,9 +56,9 @@ async function resolveLinkData(
                 name: discounts.name,
                 nameAr: discounts.nameAr,
                 nameFr: discounts.nameFr,
-                discountType: discounts.discountType,
-                discountValue: discounts.discountValue,
-                maxDiscount: discounts.maxDiscount,
+                discountType: discountGroups.discountType,
+                discountValue: discountGroups.discountValue,
+                maxDiscount: discountGroups.maxDiscount,
                 minOrderAmount: discounts.minOrderAmount,
                 logo: discounts.logo,
                 startDate: discounts.startDate,
@@ -66,6 +66,7 @@ async function resolveLinkData(
                 isActive: discounts.isActive,
             })
             .from(discounts)
+            .leftJoin(discountGroups, eq(discounts.id, discountGroups.discountId))
             .where(eq(discounts.id, discountId))
             .limit(1);
         return disc ?? null;

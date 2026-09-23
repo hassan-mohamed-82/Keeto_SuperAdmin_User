@@ -28,6 +28,15 @@ export const discounts = mysqlTable("discounts", {
     usageLimit: int("usage_limit"),
     usedCount: int("used_count").default(0),
 
+    discountType: mysqlEnum("discount_type", ["percentage", "fixed_amount"])
+        .notNull()
+        .default("percentage"),
+
+    discountValue: decimal("discount_value", { precision: 10, scale: 2 }).notNull(),
+
+    maxDiscount: decimal("max_discount", { precision: 10, scale: 2 }),
+
+
     startDate: timestamp("start_date"),
     endDate: timestamp("end_date"),
 
@@ -81,4 +90,23 @@ export const discountRestaurants = mysqlTable("discount_restaurants", {
     createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
     discountRestaurantUnique: uniqueIndex("discount_restaurant_unique_idx").on(table.discountId, table.restaurantId),
+}));
+
+export const discountFoods = mysqlTable("discount_foods", {
+    id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+
+    discountId: char("discount_id", { length: 36 })
+        .references(() => discounts.id, { onDelete: "cascade" })
+        .notNull(),
+
+    foodId: char("food_id", { length: 36 })
+        .references(() => food.id, { onDelete: "cascade" })
+        .notNull(),
+    restaurantId: char("restaurant_id", { length: 36 })
+        .notNull()
+        .references(() => restaurants.id, { onDelete: "cascade" }),
+
+    createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+    discountFoodUnique: uniqueIndex("discount_food_unique_idx").on(table.discountId, table.foodId),
 }));
