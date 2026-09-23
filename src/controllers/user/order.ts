@@ -225,7 +225,6 @@ export const checkout = async (req: Request | any, res: Response) => {
         if (rawPhone) {
             const normalizedPhone = rawPhone.replace(/[\s\-\(\)]/g, "");
 
-            // Query existing user by phone
             const [existingUser] = await db
                 .select()
                 .from(users)
@@ -238,17 +237,28 @@ export const checkout = async (req: Request | any, res: Response) => {
                 .limit(1);
 
             if (existingUser && existingUser.id !== effectiveUserId) {
-                // An account already exists with this phone number.
-                // Reassign checkout and guest cart items to the existing user.
-                const guestSessionId = req.user.id;
-                effectiveUserId = existingUser.id;
+                const isFullyRegistered = Boolean(existingUser.password); // عنده باسورد = حساب حقيقي
 
-                await db
-                    .update(cartItems)
-                    .set({ userId: effectiveUserId })
-                    .where(eq(cartItems.userId, guestSessionId));
+                if (isFullyRegistered) {
+                    // ✅ حساب حقيقي: منعمل merge تلقائي، نطلب تأكيد
+                    throw new BadRequest(
+                        "An account already exists with this phone number. Please log in with your email to continue, or use a different phone number."
+                    );
+                } else {
+                    // ✅ يوزر تاني كان guest قبل كده بنفس الرقم: دمج آمن
+                    const guestSessionId = req.user.id;
+                    effectiveUserId = existingUser.id;
+
+                    await db
+                        .update(cartItems)
+                        .set({ userId: effectiveUserId })
+                        .where(eq(cartItems.userId, guestSessionId));
+
+                    await db.update(users)
+                        .set({ isDeleted: true, status: "blocked" })
+                        .where(eq(users.id, guestSessionId));
+                }
             } else {
-                // Update current shadow user record with provided name and phone
                 await db
                     .update(users)
                     .set({
