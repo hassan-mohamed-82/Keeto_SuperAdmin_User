@@ -8,6 +8,7 @@ router.put("/:orderId/cancel", (0, catchAsync_1.catchAsync)(order_1.cancelOrder)
 router.post("/:orderId/rate", (0, catchAsync_1.catchAsync)(order_1.rateOrder));
 router.get("/select", (0, catchAsync_1.catchAsync)(order_1.getOrderPrerequisites));
 router.get("/cancel-reasons", (0, catchAsync_1.catchAsync)(order_1.getCancelReasons));
+// router.post("/checkout", validate(checkoutSchema), catchAsync(checkout));
 router.post("/checkout", (0, catchAsync_1.catchAsync)(order_1.checkout));
 router.get("/active", (0, catchAsync_1.catchAsync)(order_1.getActiveOrders));
 router.get("/history", (0, catchAsync_1.catchAsync)(order_1.getOrderHistory));

@@ -50,9 +50,9 @@ async function resolveLinkData(linkType, subcategoryId, foodId, discountId) {
             name: discount_1.discounts.name,
             nameAr: discount_1.discounts.nameAr,
             nameFr: discount_1.discounts.nameFr,
-            discountType: discount_1.discounts.discountType,
-            discountValue: discount_1.discounts.discountValue,
-            maxDiscount: discount_1.discounts.maxDiscount,
+            discountType: discount_1.discountGroups.discountType,
+            discountValue: discount_1.discountGroups.discountValue,
+            maxDiscount: discount_1.discountGroups.maxDiscount,
             minOrderAmount: discount_1.discounts.minOrderAmount,
             logo: discount_1.discounts.logo,
             startDate: discount_1.discounts.startDate,
@@ -60,6 +60,7 @@ async function resolveLinkData(linkType, subcategoryId, foodId, discountId) {
             isActive: discount_1.discounts.isActive,
         })
             .from(discount_1.discounts)
+            .leftJoin(discount_1.discountGroups, (0, drizzle_orm_1.eq)(discount_1.discounts.id, discount_1.discountGroups.discountId))
             .where((0, drizzle_orm_1.eq)(discount_1.discounts.id, discountId))
             .limit(1);
         return disc ?? null;

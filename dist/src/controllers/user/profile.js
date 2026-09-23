@@ -26,6 +26,7 @@ const getProfile = async (req, res) => {
         photo: schema_1.users.photo,
         isVerified: schema_1.users.isVerified,
         isProfileComplete: schema_1.users.isProfileComplete,
+        isGuest: schema_1.users.isGuest,
         createdAt: schema_1.users.createdAt,
     })
         .from(schema_1.users)
@@ -126,6 +127,7 @@ const getProfile = async (req, res) => {
                 isVerified: userInfo.isVerified,
                 createdAt: userInfo.createdAt,
                 isProfileComplete,
+                isGuest: userInfo.isGuest,
                 callcenterphone,
                 addresses: formattedAddresses, // 🟢 إرجاع العناوين المنسقة مع flags الاستخدام
             },

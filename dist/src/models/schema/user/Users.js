@@ -25,6 +25,8 @@ exports.users = (0, mysql_core_1.mysqlTable)("users", {
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "blocked"]).default("active"),
     isDeleted: (0, mysql_core_1.boolean)("is_deleted").default(false),
     deletedAt: (0, mysql_core_1.timestamp)("deleted_at"),
+    isGuest: (0, mysql_core_1.boolean)("is_guest").default(false).notNull(),
+    authProvider: (0, mysql_core_1.mysqlEnum)("auth_provider", ["guest", "email", "google", "facebook", "apple", "phone_otp"]).default("email"),
     totalOrders: (0, mysql_core_1.int)("total_orders").default(0),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });

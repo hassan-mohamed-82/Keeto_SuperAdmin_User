@@ -2,27 +2,55 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.applyPriorityDiscount = exports.getAvailableDiscounts = void 0;
 const connection_1 = require("../models/connection");
-const discount_1 = require("../models/schema/admin/discount");
+const schema_1 = require("../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const getAvailableDiscounts = async (restaurantId) => {
     const now = new Date();
     // 1. Fetch restaurant-specific discounts
     const restDiscounts = await connection_1.db.select({
-        discount: discount_1.discounts,
-        foodId: discount_1.discountFoods.foodId
+        discount: {
+            id: schema_1.discounts.id,
+            name: schema_1.discounts.name,
+            minOrderAmount: schema_1.discounts.minOrderAmount,
+            usageLimit: schema_1.discounts.usageLimit,
+            usedCount: schema_1.discounts.usedCount,
+            startDate: schema_1.discounts.startDate,
+            endDate: schema_1.discounts.endDate,
+            isActive: schema_1.discounts.isActive,
+            isGlobal: schema_1.discounts.isGlobal,
+            discountType: schema_1.discountGroups.discountType,
+            discountValue: schema_1.discountGroups.discountValue,
+            maxDiscount: schema_1.discountGroups.maxDiscount,
+        },
+        foodId: schema_1.food.id
     })
-        .from(discount_1.discounts)
-        .innerJoin(discount_1.discountRestaurants, (0, drizzle_orm_1.eq)(discount_1.discounts.id, discount_1.discountRestaurants.discountId))
-        .leftJoin(discount_1.discountFoods, (0, drizzle_orm_1.eq)(discount_1.discounts.id, discount_1.discountFoods.discountId))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(discount_1.discountRestaurants.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(discount_1.discounts.isActive, true), (0, drizzle_orm_1.eq)(discount_1.discounts.isGlobal, false)));
+        .from(schema_1.discounts)
+        .innerJoin(schema_1.discountRestaurants, (0, drizzle_orm_1.eq)(schema_1.discounts.id, schema_1.discountRestaurants.discountId))
+        .leftJoin(schema_1.discountGroups, (0, drizzle_orm_1.eq)(schema_1.discounts.id, schema_1.discountGroups.discountId))
+        .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.discountGroups.id, schema_1.food.discountId))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.discountRestaurants.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.discounts.isActive, true), (0, drizzle_orm_1.eq)(schema_1.discounts.isGlobal, false)));
     // 2. Fetch global discounts
     const globalDiscountsRows = await connection_1.db.select({
-        discount: discount_1.discounts,
-        foodId: discount_1.discountFoods.foodId
+        discount: {
+            id: schema_1.discounts.id,
+            name: schema_1.discounts.name,
+            minOrderAmount: schema_1.discounts.minOrderAmount,
+            usageLimit: schema_1.discounts.usageLimit,
+            usedCount: schema_1.discounts.usedCount,
+            startDate: schema_1.discounts.startDate,
+            endDate: schema_1.discounts.endDate,
+            isActive: schema_1.discounts.isActive,
+            isGlobal: schema_1.discounts.isGlobal,
+            discountType: schema_1.discountGroups.discountType,
+            discountValue: schema_1.discountGroups.discountValue,
+            maxDiscount: schema_1.discountGroups.maxDiscount,
+        },
+        foodId: schema_1.food.id
     })
-        .from(discount_1.discounts)
-        .leftJoin(discount_1.discountFoods, (0, drizzle_orm_1.eq)(discount_1.discounts.id, discount_1.discountFoods.discountId))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(discount_1.discounts.isGlobal, true), (0, drizzle_orm_1.eq)(discount_1.discounts.isActive, true)));
+        .from(schema_1.discounts)
+        .leftJoin(schema_1.discountGroups, (0, drizzle_orm_1.eq)(schema_1.discounts.id, schema_1.discountGroups.discountId))
+        .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.discountGroups.id, schema_1.food.discountId))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.discounts.isGlobal, true), (0, drizzle_orm_1.eq)(schema_1.discounts.isActive, true)));
     const allDiscounts = [...restDiscounts, ...globalDiscountsRows].filter(d => {
         if (d.discount.startDate && new Date(d.discount.startDate) > now)
             return false;

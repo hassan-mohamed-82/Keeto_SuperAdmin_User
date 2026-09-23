@@ -28,15 +28,6 @@ export const discounts = mysqlTable("discounts", {
     usageLimit: int("usage_limit"),
     usedCount: int("used_count").default(0),
 
-    discountType: mysqlEnum("discount_type", ["percentage", "fixed_amount"])
-        .notNull()
-        .default("percentage"),
-
-    discountValue: decimal("discount_value", { precision: 10, scale: 2 }).notNull(),
-
-    maxDiscount: decimal("max_discount", { precision: 10, scale: 2 }),
-
-
     startDate: timestamp("start_date"),
     endDate: timestamp("end_date"),
 

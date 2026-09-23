@@ -28,6 +28,8 @@ exports.createRestaurantSettingsSchema = zod_1.z.object({
     minOrderAmount: zod_1.z.coerce.string().optional(),
     minDeliveryTime: zod_1.z.coerce.number().int().min(0).optional(),
     maxDeliveryTime: zod_1.z.coerce.number().int().min(0).optional(),
+    paymentGatewayType: zod_1.z.enum(["SYSTEM", "CUSTOM"]).optional(),
+    enableOnlinePayment: zod_1.z.boolean().optional(),
 });
 exports.updateRestaurantSettingsSchema = exports.createRestaurantSettingsSchema.partial();
 // ==========================================

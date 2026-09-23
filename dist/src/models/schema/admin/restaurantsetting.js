@@ -40,6 +40,10 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
         .$type()
         .default(["pending"]), // pending, accepted, preparing, out_for_delivery
     resetDailyOrderNumberTime: (0, mysql_core_1.varchar)("reset_daily_order_number_time", { length: 5 }),
+    // نوع حساب بوابات الدفع (حساب المنصة ولا حساب خاص بالمطعم)
+    paymentGatewayType: (0, mysql_core_1.mysqlEnum)("payment_gateway_type", ["SYSTEM", "CUSTOM"]).default("SYSTEM"),
+    // تمكين/تعطيل دفع الفيزا أونلاين للمطعم
+    enableOnlinePayment: (0, mysql_core_1.boolean)("enable_online_payment").default(true),
 });
 // 2. جدول مواعيد العمل (يدعم الفترات المتعددة)
 exports.restaurantSchedules = (0, mysql_core_1.mysqlTable)("restaurant_schedules", {

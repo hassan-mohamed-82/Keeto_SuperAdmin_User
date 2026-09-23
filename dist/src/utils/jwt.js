@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyToken = exports.generateSalesToken = exports.generateRestaurantAdminToken = exports.generateAdminToken = exports.generateUserToken = void 0;
+exports.verifyToken = exports.generateGuestToken = exports.generateSalesToken = exports.generateRestaurantAdminToken = exports.generateAdminToken = exports.generateUserToken = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const JWT_SECRET = process.env.JWT_SECRET;
 // =======================
@@ -55,6 +55,19 @@ const generateSalesToken = (data) => {
     }, JWT_SECRET, { expiresIn: "30d" });
 };
 exports.generateSalesToken = generateSalesToken;
+// =======================
+// Generate Guest Token
+// =======================
+const generateGuestToken = (data) => {
+    return jsonwebtoken_1.default.sign({
+        id: data.id,
+        name: "Guest",
+        role: "user",
+        isGuest: true,
+        restaurantId: data.restaurantId || null,
+    }, JWT_SECRET, { expiresIn: "30d" });
+};
+exports.generateGuestToken = generateGuestToken;
 // =======================
 // Verify Token
 // =======================

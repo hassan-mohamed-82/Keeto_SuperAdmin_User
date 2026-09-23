@@ -26,6 +26,7 @@ const authenticated = (req, res, next) => {
         type: decoded.type,
         restaurantId: decoded.restaurantId,
         branchId: decoded.branchId,
+        isGuest: Boolean(decoded.isGuest),
     };
     next();
 };
@@ -46,6 +47,7 @@ const optionalAuth = (req, res, next) => {
                 type: decoded.type,
                 restaurantId: decoded.restaurantId,
                 branchId: decoded.branchId,
+                isGuest: Boolean(decoded.isGuest),
             };
         }
     }

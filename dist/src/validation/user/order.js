@@ -1,115 +1,61 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getOrderSchema = exports.getMyOrdersSchema = exports.createOrderSchema = exports.calculateSchema = void 0;
+exports.checkoutSchema = exports.guestAddressSchema = exports.guestInfoSchema = void 0;
 const zod_1 = require("zod");
-const currencies = ['USD', 'EUR', 'SAR', 'AED', 'EGP', 'INR'];
-const statuses = ['مكتمل', 'قيد الانتظار', 'مرفوض', 'ملغي'];
-// ═══════════════════════════════════════════════════════════════
-// 📊 CALCULATE SCHEMA
-// ═══════════════════════════════════════════════════════════════
-exports.calculateSchema = zod_1.z.object({
-    fromCurrency: zod_1.z.enum(currencies, {
-        errorMap: (issue) => {
-            if (issue.code === 'invalid_enum_value') {
-                return { message: 'العملة غير صالحة' };
-            }
-            return { message: 'العملة مطلوبة' };
-        },
+// ============================================================
+// Guest Info & Address Schemas
+// ============================================================
+exports.guestInfoSchema = zod_1.z.object({
+    name: zod_1.z.string().min(2, { message: "Guest name must be at least 2 characters" }),
+    phone: zod_1.z.string().min(7, { message: "Phone number must be at least 7 digits" }).max(20),
+});
+exports.guestAddressSchema = zod_1.z.object({
+    title: zod_1.z.string().optional().default("Guest Address"),
+    street: zod_1.z.string().min(1, { message: "Street is required" }),
+    number: zod_1.z.string().min(1, { message: "Building/House number is required" }),
+    floor: zod_1.z.string().optional(),
+    apartment: zod_1.z.string().optional(),
+    landmark: zod_1.z.string().optional(),
+    location: zod_1.z.string().optional(),
+    fulladdress: zod_1.z.string().optional(),
+    lat: zod_1.z.union([zod_1.z.number(), zod_1.z.string().regex(/^-?\d+(\.\d+)?$/)]).transform(Number),
+    lng: zod_1.z.union([zod_1.z.number(), zod_1.z.string().regex(/^-?\d+(\.\d+)?$/)]).transform(Number),
+});
+// ============================================================
+// Checkout Validation Schema
+// ============================================================
+exports.checkoutSchema = zod_1.z.object({
+    orderSource: zod_1.z.enum(["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"], { required_error: "orderSource is required" }),
+    paymentMethod: zod_1.z.string({ required_error: "paymentMethod is required" }),
+    orderType: zod_1.z.enum(["delivery", "takeaway", "dine_in"], {
+        required_error: "orderType is required and must be one of: delivery, takeaway, dine_in",
     }),
-    amount: zod_1.z.number({
-        required_error: 'المبلغ مطلوب',
-    }).positive({ message: 'المبلغ يجب أن يكون أكبر من صفر' }),
-});
-// ═══════════════════════════════════════════════════════════════
-// 📦 CREATE ORDER SCHEMA
-// ═══════════════════════════════════════════════════════════════
-exports.createOrderSchema = zod_1.z.object({
-    // Currency & Amount
-    fromCurrency: zod_1.z.enum(currencies, {
-        errorMap: (issue) => {
-            if (issue.code === 'invalid_enum_value') {
-                return { message: 'العملة غير صالحة' };
-            }
-            return { message: 'العملة مطلوبة' };
-        },
-    }),
-    amount: zod_1.z.number({
-        required_error: 'المبلغ مطلوب',
-    }).positive({ message: 'المبلغ يجب أن يكون أكبر من صفر' }),
-    // Sender Info
-    senderName: zod_1.z.string({
-        required_error: 'اسم المرسل مطلوب',
-    })
-        .trim()
-        .min(2, { message: 'اسم المرسل يجب أن يكون حرفين على الأقل' })
-        .max(100, { message: 'اسم المرسل يجب أن لا يتجاوز 100 حرف' }),
-    senderAddress: zod_1.z.string({
-        required_error: 'عنوان المرسل مطلوب',
-    })
-        .trim()
-        .min(5, { message: 'العنوان يجب أن يكون 5 أحرف على الأقل' })
-        .max(200, { message: 'العنوان يجب أن لا يتجاوز 200 حرف' }),
-    senderPhone: zod_1.z.string({
-        required_error: 'رقم هاتف المرسل مطلوب',
-    })
-        .trim()
-        .regex(/^[0-9+\-\s]+$/, { message: 'رقم الهاتف غير صالح' })
-        .min(10, { message: 'رقم الهاتف يجب أن يكون 10 أرقام على الأقل' })
-        .max(20, { message: 'رقم الهاتف يجب أن لا يتجاوز 20 رقم' }),
-    // Recipient Info
-    recipientName: zod_1.z.string({
-        required_error: 'اسم المستلم مطلوب',
-    })
-        .trim()
-        .min(2, { message: 'اسم المستلم يجب أن يكون حرفين على الأقل' })
-        .max(100, { message: 'اسم المستلم يجب أن لا يتجاوز 100 حرف' }),
-    recipientAccountNumber: zod_1.z.string({
-        required_error: 'رقم حساب المستلم مطلوب',
-    })
-        .trim()
-        .min(5, { message: 'رقم الحساب يجب أن يكون 5 أحرف على الأقل' })
-        .max(50, { message: 'رقم الحساب يجب أن لا يتجاوز 50 حرف' }),
-    recipientPhone: zod_1.z.string({
-        required_error: 'رقم هاتف المستلم مطلوب',
-    })
-        .trim()
-        .regex(/^[0-9+\-\s]+$/, { message: 'رقم الهاتف غير صالح' })
-        .min(10, { message: 'رقم الهاتف يجب أن يكون 10 أرقام على الأقل' })
-        .max(20, { message: 'رقم الهاتف يجب أن لا يتجاوز 20 رقم' }),
-    // Payment Method ID (الحساب البنكي اللي ظهر للـ User)
-    paymentMethodId: zod_1.z.number({
-        required_error: 'وسيلة الدفع مطلوبة',
-    }).int().positive({ message: 'وسيلة الدفع غير صالحة' }),
-    // Receipt
-    receiptImage: zod_1.z.string()
-        .regex(/^data:image\/(png|jpg|jpeg|gif|webp);base64,/, {
-        message: 'صورة الإيصال يجب أن تكون بصيغة Base64 صالحة',
-    })
-        .optional()
-        .nullable(),
-});
-// ═══════════════════════════════════════════════════════════════
-// 📋 GET MY ORDERS SCHEMA
-// ═══════════════════════════════════════════════════════════════
-exports.getMyOrdersSchema = zod_1.z.object({
-    status: zod_1.z.enum(statuses, {
-        errorMap: () => ({ message: 'الحالة غير صالحة' }),
-    }).optional(),
-    page: zod_1.z.coerce.number()
-        .int()
-        .min(1, { message: 'رقم الصفحة يجب أن يكون 1 على الأقل' })
-        .default(1),
-    limit: zod_1.z.coerce.number()
-        .int()
-        .min(1, { message: 'الحد الأدنى للنتائج هو 1' })
-        .max(100, { message: 'الحد الأقصى للنتائج هو 100' })
-        .default(10),
-});
-// ═══════════════════════════════════════════════════════════════
-// 🔍 GET ORDER SCHEMA
-// ═══════════════════════════════════════════════════════════════
-exports.getOrderSchema = zod_1.z.object({
-    id: zod_1.z.string({
-        required_error: 'معرف الطلب مطلوب',
-    }).regex(/^\d+$/, { message: 'معرف الطلب يجب أن يكون رقم صحيح' }),
+    idempotencyKey: zod_1.z.string().optional(),
+    zoneId: zod_1.z.string().optional(),
+    branchId: zod_1.z.string().optional(),
+    addressId: zod_1.z.string().optional(),
+    note: zod_1.z.string().max(500).optional(),
+    couponCode: zod_1.z.string().optional(),
+    // Guest Flow Fields
+    guestInfo: exports.guestInfoSchema.optional(),
+    guestAddress: exports.guestAddressSchema.optional(),
+}).superRefine((data, ctx) => {
+    // If delivery, either addressId or guestAddress with lat/lng must be provided
+    if (data.orderType === "delivery") {
+        if (!data.addressId && !data.guestAddress) {
+            ctx.addIssue({
+                code: zod_1.z.ZodIssueCode.custom,
+                message: "Delivery address (addressId or guestAddress) is required for delivery orders.",
+                path: ["addressId"],
+            });
+        }
+    }
+    // Takeaway or Dine-in requires branchId
+    if ((data.orderType === "takeaway" || data.orderType === "dine_in") && !data.branchId) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: "Branch ID is required for takeaway or dine-in orders.",
+            path: ["branchId"],
+        });
+    }
 });

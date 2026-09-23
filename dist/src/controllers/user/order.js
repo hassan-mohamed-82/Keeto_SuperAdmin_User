@@ -11,13 +11,15 @@ const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
 const notifications_1 = require("../../utils/notifications");
 const geo_1 = require("../../utils/geo");
-const discount_1 = require("../../utils/discount");
+const discount_service_1 = require("../../services/discount.service");
 const userBlockCheck_1 = require("../../utils/userBlockCheck");
 const restaurantFeatures_1 = require("./restaurantFeatures");
 const pricing_helper_1 = require("../../helpers/pricing.helper");
 const coupon_helper_1 = require("../../helpers/coupon.helper");
 const foodConditions_1 = require("../../helpers/foodConditions");
 const kashier_service_1 = require("../../services/payments/kashier/kashier.service");
+const paymob_service_1 = require("../../services/payments/paymob/paymob.service");
+const encryption_1 = require("../../utils/encryption");
 const getNextDailyOrderNumber_1 = require("../../helpers/getNextDailyOrderNumber");
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date) => {
@@ -154,8 +156,78 @@ const roundMoney = (amount) => Math.round(amount * 100) / 100;
 const checkout = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
-    const userId = req.user.id;
-    const { orderSource, paymentMethod, orderType, idempotencyKey, zoneId, branchId, addressId, note, couponCode } = req.body;
+    const isGuestUser = Boolean(req.user.isGuest);
+    const { orderSource, paymentMethod, orderType, idempotencyKey, zoneId, branchId, addressId: inputAddressId, note, couponCode, guestInfo, guestAddress, } = req.body;
+    let addressId = inputAddressId || null;
+    let effectiveUserId = req.user.id;
+    // ==========================================
+    // 🛡️ Guest Checkout & Phone Deduplication (Find-or-Create)
+    // ==========================================
+    if (isGuestUser || guestInfo) {
+        const guestName = guestInfo?.name || req.user.name || "Guest";
+        const rawPhone = guestInfo?.phone;
+        if (!rawPhone && isGuestUser) {
+            throw new BadRequest_1.BadRequest("Phone number is required for guest checkout.");
+        }
+        if (rawPhone) {
+            const normalizedPhone = rawPhone.replace(/[\s\-\(\)]/g, "");
+            const [existingUser] = await connection_1.db
+                .select()
+                .from(schema_1.users)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.users.phone, normalizedPhone), (0, drizzle_orm_1.eq)(schema_1.users.isDeleted, false)))
+                .limit(1);
+            if (existingUser && existingUser.id !== effectiveUserId) {
+                const isFullyRegistered = Boolean(existingUser.password); // عنده باسورد = حساب حقيقي
+                if (isFullyRegistered) {
+                    // ✅ حساب حقيقي: منعمل merge تلقائي، نطلب تأكيد
+                    throw new BadRequest_1.BadRequest("An account already exists with this phone number. Please log in with your email to continue, or use a different phone number.");
+                }
+                else {
+                    // ✅ يوزر تاني كان guest قبل كده بنفس الرقم: دمج آمن
+                    const guestSessionId = req.user.id;
+                    effectiveUserId = existingUser.id;
+                    await connection_1.db
+                        .update(schema_1.cartItems)
+                        .set({ userId: effectiveUserId })
+                        .where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, guestSessionId));
+                    await connection_1.db.update(schema_1.users)
+                        .set({ isDeleted: true, status: "blocked" })
+                        .where((0, drizzle_orm_1.eq)(schema_1.users.id, guestSessionId));
+                }
+            }
+            else {
+                await connection_1.db
+                    .update(schema_1.users)
+                    .set({
+                    name: guestName,
+                    phone: normalizedPhone,
+                })
+                    .where((0, drizzle_orm_1.eq)(schema_1.users.id, effectiveUserId));
+            }
+        }
+    }
+    const userId = effectiveUserId;
+    // ==========================================
+    // 🏠 Guest Address Creation (Delivery)
+    // ==========================================
+    if (orderType === "delivery" && !addressId && guestAddress) {
+        const newAddressId = (0, uuid_1.v4)();
+        await connection_1.db.insert(schema_1.addresses).values({
+            id: newAddressId,
+            userId,
+            title: guestAddress.title || "Guest Address",
+            street: guestAddress.street,
+            number: String(guestAddress.number),
+            floor: guestAddress.floor ? String(guestAddress.floor) : null,
+            apartment: guestAddress.apartment ? String(guestAddress.apartment) : null,
+            landmark: guestAddress.landmark || null,
+            location: guestAddress.location || null,
+            fulladdress: guestAddress.fulladdress || `${guestAddress.number} ${guestAddress.street}`,
+            lat: String(guestAddress.lat),
+            lng: String(guestAddress.lng),
+        });
+        addressId = newAddressId;
+    }
     // ==========================================
     // 🛡️ 1. Validation
     // ==========================================
@@ -171,6 +243,10 @@ const checkout = async (req, res) => {
     const paymentMethodNameAr = selectedPayment.nameAr;
     const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
     const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
+    // 🛡️ Prevent wallet payment for unverified guest accounts
+    if (isGuestUser && isWalletPayment) {
+        throw new BadRequest_1.BadRequest("Wallet payment is only available for registered accounts.");
+    }
     // Visa payment check using VISA_PAYMENT_METHOD_ID from database schema
     const isVisaPayment = paymentMethod === selectedPayment.id ||
         paymentMethodName?.toLowerCase() === "visa" ||
@@ -352,7 +428,7 @@ const checkout = async (req, res) => {
             ? connection_1.db.select().from(schema_1.addons).where((0, drizzle_orm_1.inArray)(schema_1.addons.id, [...new Set(allAddonIds)]))
             : [],
         uniqueFoodIds.length > 0
-            ? connection_1.db.select({ id: schema_1.food.id, price: schema_1.food.price, status: schema_1.food.status, isOutOfStock: schema_1.food.isOutOfStock, discount_type: schema_1.food.discount_type, discount_value: schema_1.food.discount_value })
+            ? connection_1.db.select({ id: schema_1.food.id, price: schema_1.food.price, status: schema_1.food.status, isOutOfStock: schema_1.food.isOutOfStock, discountId: schema_1.food.discountId, discount_type: schema_1.food.discount_type, discount_value: schema_1.food.discount_value })
                 .from(schema_1.food).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.food.id, uniqueFoodIds), foodConditions_1.activeFoodCondition))
             : []
     ]);
@@ -568,8 +644,19 @@ const checkout = async (req, res) => {
             },
         });
     }
-    const availableDiscounts = await (0, discount_1.getAvailableDiscounts)(restaurantId);
-    const discountState = { remainingMaxDiscounts: new Map(), appliedDiscounts: new Set() };
+    const resolvedOrderProducts = await (0, discount_service_1.formatProductsWithDiscounts)(itemsWithData
+        .filter(data => !data.isOffer && data.foodItem)
+        .map(data => ({
+        id: data.foodItem.id,
+        price: data.originalBasePrice,
+        discountId: data.foodItem.discountId,
+        discountType: data.foodItem.discount_type,
+        discountValue: data.foodItem.discount_value,
+    })), restaurantId);
+    const resolvedOrderProductMap = new Map(resolvedOrderProducts.map(product => [product.id, product]));
+    const appliedDiscountIds = new Set(resolvedOrderProducts
+        .map(product => product.appliedDiscountId)
+        .filter((id) => Boolean(id)));
     const itemsToInsert = [];
     for (const data of itemsWithData) {
         if (data.isOffer) {
@@ -594,7 +681,8 @@ const checkout = async (req, res) => {
             continue;
         }
         const { cartItem, foodItem, originalBasePrice, varPrice, addonPrice, vars, addonsList } = data;
-        const { price: discountedBasePrice } = (0, discount_1.applyPriorityDiscount)({ id: foodItem.id, discountType: foodItem.discount_type, discountValue: foodItem.discount_value }, originalBasePrice, initialSubtotal, availableDiscounts, discountState, true);
+        const resolvedProduct = resolvedOrderProductMap.get(foodItem.id);
+        const discountedBasePrice = resolvedProduct?.finalPrice ?? originalBasePrice;
         const itemTotal = roundMoney((discountedBasePrice + varPrice + addonPrice) * cartItem.quantity);
         subtotal += itemTotal;
         itemsToInsert.push({
@@ -628,24 +716,17 @@ const checkout = async (req, res) => {
     let orderDiscountType = null;
     let orderDiscountValue = null;
     let orderDiscountSource = null;
-    // 1️⃣ تتبع الخصم المطبق (إما خصم عام/مطعم أو خصم مباشر على الصنف)
-    if (discountState.appliedDiscounts.size > 0) {
-        const appliedDiscountId = Array.from(discountState.appliedDiscounts)[0];
-        const matchedItem = availableDiscounts.find(item => item.discount.id === appliedDiscountId);
-        if (matchedItem) {
-            const activeDiscount = matchedItem.discount;
-            orderDiscountId = activeDiscount.id;
-            const isGlobalDiscount = Boolean(activeDiscount.isGlobal);
-            orderDiscountSource = isGlobalDiscount ? "global_discount" : "restaurant_discount";
-            orderDiscountType = activeDiscount.discountType === "percentage" ? "percentage" : "fixed_amount";
-            orderDiscountValue = activeDiscount.discountValue ? activeDiscount.discountValue.toString() : "0";
-        }
+    const appliedProduct = resolvedOrderProducts.find(product => product.discountAmount > 0);
+    if (appliedProduct?.discountDetails) {
+        orderDiscountId = appliedProduct.discountDetails.id;
+        orderDiscountSource = appliedProduct.discountDetails.source === "product"
+            ? "food_level"
+            : appliedProduct.discountDetails.source === "global" ? "global_discount" : "restaurant_discount";
+        orderDiscountType = appliedProduct.discountDetails.type === "percentage" ? "percentage" : "fixed_amount";
+        orderDiscountValue = String(appliedProduct.discountDetails.value);
     }
     else if (hasFoodLevelDiscount) {
-        // حالة الخصم المباشر من الصنف نفسه
-        orderDiscountId = null;
         orderDiscountSource = "food_level";
-        orderDiscountType = null;
         orderDiscountValue = roundMoney(initialSubtotal - subtotal).toFixed(2);
     }
     // 2️⃣ تطبيق الكوبون وتجميعه مع الخصم (بدون إلغاء بيانات الخصم الأصلي)
@@ -1005,8 +1086,8 @@ const checkout = async (req, res) => {
                 .set({ usedCount: (0, drizzle_orm_1.sql) `used_count + 1` })
                 .where((0, drizzle_orm_1.eq)(schema_1.coupons.id, appliedCoupon.id));
         }
-        if (discountState.appliedDiscounts.size > 0) {
-            for (const dId of Array.from(discountState.appliedDiscounts)) {
+        if (appliedDiscountIds.size > 0) {
+            for (const dId of appliedDiscountIds) {
                 await tx.update(schema_1.discounts)
                     .set({ usedCount: (0, drizzle_orm_1.sql) `used_count + 1` })
                     .where((0, drizzle_orm_1.eq)(schema_1.discounts.id, dId));
@@ -1084,23 +1165,93 @@ const checkout = async (req, res) => {
         }
     });
     // ==========================================
-    // 12. Create Kashier Payment Session (if Visa)
+    // 12. Create Payment Session (if Visa/Online)
+    // Supports SYSTEM (Kashier) or CUSTOM (Paymob from restaurant_payment_credentials)
     // ==========================================
     let paymentSessionData = null;
     if (isVisaPayment) {
-        try {
-            paymentSessionData = await kashier_service_1.KashierService.createPaymentSession({
-                orderId: orderId,
-                amount: totalAmount,
-                currency: "EGP",
-                customerEmail: userInfo?.email || undefined,
-            });
+        const gatewayType = settings?.paymentGatewayType || "SYSTEM";
+        if (gatewayType === "CUSTOM") {
+            try {
+                // Find active PAYMOB credentials for this restaurant
+                const [paymobCredsRecord] = await connection_1.db
+                    .select()
+                    .from(schema_1.restaurantPaymentCredentials)
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.provider, "PAYMOB"), (0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.isActive, true)))
+                    .limit(1);
+                if (!paymobCredsRecord || !paymobCredsRecord.credentials) {
+                    throw new BadRequest_1.BadRequest("Restaurant is configured for custom gateway, but active Paymob credentials were not found.");
+                }
+                const rawCreds = paymobCredsRecord.credentials;
+                const decryptedCredentials = {
+                    ...rawCreds,
+                    apiKey: (0, encryption_1.decryptSecret)(rawCreds.apiKey),
+                    hmac: (0, encryption_1.decryptSecret)(rawCreds.hmac),
+                };
+                const nameParts = (userInfo?.name || "Customer User").trim().split(" ");
+                const firstName = nameParts[0] || "Customer";
+                const lastName = nameParts.slice(1).join(" ") || "User";
+                const paymobSession = await paymob_service_1.PaymobService.createPaymentSession({
+                    credentials: decryptedCredentials,
+                    orderId: orderId,
+                    orderNumber: orderNumber,
+                    amountCents: Math.round(totalAmount * 100),
+                    currency: "EGP",
+                    customer: {
+                        firstName,
+                        lastName,
+                        email: userInfo?.email || "customer@example.com",
+                        phone: userInfo?.phone || "+201000000000",
+                    },
+                });
+                // Update order with paymobOrderId
+                await connection_1.db
+                    .update(schema_1.orders)
+                    .set({
+                    paymobOrderId: String(paymobSession.paymobOrderId),
+                    paymentStatus: "pending_payment",
+                })
+                    .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
+                paymentSessionData = {
+                    gateway: "PAYMOB",
+                    sessionId: paymobSession.sessionId,
+                    sessionUrl: paymobSession.sessionUrl,
+                    status: "CREATED",
+                    paymobOrderId: paymobSession.paymobOrderId,
+                };
+            }
+            catch (paymentErr) {
+                console.error(`[Checkout] Paymob session creation failed for order ${orderId}:`, paymentErr?.message);
+                paymentSessionData = {
+                    gateway: "PAYMOB",
+                    error: paymentErr?.message || "Failed to create Paymob payment session.",
+                };
+            }
         }
-        catch (paymentErr) {
-            console.error(`[Checkout] Kashier session creation failed for order ${orderId}:`, paymentErr?.message);
-            paymentSessionData = {
-                error: paymentErr?.message || "Failed to create Kashier payment session.",
-            };
+        else {
+            // SYSTEM gateway -> Kashier
+            try {
+                const kashierSession = await kashier_service_1.KashierService.createPaymentSession({
+                    orderId: orderId,
+                    amount: totalAmount,
+                    currency: "EGP",
+                    customerEmail: userInfo?.email || undefined,
+                });
+                paymentSessionData = {
+                    gateway: "KASHIER",
+                    sessionId: kashierSession.sessionId,
+                    sessionUrl: kashierSession.sessionUrl,
+                    status: kashierSession.status,
+                    expireAt: kashierSession.expireAt,
+                };
+            }
+            catch (paymentErr) {
+                console.error(`[Checkout] Kashier session creation failed for order ${orderId}:`, paymentErr?.message);
+                paymentSessionData = {
+                    gateway: "KASHIER",
+                    error: paymentErr?.message || "Failed to create Kashier payment session.",
+                };
+            }
         }
     }
     // ==========================================

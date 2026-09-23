@@ -83,6 +83,9 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     isDelayEmailSent: (0, mysql_core_1.boolean)("is_delay_email_sent").default(false),
     offerId: (0, mysql_core_1.char)("offer_id", { length: 36 })
         .references(() => schema_1.offers.id, { onDelete: "set null" }),
+    paymentStatus: (0, mysql_core_1.mysqlEnum)("payment_status", ["pending_payment", "paid", "payment_failed"]).default("pending_payment"),
+    paymobOrderId: (0, mysql_core_1.varchar)("paymob_order_id", { length: 100 }),
+    paymobTransactionId: (0, mysql_core_1.varchar)("paymob_transaction_id", { length: 100 }),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });

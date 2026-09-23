@@ -4,7 +4,7 @@ exports.formatFoodsList = void 0;
 const connection_1 = require("../models/connection");
 const schema_1 = require("../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
-const discount_1 = require("../utils/discount");
+const discount_service_1 = require("./discount.service");
 const food_helper_1 = require("../helpers/food.helper");
 const pricing_overrides_1 = require("../helpers/pricing.overrides");
 const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = new Set(), targetBranchId, serviceModule) => {
@@ -208,9 +208,9 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
             });
         }
     }
-    // 4. Calculate Discounts & Format Output
-    const availableDiscounts = await (0, discount_1.getAvailableDiscounts)(restaurantId);
-    return rawMenu.map((row) => {
+    // 4. Calculate discounts through the shared product resolver.
+    const productsWithDiscounts = await (0, discount_service_1.formatProductsWithDiscounts)(rawMenu, restaurantId);
+    return productsWithDiscounts.map((row) => {
         const foodId = row.foodId || row.id;
         let effectiveFoodPrice = Number(row.price);
         if (foodOverridesMap.has(foodId)) {
@@ -219,36 +219,8 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
                 effectiveFoodPrice = (0, pricing_overrides_1.parsePrice)(bestFoodOverride.price);
             }
         }
-        const discountState = {
-            remainingMaxDiscounts: new Map(),
-            appliedDiscounts: new Set()
-        };
-        const { price: calculatedDiscountPrice, appliedDiscount, discountNote } = (0, discount_1.applyPriorityDiscount)({ id: foodId, discountType: row.foodDiscountType || row.discountType, discountValue: row.foodDiscountValue || row.discountValue }, effectiveFoodPrice, 0, availableDiscounts, discountState, false);
-        let activeDiscountInfo = null;
-        if (appliedDiscount && appliedDiscount.id) {
-            activeDiscountInfo = {
-                id: appliedDiscount.id,
-                name: appliedDiscount.name,
-                nameAr: appliedDiscount.nameAr,
-                type: appliedDiscount.discountType,
-                value: Number(appliedDiscount.discountValue),
-                maxDiscount: appliedDiscount.maxDiscount ? Number(appliedDiscount.maxDiscount) : null,
-                isGlobal: Boolean(appliedDiscount.isGlobal),
-                source: appliedDiscount.isGlobal ? "global_discount" : "restaurant_discount"
-            };
-        }
-        else if ((row.foodDiscountType || row.discountType) && Number(row.foodDiscountValue || row.discountValue) > 0) {
-            activeDiscountInfo = {
-                id: null,
-                name: "Item Discount",
-                nameAr: "خصم على الصنف",
-                type: row.foodDiscountType || row.discountType,
-                value: Number(row.foodDiscountValue || row.discountValue),
-                maxDiscount: null,
-                isGlobal: false,
-                source: "food_level"
-            };
-        }
+        const calculatedDiscountPrice = row.finalPrice;
+        const discountNote = row.discountNote;
         // Parse Addons IDs
         let foodAddonIds = [];
         if (Array.isArray(row.addonsId)) {
@@ -296,11 +268,16 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
             descriptionAr: row.descriptionAr,
             descriptionFr: row.descriptionFr,
             price: effectiveFoodPrice,
-            discountType: activeDiscountInfo?.type ?? null,
-            discountValue: activeDiscountInfo?.value ?? null,
+            originalPrice: row.originalPrice,
+            finalPrice: row.finalPrice,
+            discountAmount: row.discountAmount,
+            appliedDiscountId: row.appliedDiscountId,
+            discountSource: row.discountSource,
+            discountType: row.discountDetails?.type ?? null,
+            discountValue: row.discountDetails?.value ?? null,
             discountPrice: calculatedDiscountPrice,
             discountNote,
-            discountDetails: activeDiscountInfo,
+            discountDetails: row.discountDetails,
             image: row.image,
             isOutOfStock: row.isOutOfStock,
             points: userId ? (row.points ?? 0) : null,

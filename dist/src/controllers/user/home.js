@@ -122,8 +122,9 @@ const getFoodsByCategory = async (req, res) => {
         descriptionAr: schema_1.food.descriptionAr,
         descriptionFr: schema_1.food.descriptionFr,
         price: schema_1.food.price,
-        foodDiscountType: schema_1.food.discount_type,
-        foodDiscountValue: schema_1.food.discount_value,
+        discountId: schema_1.food.discountId,
+        discountType: schema_1.food.discount_type,
+        discountValue: schema_1.food.discount_value,
         isOutOfStock: schema_1.food.isOutOfStock,
         points: schema_1.food.points,
         addonsId: schema_1.food.addonsId,
@@ -202,104 +203,6 @@ const getFoodsByCategory = async (req, res) => {
 };
 exports.getFoodsByCategory = getFoodsByCategory;
 // ==========================================
-// 3. Foods by Category before edit
-// ==========================================
-// export const getFoodsByCategory = async (req: Request, res: Response) => {
-//     const { categoryId } = req.params;
-//     const userId = req.user?.id;
-//     // const branchIdParam = req.query?.branchId as string | undefined;
-//     // const addressIdParam = req.query?.addressId as string | undefined;
-//     // // Resolve the target branch: direct branchId wins, else resolve from addressId
-//     // let targetBranchId: string | null = branchIdParam || null;
-//     // if (!targetBranchId && addressIdParam) {
-//     //     targetBranchId = await resolveBranchIdFromAddress(addressIdParam);
-//     // }
-//     const { favoriteFoodIds } = await getUserFavoritesSets(userId);
-//     const data = await db.select({
-//         foodId: food.id,
-//         foodName: food.name,
-//         foodNameAr: food.nameAr,
-//         foodNameFr: food.nameFr,
-//         foodImage: food.image,
-//         price: food.price,
-//         foodDiscountType: food.discount_type,
-//         foodDiscountValue: food.discount_value,
-//         isOutOfStock: food.isOutOfStock,
-//         restaurantId: restaurants.id,
-//         restaurantName: restaurants.name,
-//         restaurantNameAr: restaurants.nameAr,
-//         restaurantNameFr: restaurants.nameFr,
-//         restaurantLogo: restaurants.logo,
-//         callcenterphone: restaurants.callcenterphone,
-//     })
-//         .from(food)
-//         .leftJoin(restaurants, eq(food.restaurantid, restaurants.id))
-//         .where(and(
-//             eq(food.categoryid, categoryId),
-//             eq(food.status, "active"),
-//             activeFoodCondition
-//         ));
-//     const uniqueRestaurants = [...new Set(data.map(f => f.restaurantId))];
-//     const discountsByRestaurant = new Map();
-//     for (const rId of uniqueRestaurants) {
-//         if (rId) discountsByRestaurant.set(rId, await getAvailableDiscounts(rId));
-//     }
-//     // ==========================================
-//     // حساب الفروع غير المتاحة لكل وجبة
-//     // ==========================================
-//     // الوجبات النشطة فقط (status == active) هي التي وصلت هنا،
-//     // لكن isOutOfStock ممكن تكون true → غير متاحة في كل الفروع
-//     const activeFoodIds = data
-//         .filter(f => !f.isOutOfStock)
-//         .map(f => f.foodId)
-//         .filter(Boolean) as string[];
-//     const unavailableBranchesMap = activeFoodIds.length > 0
-//         ? await getUnavailableBranchesForFoods(activeFoodIds)
-//         : new Map<string, BranchInfo[]>();
-//     const result = data.map(f => {
-//         const availableDiscounts = discountsByRestaurant.get(f.restaurantId) || [];
-//         const discountState = { remainingMaxDiscounts: new Map<string, number>(), appliedDiscounts: new Set<string>() };
-//         const { price: finalDiscountPrice, discountNote } = applyPriorityDiscount(
-//             { id: f.foodId, discountType: f.foodDiscountType, discountValue: f.foodDiscountValue },
-//             Number(f.price),
-//             0,
-//             availableDiscounts,
-//             discountState,
-//             false
-//         );
-//         // إذا كانت الوجبة isOutOfStock → غير متاحة في جميع الفروع (null)
-//         // وإلا → قائمة الفروع غير المتاحة بالتحديد
-//         const unavailableBranches: BranchInfo[] | null = f.isOutOfStock
-//             ? null
-//             : (unavailableBranchesMap.get(f.foodId!) ?? []);
-//         // Filter out foods that are unavailable at the requested branch
-//         // if (targetBranchId && isFoodUnavailableForBranch(unavailableBranches, targetBranchId)) {
-//         //     return null;
-//         // }
-//         return {
-//             foodId: f.foodId,
-//             foodName: f.foodName,
-//             foodNameAr: f.foodNameAr,
-//             foodNameFr: f.foodNameFr,
-//             foodImage: f.foodImage,
-//             price: Number(f.price),
-//             discountPrice: finalDiscountPrice,
-//             discountNote,
-//             restaurantId: f.restaurantId,
-//             restaurantName: f.restaurantName,
-//             restaurantNameAr: f.restaurantNameAr,
-//             restaurantNameFr: f.restaurantNameFr,
-//             restaurantLogo: f.restaurantLogo,
-//             callcenterphone: f.callcenterphone,
-//             isOutOfStock: f.isOutOfStock,
-//             isFavorite: userId ? favoriteFoodIds.has(f.foodId) : false,
-//             unavailableBranches
-//         };
-//     })
-//     //.filter(Boolean);
-//     return SuccessResponse(res, { data: result });
-// };
-// ==========================================
 // 4. Restaurant Details + Menu
 // ==========================================
 const getRestaurantDetails = async (req, res) => {
@@ -358,8 +261,9 @@ const getRestaurantDetails = async (req, res) => {
         descriptionAr: schema_1.food.descriptionAr,
         descriptionFr: schema_1.food.descriptionFr,
         price: schema_1.food.price,
-        foodDiscountType: schema_1.food.discount_type,
-        foodDiscountValue: schema_1.food.discount_value,
+        discountId: schema_1.food.discountId,
+        discountType: schema_1.food.discount_type,
+        discountValue: schema_1.food.discount_value,
         isOutOfStock: schema_1.food.isOutOfStock,
         image: schema_1.food.image,
         points: schema_1.food.points,

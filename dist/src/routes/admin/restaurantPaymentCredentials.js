@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const catchAsync_1 = require("../../utils/catchAsync");
+const validation_1 = require("../../middlewares/validation");
+const restaurantPaymentCredentials_1 = require("../../controllers/admin/restaurantPaymentCredentials");
+const restaurantPaymentCredentials_2 = require("../../validation/admin/restaurantPaymentCredentials");
+const middlewares_1 = require("../../middlewares");
+const router = (0, express_1.Router)();
+router.post("/:restaurantId", (0, middlewares_1.hasPermission)("restaurantPaymentCredentials", "Add"), (0, validation_1.validate)(restaurantPaymentCredentials_2.createPaymentCredentialsSchema), (0, catchAsync_1.catchAsync)(restaurantPaymentCredentials_1.createCredentials));
+router.get("/:restaurantId", (0, middlewares_1.hasPermission)("restaurantPaymentCredentials", "View"), (0, catchAsync_1.catchAsync)(restaurantPaymentCredentials_1.getCredentialsByRestaurant));
+router.put("/:restaurantId/:credentialId", (0, middlewares_1.hasPermission)("restaurantPaymentCredentials", "Edit"), (0, validation_1.validate)(restaurantPaymentCredentials_2.updatePaymentCredentialsSchema), (0, catchAsync_1.catchAsync)(restaurantPaymentCredentials_1.updateCredential));
+router.delete("/:restaurantId/:credentialId", (0, middlewares_1.hasPermission)("restaurantPaymentCredentials", "Delete"), (0, catchAsync_1.catchAsync)(restaurantPaymentCredentials_1.deleteCredential));
+router.put("/:restaurantId/:credentialId/toggle", (0, middlewares_1.hasPermission)("restaurantPaymentCredentials", "Status"), (0, validation_1.validate)(restaurantPaymentCredentials_2.toggleCredentialSchema), (0, catchAsync_1.catchAsync)(restaurantPaymentCredentials_1.toggleCredential));
+exports.default = router;

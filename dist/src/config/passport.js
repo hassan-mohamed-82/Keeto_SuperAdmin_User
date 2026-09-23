@@ -77,6 +77,8 @@ const verifyGoogleToken = async (req, res) => {
                 isDeleted: false,
                 deletedAt: null,
                 totalOrders: 0,
+                isGuest: false,
+                authProvider: "google",
             };
         }
         else {
