@@ -327,7 +327,7 @@ export const formatFoodsList = async (
             appliedDiscountId: row.appliedDiscountId,
             discountSource: row.discountSource,
             discountType: row.discountDetails?.type ?? null,
-            discountValue: row.discountAmount,
+            discountValue: row.discountDetails?.value ?? null,
             discountPrice: calculatedDiscountPrice,
             discountNote,
             discountDetails: row.discountDetails,
