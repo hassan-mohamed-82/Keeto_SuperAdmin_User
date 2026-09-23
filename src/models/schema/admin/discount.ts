@@ -7,14 +7,15 @@ import {
     mysqlEnum,
     int,
     boolean,
-    uniqueIndex
+    uniqueIndex,
+    index,
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
 import { food } from "./food";
 
 // ==========================================
-// 1. Discounts Table (الجدول الرئيسي)
+// 1. Discounts Table (الخصم الأساسي / الحملة)
 // ==========================================
 export const discounts = mysqlTable("discounts", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -23,27 +24,14 @@ export const discounts = mysqlTable("discounts", {
     nameAr: varchar("name_ar", { length: 255 }),
     nameFr: varchar("name_fr", { length: 255 }),
 
-    // percentage | fixed_amount
-    discountType: mysqlEnum("discount_type", ["percentage", "fixed_amount"])
-        .notNull()
-        .default("percentage"),
-
-    discountValue: decimal("discount_value", { precision: 10, scale: 2 }).notNull(),
-
-    maxDiscount: decimal("max_discount", { precision: 10, scale: 2 }),
-
     minOrderAmount: decimal("min_order_amount", { precision: 10, scale: 2 }).default("0.00"),
-
     usageLimit: int("usage_limit"),
-
     usedCount: int("used_count").default(0),
 
     startDate: timestamp("start_date"),
     endDate: timestamp("end_date"),
 
     isActive: boolean("is_active").default(true),
-
-    // الفلاج الجديد لتحديد إذا كان الخصم عاماً لكل المطاعم في حال عدم اختيار مطعم محدد
     isGlobal: boolean("is_global").default(false),
 
     logo: varchar("logo", { length: 500 }),
@@ -53,40 +41,44 @@ export const discounts = mysqlTable("discounts", {
 });
 
 // ==========================================
-// 2. Discount Restaurants Table (جدول الربط المشترك)
+// 2. Discount Groups Table (الخصم الفرعي — نوع/قيمة/منتجات)
+// ==========================================
+export const discountGroups = mysqlTable("discount_groups", {
+    id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+
+    discountId: char("discount_id", { length: 36 })
+        .notNull()
+        .references(() => discounts.id, { onDelete: "cascade" }),
+
+    // percentage | fixed_amount
+    discountType: mysqlEnum("discount_type", ["percentage", "fixed_amount"])
+        .notNull()
+        .default("percentage"),
+
+    discountValue: decimal("discount_value", { precision: 10, scale: 2 }).notNull(),
+    maxDiscount: decimal("max_discount", { precision: 10, scale: 2 }),
+
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+}, (table) => ({
+    discountIdx: index("discount_groups_discount_idx").on(table.discountId),
+}));
+
+// ==========================================
+// 3. Discount Restaurants Table (many-to-many)
 // ==========================================
 export const discountRestaurants = mysqlTable("discount_restaurants", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
     discountId: char("discount_id", { length: 36 })
-        .references(() => discounts.id, { onDelete: "cascade" })
-        .notNull(),
+        .notNull()
+        .references(() => discounts.id, { onDelete: "cascade" }),
 
     restaurantId: char("restaurant_id", { length: 36 })
-        .references(() => restaurants.id, { onDelete: "cascade" })
-        .notNull(),
+        .notNull()
+        .references(() => restaurants.id, { onDelete: "cascade" }),
 
     createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
-    // قيد يمنع تكرار ربط نفس الخصم بنفس المطعم
     discountRestaurantUnique: uniqueIndex("discount_restaurant_unique_idx").on(table.discountId, table.restaurantId),
-}));
-
-// ==========================================
-// 3. Discount Foods Table (Optional Specific Products)
-// ==========================================
-export const discountFoods = mysqlTable("discount_foods", {
-    id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
-
-    discountId: char("discount_id", { length: 36 })
-        .references(() => discounts.id, { onDelete: "cascade" })
-        .notNull(),
-
-    foodId: char("food_id", { length: 36 })
-        .references(() => food.id, { onDelete: "cascade" })
-        .notNull(),
-
-    createdAt: timestamp("created_at").defaultNow(),
-}, (table) => ({
-    discountFoodUnique: uniqueIndex("discount_food_unique_idx").on(table.discountId, table.foodId),
 }));

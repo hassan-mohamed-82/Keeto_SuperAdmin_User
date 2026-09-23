@@ -15,7 +15,7 @@ import {
 import { relations, sql } from "drizzle-orm";
 import { addons, categories, foodVariations, restaurants, subcategories } from "../../schema";
 import { noteGroups } from "./noteGroup";
-import { discounts } from "./discount";
+import { discountGroups } from "./discount";
 
 export const food = mysqlTable("food", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -26,26 +26,26 @@ export const food = mysqlTable("food", {
     descriptionAr: text("description_ar").notNull().default(''),
     descriptionFr: text("description_fr").notNull().default(''),
     image: varchar("image", { length: 500 }).notNull(),
-    
+
     // 👇 هنا التعديل: إضافة { onDelete: "cascade" } لحل مشكلة الحذف
     restaurantid: char("restaurantid", { length: 36 })
         .references(() => restaurants.id, { onDelete: "cascade" })
         .notNull(),
-        
+
     categoryid: char("categoryid", { length: 36 }).references(() => categories.id).notNull(),
     subcategoryid: char("subcategoryid", { length: 36 }).references(() => subcategories.id).notNull(),
     foodtype: mysqlEnum("foodtype", ["veg", "non-veg"]).default("veg"),
     Nutrition: text("nutrition"),
-    allergen_ingredients: text("allergen_ingredients"), 
+    allergen_ingredients: text("allergen_ingredients"),
     is_Halal: boolean("is_Halal").default(false),
     addonsId: json("addons_ids").$type<string[]>().default([]),
     group_note_id: char("group_note_id", { length: 36 })
         .references(() => noteGroups.id, { onDelete: "set null" }),
     discountId: char("discount_id", { length: 36 })
-        .references(() => discounts.id, { onDelete: "set null" }),
+        .references(() => discountGroups.id, { onDelete: "set null" }),
     startTime: varchar("start_time", { length: 255 }).notNull(),
     endTime: varchar("end_time", { length: 255 }).notNull(),
-    
+
     search_tags: varchar("search_tags", { length: 255 }),
 
     price: decimal("price", { precision: 10, scale: 2 }).notNull(),
@@ -56,7 +56,7 @@ export const food = mysqlTable("food", {
     offer_start: time("offer_start"),
     offer_end: time("offer_end"),
     Maximum_Purchase: int("Maximum_Purchase"),
-    
+
     stock_type: mysqlEnum("stock_type", ["limited", "unlimited", "daily"]).default("unlimited"),
 
     isOutOfStock: boolean("is_out_of_stock").default(false),

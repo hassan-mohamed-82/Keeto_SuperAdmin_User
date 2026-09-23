@@ -1,8 +1,26 @@
 import { and, eq, inArray, isNull, lte, gte, or, sql } from "drizzle-orm";
 import { db } from "../models/connection";
-import { discounts, discountRestaurants, food } from "../models/schema";
+import { discounts, discountGroups, discountRestaurants, food } from "../models/schema";
 
-export type DiscountRecord = typeof discounts.$inferSelect;
+// ✅ دلوقتي بيمثل صف الخصم الفرعي (Group) مدموج ببيانات الخصم الأساسي (Campaign)
+export type DiscountRecord = {
+    id: string;                 // discountGroups.id — ده اللي food.discountId بيشاور عليه
+    discountId: string;         // discounts.id (الخصم الأساسي)
+    discountType: "percentage" | "fixed_amount";
+    discountValue: string;
+    maxDiscount: string | null;
+    isActive: boolean | null;
+    startDate: Date | null;
+    endDate: Date | null;
+    usageLimit: number | null;
+    usedCount: number | null;
+    isGlobal: boolean | null;
+    minOrderAmount: string | null;
+    name: string;
+    nameAr: string | null;
+    nameFr: string | null;
+    logo: string | null;
+};
 
 export type ResolvedProduct = {
     originalPrice: number;
@@ -35,12 +53,21 @@ type ProductDiscountInput = {
     discount?: DiscountRecord | null;
 };
 
+// ✅ الـ query الأساسية اللي بتجيب المنتج مع الخصم الفرعي والأساسي مربوطين مع بعض
 export const getBaseFoodsQuery = () => db
-    .select({ food, discount: discounts })
+    .select({ food, discountGroup: discountGroups, discount: discounts })
     .from(food)
-    .leftJoin(discounts, eq(food.discountId, discounts.id));
+    .leftJoin(discountGroups, eq(food.discountId, discountGroups.id))
+    .leftJoin(discounts, eq(discountGroups.discountId, discounts.id));
 
-export const getActiveGeneralDiscounts = async (restaurantId: string): Promise<DiscountRecord[]> => {
+/**
+ * ⚠️ ملحوظة: الدالة دي بترجع صفوف من جدول discounts (الحملة الأساسية) بس،
+ * وده الجدول اللي بقى مالوش discountType/discountValue/maxDiscount بعد التقسيم
+ * (دول بقوا في discountGroups). الدالة دي مش مستخدمة في resolveProductDiscount
+ * تحت (تم إلغاء الـ fallback للخصومات العامة بالكامل حسب الطلب)، فلو حابب
+ * تستخدمها في مكان تاني (كوبونات مثلاً)، لازم تراجع الأعمدة اللي بترجعها.
+ */
+export const getActiveGeneralDiscounts = async (restaurantId: string) => {
     const now = new Date();
 
     return db
@@ -60,15 +87,16 @@ export const getActiveGeneralDiscounts = async (restaurantId: string): Promise<D
 const isUsableDiscount = (discount: DiscountRecord) => {
     const now = new Date();
     return Boolean(discount.isActive)
-    && (!discount.startDate || new Date(discount.startDate) <= now)
-    && (!discount.endDate || new Date(discount.endDate) >= now)
-    && (discount.usageLimit === null || (discount.usedCount ?? 0) < discount.usageLimit);
+        && (!discount.startDate || new Date(discount.startDate) <= now)
+        && (!discount.endDate || new Date(discount.endDate) >= now)
+        && (discount.usageLimit === null || (discount.usedCount ?? 0) < discount.usageLimit);
 };
 
 /**
  * الخصم بيتطبق فقط لو:
  * 1. المنتج عنده discountType + discountValue مباشرين (خصم يدوي على المنتج نفسه)، أو
- * 2. المنتج مربوط بـ discountId (food.discount_id) وده الخصم "usable" (active + داخل التاريخ + تحت الـ usage limit)
+ * 2. المنتج مربوط بـ discountId (food.discount_id → discountGroups.id) وده الخصم
+ *    "usable" (الحملة الأساسية active + داخل التاريخ + تحت الـ usage limit)
  *
  * لا يوجد fallback لأي خصم عام (Global) أو خصم مطعم — أي منتج من غير الحالتين دول
  * بيرجع من غير خصم خالص، حتى لو فيه خصومات عامة شغالة في النظام.
@@ -146,7 +174,7 @@ export const resolveProductDiscount = (
         discountNote: discount.discountType === "percentage"
             ? `${value}% off`
             : `${value} off`,
-        appliedDiscountId: discount.id,
+        appliedDiscountId: discount.id, // ✅ ده الـ discountGroups.id (نفس food.discountId)
         discountSource: discount.isGlobal ? "global" : "restaurant",
         discountDetails: {
             id: discount.id,
@@ -172,11 +200,38 @@ export const formatProductsWithDiscounts = async <T extends { id?: string | null
 ): Promise<Array<T & ResolvedProduct>> => {
     if (rawFoods.length === 0) return [];
 
+    // ✅ food.discountId بيشاور على discountGroups.id دلوقتي، فلازم نجيب الـ group
+    //    مدموج مع بيانات الخصم الأساسي (discounts) في نفس الـ query
     const directIds = [...new Set(rawFoods.map(item => item.discountId).filter(Boolean))] as string[];
-    const directDiscounts = directIds.length > 0
-        ? await db.select().from(discounts).where(inArray(discounts.id, directIds))
+
+    const directGroups = directIds.length > 0
+        ? await db
+            .select({
+                id: discountGroups.id,
+                discountId: discountGroups.discountId,
+                discountType: discountGroups.discountType,
+                discountValue: discountGroups.discountValue,
+                maxDiscount: discountGroups.maxDiscount,
+                isActive: discounts.isActive,
+                startDate: discounts.startDate,
+                endDate: discounts.endDate,
+                usageLimit: discounts.usageLimit,
+                usedCount: discounts.usedCount,
+                isGlobal: discounts.isGlobal,
+                minOrderAmount: discounts.minOrderAmount,
+                name: discounts.name,
+                nameAr: discounts.nameAr,
+                nameFr: discounts.nameFr,
+                logo: discounts.logo,
+            })
+            .from(discountGroups)
+            .innerJoin(discounts, eq(discountGroups.discountId, discounts.id))
+            .where(inArray(discountGroups.id, directIds))
         : [];
-    const directDiscountMap = new Map(directDiscounts.map(discount => [discount.id, discount]));
+
+    const directDiscountMap = new Map<string, DiscountRecord>(
+        directGroups.map(group => [group.id, group as DiscountRecord])
+    );
 
     return rawFoods.map(item => {
         const itemWithDiscount = {

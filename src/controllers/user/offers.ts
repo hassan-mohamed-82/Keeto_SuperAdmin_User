@@ -1,8 +1,9 @@
 import { Request, Response } from "express";
-import { eq, and, or, isNull, lte, gte, inArray } from "drizzle-orm";
+import { eq, and, or, isNull, isNotNull, lte, gte, inArray, sql } from "drizzle-orm";
 import { db } from "../../models/connection";
 import {
     discounts,
+    discountGroups,
     discountRestaurants,
     food,
     restaurants,
@@ -13,95 +14,29 @@ import { activeFoodCondition } from "../../helpers/foodConditions";
 import { formatFoodsList } from "../../services/foodFormat";
 import { getUserFavoritesSets } from "../../services/userFavoritesFood";
 import { resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
+import { formatProductsWithDiscounts } from "../../services/discount.service";
 
-interface OfferDiscountMeta {
-    discountId: string;
-    discountName: string;
-    discountNameAr: string | null;
-    discountNameFr: string | null;
-    discountType: string;
-    discountValue: number | null;
-    maxDiscount: number | null;
-    minOrderAmount: number | null;
-    startDate: Date | null;
-    endDate: Date | null;
-    isGlobal: boolean;
-    discountLogo: string | null;
-    restaurant?: any;
-}
-
-const attachDiscountDetails = (item: any, meta?: OfferDiscountMeta) => {
-    const hasResolvedProductDiscount = item.discountSource === "product"
-        || item.discountDetails?.source === "product";
-    const discountDetails = item.discountDetails ?? (meta
-        ? {
-            id: meta.discountId,
-            name: meta.discountName,
-            nameAr: meta.discountNameAr ?? null,
-            nameFr: meta.discountNameFr ?? null,
-            type: meta.discountType,
-            value: meta.discountValue,
-            discountType: meta.discountType,
-            discountValue: meta.discountValue,
-            maxDiscount: meta.maxDiscount,
-            minOrderAmount: meta.minOrderAmount,
-            startDate: meta.startDate,
-            endDate: meta.endDate,
-            isGlobal: meta.isGlobal,
-            logo: meta.discountLogo,
-            source: meta.isGlobal ? "global_discount" : "restaurant_discount",
-        }
-        : null);
-
-    let discountPrice = item.discountPrice;
-    let discountType = item.discountType;
-    let discountValue = item.discountValue;
-
-    // If formatFoodsList didn't calculate a discount price but meta discount exists
-    if (!item.discountDetails && meta && (discountPrice === item.price || discountPrice === null || discountPrice === undefined)) {
-        if (meta.discountType === "percentage" && meta.discountValue) {
-            let discountAmount = item.price * (meta.discountValue / 100);
-            if (meta.maxDiscount && meta.maxDiscount > 0) {
-                discountAmount = Math.min(discountAmount, meta.maxDiscount);
-            }
-            discountPrice = Math.max(0, item.price - discountAmount);
-            discountType = meta.discountType;
-            discountValue = meta.discountValue;
-        } else if (["fixed_amount", "amount", "fixed"].includes(meta.discountType) && meta.discountValue) {
-            discountPrice = Math.max(0, item.price - meta.discountValue);
-            discountType = meta.discountType;
-            discountValue = meta.discountValue;
-        }
-    }
-
+const attachDiscountDetails = (item: any) => {
+    const details = item.discountDetails;
     return {
         ...item,
-        discountPrice,
-        discountType: discountType ?? meta?.discountType ?? null,
-        discountValue: discountValue ?? meta?.discountValue ?? null,
-        discountId: hasResolvedProductDiscount
-            ? (item.discountDetails?.id ?? null)
-            : (meta?.discountId ?? item.discountDetails?.id ?? null),
-        discountName: hasResolvedProductDiscount
-            ? (item.discountDetails?.name ?? "Product discount")
-            : (meta?.discountName ?? item.discountDetails?.name ?? null),
-        discountNameAr: hasResolvedProductDiscount
-            ? (item.discountDetails?.nameAr ?? null)
-            : (meta?.discountNameAr ?? item.discountDetails?.nameAr ?? null),
-        discountNameFr: hasResolvedProductDiscount
-            ? (item.discountDetails?.nameFr ?? null)
-            : (meta?.discountNameFr ?? item.discountDetails?.nameFr ?? null),
-        isGlobal: hasResolvedProductDiscount
-            ? false
-            : (meta ? meta.isGlobal : (item.discountDetails?.isGlobal ?? false)),
-        discountLogo: hasResolvedProductDiscount
-            ? (item.discountDetails?.logo ?? null)
-            : (meta?.discountLogo ?? null),
-        discountDetails,
-        discount: discountDetails,
+        discountPrice: item.discountPrice ?? item.finalPrice ?? item.price,
+        discountType: item.discountType ?? details?.type ?? null,
+        discountValue: item.discountValue ?? (details?.value !== undefined ? details.value : null),
+        discountId: item.appliedDiscountId ?? details?.id ?? null,
+        discountName: details?.name ?? (item.discountSource === "product" ? "Product discount" : null),
+        discountNameAr: details?.nameAr ?? null,
+        discountNameFr: details?.nameFr ?? null,
+        isGlobal: details?.isGlobal ?? false,
+        discountLogo: details?.logo ?? null,
+        discountDetails: details ?? null,
+        discount: details ?? null,
     };
 };
 
+// ==========================================
+// 1. GET Restaurant Offers (Flat list of active foods with offers)
+// ==========================================
 export const getRestaurantOffers = async (req: Request, res: Response) => {
     try {
         const { restaurantId } = req.params;
@@ -133,26 +68,13 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                 descriptionAr: food.descriptionAr,
                 descriptionFr: food.descriptionFr,
                 price: food.price,
+                discountId: food.discountId, // groupId — crucial for discount.service
                 foodDiscountType: food.discount_type,
                 foodDiscountValue: food.discount_value,
                 isOutOfStock: food.isOutOfStock,
                 image: food.image,
                 points: food.points,
                 addonsId: food.addonsId,
-
-                // تفاصيل الخصم
-                discountId: discounts.id,
-                discountName: discounts.name,
-                discountNameAr: discounts.nameAr,
-                discountNameFr: discounts.nameFr,
-                discountType: discounts.discountType,
-                discountValue: discounts.discountValue,
-                maxDiscount: discounts.maxDiscount,
-                minOrderAmount: discounts.minOrderAmount,
-                startDate: discounts.startDate,
-                endDate: discounts.endDate,
-                isGlobal: discounts.isGlobal,
-                logo: discounts.logo,
 
                 categoryId: categories.id,
                 categoryName: categories.name,
@@ -167,7 +89,8 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                 order_level: subcategories.order_Level,
             })
             .from(food)
-            .innerJoin(discounts, eq(food.discountId, discounts.id))
+            .leftJoin(discountGroups, eq(food.discountId, discountGroups.id))
+            .leftJoin(discounts, eq(discountGroups.discountId, discounts.id))
             .leftJoin(categories, eq(food.categoryid, categories.id))
             .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
             .where(
@@ -177,9 +100,22 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                     activeFoodCondition,
                     or(isNull(categories.id), eq(categories.status, "active")),
                     or(isNull(subcategories.id), eq(subcategories.status, "active")),
-                    eq(discounts.isActive, true),
-                    or(isNull(discounts.startDate), lte(discounts.startDate, now)),
-                    or(isNull(discounts.endDate), gte(discounts.endDate, now))
+                    or(
+                        // 1. Linked to active campaign group
+                        and(
+                            isNotNull(food.discountId),
+                            eq(discounts.isActive, true),
+                            or(isNull(discounts.startDate), lte(discounts.startDate, now)),
+                            or(isNull(discounts.endDate), gte(discounts.endDate, now)),
+                            or(isNull(discounts.usageLimit), sql`${discounts.usedCount} < ${discounts.usageLimit}`)
+                        ),
+                        // 2. Direct product discount
+                        and(
+                            isNotNull(food.discount_type),
+                            isNotNull(food.discount_value),
+                            sql`CAST(${food.discount_value} AS DECIMAL(10,2)) > 0`
+                        )
+                    )
                 )
             );
 
@@ -188,24 +124,6 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                 success: true,
                 message: "Restaurant offers retrieved successfully",
                 data: [],
-            });
-        }
-
-        const offerMetadataMap = new Map<string, OfferDiscountMeta>();
-        for (const row of offersData) {
-            offerMetadataMap.set(row.foodId, {
-                discountId: row.discountId,
-                discountName: row.discountName,
-                discountNameAr: row.discountNameAr ?? null,
-                discountNameFr: row.discountNameFr ?? null,
-                discountType: row.discountType,
-                discountValue: row.discountValue !== null ? Number(row.discountValue) : null,
-                maxDiscount: row.maxDiscount !== null ? Number(row.maxDiscount) : null,
-                minOrderAmount: row.minOrderAmount !== null ? Number(row.minOrderAmount) : null,
-                startDate: row.startDate,
-                endDate: row.endDate,
-                isGlobal: Boolean(row.isGlobal),
-                discountLogo: row.logo ?? null,
             });
         }
 
@@ -218,23 +136,24 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
             serviceModule
         );
 
-        const formattedResults = formattedOffers.map((item) => {
-            const meta = offerMetadataMap.get(item.id);
-            return attachDiscountDetails(item, meta);
-        });
+        const formattedResults = formattedOffers
+            .filter((item) => item.discountAmount > 0)
+            .map((item) => attachDiscountDetails(item));
 
         return res.status(200).json({
             success: true,
             message: "Restaurant offers retrieved successfully",
             data: formattedResults,
         });
-
     } catch (error) {
         console.error("Error fetching restaurant offers:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
 
+// ==========================================
+// 2. GET All Offers (Flat list across all active restaurants)
+// ==========================================
 export const getAllOffers = async (req: Request, res: Response) => {
     try {
         const now = new Date();
@@ -251,26 +170,13 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 descriptionAr: food.descriptionAr,
                 descriptionFr: food.descriptionFr,
                 price: food.price,
+                discountId: food.discountId,
                 foodDiscountType: food.discount_type,
                 foodDiscountValue: food.discount_value,
                 image: food.image,
                 points: food.points,
                 isOutOfStock: food.isOutOfStock,
                 addonsId: food.addonsId,
-
-                // تفاصيل الخصم
-                discountId: discounts.id,
-                discountName: discounts.name,
-                discountNameAr: discounts.nameAr,
-                discountNameFr: discounts.nameFr,
-                discountType: discounts.discountType,
-                discountValue: discounts.discountValue,
-                maxDiscount: discounts.maxDiscount,
-                minOrderAmount: discounts.minOrderAmount,
-                startDate: discounts.startDate,
-                endDate: discounts.endDate,
-                isGlobal: discounts.isGlobal,
-                logo: discounts.logo,
 
                 categoryId: categories.id,
                 categoryName: categories.name,
@@ -285,7 +191,6 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 order_level: subcategories.order_Level,
 
                 restaurantId: restaurants.id,
-                // تفاصيل المطعم
                 restaurant: {
                     id: restaurants.id,
                     name: restaurants.name,
@@ -297,23 +202,37 @@ export const getAllOffers = async (req: Request, res: Response) => {
                     minDeliveryTime: restaurants.minDeliveryTime,
                     maxDeliveryTime: restaurants.maxDeliveryTime,
                     deliveryTimeUnit: restaurants.deliveryTimeUnit,
-                }
+                },
             })
             .from(food)
-            .innerJoin(discounts, eq(food.discountId, discounts.id))
             .innerJoin(restaurants, eq(food.restaurantid, restaurants.id))
+            .leftJoin(discountGroups, eq(food.discountId, discountGroups.id))
+            .leftJoin(discounts, eq(discountGroups.discountId, discounts.id))
             .leftJoin(categories, eq(food.categoryid, categories.id))
             .leftJoin(subcategories, eq(food.subcategoryid, subcategories.id))
             .where(
                 and(
-                    eq(discounts.isActive, true),
                     eq(restaurants.status, "active"),
                     eq(food.status, "active"),
                     activeFoodCondition,
                     or(isNull(categories.id), eq(categories.status, "active")),
                     or(isNull(subcategories.id), eq(subcategories.status, "active")),
-                    or(isNull(discounts.startDate), lte(discounts.startDate, now)),
-                    or(isNull(discounts.endDate), gte(discounts.endDate, now))
+                    or(
+                        // 1. Active campaign discount
+                        and(
+                            isNotNull(food.discountId),
+                            eq(discounts.isActive, true),
+                            or(isNull(discounts.startDate), lte(discounts.startDate, now)),
+                            or(isNull(discounts.endDate), gte(discounts.endDate, now)),
+                            or(isNull(discounts.usageLimit), sql`${discounts.usedCount} < ${discounts.usageLimit}`)
+                        ),
+                        // 2. Direct product discount
+                        and(
+                            isNotNull(food.discount_type),
+                            isNotNull(food.discount_value),
+                            sql`CAST(${food.discount_value} AS DECIMAL(10,2)) > 0`
+                        )
+                    )
                 )
             );
 
@@ -325,30 +244,15 @@ export const getAllOffers = async (req: Request, res: Response) => {
             });
         }
 
-        // Group foods by restaurant to run formatFoodsList per restaurant
         const offersByRestaurant = new Map<string, any[]>();
-        const offerMetadataMap = new Map<string, OfferDiscountMeta>();
+        const restaurantMap = new Map<string, any>();
 
         for (const row of globalOffers) {
             if (!offersByRestaurant.has(row.restaurantId)) {
                 offersByRestaurant.set(row.restaurantId, []);
+                restaurantMap.set(row.restaurantId, row.restaurant);
             }
             offersByRestaurant.get(row.restaurantId)!.push(row);
-            offerMetadataMap.set(row.foodId, {
-                discountId: row.discountId,
-                discountName: row.discountName,
-                discountNameAr: row.discountNameAr ?? null,
-                discountNameFr: row.discountNameFr ?? null,
-                discountType: row.discountType,
-                discountValue: row.discountValue !== null ? Number(row.discountValue) : null,
-                maxDiscount: row.maxDiscount !== null ? Number(row.maxDiscount) : null,
-                minOrderAmount: row.minOrderAmount !== null ? Number(row.minOrderAmount) : null,
-                startDate: row.startDate,
-                endDate: row.endDate,
-                isGlobal: Boolean(row.isGlobal),
-                discountLogo: row.logo ?? null,
-                restaurant: row.restaurant,
-            });
         }
 
         const formattedResults: any[] = [];
@@ -360,12 +264,13 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 favoriteFoodIds
             );
             for (const item of formatted) {
-                const meta = offerMetadataMap.get(item.id);
-                const enrichedItem = attachDiscountDetails(item, meta);
-                formattedResults.push({
-                    ...enrichedItem,
-                    restaurant: meta?.restaurant ?? null,
-                });
+                if (item.discountAmount > 0) {
+                    const enrichedItem = attachDiscountDetails(item);
+                    formattedResults.push({
+                        ...enrichedItem,
+                        restaurant: restaurantMap.get(rId) ?? null,
+                    });
+                }
             }
         }
 
@@ -374,13 +279,15 @@ export const getAllOffers = async (req: Request, res: Response) => {
             message: "All platform offers retrieved successfully",
             data: formattedResults,
         });
-
     } catch (error) {
         console.error("Error fetching all offers:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
 
+// ==========================================
+// 3. GET Discounts with Products (Campaigns grouping foods)
+// ==========================================
 export const getAllDiscountsWithProducts = async (req: Request, res: Response) => {
     try {
         const now = new Date();
@@ -405,7 +312,8 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
         const nowConditions = and(
             eq(discounts.isActive, true),
             or(isNull(discounts.startDate), lte(discounts.startDate, now)),
-            or(isNull(discounts.endDate), gte(discounts.endDate, now))
+            or(isNull(discounts.endDate), gte(discounts.endDate, now)),
+            or(isNull(discounts.usageLimit), sql`${discounts.usedCount} < ${discounts.usageLimit}`)
         );
 
         let activeDiscountsRows: any[] = [];
@@ -443,10 +351,52 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
             });
         }
 
-        const discountIds = activeDiscountsRows.map((d) => d.id);
+        const activeDiscountIds = activeDiscountsRows.map((d) => d.id);
+        const groups = await db
+            .select()
+            .from(discountGroups)
+            .where(inArray(discountGroups.discountId, activeDiscountIds));
+
+        if (groups.length === 0) {
+            const result = activeDiscountsRows.map((d) => ({
+                id: d.id,
+                name: d.name,
+                nameAr: d.nameAr,
+                nameFr: d.nameFr,
+                discountType: null,
+                discountValue: null,
+                maxDiscount: null,
+                minOrderAmount: d.minOrderAmount !== null ? Number(d.minOrderAmount) : null,
+                startDate: d.startDate,
+                endDate: d.endDate,
+                isGlobal: Boolean(d.isGlobal),
+                logo: d.logo ?? null,
+                source: d.isGlobal ? "global_discount" : "restaurant_discount",
+                groups: [],
+                foods: [],
+            }));
+            return res.status(200).json({
+                success: true,
+                message: "Discounts with products retrieved successfully",
+                data: result,
+            });
+        }
+
+        const groupToDiscountIdMap = new Map<string, string>();
+        const groupsByDiscountIdMap = new Map<string, any[]>();
+        const groupIds: string[] = [];
+
+        for (const g of groups) {
+            groupIds.push(g.id);
+            groupToDiscountIdMap.set(g.id, g.discountId);
+            if (!groupsByDiscountIdMap.has(g.discountId)) {
+                groupsByDiscountIdMap.set(g.discountId, []);
+            }
+            groupsByDiscountIdMap.get(g.discountId)!.push(g);
+        }
 
         const foodWhereConditions = [
-            inArray(food.discountId, discountIds),
+            inArray(food.discountId, groupIds),
             eq(food.status, "active"),
             eq(restaurants.status, "active"),
             activeFoodCondition,
@@ -460,7 +410,6 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
 
         const productsRows = await db
             .select({
-                discountId: food.discountId,
                 foodId: food.id,
                 foodName: food.name,
                 foodNameAr: food.nameAr,
@@ -469,6 +418,7 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
                 descriptionAr: food.descriptionAr,
                 descriptionFr: food.descriptionFr,
                 price: food.price,
+                discountId: food.discountId, // groupId
                 foodDiscountType: food.discount_type,
                 foodDiscountValue: food.discount_value,
                 isOutOfStock: food.isOutOfStock,
@@ -498,12 +448,12 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
 
         const discountProductsMap = new Map<string, Map<string, any[]>>();
         for (const row of productsRows) {
-            const discountId = row.discountId;
-            if (!discountId) continue;
-            if (!discountProductsMap.has(discountId)) {
-                discountProductsMap.set(discountId, new Map());
+            const campaignId = row.discountId ? groupToDiscountIdMap.get(row.discountId) : null;
+            if (!campaignId) continue;
+            if (!discountProductsMap.has(campaignId)) {
+                discountProductsMap.set(campaignId, new Map());
             }
-            const restMap = discountProductsMap.get(discountId)!;
+            const restMap = discountProductsMap.get(campaignId)!;
             if (!restMap.has(row.restaurantId)) {
                 restMap.set(row.restaurantId, []);
             }
@@ -513,20 +463,14 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
         const result: any[] = [];
 
         for (const d of activeDiscountsRows) {
-            const meta: OfferDiscountMeta = {
-                discountId: d.id,
-                discountName: d.name,
-                discountNameAr: d.nameAr ?? null,
-                discountNameFr: d.nameFr ?? null,
-                discountType: d.discountType,
-                discountValue: d.discountValue !== null ? Number(d.discountValue) : null,
-                maxDiscount: d.maxDiscount !== null ? Number(d.maxDiscount) : null,
-                minOrderAmount: d.minOrderAmount !== null ? Number(d.minOrderAmount) : null,
-                startDate: d.startDate,
-                endDate: d.endDate,
-                isGlobal: Boolean(d.isGlobal),
-                discountLogo: d.logo ?? null,
-            };
+            const dGroups = groupsByDiscountIdMap.get(d.id) || [];
+            const primaryGroup = dGroups[0];
+            const metaDiscountValue = primaryGroup?.discountValue !== null && primaryGroup?.discountValue !== undefined
+                ? Number(primaryGroup.discountValue)
+                : null;
+            const metaMaxDiscount = primaryGroup?.maxDiscount !== null && primaryGroup?.maxDiscount !== undefined
+                ? Number(primaryGroup.maxDiscount)
+                : null;
 
             const restMap = discountProductsMap.get(d.id);
             const allProductsForDiscount: any[] = [];
@@ -543,36 +487,8 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
                     );
 
                     for (const item of formatted) {
-                        let discountPrice = item.discountPrice;
-                        if (meta.discountType === "percentage" && meta.discountValue) {
-                            let discountAmount = item.price * (meta.discountValue / 100);
-                            if (meta.maxDiscount && meta.maxDiscount > 0) {
-                                discountAmount = Math.min(discountAmount, meta.maxDiscount);
-                            }
-                            discountPrice = Math.max(0, item.price - discountAmount);
-                        } else if (["fixed_amount", "amount", "fixed"].includes(meta.discountType) && meta.discountValue) {
-                            discountPrice = Math.max(0, item.price - meta.discountValue);
-                        }
-
-                        const {
-                            discountDetails,
-                            discount,
-                            discountId,
-                            discountName,
-                            discountNameAr,
-                            discountNameFr,
-                            discountLogo,
-                            discountType,
-                            discountValue,
-                            isGlobal,
-                            restaurant,
-                            ...cleanItem
-                        } = item;
-
-                        allProductsForDiscount.push({
-                            ...cleanItem,
-                            discountPrice,
-                        });
+                        const enrichedItem = attachDiscountDetails(item);
+                        allProductsForDiscount.push(enrichedItem);
                     }
                 }
             }
@@ -582,15 +498,21 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
                 name: d.name,
                 nameAr: d.nameAr,
                 nameFr: d.nameFr,
-                discountType: d.discountType,
-                discountValue: meta.discountValue,
-                maxDiscount: meta.maxDiscount,
-                minOrderAmount: meta.minOrderAmount,
+                discountType: primaryGroup?.discountType ?? null,
+                discountValue: metaDiscountValue,
+                maxDiscount: metaMaxDiscount,
+                minOrderAmount: d.minOrderAmount !== null ? Number(d.minOrderAmount) : null,
                 startDate: d.startDate,
                 endDate: d.endDate,
                 isGlobal: Boolean(d.isGlobal),
                 logo: d.logo ?? null,
                 source: d.isGlobal ? "global_discount" : "restaurant_discount",
+                groups: dGroups.map((g) => ({
+                    id: g.id,
+                    discountType: g.discountType,
+                    discountValue: Number(g.discountValue),
+                    maxDiscount: g.maxDiscount !== null ? Number(g.maxDiscount) : null,
+                })),
                 foods: allProductsForDiscount,
             });
         }
@@ -600,10 +522,8 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
             message: "Discounts with products retrieved successfully",
             data: result,
         });
-
     } catch (error) {
         console.error("Error fetching discounts with products:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
-
