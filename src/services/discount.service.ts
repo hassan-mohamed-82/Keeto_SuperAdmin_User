@@ -65,9 +65,16 @@ const isUsableDiscount = (discount: DiscountRecord) => {
     && (discount.usageLimit === null || (discount.usedCount ?? 0) < discount.usageLimit);
 };
 
+/**
+ * الخصم بيتطبق فقط لو:
+ * 1. المنتج عنده discountType + discountValue مباشرين (خصم يدوي على المنتج نفسه)، أو
+ * 2. المنتج مربوط بـ discountId (food.discount_id) وده الخصم "usable" (active + داخل التاريخ + تحت الـ usage limit)
+ *
+ * لا يوجد fallback لأي خصم عام (Global) أو خصم مطعم — أي منتج من غير الحالتين دول
+ * بيرجع من غير خصم خالص، حتى لو فيه خصومات عامة شغالة في النظام.
+ */
 export const resolveProductDiscount = (
     foodItem: ProductDiscountInput,
-    generalDiscounts: DiscountRecord[],
 ): ResolvedProduct => {
     const originalPrice = Math.max(0, Number(foodItem.price ?? 0));
     const hasDirectProductDiscount = Boolean(
@@ -76,11 +83,10 @@ export const resolveProductDiscount = (
         && foodItem.discountValue !== undefined
         && Number(foodItem.discountValue) > 0
     );
+
     const discount = !hasDirectProductDiscount && foodItem.discount && isUsableDiscount(foodItem.discount)
         ? foodItem.discount
-        : !hasDirectProductDiscount ? [...generalDiscounts]
-            .sort((left, right) => Number(left.isGlobal) - Number(right.isGlobal))
-            .find(discount => isUsableDiscount(discount)) ?? null : null;
+        : null;
 
     if (hasDirectProductDiscount) {
         const value = Math.max(0, Number(foodItem.discountValue));
@@ -171,7 +177,6 @@ export const formatProductsWithDiscounts = async <T extends { id?: string | null
         ? await db.select().from(discounts).where(inArray(discounts.id, directIds))
         : [];
     const directDiscountMap = new Map(directDiscounts.map(discount => [discount.id, discount]));
-    const generalDiscounts = await getActiveGeneralDiscounts(restaurantId);
 
     return rawFoods.map(item => {
         const itemWithDiscount = {
@@ -185,7 +190,7 @@ export const formatProductsWithDiscounts = async <T extends { id?: string | null
             // Expose normalized names so offers and checkout share one contract.
             discountType: itemWithDiscount.discountType ?? null,
             discountValue: itemWithDiscount.discountValue ?? null,
-            ...resolveProductDiscount(itemWithDiscount, generalDiscounts),
+            ...resolveProductDiscount(itemWithDiscount),
         };
     });
 };
