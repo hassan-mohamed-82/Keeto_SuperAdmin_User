@@ -23,6 +23,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
             photo: users.photo,
             isVerified: users.isVerified,
             isProfileComplete: users.isProfileComplete,
+            isGuest: users.isGuest,
             createdAt: users.createdAt,
         })
         .from(users)
@@ -135,6 +136,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
                 isVerified: userInfo.isVerified,
                 createdAt: userInfo.createdAt,
                 isProfileComplete,
+                isGuest: userInfo.isGuest,
                 callcenterphone,
                 addresses: formattedAddresses, // 🟢 إرجاع العناوين المنسقة مع flags الاستخدام
             },
