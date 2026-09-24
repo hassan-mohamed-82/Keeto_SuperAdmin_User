@@ -1,6 +1,18 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurants, cuisines, zones, restaurantWallets, food, restrauntadmin, restaurantBusinessPlans, sales, restaurantSettings, cities } from "../../models/schema";
+import {
+    restaurants,
+    cuisines,
+    zones,
+    restaurantWallets,
+    food,
+    restrauntadmin,
+    restaurantBusinessPlans,
+    sales,
+    restaurantSettings,
+    cities,
+    restaurantPaymentCredentials,
+} from "../../models/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -8,6 +20,54 @@ import { BadRequest } from "../../Errors/BadRequest";
 import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
 import { saveBase64Image, handleImageUpdate } from "../../utils/handleImages";
+import { encryptSecret } from "../../utils/encryption";
+
+// Helper: Parse payment credentials from request body (accepts array, single object, or JSON string)
+const parsePaymentCredentialsInput = (input: any): any[] => {
+    if (!input) return [];
+    let parsed = input;
+    if (typeof input === "string") {
+        try {
+            parsed = JSON.parse(input);
+        } catch {
+            return [];
+        }
+    }
+    if (Array.isArray(parsed)) {
+        return parsed;
+    } else if (typeof parsed === "object" && parsed !== null) {
+        return [parsed];
+    }
+    return [];
+};
+
+// Helper: Encrypt sensitive fields in payment credentials
+const encryptCredFields = (creds: Record<string, any>) => {
+    const enc = { ...creds };
+    if (enc.apiKey && typeof enc.apiKey === "string" && !enc.apiKey.startsWith("******")) {
+        enc.apiKey = encryptSecret(enc.apiKey);
+    }
+    if (enc.hmac && typeof enc.hmac === "string" && !enc.hmac.startsWith("******")) {
+        enc.hmac = encryptSecret(enc.hmac);
+    }
+    if (enc.secretKey && typeof enc.secretKey === "string" && !enc.secretKey.startsWith("******")) {
+        enc.secretKey = encryptSecret(enc.secretKey);
+    }
+    return enc;
+};
+
+// Helper: Sanitize credentials record for API responses
+const sanitizePaymentCredentialRecord = (record: any) => {
+    if (!record) return null;
+    const creds = record.credentials ? { ...record.credentials } : {};
+    if (creds.apiKey) creds.apiKey = "******";
+    if (creds.hmac) creds.hmac = "******";
+    if (creds.secretKey) creds.secretKey = "******";
+    return {
+        ...record,
+        credentials: creds,
+    };
+};
 
 // Helper: increment total_restaurants on a cuisine
 const incrementCuisineCount = async (cuisineId: string) => {
@@ -138,7 +198,11 @@ export const createRestaurant = async (req: Request, res: Response) => {
         }
     }
 
+    const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
+    const parsedPaymentCredentials: any[] = parsePaymentCredentialsInput(paymentCredsRaw);
+
     const plansToReturn: any[] = []; // 👈 مصفوفة لتجميع الخطط وإرجاعها
+    const credentialsToReturn: any[] = []; // 👈 مصفوفة لتجميع بيانات بوابات الدفع وإرجاعها
 
     await db.transaction(async (tx) => {
         // 1. إنشاء المطعم
@@ -241,13 +305,49 @@ export const createRestaurant = async (req: Request, res: Response) => {
             secondTextColor: secondTextColor ? clean(secondTextColor) : null,
         });
 
+        // 5. بيانات بوابات الدفع (Payment Credentials)
+        if (parsedPaymentCredentials.length > 0) {
+            for (const credItem of parsedPaymentCredentials) {
+                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid) continue;
+                const provider = (credItem.provider || (credItem.mid ? "KASHIER" : "PAYMOB")).toUpperCase() as "PAYMOB" | "KASHIER";
+                const title = credItem.title || provider;
+                const environment = (credItem.environment || "LIVE").toUpperCase() as "LIVE" | "TEST";
+                const rawCreds = credItem.credentials && typeof credItem.credentials === "object"
+                    ? credItem.credentials
+                    : {
+                        apiKey: credItem.apiKey,
+                        hmac: credItem.hmac,
+                        integrationId: credItem.integrationId,
+                        iframeId: credItem.iframeId,
+                        callbackUrl: credItem.callbackUrl,
+                        mid: credItem.mid,
+                        secretKey: credItem.secretKey,
+                        baseUrl: credItem.baseUrl,
+                    };
+                const encryptedCreds = encryptCredFields(rawCreds);
+                const credId = uuidv4();
+                const newRecord = {
+                    id: credId,
+                    restaurantId: restaurantId,
+                    provider,
+                    title,
+                    environment,
+                    credentials: encryptedCreds,
+                    logoUrl: credItem.logoUrl || null,
+                    isActive: credItem.isActive !== undefined ? Boolean(credItem.isActive) : true,
+                };
+                await tx.insert(restaurantPaymentCredentials).values(newRecord);
+                credentialsToReturn.push(sanitizePaymentCredentialRecord(newRecord));
+            }
+        }
+
         await adjustSalesRepPoints(tx, salesId ? clean(salesId) : null, pointsToAward);
     });
 
     for (const cid of parsedCuisines) await incrementCuisineCount(cid);
 
     return SuccessResponse(res, {
-        message: "Restaurant, Owner account, and Business Plans created successfully",
+        message: "Restaurant, Owner account, Business Plans, and Payment Credentials created successfully",
         data: {
             restaurantId,
             ownerUserId,
@@ -255,7 +355,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
             salesId: salesId || null,
             ownerposition: ownerposition || null,
             callcenterphone: callcenterphone || null,
-            businessPlans: plansToReturn
+            businessPlans: plansToReturn,
+            paymentCredentials: credentialsToReturn,
         }
     }, 201);
 };
@@ -320,6 +421,13 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         plansMap.get(plan.restaurantId).push(plan);
     }
 
+    const allPaymentCredentialsList = await db.select().from(restaurantPaymentCredentials);
+    const paymentCredentialsMap = new Map<string, any[]>();
+    for (const cred of allPaymentCredentialsList) {
+        if (!paymentCredentialsMap.has(cred.restaurantId)) paymentCredentialsMap.set(cred.restaurantId, []);
+        paymentCredentialsMap.get(cred.restaurantId)!.push(sanitizePaymentCredentialRecord(cred));
+    }
+
     const formatted = raw.map(r => {
         let parsedCuisines = safeParseArray(r.cuisineIds);
         return {
@@ -343,6 +451,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             lng: r.lng,
             cuisines: parsedCuisines.map((id: string) => cuisineMap.get(id.toLowerCase())).filter(Boolean),
             businessPlans: plansMap.get(r.id) || [],
+            paymentCredentials: paymentCredentialsMap.get(r.id) || [],
             zone: r.zone_id ? { id: r.zone_id, name: r.zone_name } : null,
             city: r.city ? { id: r.city.id, name: r.city.name, nameAr: r.city.nameAr, nameFr: r.city.nameFr } : null,
             likes: r.likes,
@@ -402,6 +511,12 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         .from(restaurantBusinessPlans)
         .where(eq(restaurantBusinessPlans.restaurantId, id));
 
+    const restaurantCreds = await db
+        .select()
+        .from(restaurantPaymentCredentials)
+        .where(eq(restaurantPaymentCredentials.restaurantId, id));
+    const sanitizedCreds = restaurantCreds.map(sanitizePaymentCredentialRecord);
+
     const formattedRestaurant = {
         ...row.restaurantObj,
         type: row.restaurantObj.type,
@@ -410,6 +525,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         email: row.ownerEmail || null,
         cuisines: restaurantCuisines,
         businessPlans: restaurantPlans,
+        paymentCredentials: sanitizedCreds,
         zone: row.zoneObj ? { id: row.zoneObj.id, name: row.zoneObj.name } : null,
         city: row.cityObj ? { id: row.cityObj.id, name: row.cityObj.name, nameAr: row.cityObj.nameAr, nameFr: row.cityObj.nameFr } : null,
         firstColor: row.settingsObj?.firstColor || null,
@@ -471,6 +587,9 @@ export const updateRestaurant = async (req: Request, res: Response) => {
             parsedBusinessPlans = businessPlans;
         }
     }
+
+    const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
+    const parsedPaymentCredentials: any[] | undefined = paymentCredsRaw !== undefined ? parsePaymentCredentialsInput(paymentCredsRaw) : undefined;
 
     if (email && existingOwner && email !== existingOwner.email) {
         const [emailExists] = await db.select().from(restrauntadmin).where(eq(restrauntadmin.email, email.trim())).limit(1);
@@ -584,6 +703,90 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                         // حالة المنصة (خاصة بـ food_aggregator و mykeeto)
                         aggregatorStatus: plan.aggregatorStatus === "inactive" ? "inactive" : "active",
                         mykeetoStatus: plan.mykeetoStatus === "inactive" ? "inactive" : "active",
+                    });
+                }
+            }
+        }
+
+        // 👈 تحديث بيانات بوابات الدفع (Payment Credentials)
+        if (parsedPaymentCredentials !== undefined) {
+            for (const credItem of parsedPaymentCredentials) {
+                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid) continue;
+                const provider = (credItem.provider || (credItem.mid ? "KASHIER" : "PAYMOB")).toUpperCase() as "PAYMOB" | "KASHIER";
+                const title = credItem.title || provider;
+                const environment = (credItem.environment || "LIVE").toUpperCase() as "LIVE" | "TEST";
+                const rawCreds = credItem.credentials && typeof credItem.credentials === "object"
+                    ? credItem.credentials
+                    : {
+                        apiKey: credItem.apiKey,
+                        hmac: credItem.hmac,
+                        integrationId: credItem.integrationId,
+                        iframeId: credItem.iframeId,
+                        callbackUrl: credItem.callbackUrl,
+                        mid: credItem.mid,
+                        secretKey: credItem.secretKey,
+                        baseUrl: credItem.baseUrl,
+                    };
+
+                let existingRecord = null;
+                if (credItem.id) {
+                    const [foundById] = await tx
+                        .select()
+                        .from(restaurantPaymentCredentials)
+                        .where(
+                            and(
+                                eq(restaurantPaymentCredentials.id, credItem.id),
+                                eq(restaurantPaymentCredentials.restaurantId, id)
+                            )
+                        )
+                        .limit(1);
+                    existingRecord = foundById;
+                }
+                if (!existingRecord) {
+                    const [foundByProvider] = await tx
+                        .select()
+                        .from(restaurantPaymentCredentials)
+                        .where(
+                            and(
+                                eq(restaurantPaymentCredentials.restaurantId, id),
+                                eq(restaurantPaymentCredentials.provider, provider)
+                            )
+                        )
+                        .limit(1);
+                    existingRecord = foundByProvider;
+                }
+
+                if (existingRecord) {
+                    const mergedCreds = {
+                        ...(existingRecord.credentials as object),
+                        ...rawCreds,
+                    };
+                    const encryptedCreds = encryptCredFields(mergedCreds);
+                    const updatePayload: Record<string, any> = {
+                        provider,
+                        title,
+                        environment,
+                        credentials: encryptedCreds,
+                        updatedAt: new Date(),
+                    };
+                    if (credItem.logoUrl !== undefined) updatePayload.logoUrl = credItem.logoUrl || null;
+                    if (credItem.isActive !== undefined) updatePayload.isActive = Boolean(credItem.isActive);
+
+                    await tx
+                        .update(restaurantPaymentCredentials)
+                        .set(updatePayload)
+                        .where(eq(restaurantPaymentCredentials.id, existingRecord.id));
+                } else {
+                    const encryptedCreds = encryptCredFields(rawCreds);
+                    await tx.insert(restaurantPaymentCredentials).values({
+                        id: uuidv4(),
+                        restaurantId: id,
+                        provider,
+                        title,
+                        environment,
+                        credentials: encryptedCreds,
+                        logoUrl: credItem.logoUrl || null,
+                        isActive: credItem.isActive !== undefined ? Boolean(credItem.isActive) : true,
                     });
                 }
             }

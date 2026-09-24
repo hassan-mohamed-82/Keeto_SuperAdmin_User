@@ -35,6 +35,8 @@ export const createRestaurantSchema = z.object({
     
     addhome: z.boolean().optional(),
     status: z.enum(["active", "inactive"]).optional(),
+    paymentCredentials: z.any().optional(),
+    paymentcredition: z.any().optional(),
 });
 
 export const updateRestaurantSchema = createRestaurantSchema.partial();

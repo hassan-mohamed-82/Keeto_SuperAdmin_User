@@ -7,6 +7,19 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { encryptSecret } from "../../utils/encryption";
 
+// Helper to sanitize credential secrets before sending in response
+const sanitizeCredentialRecord = (record: any) => {
+    if (!record) return null;
+    const creds = record.credentials ? { ...record.credentials } : {};
+    if (creds.apiKey) creds.apiKey = "******";
+    if (creds.hmac) creds.hmac = "******";
+    if (creds.secretKey) creds.secretKey = "******";
+    return {
+        ...record,
+        credentials: creds,
+    };
+};
+
 /**
  * 1. Add/Create Payment Credentials for a restaurant
  */
@@ -28,24 +41,32 @@ export const createCredentials = async (req: Request, res: Response): Promise<vo
 
     const { provider, title, environment, credentials, logoUrl, isActive } = req.body;
 
-    if (!provider || !title || !credentials) {
-        throw new BadRequest("Provider, title, and credentials are required");
+    if (!provider || !credentials) {
+        throw new BadRequest("Provider and credentials are required");
     }
 
+    const rawCreds = typeof credentials === "string" ? JSON.parse(credentials) : credentials;
+
     // Encrypt sensitive credential fields before storing in database
-    const encryptedCredentials = {
-        ...credentials,
-        apiKey: credentials.apiKey ? encryptSecret(credentials.apiKey) : "",
-        hmac: credentials.hmac ? encryptSecret(credentials.hmac) : "",
-    };
+    const encryptedCredentials: Record<string, any> = { ...rawCreds };
+    if (rawCreds.apiKey && !rawCreds.apiKey.startsWith("******")) {
+        encryptedCredentials.apiKey = encryptSecret(rawCreds.apiKey);
+    }
+    if (rawCreds.hmac && !rawCreds.hmac.startsWith("******")) {
+        encryptedCredentials.hmac = encryptSecret(rawCreds.hmac);
+    }
+    if (rawCreds.secretKey && !rawCreds.secretKey.startsWith("******")) {
+        encryptedCredentials.secretKey = encryptSecret(rawCreds.secretKey);
+    }
 
     const newId = uuidv4();
+    const formattedProvider = String(provider).toUpperCase() as "PAYMOB" | "KASHIER";
 
     await db.insert(restaurantPaymentCredentials).values({
         id: newId,
         restaurantId,
-        provider,
-        title: title ?? "PAYMOB",
+        provider: formattedProvider,
+        title: title || formattedProvider,
         environment: environment || "LIVE",
         credentials: encryptedCredentials,
         logoUrl: logoUrl || null,
@@ -58,20 +79,10 @@ export const createCredentials = async (req: Request, res: Response): Promise<vo
         .where(eq(restaurantPaymentCredentials.id, newId))
         .limit(1);
 
-    // Mask secret values in response
-    const sanitizedData = created ? {
-        ...created,
-        credentials: {
-            ...created.credentials,
-            apiKey: "******",
-            hmac: "******",
-        }
-    } : null;
-
     res.status(201).json({
         success: true,
         message: "Payment credentials created successfully",
-        data: sanitizedData,
+        data: sanitizeCredentialRecord(created),
     });
 };
 
@@ -89,14 +100,7 @@ export const getCredentialsByRestaurant = async (req: Request, res: Response): P
         .from(restaurantPaymentCredentials)
         .where(eq(restaurantPaymentCredentials.restaurantId, restaurantId));
 
-    const sanitizedList = list.map((item) => ({
-        ...item,
-        credentials: item.credentials ? {
-            ...item.credentials,
-            apiKey: "******",
-            hmac: "******",
-        } : null,
-    }));
+    const sanitizedList = list.map(sanitizeCredentialRecord);
 
     res.status(200).json({
         success: true,
@@ -131,21 +135,25 @@ export const updateCredential = async (req: Request, res: Response): Promise<voi
     const { provider, title, environment, credentials, logoUrl, isActive } = req.body;
 
     const updatePayload: Record<string, any> = {};
-    if (provider !== undefined) updatePayload.provider = provider;
+    if (provider !== undefined) updatePayload.provider = String(provider).toUpperCase() as "PAYMOB" | "KASHIER";
     if (title !== undefined) updatePayload.title = title;
     if (environment !== undefined) updatePayload.environment = environment;
     if (logoUrl !== undefined) updatePayload.logoUrl = logoUrl || null;
     if (isActive !== undefined) updatePayload.isActive = isActive;
     if (credentials !== undefined) {
-        const mergedCredentials = {
+        const rawCreds = typeof credentials === "string" ? JSON.parse(credentials) : credentials;
+        const mergedCredentials: Record<string, any> = {
             ...(existing.credentials as object),
-            ...credentials,
+            ...rawCreds,
         };
-        if (credentials.apiKey && !credentials.apiKey.startsWith("******")) {
-            mergedCredentials.apiKey = encryptSecret(credentials.apiKey);
+        if (rawCreds.apiKey && !rawCreds.apiKey.startsWith("******")) {
+            mergedCredentials.apiKey = encryptSecret(rawCreds.apiKey);
         }
-        if (credentials.hmac && !credentials.hmac.startsWith("******")) {
-            mergedCredentials.hmac = encryptSecret(credentials.hmac);
+        if (rawCreds.hmac && !rawCreds.hmac.startsWith("******")) {
+            mergedCredentials.hmac = encryptSecret(rawCreds.hmac);
+        }
+        if (rawCreds.secretKey && !rawCreds.secretKey.startsWith("******")) {
+            mergedCredentials.secretKey = encryptSecret(rawCreds.secretKey);
         }
         updatePayload.credentials = mergedCredentials;
     }
@@ -163,19 +171,10 @@ export const updateCredential = async (req: Request, res: Response): Promise<voi
         .where(eq(restaurantPaymentCredentials.id, credentialId))
         .limit(1);
 
-    const sanitizedData = updated ? {
-        ...updated,
-        credentials: {
-            ...updated.credentials,
-            apiKey: "******",
-            hmac: "******",
-        }
-    } : null;
-
     res.status(200).json({
         success: true,
         message: "Payment credentials updated successfully",
-        data: sanitizedData,
+        data: sanitizeCredentialRecord(updated),
     });
 };
 

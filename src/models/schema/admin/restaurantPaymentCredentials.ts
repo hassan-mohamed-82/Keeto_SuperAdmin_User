@@ -22,8 +22,17 @@ export interface PaymobCredentials {
     callbackUrl?: string;
 }
 
+export interface KashierCredentials {
+    mid: string;
+    apiKey: string;
+    secretKey?: string;
+    baseUrl?: string;
+}
+
+export type PaymentCredentialsData = PaymobCredentials | KashierCredentials | Record<string, any>;
+
 // ==========================================
-// 3. تعريف الجدول باستخدام الـ Type المعرّف
+// 2. تعريف الجدول باستخدام الـ Type المعرّف
 // ==========================================
 
 export const restaurantPaymentCredentials = mysqlTable("restaurant_payment_credentials", {
@@ -33,13 +42,13 @@ export const restaurantPaymentCredentials = mysqlTable("restaurant_payment_crede
         .notNull()
         .references(() => restaurants.id, { onDelete: "cascade" }),
 
-    provider: mysqlEnum("provider", ["PAYMOB"]).notNull(),
+    provider: mysqlEnum("provider", ["PAYMOB", "KASHIER"]).notNull(),
 
     title: varchar("title", { length: 255 }).notNull(),
     environment: mysqlEnum("environment", ["LIVE", "TEST"]).default("LIVE"),
 
-    // 💡 استخدام Type المخصص هنا بدل Generic Record
-    credentials: json("credentials").$type<PaymobCredentials>().notNull(),
+    // 💡 استخدام Type المخصص هنا لدعم Paymob و Kashier
+    credentials: json("credentials").$type<PaymentCredentialsData>().notNull(),
 
     logoUrl: varchar("logo_url", { length: 500 }),
     isActive: boolean("is_active").default(true),
