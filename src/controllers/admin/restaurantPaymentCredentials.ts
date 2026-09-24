@@ -10,13 +10,31 @@ import { encryptSecret } from "../../utils/encryption";
 // Helper to sanitize credential secrets before sending in response
 const sanitizeCredentialRecord = (record: any) => {
     if (!record) return null;
-    const creds = record.credentials ? { ...record.credentials } : {};
-    if (creds.apiKey) creds.apiKey = "******";
-    if (creds.hmac) creds.hmac = "******";
-    if (creds.secretKey) creds.secretKey = "******";
+    let creds: any = record.credentials;
+    if (typeof creds === "string") {
+        try {
+            creds = JSON.parse(creds);
+        } catch {
+            creds = {};
+        }
+    }
+    // Auto-heal if previously corrupted with character-spread keys: { 0: '{', 1: '"', ... }
+    if (creds && typeof creds === "object" && "0" in creds && !("mid" in creds) && !("apiKey" in creds)) {
+        try {
+            const reconstructed = Object.keys(creds)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => creds[k])
+                .join("");
+            creds = JSON.parse(reconstructed);
+        } catch {}
+    }
+    const safeCreds = creds && typeof creds === "object" ? { ...creds } : {};
+    if (safeCreds.apiKey) safeCreds.apiKey = "******";
+    if (safeCreds.hmac) safeCreds.hmac = "******";
+    if (safeCreds.secretKey) safeCreds.secretKey = "******";
     return {
         ...record,
-        credentials: creds,
+        credentials: safeCreds,
     };
 };
 
@@ -141,18 +159,34 @@ export const updateCredential = async (req: Request, res: Response): Promise<voi
     if (logoUrl !== undefined) updatePayload.logoUrl = logoUrl || null;
     if (isActive !== undefined) updatePayload.isActive = isActive;
     if (credentials !== undefined) {
-        const rawCreds = typeof credentials === "string" ? JSON.parse(credentials) : credentials;
+        let rawCreds = credentials;
+        if (typeof rawCreds === "string") {
+            try { rawCreds = JSON.parse(rawCreds); } catch { rawCreds = {}; }
+        }
+        let existingCreds: any = existing.credentials;
+        if (typeof existingCreds === "string") {
+            try { existingCreds = JSON.parse(existingCreds); } catch { existingCreds = {}; }
+        }
+        if (existingCreds && typeof existingCreds === "object" && "0" in existingCreds && !("mid" in existingCreds) && !("apiKey" in existingCreds)) {
+            try {
+                const reconstructed = Object.keys(existingCreds)
+                    .sort((a, b) => Number(a) - Number(b))
+                    .map((k) => existingCreds[k])
+                    .join("");
+                existingCreds = JSON.parse(reconstructed);
+            } catch {}
+        }
         const mergedCredentials: Record<string, any> = {
-            ...(existing.credentials as object),
-            ...rawCreds,
+            ...(existingCreds && typeof existingCreds === "object" ? existingCreds : {}),
+            ...(rawCreds && typeof rawCreds === "object" ? rawCreds : {}),
         };
-        if (rawCreds.apiKey && !rawCreds.apiKey.startsWith("******")) {
+        if (rawCreds?.apiKey && typeof rawCreds.apiKey === "string" && !rawCreds.apiKey.startsWith("******")) {
             mergedCredentials.apiKey = encryptSecret(rawCreds.apiKey);
         }
-        if (rawCreds.hmac && !rawCreds.hmac.startsWith("******")) {
+        if (rawCreds?.hmac && typeof rawCreds.hmac === "string" && !rawCreds.hmac.startsWith("******")) {
             mergedCredentials.hmac = encryptSecret(rawCreds.hmac);
         }
-        if (rawCreds.secretKey && !rawCreds.secretKey.startsWith("******")) {
+        if (rawCreds?.secretKey && typeof rawCreds.secretKey === "string" && !rawCreds.secretKey.startsWith("******")) {
             mergedCredentials.secretKey = encryptSecret(rawCreds.secretKey);
         }
         updatePayload.credentials = mergedCredentials;

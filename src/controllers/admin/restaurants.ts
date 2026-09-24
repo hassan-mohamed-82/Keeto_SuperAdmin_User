@@ -41,9 +41,61 @@ const parsePaymentCredentialsInput = (input: any): any[] => {
     return [];
 };
 
+// Helper: Safely extract credentials object from input (tolerates JSON strings and character-spread objects)
+const extractRawCredentials = (item: any): Record<string, any> => {
+    let creds = item?.credentials ?? item;
+    if (typeof creds === "string") {
+        try {
+            creds = JSON.parse(creds);
+        } catch {
+            creds = null;
+        }
+    }
+    // Auto-heal if previously corrupted with character-spread keys: { 0: '{', 1: '"', ... }
+    if (creds && typeof creds === "object" && "0" in creds && !("mid" in creds) && !("apiKey" in creds)) {
+        try {
+            const reconstructed = Object.keys(creds)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => creds[k])
+                .join("");
+            creds = JSON.parse(reconstructed);
+        } catch {}
+    }
+    if (creds && typeof creds === "object") {
+        return { ...creds };
+    }
+    return {
+        apiKey: item?.apiKey,
+        hmac: item?.hmac,
+        integrationId: item?.integrationId,
+        iframeId: item?.iframeId,
+        callbackUrl: item?.callbackUrl,
+        mid: item?.mid,
+        secretKey: item?.secretKey,
+        baseUrl: item?.baseUrl,
+    };
+};
+
 // Helper: Encrypt sensitive fields in payment credentials
-const encryptCredFields = (creds: Record<string, any>) => {
-    const enc = { ...creds };
+const encryptCredFields = (creds: any): Record<string, any> => {
+    let parsed = creds;
+    if (typeof creds === "string") {
+        try {
+            parsed = JSON.parse(creds);
+        } catch {
+            parsed = {};
+        }
+    }
+    if (parsed && typeof parsed === "object" && "0" in parsed && !("mid" in parsed) && !("apiKey" in parsed)) {
+        try {
+            const reconstructed = Object.keys(parsed)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => parsed[k])
+                .join("");
+            parsed = JSON.parse(reconstructed);
+        } catch {}
+    }
+    const enc = parsed && typeof parsed === "object" ? { ...parsed } : {};
     if (enc.apiKey && typeof enc.apiKey === "string" && !enc.apiKey.startsWith("******")) {
         enc.apiKey = encryptSecret(enc.apiKey);
     }
@@ -59,13 +111,31 @@ const encryptCredFields = (creds: Record<string, any>) => {
 // Helper: Sanitize credentials record for API responses
 const sanitizePaymentCredentialRecord = (record: any) => {
     if (!record) return null;
-    const creds = record.credentials ? { ...record.credentials } : {};
-    if (creds.apiKey) creds.apiKey = "******";
-    if (creds.hmac) creds.hmac = "******";
-    if (creds.secretKey) creds.secretKey = "******";
+    let creds = record.credentials;
+    if (typeof creds === "string") {
+        try {
+            creds = JSON.parse(creds);
+        } catch {
+            creds = {};
+        }
+    }
+    // Auto-heal if previously corrupted with character-spread keys: { 0: '{', 1: '"', ... }
+    if (creds && typeof creds === "object" && "0" in creds && !("mid" in creds) && !("apiKey" in creds)) {
+        try {
+            const reconstructed = Object.keys(creds)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => creds[k])
+                .join("");
+            creds = JSON.parse(reconstructed);
+        } catch {}
+    }
+    const safeCreds = creds && typeof creds === "object" ? { ...creds } : {};
+    if (safeCreds.apiKey) safeCreds.apiKey = "******";
+    if (safeCreds.hmac) safeCreds.hmac = "******";
+    if (safeCreds.secretKey) safeCreds.secretKey = "******";
     return {
         ...record,
-        credentials: creds,
+        credentials: safeCreds,
     };
 };
 
@@ -331,18 +401,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
                 const provider = (credItem.provider || (credItem.mid ? "KASHIER" : "PAYMOB")).toUpperCase() as "PAYMOB" | "KASHIER";
                 const title = credItem.title || provider;
                 const environment = (credItem.environment || "LIVE").toUpperCase() as "LIVE" | "TEST";
-                const rawCreds = credItem.credentials && typeof credItem.credentials === "object"
-                    ? credItem.credentials
-                    : {
-                        apiKey: credItem.apiKey,
-                        hmac: credItem.hmac,
-                        integrationId: credItem.integrationId,
-                        iframeId: credItem.iframeId,
-                        callbackUrl: credItem.callbackUrl,
-                        mid: credItem.mid,
-                        secretKey: credItem.secretKey,
-                        baseUrl: credItem.baseUrl,
-                    };
+                const rawCreds = extractRawCredentials(credItem);
                 const encryptedCreds = encryptCredFields(rawCreds);
                 const credId = uuidv4();
                 const isActiveFlag = credItem.isActive !== undefined ? Boolean(credItem.isActive) : true;
@@ -779,18 +838,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                 const provider = (credItem.provider || (credItem.mid ? "KASHIER" : "PAYMOB")).toUpperCase() as "PAYMOB" | "KASHIER";
                 const title = credItem.title || provider;
                 const environment = (credItem.environment || "LIVE").toUpperCase() as "LIVE" | "TEST";
-                const rawCreds = credItem.credentials && typeof credItem.credentials === "object"
-                    ? credItem.credentials
-                    : {
-                        apiKey: credItem.apiKey,
-                        hmac: credItem.hmac,
-                        integrationId: credItem.integrationId,
-                        iframeId: credItem.iframeId,
-                        callbackUrl: credItem.callbackUrl,
-                        mid: credItem.mid,
-                        secretKey: credItem.secretKey,
-                        baseUrl: credItem.baseUrl,
-                    };
+                const rawCreds = extractRawCredentials(credItem);
 
                 let existingRecord = null;
                 if (credItem.id) {
@@ -823,8 +871,9 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                 let savedRecordId: string;
 
                 if (existingRecord) {
+                    const existingCreds = extractRawCredentials(existingRecord);
                     const mergedCreds = {
-                        ...(existingRecord.credentials as object),
+                        ...existingCreds,
                         ...rawCreds,
                     };
                     const encryptedCreds = encryptCredFields(mergedCreds);
