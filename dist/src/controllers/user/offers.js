@@ -81,11 +81,9 @@ const getRestaurantOffers = async (req, res) => {
             .leftJoin(schema_1.discounts, (0, drizzle_orm_1.eq)(schema_1.discountGroups.discountId, schema_1.discounts.id))
             .leftJoin(schema_1.categories, (0, drizzle_orm_1.eq)(schema_1.food.categoryid, schema_1.categories.id))
             .leftJoin(schema_1.subcategories, (0, drizzle_orm_1.eq)(schema_1.food.subcategoryid, schema_1.subcategories.id))
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active"), foodConditions_1.activeFoodCondition, (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.categories.id), (0, drizzle_orm_1.eq)(schema_1.categories.status, "active")), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.subcategories.id), (0, drizzle_orm_1.eq)(schema_1.subcategories.status, "active")), (0, drizzle_orm_1.or)(
-        // 1. Linked to active campaign group
-        (0, drizzle_orm_1.and)((0, drizzle_orm_1.isNotNull)(schema_1.food.discountId), (0, drizzle_orm_1.eq)(schema_1.discounts.isActive, true), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.discounts.startDate), (0, drizzle_orm_1.lte)(schema_1.discounts.startDate, now)), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.discounts.endDate), (0, drizzle_orm_1.gte)(schema_1.discounts.endDate, now)), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.discounts.usageLimit), (0, drizzle_orm_1.sql) `${schema_1.discounts.usedCount} < ${schema_1.discounts.usageLimit}`)), 
-        // 2. Direct product discount
-        (0, drizzle_orm_1.and)((0, drizzle_orm_1.isNotNull)(schema_1.food.discount_type), (0, drizzle_orm_1.isNotNull)(schema_1.food.discount_value), (0, drizzle_orm_1.sql) `CAST(${schema_1.food.discount_value} AS DECIMAL(10,2)) > 0`))));
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId), (0, drizzle_orm_1.eq)(schema_1.food.status, "active"), foodConditions_1.activeFoodCondition, (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.categories.id), (0, drizzle_orm_1.eq)(schema_1.categories.status, "active")), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.subcategories.id), (0, drizzle_orm_1.eq)(schema_1.subcategories.status, "active")), 
+        // Only restaurant/campaign discounts — no direct product discounts
+        (0, drizzle_orm_1.and)((0, drizzle_orm_1.isNotNull)(schema_1.food.discountId), (0, drizzle_orm_1.eq)(schema_1.discounts.isActive, true), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.discounts.startDate), (0, drizzle_orm_1.lte)(schema_1.discounts.startDate, now)), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.discounts.endDate), (0, drizzle_orm_1.gte)(schema_1.discounts.endDate, now)), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.discounts.usageLimit), (0, drizzle_orm_1.sql) `${schema_1.discounts.usedCount} < ${schema_1.discounts.usageLimit}`))));
         if (offersData.length === 0) {
             return res.status(200).json({
                 success: true,
@@ -94,9 +92,11 @@ const getRestaurantOffers = async (req, res) => {
             });
         }
         const formattedOffers = await (0, foodFormat_1.formatFoodsList)(offersData, restaurantId, userId, favoriteFoodIds, targetBranchId, serviceModule);
+        // Only restaurant/global campaign discounts — product-level are excluded by the SQL query
         const formattedResults = formattedOffers
-            .filter((item) => item.discountAmount > 0)
-            .map((item) => attachDiscountDetails(item));
+            .filter((item) => item.discountAmount > 0 &&
+            (item.discountSource === "restaurant" || item.discountSource === "global"))
+            .map(attachDiscountDetails);
         return res.status(200).json({
             success: true,
             message: "Restaurant offers retrieved successfully",
@@ -189,7 +189,8 @@ const getAllOffers = async (req, res) => {
         for (const [rId, rFoods] of offersByRestaurant.entries()) {
             const formatted = await (0, foodFormat_1.formatFoodsList)(rFoods, rId, userId, favoriteFoodIds);
             for (const item of formatted) {
-                if (item.discountAmount > 0) {
+                if (item.discountAmount > 0 &&
+                    (item.discountSource === "restaurant" || item.discountSource === "global")) {
                     const enrichedItem = attachDiscountDetails(item);
                     formattedResults.push({
                         ...enrichedItem,

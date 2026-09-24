@@ -83,9 +83,11 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     isDelayEmailSent: (0, mysql_core_1.boolean)("is_delay_email_sent").default(false),
     offerId: (0, mysql_core_1.char)("offer_id", { length: 36 })
         .references(() => schema_1.offers.id, { onDelete: "set null" }),
+    // Unified payment gateway columns (supports both Kashier and Paymob)
+    paymentGateway: (0, mysql_core_1.mysqlEnum)("payment_gateway", ["kashier", "paymob"]),
+    paymentOrderId: (0, mysql_core_1.varchar)("payment_order_id", { length: 150 }), // Kashier sessionId / Paymob orderId
+    paymentTransactionId: (0, mysql_core_1.varchar)("payment_transaction_id", { length: 150 }), // Kashier transactionId / Paymob transactionId
     paymentStatus: (0, mysql_core_1.mysqlEnum)("payment_status", ["pending_payment", "paid", "payment_failed"]).default("pending_payment"),
-    paymobOrderId: (0, mysql_core_1.varchar)("paymob_order_id", { length: 100 }),
-    paymobTransactionId: (0, mysql_core_1.varchar)("paymob_transaction_id", { length: 100 }),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });

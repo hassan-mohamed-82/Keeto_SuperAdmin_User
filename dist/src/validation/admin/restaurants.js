@@ -28,5 +28,7 @@ exports.createRestaurantSchema = zod_1.z.object({
     taxCertificate: fileOrString.optional(),
     addhome: zod_1.z.boolean().optional(),
     status: zod_1.z.enum(["active", "inactive"]).optional(),
+    paymentCredentials: zod_1.z.any().optional(),
+    paymentcredition: zod_1.z.any().optional(),
 });
 exports.updateRestaurantSchema = exports.createRestaurantSchema.partial();

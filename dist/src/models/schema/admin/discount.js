@@ -1,10 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.discountFoods = exports.discountRestaurants = exports.discountGroups = exports.discounts = void 0;
+exports.discountRestaurants = exports.discountGroups = exports.discounts = void 0;
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 const restaurants_1 = require("./restaurants");
-const food_1 = require("./food");
 // ==========================================
 // 1. Discounts Table (الخصم الأساسي / الحملة)
 // ==========================================
@@ -58,18 +57,18 @@ exports.discountRestaurants = (0, mysql_core_1.mysqlTable)("discount_restaurants
 }, (table) => ({
     discountRestaurantUnique: (0, mysql_core_1.uniqueIndex)("discount_restaurant_unique_idx").on(table.discountId, table.restaurantId),
 }));
-exports.discountFoods = (0, mysql_core_1.mysqlTable)("discount_foods", {
-    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
-    discountId: (0, mysql_core_1.char)("discount_id", { length: 36 })
-        .references(() => exports.discounts.id, { onDelete: "cascade" })
-        .notNull(),
-    foodId: (0, mysql_core_1.char)("food_id", { length: 36 })
-        .references(() => food_1.food.id, { onDelete: "cascade" })
-        .notNull(),
-    restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 })
-        .notNull()
-        .references(() => restaurants_1.restaurants.id, { onDelete: "cascade" }),
-    createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
-}, (table) => ({
-    discountFoodUnique: (0, mysql_core_1.uniqueIndex)("discount_food_unique_idx").on(table.discountId, table.foodId),
-}));
+// export const discountFoods = mysqlTable("discount_foods", {
+//     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+//     discountId: char("discount_id", { length: 36 })
+//         .references(() => discounts.id, { onDelete: "cascade" })
+//         .notNull(),
+//     foodId: char("food_id", { length: 36 })
+//         .references(() => food.id, { onDelete: "cascade" })
+//         .notNull(),
+//     restaurantId: char("restaurant_id", { length: 36 })
+//         .notNull()
+//         .references(() => restaurants.id, { onDelete: "cascade" }),
+//     createdAt: timestamp("created_at").defaultNow(),
+// }, (table) => ({
+//     discountFoodUnique: uniqueIndex("discount_food_unique_idx").on(table.discountId, table.foodId),
+// }));
