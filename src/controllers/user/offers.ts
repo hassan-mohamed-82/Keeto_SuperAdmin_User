@@ -16,21 +16,21 @@ import { getUserFavoritesSets } from "../../services/userFavoritesFood";
 import { resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
 import { formatProductsWithDiscounts } from "../../services/discount.service";
 
-const attachDiscountDetails = (item: any) => {
-    const details = item.discountDetails;
+/**
+ * Promotes the few flat convenience fields that the client needs directly
+ * (name/logo/isGlobal of the campaign), without duplicating the full discountDetails object.
+ */
+const flattenDiscountMeta = (item: any) => {
+    const d = item.discountDetails;
+    const { discountDetails: _dropped, ...rest } = item;
     return {
-        ...item,
-        discountPrice: item.discountPrice ?? item.finalPrice ?? item.price,
-        discountType: item.discountType ?? details?.type ?? null,
-        discountValue: item.discountValue ?? (details?.value !== undefined ? details.value : null),
-        discountId: item.appliedDiscountId ?? details?.id ?? null,
-        discountName: details?.name ?? (item.discountSource === "product" ? "Product discount" : null),
-        discountNameAr: details?.nameAr ?? null,
-        discountNameFr: details?.nameFr ?? null,
-        isGlobal: details?.isGlobal ?? false,
-        discountLogo: details?.logo ?? null,
-        discountDetails: details ?? null,
-        discount: details ?? null,
+        ...rest,
+        discountId: item.appliedDiscountId ?? d?.id ?? null,
+        discountName: d?.name ?? null,
+        discountNameAr: d?.nameAr ?? null,
+        discountNameFr: d?.nameFr ?? null,
+        isGlobal: d?.isGlobal ?? false,
+        discountLogo: d?.logo ?? null,
     };
 };
 
@@ -100,21 +100,13 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                     activeFoodCondition,
                     or(isNull(categories.id), eq(categories.status, "active")),
                     or(isNull(subcategories.id), eq(subcategories.status, "active")),
-                    or(
-                        // 1. Linked to active campaign group
-                        and(
-                            isNotNull(food.discountId),
-                            eq(discounts.isActive, true),
-                            or(isNull(discounts.startDate), lte(discounts.startDate, now)),
-                            or(isNull(discounts.endDate), gte(discounts.endDate, now)),
-                            or(isNull(discounts.usageLimit), sql`${discounts.usedCount} < ${discounts.usageLimit}`)
-                        ),
-                        // 2. Direct product discount
-                        and(
-                            isNotNull(food.discount_type),
-                            isNotNull(food.discount_value),
-                            sql`CAST(${food.discount_value} AS DECIMAL(10,2)) > 0`
-                        )
+                    // Only restaurant/campaign discounts — no direct product discounts
+                    and(
+                        isNotNull(food.discountId),
+                        eq(discounts.isActive, true),
+                        or(isNull(discounts.startDate), lte(discounts.startDate, now)),
+                        or(isNull(discounts.endDate), gte(discounts.endDate, now)),
+                        or(isNull(discounts.usageLimit), sql`${discounts.usedCount} < ${discounts.usageLimit}`)
                     )
                 )
             );
@@ -136,9 +128,13 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
             serviceModule
         );
 
+        // Only restaurant/global campaign discounts — product-level are excluded by the SQL query
         const formattedResults = formattedOffers
-            .filter((item) => item.discountAmount > 0)
-            .map((item) => attachDiscountDetails(item));
+            .filter((item) =>
+                item.discountAmount > 0 &&
+                (item.discountSource === "restaurant" || item.discountSource === "global")
+            )
+            .map(flattenDiscountMeta);
 
         return res.status(200).json({
             success: true,
@@ -264,8 +260,11 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 favoriteFoodIds
             );
             for (const item of formatted) {
-                if (item.discountAmount > 0) {
-                    const enrichedItem = attachDiscountDetails(item);
+                if (
+                    item.discountAmount > 0 &&
+                    (item.discountSource === "restaurant" || item.discountSource === "global")
+                ) {
+                    const enrichedItem = flattenDiscountMeta(item);
                     formattedResults.push({
                         ...enrichedItem,
                         restaurant: restaurantMap.get(rId) ?? null,
@@ -487,7 +486,7 @@ export const getAllDiscountsWithProducts = async (req: Request, res: Response) =
                     );
 
                     for (const item of formatted) {
-                        const enrichedItem = attachDiscountDetails(item);
+                        const enrichedItem = flattenDiscountMeta(item);
                         allProductsForDiscount.push(enrichedItem);
                     }
                 }
