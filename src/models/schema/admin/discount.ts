@@ -83,21 +83,21 @@ export const discountRestaurants = mysqlTable("discount_restaurants", {
     discountRestaurantUnique: uniqueIndex("discount_restaurant_unique_idx").on(table.discountId, table.restaurantId),
 }));
 
-export const discountFoods = mysqlTable("discount_foods", {
-    id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+// export const discountFoods = mysqlTable("discount_foods", {
+//     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
 
-    discountId: char("discount_id", { length: 36 })
-        .references(() => discounts.id, { onDelete: "cascade" })
-        .notNull(),
+//     discountId: char("discount_id", { length: 36 })
+//         .references(() => discounts.id, { onDelete: "cascade" })
+//         .notNull(),
 
-    foodId: char("food_id", { length: 36 })
-        .references(() => food.id, { onDelete: "cascade" })
-        .notNull(),
-    restaurantId: char("restaurant_id", { length: 36 })
-        .notNull()
-        .references(() => restaurants.id, { onDelete: "cascade" }),
+//     foodId: char("food_id", { length: 36 })
+//         .references(() => food.id, { onDelete: "cascade" })
+//         .notNull(),
+//     restaurantId: char("restaurant_id", { length: 36 })
+//         .notNull()
+//         .references(() => restaurants.id, { onDelete: "cascade" }),
 
-    createdAt: timestamp("created_at").defaultNow(),
-}, (table) => ({
-    discountFoodUnique: uniqueIndex("discount_food_unique_idx").on(table.discountId, table.foodId),
-}));
+//     createdAt: timestamp("created_at").defaultNow(),
+// }, (table) => ({
+//     discountFoodUnique: uniqueIndex("discount_food_unique_idx").on(table.discountId, table.foodId),
+// }));
