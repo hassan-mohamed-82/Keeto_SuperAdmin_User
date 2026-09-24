@@ -6,29 +6,7 @@ import { BadRequest, NotFound } from "../../../Errors";
 import {
     getKashierConfig,
     generateKashierOrderHash,
-    maskCardNumber,
 } from "./kashier";
-
-export interface DirectChargeInput {
-    orderId: string | number;
-    amount: string | number;
-    currency?: string;
-    cardNumber: string;
-    expiryMonth: string;
-    expiryYear: string;
-    cvv: string;
-    cardHolderName: string;
-    saveCard?: boolean;
-}
-
-export interface ChargeResponse {
-    status: "SUCCESS" | "3DS_REQUIRED" | "FAILED";
-    transactionId?: string;
-    orderId: string | number;
-    redirectUrl?: string;
-    message?: string;
-    data?: any;
-}
 
 // ──────────────────────────────────────────────────────
 // Kashier Payment Sessions API types
@@ -39,6 +17,12 @@ export interface CreateSessionInput {
     amount: number;
     currency?: string;
     customerEmail?: string;
+    credentials?: {
+        mid: string;
+        apiKey: string;
+        secretKey?: string;
+        baseUrl?: string;
+    };
 }
 
 export interface PaymentSessionResponse {
@@ -58,15 +42,23 @@ export class KashierService {
      *
      * Returns a `sessionUrl` that the client should redirect to (web)
      * or open in a WebView (mobile). Kashier handles all card input & 3DS.
+     *
+     * Also persists the Kashier sessionId to the order row immediately
+     * so the session is never lost even if the client disconnects.
      */
     static async createPaymentSession(input: CreateSessionInput): Promise<PaymentSessionResponse> {
-        const config = getKashierConfig();
+        const sysConfig = getKashierConfig();
+        const mid = input.credentials?.mid || sysConfig.mid;
+        const apiKey = input.credentials?.apiKey || sysConfig.apiKey;
+        const secretKey = input.credentials?.secretKey || sysConfig.secretKey;
+        const baseUrl = input.credentials?.baseUrl || sysConfig.baseUrl;
+
         const currency = (input.currency || "EGP").toUpperCase();
         const amount = input.amount.toFixed(2);
 
-        if (!config.mid || !config.apiKey || !config.secretKey) {
+        if (!mid || !apiKey) {
             throw new BadRequest(
-                "Kashier credentials (KASHIER_MID, KASHIER_API_KEY, or KASHIER_SECRET_KEY) are missing in environment variables."
+                "Kashier credentials (KASHIER_MID or KASHIER_API_KEY) are missing or incomplete."
             );
         }
 
@@ -78,7 +70,7 @@ export class KashierService {
         const merchantRedirect = `${appBaseUrl}/payment/result`;
 
         const body: Record<string, unknown> = {
-            merchantId: config.mid,
+            merchantId: mid,
             order: input.orderId,
             amount,
             currency,
@@ -98,16 +90,20 @@ export class KashierService {
 
         console.log(`[Kashier Session] Creating session for order ${input.orderId}, amount: ${amount} ${currency}`);
 
+        const requestHeaders: Record<string, string> = {
+            "Content-Type": "application/json",
+            "api-key": apiKey,
+        };
+        if (secretKey) {
+            requestHeaders["Authorization"] = secretKey;
+        }
+
         try {
             const response = await axios.post(
-                `${config.baseUrl}/v3/payment/sessions`,
+                `${baseUrl}/v3/payment/sessions`,
                 body,
                 {
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: config.secretKey, // Raw secretKey without "Bearer " prefix
-                        "api-key": config.apiKey,         // Separate required header
-                    },
+                    headers: requestHeaders,
                     timeout: 15000,
                 }
             );
@@ -120,10 +116,31 @@ export class KashierService {
                 );
             }
 
-            console.log(`[Kashier Session] Created: ${data._id}, expires: ${data.expireAt}`);
+            const sessionId: string = data._id || data.sessionId || "";
+            console.log(`[Kashier Session] Created: ${sessionId}, expires: ${data.expireAt}`);
+
+            // 🔒 Persist Kashier sessionId to the order row immediately so it is
+            //    never lost regardless of what the client does next.
+            if (input.orderId && sessionId) {
+                try {
+                    await db
+                        .update(orders)
+                        .set({
+                            paymentGateway: "kashier",
+                            paymentOrderId: sessionId,   // Kashier session ID acts as the "order" reference
+                            paymentStatus: "pending_payment",
+                        })
+                        .where(eq(orders.id, input.orderId));
+
+                    console.log(`[Kashier Session] Saved sessionId "${sessionId}" to order ${input.orderId}.`);
+                } catch (dbErr) {
+                    // Log but do not fail — the session URL is still usable
+                    console.error(`[Kashier Session] Failed to persist sessionId to order ${input.orderId}:`, dbErr);
+                }
+            }
 
             return {
-                sessionId: data._id,
+                sessionId,
                 sessionUrl: data.sessionUrl,
                 status: data.status || "CREATED",
                 orderId: input.orderId,
@@ -147,143 +164,60 @@ export class KashierService {
     }
 
     /**
-     * Executes a server-to-server Direct Charge request to Kashier.
-     */
-    static async executeDirectCharge(input: DirectChargeInput): Promise<ChargeResponse> {
-        const config = getKashierConfig();
-        const currency = (input.currency || "EGP").toUpperCase();
-        const amount = typeof input.amount === "number" ? input.amount.toFixed(2) : String(input.amount);
-        const orderIdStr = String(input.orderId);
-
-        // Security check: Verify order exists in DB
-        const [existingOrder] = await db
-            .select()
-            .from(orders)
-            .where(eq(orders.id, orderIdStr))
-            .limit(1);
-
-        if (!existingOrder) {
-            throw new NotFound(`Order with ID ${orderIdStr} was not found.`);
-        }
-
-        // 1. Generate Order Hash
-        const hash = generateKashierOrderHash({
-            mid: config.mid,
-            orderId: orderIdStr,
-            amount: amount,
-            currency: currency,
-        });
-
-        // 2. Safe log (never logs CVV or full card number)
-        console.log(
-            `[Kashier Direct Charge] Order: ${orderIdStr}, Card: ${maskCardNumber(input.cardNumber)}, Amount: ${amount} ${currency}`
-        );
-
-        // 3. Prepare payload for Kashier API
-        const payload = {
-            payment: {
-                mid: config.mid,
-                amount: amount,
-                currency: currency,
-                orderId: orderIdStr,
-                hash: hash,
-            },
-            card: {
-                number: input.cardNumber.replace(/\s+/g, ""),
-                expiryMonth: input.expiryMonth,
-                expiryYear: input.expiryYear,
-                cvv: input.cvv,
-                cardHolderName: input.cardHolderName,
-            },
-            saveCard: !!input.saveCard,
-        };
-
-        const targetUrl = `${config.baseUrl}/checkout`;
-
-        try {
-            const response = await axios.post(targetUrl, payload, {
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: config.apiKey,
-                    "api-key": config.apiKey,
-                },
-                timeout: 30000,
-            });
-
-            const resData = response.data || {};
-            const paymentStatus = (resData.status || resData.response?.status || "").toUpperCase();
-
-            // 4. Handle 3DS Redirection
-            if (
-                paymentStatus === "3DS_REQUIRED" ||
-                paymentStatus === "REDIRECT" ||
-                resData.redirectUrl ||
-                resData.response?.redirectUrl
-            ) {
-                const redirectUrl = resData.redirectUrl || resData.response?.redirectUrl;
-                return {
-                    status: "3DS_REQUIRED",
-                    orderId: orderIdStr,
-                    redirectUrl: redirectUrl,
-                    message: "3D Secure OTP verification required.",
-                    data: resData,
-                };
-            }
-
-            // 5. Handle Direct Success
-            if (paymentStatus === "SUCCESS" || resData.success === true) {
-                const transactionId =
-                    resData.transactionId ||
-                    resData.response?.transactionId ||
-                    resData.response?.cardTransactionId ||
-                    `KSH-${Date.now()}`;
-
-                await this.markOrderAsPaid(orderIdStr, transactionId);
-
-                return {
-                    status: "SUCCESS",
-                    orderId: orderIdStr,
-                    transactionId: transactionId,
-                    message: "Payment processed and order confirmed successfully.",
-                    data: resData,
-                };
-            }
-
-            // Otherwise failure
-            const errMsg = resData.message || resData.response?.message || "Payment transaction was declined.";
-            throw new BadRequest(errMsg);
-        } catch (error: any) {
-            if (error instanceof BadRequest || error instanceof NotFound) {
-                throw error;
-            }
-
-            const axiosErr = error as AxiosError<any>;
-            const errorMsg =
-                axiosErr.response?.data?.message ||
-                axiosErr.response?.data?.response?.message ||
-                axiosErr.message ||
-                "Failed to communicate with Kashier payment gateway.";
-
-            console.error(`[Kashier Charge Error] Order: ${orderIdStr}:`, errorMsg);
-            throw new BadRequest(`Payment failed: ${errorMsg}`);
-        }
-    }
-
-    /**
-     * Updates order status in the database after successful payment confirmation.
+     * Updates order status in the database after a successful Kashier payment confirmation.
+     *
+     * Fixes applied:
+     * - Sets `paymentStatus: "paid"` (was missing — only `status` was being set).
+     * - Saves `paymentTransactionId` (the Kashier transactionId).
+     * - Sets `paymentGateway: "kashier"` for traceability.
+     * - Keeps idempotency: if already paid, skip silently.
      */
     static async markOrderAsPaid(orderId: string, transactionId?: string): Promise<void> {
         try {
-            // Find or link payment method for Visa/Digital
+            // Idempotency: skip if already paid
+            const [existingOrder] = await db
+                .select({ id: orders.id, paymentStatus: orders.paymentStatus })
+                .from(orders)
+                .where(eq(orders.id, orderId))
+                .limit(1);
+
+            if (!existingOrder) {
+                console.warn(`[Kashier markOrderAsPaid] Order ${orderId} not found.`);
+                return;
+            }
+
+            if (existingOrder.paymentStatus === "paid") {
+                console.log(`[Kashier markOrderAsPaid] Order ${orderId} already paid — skipping.`);
+                return;
+            }
+
+            // Find Kashier / digital payment method record
             const [digitalMethod] = await db
                 .select()
                 .from(paymentMethods)
-                .where(or(like(paymentMethods.name, "%visa%"), like(paymentMethods.name, "%card%"), like(paymentMethods.name, "%digital%")))
+                .where(
+                    or(
+                        like(paymentMethods.name, "%kashier%"),
+                        like(paymentMethods.name, "%visa%"),
+                        like(paymentMethods.name, "%card%"),
+                        like(paymentMethods.name, "%digital%")
+                    )
+                )
                 .limit(1);
 
             const updateData: Record<string, any> = {
-                status: "accepted", // Automatically accept order once online payment succeeds
+                // ✅ FIX #1: Update paymentStatus to "paid"
+                paymentStatus: "paid",
+                // ✅ FIX #2: Mark which gateway processed the payment
+                paymentGateway: "kashier",
+                // Automatically accept order once online payment succeeds
+                status: "accepted",
             };
+
+            // ✅ FIX #2: Save the Kashier transactionId (was only console.log'd before)
+            if (transactionId) {
+                updateData.paymentTransactionId = transactionId;
+            }
 
             if (digitalMethod) {
                 updateData.paymentMethod = digitalMethod.id;
@@ -294,7 +228,9 @@ export class KashierService {
                 .set(updateData)
                 .where(eq(orders.id, orderId));
 
-            console.log(`[Kashier Order Updated] Order ${orderId} marked as accepted. Tx: ${transactionId || "N/A"}`);
+            console.log(
+                `[Kashier Order Updated] Order ${orderId} → paymentStatus: paid, status: accepted, gateway: kashier. Tx: ${transactionId || "N/A"}`
+            );
         } catch (dbErr) {
             console.error(`[Kashier Order Update Error] Failed to update order ${orderId}:`, dbErr);
         }

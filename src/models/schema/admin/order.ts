@@ -148,9 +148,11 @@ export const orders = mysqlTable("orders", {
     offerId: char("offer_id", { length: 36 })
         .references(() => offers.id, { onDelete: "set null" }),
 
+    // Unified payment gateway columns (supports both Kashier and Paymob)
+    paymentGateway: mysqlEnum("payment_gateway", ["kashier", "paymob"]),
+    paymentOrderId: varchar("payment_order_id", { length: 150 }),        // Kashier sessionId / Paymob orderId
+    paymentTransactionId: varchar("payment_transaction_id", { length: 150 }), // Kashier transactionId / Paymob transactionId
     paymentStatus: mysqlEnum("payment_status", ["pending_payment", "paid", "payment_failed"]).default("pending_payment"),
-    paymobOrderId: varchar("paymob_order_id", { length: 100 }),
-    paymobTransactionId: varchar("paymob_transaction_id", { length: 100 }),
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),

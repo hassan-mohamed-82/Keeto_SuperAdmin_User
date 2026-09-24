@@ -1412,69 +1412,101 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         if (gatewayType === "CUSTOM") {
             try {
-                // Find active PAYMOB credentials for this restaurant
-                const [paymobCredsRecord] = await db
+                // Find active credentials (KASHIER or PAYMOB) for this restaurant
+                const activeCreds = await db
                     .select()
                     .from(restaurantPaymentCredentials)
                     .where(
                         and(
                             eq(restaurantPaymentCredentials.restaurantId, restaurantId),
-                            eq(restaurantPaymentCredentials.provider, "PAYMOB"),
                             eq(restaurantPaymentCredentials.isActive, true)
                         )
-                    )
-                    .limit(1);
+                    );
 
-                if (!paymobCredsRecord || !paymobCredsRecord.credentials) {
-                    throw new BadRequest("Restaurant is configured for custom gateway, but active Paymob credentials were not found.");
+                const kashierCredRecord = activeCreds.find((c) => c.provider === "KASHIER");
+                const paymobCredRecord = activeCreds.find((c) => c.provider === "PAYMOB");
+
+                if (!kashierCredRecord && !paymobCredRecord) {
+                    throw new BadRequest(
+                        "Restaurant is configured for custom gateway, but no active payment credentials (Paymob or Kashier) were found."
+                    );
                 }
 
-                const rawCreds = paymobCredsRecord.credentials;
-                const decryptedCredentials = {
-                    ...rawCreds,
-                    apiKey: decryptSecret(rawCreds.apiKey),
-                    hmac: decryptSecret(rawCreds.hmac),
-                };
+                if (kashierCredRecord && kashierCredRecord.credentials) {
+                    const rawCreds = kashierCredRecord.credentials as any;
+                    const decryptedCredentials = {
+                        mid: rawCreds.mid,
+                        apiKey: decryptSecret(rawCreds.apiKey),
+                        secretKey: rawCreds.secretKey ? decryptSecret(rawCreds.secretKey) : undefined,
+                        baseUrl: rawCreds.baseUrl,
+                    };
 
-                const nameParts = (userInfo?.name || "Customer User").trim().split(" ");
-                const firstName = nameParts[0] || "Customer";
-                const lastName = nameParts.slice(1).join(" ") || "User";
+                    const kashierSession = await KashierService.createPaymentSession({
+                        orderId: orderId,
+                        amount: totalAmount,
+                        currency: "EGP",
+                        customerEmail: userInfo?.email || undefined,
+                        credentials: decryptedCredentials,
+                    });
 
-                const paymobSession = await PaymobService.createPaymentSession({
-                    credentials: decryptedCredentials,
-                    orderId: orderId,
-                    orderNumber: orderNumber,
-                    amountCents: Math.round(totalAmount * 100),
-                    currency: "EGP",
-                    customer: {
-                        firstName,
-                        lastName,
-                        email: userInfo?.email || "customer@example.com",
-                        phone: userInfo?.phone || "+201000000000",
-                    },
-                });
+                    paymentSessionData = {
+                        gateway: "KASHIER",
+                        type: "redirect",         // Frontend does full-page redirect
+                        sessionId: kashierSession.sessionId,
+                        sessionUrl: kashierSession.sessionUrl,
+                        status: kashierSession.status,
+                        expireAt: kashierSession.expireAt,
+                    };
+                } else if (paymobCredRecord && paymobCredRecord.credentials) {
+                    const rawCreds = paymobCredRecord.credentials as any;
+                    const decryptedCredentials = {
+                        ...rawCreds,
+                        apiKey: decryptSecret(rawCreds.apiKey),
+                        hmac: decryptSecret(rawCreds.hmac),
+                    };
 
-                // Update order with paymobOrderId
-                await db
-                    .update(orders)
-                    .set({
-                        paymobOrderId: String(paymobSession.paymobOrderId),
-                        paymentStatus: "pending_payment",
-                    })
-                    .where(eq(orders.id, orderId));
+                    const nameParts = (userInfo?.name || "Customer User").trim().split(" ");
+                    const firstName = nameParts[0] || "Customer";
+                    const lastName = nameParts.slice(1).join(" ") || "User";
 
-                paymentSessionData = {
-                    gateway: "PAYMOB",
-                    sessionId: paymobSession.sessionId,
-                    sessionUrl: paymobSession.sessionUrl,
-                    status: "CREATED",
-                    paymobOrderId: paymobSession.paymobOrderId,
-                };
+                    const paymobSession = await PaymobService.createPaymentSession({
+                        credentials: decryptedCredentials,
+                        orderId: orderId,
+                        orderNumber: orderNumber,
+                        amountCents: Math.round(totalAmount * 100),
+                        currency: "EGP",
+                        customer: {
+                            firstName,
+                            lastName,
+                            email: userInfo?.email || "customer@example.com",
+                            phone: userInfo?.phone || "+201000000000",
+                        },
+                    });
+
+                    // Update order with Paymob gateway info
+                    await db
+                        .update(orders)
+                        .set({
+                            paymentOrderId: String(paymobSession.paymobOrderId),
+                            paymentGateway: "paymob",
+                            paymentStatus: "pending_payment",
+                        })
+                        .where(eq(orders.id, orderId));
+
+                    paymentSessionData = {
+                        gateway: "PAYMOB",
+                        type: "iframe",           // Frontend uses iframe embed
+                        sessionId: paymobSession.sessionId,
+                        sessionUrl: paymobSession.sessionUrl,
+                        status: "CREATED",
+                        paymobOrderId: paymobSession.paymobOrderId,
+                    };
+                }
             } catch (paymentErr: any) {
-                console.error(`[Checkout] Paymob session creation failed for order ${orderId}:`, paymentErr?.message);
+                console.error(`[Checkout] Custom payment session creation failed for order ${orderId}:`, paymentErr?.message);
                 paymentSessionData = {
-                    gateway: "PAYMOB",
-                    error: paymentErr?.message || "Failed to create Paymob payment session.",
+                    gateway: "CUSTOM",
+                    error: paymentErr?.message || "Failed to create custom payment session.",
                 };
             }
         } else {
@@ -1486,9 +1518,12 @@ export const checkout = async (req: Request | any, res: Response) => {
                     currency: "EGP",
                     customerEmail: userInfo?.email || undefined,
                 });
+                // Note: KashierService.createPaymentSession() already saves
+                // sessionId + paymentGateway + paymentStatus to the order row.
 
                 paymentSessionData = {
                     gateway: "KASHIER",
+                    type: "redirect",         // Frontend does full-page redirect
                     sessionId: kashierSession.sessionId,
                     sessionUrl: kashierSession.sessionUrl,
                     status: kashierSession.status,
@@ -1510,6 +1545,8 @@ export const checkout = async (req: Request | any, res: Response) => {
     return SuccessResponse(res, {
         message: "Order created successfully",
         payment: paymentSessionData ? {
+            gateway: paymentSessionData.gateway,       // "KASHIER" | "PAYMOB"
+            type: paymentSessionData.type,             // "redirect" | "iframe"
             sessionId: paymentSessionData.sessionId,
             sessionUrl: paymentSessionData.sessionUrl,
             status: paymentSessionData.status,

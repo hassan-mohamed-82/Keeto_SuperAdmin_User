@@ -72,38 +72,64 @@ export const generateKashierOrderHash = ({
 };
 
 /**
- * Validates the incoming webhook signature from Kashier using KASHIER_SECRET_KEY.
- * Kashier typically sends a signature in headers or as part of the payload query/body.
+ * Validates the incoming webhook signature from Kashier.
+ *
+ * Kashier algorithm:
+ *   1. Use `data.signatureKeys` (array) to determine which fields to sign.
+ *   2. Concatenate the VALUES of those fields from `data` in order.
+ *   3. HMAC-SHA256 the result using KASHIER_API_KEY (NOT secretKey).
+ *   4. Compare with the signature sent in `data.kashierSignature` (or a header).
+ *
+ * Reference: https://kashier.io/docs/webhooks
  */
 export const verifyKashierWebhookSignature = (
-    dataToSign: string | Record<string, any>,
-    receivedSignature: string
+    data: Record<string, any>,
+    receivedSignature?: string,
+    customApiKey?: string
 ): boolean => {
     const config = getKashierConfig();
-    if (!config.secretKey) {
-        console.error("KASHIER_SECRET_KEY is required to verify webhook signatures.");
+    const apiKey = customApiKey || config.apiKey;
+    if (!apiKey) {
+        console.error("KASHIER_API_KEY is required to verify webhook signatures.");
         return false;
     }
 
     try {
-        let payloadString = "";
-        if (typeof dataToSign === "string") {
-            payloadString = dataToSign;
-        } else if (typeof dataToSign === "object" && dataToSign !== null) {
-            // Sort keys to maintain deterministic HMAC order if signing payload object
-            const sortedKeys = Object.keys(dataToSign).sort();
-            payloadString = sortedKeys
-                .map((key) => `${key}=${dataToSign[key]}`)
-                .join("&");
+        // The actual received signature comes from data.kashierSignature if not passed separately
+        const signature = receivedSignature || data?.kashierSignature;
+        if (!signature) {
+            console.error("[Kashier Webhook] No signature found to verify.");
+            return false;
         }
 
+        // FIX #3: `signatureKeys` MUST come from Kashier itself. Previously, when
+        // it was missing we silently rebuilt the key list from every field in the
+        // incoming body — which means an attacker could add/remove fields to
+        // influence exactly what gets signed (signature malleability), or simply
+        // send a payload shaped to make an unrelated field set "just happen" to
+        // validate. There is no safe way to verify a Kashier signature without
+        // Kashier's own signatureKeys, so we now reject outright instead of guessing.
+        if (!Array.isArray(data?.signatureKeys) || data.signatureKeys.length === 0) {
+            console.error("[Kashier Webhook] Missing or invalid signatureKeys — rejecting webhook.");
+            return false;
+        }
+        const signatureKeys: string[] = data.signatureKeys;
+
+        // Concatenate values in specified order
+        const payload = signatureKeys
+            .map((key) => {
+                const val = data[key];
+                return val === null || val === undefined ? "" : String(val);
+            })
+            .join("");
+
         const expectedSignature = crypto
-            .createHmac("sha256", config.secretKey)
-            .update(payloadString)
+            .createHmac("sha256", apiKey)
+            .update(payload)
             .digest("hex");
 
-        const receivedBuf = Buffer.from(receivedSignature, "utf8");
-        const expectedBuf = Buffer.from(expectedSignature, "utf8");
+        const receivedBuf = Buffer.from(signature.toLowerCase(), "utf8");
+        const expectedBuf = Buffer.from(expectedSignature.toLowerCase(), "utf8");
 
         if (receivedBuf.length !== expectedBuf.length) {
             return false;

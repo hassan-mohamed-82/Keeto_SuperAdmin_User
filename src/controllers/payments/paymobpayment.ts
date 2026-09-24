@@ -26,13 +26,19 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
     const paymobOrderId = String(transactionObj.order?.id || transactionObj.order_id || "");
     const transactionId = String(transactionObj.id || "");
     const isSuccess = Boolean(transactionObj.success === true || transactionObj.success === "true");
+    // FIX #1: Paymob can send success=false while pending=true — that means the
+    // transaction is still being processed, NOT that it failed. We must not mark
+    // the order as "payment_failed" in that case.
+    const isPending = Boolean(transactionObj.pending === true || transactionObj.pending === "true");
+    const amountCentsFromWebhook =
+        transactionObj.amount_cents !== undefined ? Number(transactionObj.amount_cents) : undefined;
 
     console.log("[Paymob Webhook Received]:", {
         merchantOrderId,
         paymobOrderId,
         transactionId,
         isSuccess,
-        pending: transactionObj.pending,
+        pending: isPending,
     });
 
     if (!paymobOrderId && !merchantOrderId) {
@@ -45,7 +51,7 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
         .from(orders)
         .where(
             or(
-                paymobOrderId ? eq(orders.paymobOrderId, paymobOrderId) : undefined,
+                paymobOrderId ? eq(orders.paymentOrderId, paymobOrderId) : undefined,
                 merchantOrderId ? eq(orders.id, merchantOrderId) : undefined,
                 merchantOrderId ? eq(orders.orderNumber, merchantOrderId) : undefined
             )
@@ -57,17 +63,7 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
         throw new NotFound("Order matching this Paymob transaction was not found.");
     }
 
-    // 2. 🛡️ Idempotency check: If order is already marked as paid, return early to prevent duplicates
-    if (matchedOrder.paymentStatus === "paid") {
-        console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} is already marked as paid. Skipping duplicate processing.`);
-        return SuccessResponse(res, {
-            received: true,
-            alreadyProcessed: true,
-            message: "Order has already been processed and marked as paid.",
-        });
-    }
-
-    // 3. Fetch Restaurant Settings to determine gateway & HMAC secret
+    // 2. Fetch Restaurant Settings to determine gateway & HMAC secret
     let hmacSecret = "";
 
     const [settings] = await db
@@ -88,16 +84,21 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
             )
             .limit(1);
 
-        if (!credsRecord || !credsRecord.credentials?.hmac) {
+        const rawCreds = credsRecord?.credentials as any;
+        if (!credsRecord || !rawCreds?.hmac) {
             throw new BadRequest("Restaurant Paymob credentials or HMAC secret missing in database.");
         }
 
-        hmacSecret = decryptSecret(credsRecord.credentials.hmac);
+        hmacSecret = decryptSecret(rawCreds.hmac);
     } else {
         hmacSecret = process.env.PLATFORM_PAYMOB_HMAC || "";
     }
 
-    // 4. 🛡️ Strict HMAC Verification: MANDATORY
+    // 3. 🛡️ Strict HMAC Verification: MANDATORY
+    // FIX #4: This now runs BEFORE the idempotency short-circuit below, so an
+    // unauthenticated request can never even learn the current payment status
+    // of an order (previously the "already paid" branch returned success
+    // before the signature was checked at all).
     if (!hmacSecret) {
         console.error("⚠️ Paymob HMAC secret is not configured. Cannot verify webhook safely.");
         throw new BadRequest("Payment gateway webhook verification secret is not configured.");
@@ -114,7 +115,30 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
         throw new BadRequest("Invalid HMAC signature.");
     }
 
-    // 5. Update Order status based on transaction result
+    // 4. 🛡️ Idempotency check: If order is already marked as paid, return early to prevent duplicates
+    if (matchedOrder.paymentStatus === "paid") {
+        console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} is already marked as paid. Skipping duplicate processing.`);
+        return SuccessResponse(res, {
+            received: true,
+            alreadyProcessed: true,
+            message: "Order has already been processed and marked as paid.",
+        });
+    }
+
+    // 5. FIX #2: Verify the paid amount matches the order total before trusting
+    // the webhook. This protects against a mismatched/forged amount even in
+    // scenarios where the HMAC secret itself has been compromised or reused.
+    if (isSuccess && amountCentsFromWebhook !== undefined) {
+        const expectedCents = Math.round(parseFloat(matchedOrder.totalAmount as string) * 100);
+        if (amountCentsFromWebhook !== expectedCents) {
+            console.error(
+                `[Paymob Webhook]: Amount mismatch for order ${matchedOrder.orderNumber}. Expected ${expectedCents} cents, got ${amountCentsFromWebhook} cents.`
+            );
+            throw new BadRequest("Paid amount does not match the order total.");
+        }
+    }
+
+    // 6. Update Order status based on transaction result
     if (isSuccess) {
         const [digitalMethod] = await db
             .select()
@@ -131,8 +155,9 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
 
         const updateData: Record<string, any> = {
             paymentStatus: "paid",
+            paymentGateway: "paymob",
             status: "accepted", // Order automatically accepted once payment confirmed
-            paymobTransactionId: transactionId,
+            paymentTransactionId: transactionId,
         };
 
         if (digitalMethod) {
@@ -145,12 +170,26 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
             .where(eq(orders.id, matchedOrder.id));
 
         console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} successfully marked as PAID & ACCEPTED. Tx: ${transactionId}`);
+    } else if (isPending) {
+        // FIX #1 (cont'd): Do NOT mark as failed. Leave the order in a pending
+        // state so a later webhook call (success or failure) can still resolve it.
+        await db
+            .update(orders)
+            .set({
+                paymentStatus: "pending_payment",
+                paymentGateway: "paymob",
+                paymentTransactionId: transactionId || null,
+            })
+            .where(eq(orders.id, matchedOrder.id));
+
+        console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} payment PENDING. Tx: ${transactionId}`);
     } else {
         await db
             .update(orders)
             .set({
                 paymentStatus: "payment_failed",
-                paymobTransactionId: transactionId || null,
+                paymentGateway: "paymob",
+                paymentTransactionId: transactionId || null,
             })
             .where(eq(orders.id, matchedOrder.id));
 
