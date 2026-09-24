@@ -156,12 +156,12 @@ export const createRestaurant = async (req: Request, res: Response) => {
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans,
         type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor,
-        callcenterphone
+        callcenterphone, paymentGatewayType, enableOnlinePayment
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
 
-    if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerPhone || !email || !password ) {
+    if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerPhone || !email || !password) {
         throw new BadRequest("Missing required fields");
     }
 
@@ -200,6 +200,23 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
     const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
     const parsedPaymentCredentials: any[] = parsePaymentCredentialsInput(paymentCredsRaw);
+
+    // 👈 نوع بوابة الدفع (SYSTEM = حساب المنصة، CUSTOM = حساب خاص بالمطعم)
+    const resolvedPaymentGatewayType: "SYSTEM" | "CUSTOM" =
+        paymentGatewayType && String(paymentGatewayType).trim().toUpperCase() === "CUSTOM"
+            ? "CUSTOM"
+            : "SYSTEM";
+
+    // 👈 تفعيل/تعطيل الدفع أونلاين (افتراضي: مفعّل)
+    const resolvedEnableOnlinePayment =
+        enableOnlinePayment === true || enableOnlinePayment === "true" || enableOnlinePayment === undefined
+            ? true
+            : Boolean(enableOnlinePayment);
+
+    // 👈 لو النوع CUSTOM لازم يبعت بيانات بوابة دفع واحدة على الأقل
+    if (resolvedPaymentGatewayType === "CUSTOM" && parsedPaymentCredentials.length === 0) {
+        throw new BadRequest("paymentCredentials are required when paymentGatewayType is CUSTOM");
+    }
 
     const plansToReturn: any[] = []; // 👈 مصفوفة لتجميع الخطط وإرجاعها
     const credentialsToReturn: any[] = []; // 👈 مصفوفة لتجميع بيانات بوابات الدفع وإرجاعها
@@ -303,6 +320,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
             secondColor: secondColor ? clean(secondColor) : null,
             firstTextColor: firstTextColor ? clean(firstTextColor) : null,
             secondTextColor: secondTextColor ? clean(secondTextColor) : null,
+            paymentGatewayType: resolvedPaymentGatewayType, // 👈 نوع بوابة الدفع
+            enableOnlinePayment: resolvedEnableOnlinePayment, // 👈 تفعيل الدفع أونلاين
         });
 
         // 5. بيانات بوابات الدفع (Payment Credentials)
@@ -326,6 +345,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
                     };
                 const encryptedCreds = encryptCredFields(rawCreds);
                 const credId = uuidv4();
+                const isActiveFlag = credItem.isActive !== undefined ? Boolean(credItem.isActive) : true;
                 const newRecord = {
                     id: credId,
                     restaurantId: restaurantId,
@@ -334,10 +354,27 @@ export const createRestaurant = async (req: Request, res: Response) => {
                     environment,
                     credentials: encryptedCreds,
                     logoUrl: credItem.logoUrl || null,
-                    isActive: credItem.isActive !== undefined ? Boolean(credItem.isActive) : true,
+                    isActive: isActiveFlag,
                 };
                 await tx.insert(restaurantPaymentCredentials).values(newRecord);
                 credentialsToReturn.push(sanitizePaymentCredentialRecord(newRecord));
+
+                // 👈 لو دي البوابة النشطة، اعمل تعطيل لأي بوابة تانية للمطعم ده
+                if (isActiveFlag) {
+                    await tx
+                        .update(restaurantPaymentCredentials)
+                        .set({ isActive: false, updatedAt: new Date() })
+                        .where(
+                            and(
+                                eq(restaurantPaymentCredentials.restaurantId, restaurantId),
+                                sql`${restaurantPaymentCredentials.id} != ${credId}`
+                            )
+                        );
+                    // خلي الشكل الراجع متسق مع اللي حصل في الداتابيز
+                    for (const c of credentialsToReturn) {
+                        if (c.id !== credId) c.isActive = false;
+                    }
+                }
             }
         }
 
@@ -355,6 +392,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
             salesId: salesId || null,
             ownerposition: ownerposition || null,
             callcenterphone: callcenterphone || null,
+            paymentGatewayType: resolvedPaymentGatewayType,
+            enableOnlinePayment: resolvedEnableOnlinePayment,
             businessPlans: plansToReturn,
             paymentCredentials: credentialsToReturn,
         }
@@ -394,10 +433,13 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         deliverystatus: restaurants.deliverystatus,
         iosApp: restaurants.iosApp,
         androidApp: restaurants.androidApp,
+        paymentGatewayType: restaurantSettings.paymentGatewayType, // 👈 نوع بوابة الدفع
+        enableOnlinePayment: restaurantSettings.enableOnlinePayment, // 👈 تفعيل الدفع أونلاين
     })
         .from(restaurants)
         .leftJoin(cities, eq(restaurants.cityId, cities.id))
         .leftJoin(zones, eq(restaurants.zoneId, zones.id))
+        .leftJoin(restaurantSettings, eq(restaurants.id, restaurantSettings.restaurantId))
         .leftJoin(
             restrauntadmin,
             and(
@@ -460,6 +502,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             deliverystatus: r.deliverystatus,
             iosApp: r.iosApp || null,
             androidApp: r.androidApp || null,
+            paymentGatewayType: r.paymentGatewayType || "SYSTEM", // 👈
+            enableOnlinePayment: r.enableOnlinePayment ?? true, // 👈
         };
     });
 
@@ -532,6 +576,8 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         secondColor: row.settingsObj?.secondColor || null,
         firstTextColor: row.settingsObj?.firstTextColor || null,
         secondTextColor: row.settingsObj?.secondTextColor || null,
+        paymentGatewayType: row.settingsObj?.paymentGatewayType || "SYSTEM", // 👈 نوع بوابة الدفع
+        enableOnlinePayment: row.settingsObj?.enableOnlinePayment ?? true, // 👈 تفعيل الدفع أونلاين
     };
     delete (formattedRestaurant as any).cuisineId;
 
@@ -551,7 +597,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
         type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId,
-        callcenterphone
+        callcenterphone, paymentGatewayType, enableOnlinePayment
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -590,6 +636,18 @@ export const updateRestaurant = async (req: Request, res: Response) => {
 
     const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
     const parsedPaymentCredentials: any[] | undefined = paymentCredsRaw !== undefined ? parsePaymentCredentialsInput(paymentCredsRaw) : undefined;
+
+    // 👈 نوع بوابة الدفع (يتحدث فقط لو اتبعت)
+    let resolvedPaymentGatewayType: "SYSTEM" | "CUSTOM" | undefined;
+    if (paymentGatewayType !== undefined) {
+        resolvedPaymentGatewayType = String(paymentGatewayType).trim().toUpperCase() === "CUSTOM" ? "CUSTOM" : "SYSTEM";
+    }
+
+    // 👈 تفعيل/تعطيل الدفع أونلاين (يتحدث فقط لو اتبعت)
+    let resolvedEnableOnlinePayment: boolean | undefined;
+    if (enableOnlinePayment !== undefined) {
+        resolvedEnableOnlinePayment = enableOnlinePayment === true || enableOnlinePayment === "true";
+    }
 
     if (email && existingOwner && email !== existingOwner.email) {
         const [emailExists] = await db.select().from(restrauntadmin).where(eq(restrauntadmin.email, email.trim())).limit(1);
@@ -664,12 +722,18 @@ export const updateRestaurant = async (req: Request, res: Response) => {
             await tx.update(restrauntadmin).set(ownerUpdateData).where(eq(restrauntadmin.id, existingOwner.id));
         }
 
-        if (firstColor !== undefined || secondColor !== undefined || firstTextColor !== undefined || secondTextColor !== undefined) {
+        if (
+            firstColor !== undefined || secondColor !== undefined ||
+            firstTextColor !== undefined || secondTextColor !== undefined ||
+            resolvedPaymentGatewayType !== undefined || resolvedEnableOnlinePayment !== undefined
+        ) {
             const settingsUpdateData: any = {};
             if (firstColor !== undefined) settingsUpdateData.firstColor = (firstColor === "" || firstColor === null) ? null : clean(firstColor);
             if (secondColor !== undefined) settingsUpdateData.secondColor = (secondColor === "" || secondColor === null) ? null : clean(secondColor);
             if (firstTextColor !== undefined) settingsUpdateData.firstTextColor = (firstTextColor === "" || firstTextColor === null) ? null : clean(firstTextColor);
             if (secondTextColor !== undefined) settingsUpdateData.secondTextColor = (secondTextColor === "" || secondTextColor === null) ? null : clean(secondTextColor);
+            if (resolvedPaymentGatewayType !== undefined) settingsUpdateData.paymentGatewayType = resolvedPaymentGatewayType; // 👈
+            if (resolvedEnableOnlinePayment !== undefined) settingsUpdateData.enableOnlinePayment = resolvedEnableOnlinePayment; // 👈
 
             if (Object.keys(settingsUpdateData).length > 0) {
                 const existingSettings = await tx.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, id)).limit(1);
@@ -756,6 +820,8 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                     existingRecord = foundByProvider;
                 }
 
+                let savedRecordId: string;
+
                 if (existingRecord) {
                     const mergedCreds = {
                         ...(existingRecord.credentials as object),
@@ -776,10 +842,13 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                         .update(restaurantPaymentCredentials)
                         .set(updatePayload)
                         .where(eq(restaurantPaymentCredentials.id, existingRecord.id));
+
+                    savedRecordId = existingRecord.id;
                 } else {
                     const encryptedCreds = encryptCredFields(rawCreds);
+                    const newId = uuidv4();
                     await tx.insert(restaurantPaymentCredentials).values({
-                        id: uuidv4(),
+                        id: newId,
                         restaurantId: id,
                         provider,
                         title,
@@ -788,7 +857,35 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                         logoUrl: credItem.logoUrl || null,
                         isActive: credItem.isActive !== undefined ? Boolean(credItem.isActive) : true,
                     });
+
+                    savedRecordId = newId;
                 }
+
+                // 👈 لو دي البوابة النشطة، اعمل تعطيل لأي بوابة تانية للمطعم ده
+                const finalIsActive = credItem.isActive !== undefined ? Boolean(credItem.isActive) : (existingRecord ? undefined : true);
+                if (finalIsActive) {
+                    await tx
+                        .update(restaurantPaymentCredentials)
+                        .set({ isActive: false, updatedAt: new Date() })
+                        .where(
+                            and(
+                                eq(restaurantPaymentCredentials.restaurantId, id),
+                                sql`${restaurantPaymentCredentials.id} != ${savedRecordId}`
+                            )
+                        );
+                }
+            }
+        }
+
+        // 👈 لو النوع بعد التحديث CUSTOM، لازم يبقى فيه بوابة دفع واحدة على الأقل مسجلة فعليًا
+        if (resolvedPaymentGatewayType === "CUSTOM") {
+            const [{ count }] = await tx
+                .select({ count: sql<number>`count(*)` })
+                .from(restaurantPaymentCredentials)
+                .where(eq(restaurantPaymentCredentials.restaurantId, id));
+
+            if (Number(count) === 0) {
+                throw new BadRequest("At least one paymentCredentials record is required when paymentGatewayType is CUSTOM");
             }
         }
 
