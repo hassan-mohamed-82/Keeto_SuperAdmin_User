@@ -30,7 +30,7 @@ const attachDiscountDetails = (item: any) => {
         isGlobal: details?.isGlobal ?? false,
         discountLogo: details?.logo ?? null,
         discountDetails: details ?? null,
-        // discount: details ?? null,
+        discount: details ?? null,
     };
 };
 
