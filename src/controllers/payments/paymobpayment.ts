@@ -26,9 +26,6 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
     const paymobOrderId = String(transactionObj.order?.id || transactionObj.order_id || "");
     const transactionId = String(transactionObj.id || "");
     const isSuccess = Boolean(transactionObj.success === true || transactionObj.success === "true");
-    // FIX #1: Paymob can send success=false while pending=true — that means the
-    // transaction is still being processed, NOT that it failed. We must not mark
-    // the order as "payment_failed" in that case.
     const isPending = Boolean(transactionObj.pending === true || transactionObj.pending === "true");
     const amountCentsFromWebhook =
         transactionObj.amount_cents !== undefined ? Number(transactionObj.amount_cents) : undefined;
@@ -79,7 +76,8 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
             .where(
                 and(
                     eq(restaurantPaymentCredentials.restaurantId, matchedOrder.restaurantId),
-                    eq(restaurantPaymentCredentials.provider, "PAYMOB")
+                    eq(restaurantPaymentCredentials.provider, "PAYMOB"),
+                    eq(restaurantPaymentCredentials.isActive, true)
                 )
             )
             .limit(1);
@@ -94,11 +92,7 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
         hmacSecret = process.env.PLATFORM_PAYMOB_HMAC || "";
     }
 
-    // 3. 🛡️ Strict HMAC Verification: MANDATORY
-    // FIX #4: This now runs BEFORE the idempotency short-circuit below, so an
-    // unauthenticated request can never even learn the current payment status
-    // of an order (previously the "already paid" branch returned success
-    // before the signature was checked at all).
+    // 3. 🛡️ Strict HMAC Verification: MANDATORY (runs before idempotency check)
     if (!hmacSecret) {
         console.error("⚠️ Paymob HMAC secret is not configured. Cannot verify webhook safely.");
         throw new BadRequest("Payment gateway webhook verification secret is not configured.");
@@ -125,9 +119,7 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
         });
     }
 
-    // 5. FIX #2: Verify the paid amount matches the order total before trusting
-    // the webhook. This protects against a mismatched/forged amount even in
-    // scenarios where the HMAC secret itself has been compromised or reused.
+    // 5. Verify the paid amount matches the order total before trusting the webhook.
     if (isSuccess && amountCentsFromWebhook !== undefined) {
         const expectedCents = Math.round(parseFloat(matchedOrder.totalAmount as string) * 100);
         if (amountCentsFromWebhook !== expectedCents) {
@@ -171,8 +163,6 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
 
         console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} successfully marked as PAID & ACCEPTED. Tx: ${transactionId}`);
     } else if (isPending) {
-        // FIX #1 (cont'd): Do NOT mark as failed. Leave the order in a pending
-        // state so a later webhook call (success or failure) can still resolve it.
         await db
             .update(orders)
             .set({

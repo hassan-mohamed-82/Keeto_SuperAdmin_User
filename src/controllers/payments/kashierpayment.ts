@@ -4,9 +4,10 @@ import { BadRequest } from "../../Errors";
 import { verifyKashierWebhookSignature } from "../../services/payments/kashier/kashier";
 import { KashierService } from "../../services/payments/kashier/kashier.service";
 import { db } from "../../models/connection";
-import { orders, users, restaurantSettings, restaurantPaymentCredentials } from "../../models/schema";
-import { eq, and } from "drizzle-orm";
+import { orders, users, restaurantSettings } from "../../models/schema";
+import { eq } from "drizzle-orm";
 import { decryptSecret } from "../../utils/encryption";
+import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
 
 
 /**
@@ -23,28 +24,31 @@ import { decryptSecret } from "../../utils/encryption";
 export const generatePaymentSession = async (req: Request, res: Response) => {
     let { orderId, amount, currency = "EGP", customerEmail } = req.body;
 
-    // Fetch order from database to get amount and customer details if not supplied
-    if (orderId) {
-        const [existingOrder] = await db
-            .select()
-            .from(orders)
-            .where(eq(orders.id, String(orderId)))
-            .limit(1);
+    if (!orderId) {
+        throw new BadRequest("orderId is required to create a Kashier session.");
+    }
 
-        if (existingOrder) {
-            if (!amount) {
-                amount = parseFloat(existingOrder.totalAmount as string);
-            }
-            if (!customerEmail && existingOrder.userId) {
-                const [customer] = await db
-                    .select({ email: users.email })
-                    .from(users)
-                    .where(eq(users.id, existingOrder.userId))
-                    .limit(1);
-                if (customer?.email) {
-                    customerEmail = customer.email;
-                }
-            }
+    const [existingOrder] = await db
+        .select()
+        .from(orders)
+        .where(eq(orders.id, String(orderId)))
+        .limit(1);
+
+    if (!existingOrder) {
+        throw new BadRequest("Order does not exist.");
+    }
+
+    if (!amount) {
+        amount = parseFloat(existingOrder.totalAmount as string);
+    }
+    if (!customerEmail && existingOrder.userId) {
+        const [customer] = await db
+            .select({ email: users.email })
+            .from(users)
+            .where(eq(users.id, existingOrder.userId))
+            .limit(1);
+        if (customer?.email) {
+            customerEmail = customer.email;
         }
     }
 
@@ -52,11 +56,48 @@ export const generatePaymentSession = async (req: Request, res: Response) => {
         throw new BadRequest("Order amount is required or order does not exist.");
     }
 
+    let kashierCredentials: { mid: string; apiKey: string; secretKey?: string; baseUrl?: string } | undefined;
+
+    const [settings] = await db
+        .select({ paymentGatewayType: restaurantSettings.paymentGatewayType })
+        .from(restaurantSettings)
+        .where(eq(restaurantSettings.restaurantId, existingOrder.restaurantId))
+        .limit(1);
+
+    if (settings?.paymentGatewayType === "CUSTOM") {
+        const activeGateway = await getActiveCustomGateway(existingOrder.restaurantId);
+
+        if (!activeGateway) {
+            throw new BadRequest(
+                "Restaurant is configured for custom gateway, but no active payment credentials were found."
+            );
+        }
+
+        if (activeGateway.provider !== "KASHIER") {
+            // The restaurant's active custom provider is Paymob, not Kashier —
+            // creating a Kashier session here would be entirely the wrong gateway.
+            throw new BadRequest(
+                "This restaurant's active payment provider is Paymob, not Kashier. Use the Paymob session flow instead."
+            );
+        }
+
+        const rawCreds = activeGateway.record.credentials as any;
+        kashierCredentials = {
+            mid: rawCreds.mid,
+            apiKey: decryptSecret(rawCreds.apiKey),
+            secretKey: rawCreds.secretKey ? decryptSecret(rawCreds.secretKey) : undefined,
+            baseUrl: rawCreds.baseUrl,
+        };
+    }
+    // else: SYSTEM gateway -> leave kashierCredentials undefined so the service
+    // falls back to the platform's own Kashier account, same as before.
+
     const session = await KashierService.createPaymentSession({
         orderId: String(orderId),
         amount: typeof amount === "string" ? parseFloat(amount) : amount,
         currency,
         customerEmail,
+        credentials: kashierCredentials,
     });
 
     return SuccessResponse(res, {
@@ -107,15 +148,16 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
     });
 
     // ─── Signature Verification ───────────────────────────────────────────────
-    // verifyKashierWebhookSignature uses data.kashierSignature OR the passed header sig.
-    // If neither is present, we still reject to avoid unsigned webhook abuse.
     const hasSomeSignature = Boolean(webhookData?.kashierSignature || headerSignature);
     if (!hasSomeSignature) {
         console.error("⚠️ Kashier webhook has no signature — rejecting.");
         throw new BadRequest("Webhook signature is required.");
     }
 
-    // Look up restaurant to check if CUSTOM gateway credentials should be used
+    // Look up restaurant to check if CUSTOM gateway credentials should be used.
+    // Uses getActiveCustomGateway so this stays consistent with checkout and
+    // /kashier/session: if the restaurant has a conflicting active-provider
+    // setup, that is surfaced instead of silently picking a key.
     let customApiKey: string | undefined = undefined;
     if (orderId) {
         const [matchedOrder] = await db
@@ -132,20 +174,12 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
                 .limit(1);
 
             if (settings?.paymentGatewayType === "CUSTOM") {
-                const [customCred] = await db
-                    .select()
-                    .from(restaurantPaymentCredentials)
-                    .where(
-                        and(
-                            eq(restaurantPaymentCredentials.restaurantId, matchedOrder.restaurantId),
-                            eq(restaurantPaymentCredentials.provider, "KASHIER"),
-                            eq(restaurantPaymentCredentials.isActive, true)
-                        )
-                    )
-                    .limit(1);
-
-                if (customCred?.credentials && (customCred.credentials as any).apiKey) {
-                    customApiKey = decryptSecret((customCred.credentials as any).apiKey);
+                const activeGateway = await getActiveCustomGateway(matchedOrder.restaurantId);
+                if (activeGateway?.provider === "KASHIER") {
+                    const rawCreds = activeGateway.record.credentials as any;
+                    if (rawCreds?.apiKey) {
+                        customApiKey = decryptSecret(rawCreds.apiKey);
+                    }
                 }
             }
         }
@@ -164,9 +198,6 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
 
     // ─── Process payment result ───────────────────────────────────────────────
     if (orderId && (paymentStatus === "SUCCESS" || paymentStatus === "CAPTURED" || paymentStatus === "PAID")) {
-        // FIX #2: Verify the webhook amount matches the order total before
-        // marking as paid, so a forged/mismatched amount in an otherwise
-        // validly-signed payload can't silently short-change the restaurant.
         if (webhookAmount !== undefined) {
             const [orderForAmountCheck] = await db
                 .select({ totalAmount: orders.totalAmount })
@@ -176,7 +207,6 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
 
             if (orderForAmountCheck) {
                 const expectedAmount = parseFloat(orderForAmountCheck.totalAmount as string);
-                // Compare with a small epsilon to tolerate floating point formatting differences
                 if (Math.abs(expectedAmount - webhookAmount) > 0.01) {
                     console.error(
                         `[Kashier Webhook] Amount mismatch for order ${orderId}. Expected ${expectedAmount}, got ${webhookAmount}.`
@@ -189,7 +219,6 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
         await KashierService.markOrderAsPaid(String(orderId), transactionId);
         console.log(`[Kashier Webhook] Order ${orderId} marked as paid. Tx: ${transactionId}`);
     } else if (orderId && (paymentStatus === "FAILED" || paymentStatus === "DECLINED" || paymentStatus === "REJECTED")) {
-        // Mark payment failed
         try {
             await db
                 .update(orders)

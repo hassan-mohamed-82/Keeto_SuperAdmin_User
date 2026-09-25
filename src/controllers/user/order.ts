@@ -45,6 +45,7 @@ import { KashierService } from "../../services/payments/kashier/kashier.service"
 import { PaymobService } from "../../services/payments/paymob/paymob.service";
 import { decryptSecret } from "../../utils/encryption";
 import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
+import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -318,7 +319,6 @@ export const checkout = async (req: Request | any, res: Response) => {
 
     // Visa payment check using VISA_PAYMENT_METHOD_ID from database schema
     const isVisaPayment =
-        paymentMethod === selectedPayment.id ||
         paymentMethodName?.toLowerCase() === "visa" ||
         paymentMethodNameAr === "بطاقة";
 
@@ -1349,7 +1349,7 @@ export const checkout = async (req: Request | any, res: Response) => {
 
     // ==========================================
     // 12. Create Payment Session (if Visa/Online)
-    // Supports SYSTEM (Kashier) or CUSTOM (Paymob from restaurant_payment_credentials)
+    // Supports SYSTEM (Kashier) or CUSTOM (Paymob OR Kashier from restaurant_payment_credentials)
     // ==========================================
     let paymentSessionData: any = null;
     if (isVisaPayment) {
@@ -1357,28 +1357,16 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         if (gatewayType === "CUSTOM") {
             try {
-                // Find active credentials (KASHIER or PAYMOB) for this restaurant
-                const activeCreds = await db
-                    .select()
-                    .from(restaurantPaymentCredentials)
-                    .where(
-                        and(
-                            eq(restaurantPaymentCredentials.restaurantId, restaurantId),
-                            eq(restaurantPaymentCredentials.isActive, true)
-                        )
-                    );
+                const activeGateway = await getActiveCustomGateway(restaurantId);
 
-                const kashierCredRecord = activeCreds.find((c) => c.provider === "KASHIER");
-                const paymobCredRecord = activeCreds.find((c) => c.provider === "PAYMOB");
-
-                if (!kashierCredRecord && !paymobCredRecord) {
+                if (!activeGateway) {
                     throw new BadRequest(
                         "Restaurant is configured for custom gateway, but no active payment credentials (Paymob or Kashier) were found."
                     );
                 }
 
-                if (kashierCredRecord && kashierCredRecord.credentials) {
-                    const rawCreds = kashierCredRecord.credentials as any;
+                if (activeGateway.provider === "KASHIER") {
+                    const rawCreds = activeGateway.record.credentials as any;
                     const decryptedCredentials = {
                         mid: rawCreds.mid,
                         apiKey: decryptSecret(rawCreds.apiKey),
@@ -1402,8 +1390,9 @@ export const checkout = async (req: Request | any, res: Response) => {
                         status: kashierSession.status,
                         expireAt: kashierSession.expireAt,
                     };
-                } else if (paymobCredRecord && paymobCredRecord.credentials) {
-                    const rawCreds = paymobCredRecord.credentials as any;
+                } else {
+                    // PAYMOB
+                    const rawCreds = activeGateway.record.credentials as any;
                     const decryptedCredentials = {
                         ...rawCreds,
                         apiKey: decryptSecret(rawCreds.apiKey),
@@ -1455,7 +1444,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                 };
             }
         } else {
-            // SYSTEM gateway -> Kashier
+            // SYSTEM gateway -> Kashier (platform's own account)
             try {
                 const kashierSession = await KashierService.createPaymentSession({
                     orderId: orderId,
