@@ -657,41 +657,6 @@ export const checkout = async (req: Request | any, res: Response) => {
                 oldUnitPrice: storedUnit,
                 newUnitPrice: liveUnit,
             });
-
-            //      else {
-            //     const foodRow = foodMap.get(cartItem.foodId);
-            //     if (!foodRow) throw new BadRequest(`Food item with ID ${cartItem.foodId} not found`);
-
-            //     channelBasePrice = parseFloat(foodRow.price as string || "0");
-            //     itemIsAvailable = foodRow.status !== "inactive" && !foodRow.isOutOfStock;
-
-            //     varPrice = 0;
-            //     if (optionIds.length > 0) {
-            //         for (const v of parsedVariations) {
-            //             if (v.optionId) {
-            //                 const opt = optionsWithParentMap.get(v.optionId);
-            //                 if (!opt) {
-            //                     return res.status(422).json({
-            //                         success: false,
-            //                         message: `Option '${v.optionName || 'selected'}' is no longer available. Please refresh your cart.`,
-            //                         data: { affectedFoodId: cartItem.foodId },
-            //                     });
-            //                 }
-            //                 if (opt.status === false) {
-            //                     return res.status(422).json({
-            //                         success: false,
-            //                         message: `Option '${opt.optionName}' is currently unavailable.`,
-            //                         data: { affectedFoodId: cartItem.foodId },
-            //                     });
-            //                 }
-            //                 const resolvedPrice = (opt.additionalPrice as string || "0");
-            //                 varPrice += parseFloat(resolvedPrice);
-            //                 v.additionalPrice = resolvedPrice;
-            //             }
-            //         }
-            //     }
-            // }
-
         }
 
         if (!itemIsAvailable) checkoutHasUnavailable = true;
@@ -1152,26 +1117,6 @@ export const checkout = async (req: Request | any, res: Response) => {
     // 🛡️ 10. Execute Order (Transaction)
     // ==========================================
     const now = new Date();
-
-    // ⏰ 1. Fetch value from settings
-    // const resetTimeStr = (settings as any)?.resetDailyOrderNumberTime || "00:00";
-    // const [resetHourRaw, resetMinuteRaw] = resetTimeStr.split(":").map(Number);
-    // const resetHour = isNaN(resetHourRaw) ? 0 : resetHourRaw;
-    // const resetMinute = isNaN(resetMinuteRaw) ? 0 : resetMinuteRaw;
-
-    // // 🌍 2. Dynamic Timezone Handling (Africa/Cairo)
-    // const egyptDateStr = now.toLocaleString("en-US", { timeZone: "Africa/Cairo" });
-    // const nowLocal = new Date(egyptDateStr);
-
-    // const startOfTodayLocal = new Date(nowLocal);
-    // startOfTodayLocal.setHours(resetHour, resetMinute, 0, 0);
-
-    // if (nowLocal < startOfTodayLocal) {
-    //     startOfTodayLocal.setDate(startOfTodayLocal.getDate() - 1);
-    // }
-
-    // const diffMs = nowLocal.getTime() - startOfTodayLocal.getTime();
-    // const startOfTodayQuery = new Date(now.getTime() - diffMs);
 
     // 🔒 3. Fetch Last Order
     let createdDailyOrderNumber = 1;
