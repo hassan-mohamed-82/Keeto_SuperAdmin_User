@@ -2,11 +2,8 @@ import axios, { AxiosError } from "axios";
 import { db } from "../../../models/connection";
 import { orders, paymentMethods } from "../../../models/schema";
 import { eq, like, or } from "drizzle-orm";
-import { BadRequest, NotFound } from "../../../Errors";
-import {
-    getKashierConfig,
-    generateKashierOrderHash,
-} from "./kashier";
+import { BadRequest } from "../../../Errors";
+import { getKashierConfig } from "./kashier";
 
 // ──────────────────────────────────────────────────────
 // Kashier Payment Sessions API types
@@ -67,7 +64,10 @@ export class KashierService {
 
         // Redirect URL after Kashier hosted checkout completes
         const appBaseUrl = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+        const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
+
         const merchantRedirect = `${appBaseUrl}/payment/result`;
+        const serverWebhook = backendBaseUrl ? `${backendBaseUrl}/api/payments/kashier/webhook` : undefined;
 
         const body: Record<string, unknown> = {
             merchantId: mid,
@@ -76,6 +76,7 @@ export class KashierService {
             currency,
             expireAt,
             merchantRedirect,
+            ...(serverWebhook ? { serverWebhook } : {}),
             paymentType: "one-time",
             type: "one-time",
             display: "en",
@@ -88,7 +89,7 @@ export class KashierService {
             },
         };
 
-        console.log(`[Kashier Session] Creating session for order ${input.orderId}, amount: ${amount} ${currency}`);
+        console.log(`[Kashier Session] Creating session for order ${input.orderId}, amount: ${amount} ${currency}, serverWebhook: ${serverWebhook || "NOT SET"}`);
 
         const requestHeaders: Record<string, string> = {
             "Content-Type": "application/json",
@@ -154,12 +155,6 @@ export class KashierService {
             const axiosErr = error as AxiosError<{ message?: string; error?: unknown }>;
 
             // FIX: axiosErr.response.data.error can be an OBJECT (Kashier
-            // sometimes returns structured validation errors like
-            // { order: "already exists", ... }), not a plain string.
-            // Interpolating an object directly into a template literal
-            // silently turns into the useless string "[object Object]" and
-            // the real reason is lost. Always stringify non-string shapes,
-            // and always log the FULL raw response body for debugging.
             const rawMessage = axiosErr.response?.data?.message;
             const rawError = axiosErr.response?.data?.error;
             let errMsg: string;
@@ -228,7 +223,7 @@ export class KashierService {
             const updateData: Record<string, any> = {
                 paymentStatus: "paid",
                 paymentGateway: "kashier",
-                status: "accepted",
+                status: "pending",
             };
 
             if (transactionId) {
