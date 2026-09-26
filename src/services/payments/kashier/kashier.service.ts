@@ -151,14 +151,34 @@ export class KashierService {
         } catch (error: unknown) {
             if (error instanceof BadRequest) throw error;
 
-            const axiosErr = error as AxiosError<{ message?: string; error?: string }>;
-            const errMsg =
-                axiosErr.response?.data?.message ||
-                axiosErr.response?.data?.error ||
-                axiosErr.message ||
-                "Failed to create Kashier payment session.";
+            const axiosErr = error as AxiosError<{ message?: string; error?: unknown }>;
 
-            console.error(`[Kashier Session Error] Order ${input.orderId}:`, errMsg);
+            // FIX: axiosErr.response.data.error can be an OBJECT (Kashier
+            // sometimes returns structured validation errors like
+            // { order: "already exists", ... }), not a plain string.
+            // Interpolating an object directly into a template literal
+            // silently turns into the useless string "[object Object]" and
+            // the real reason is lost. Always stringify non-string shapes,
+            // and always log the FULL raw response body for debugging.
+            const rawMessage = axiosErr.response?.data?.message;
+            const rawError = axiosErr.response?.data?.error;
+            let errMsg: string;
+            if (typeof rawMessage === "string" && rawMessage) {
+                errMsg = rawMessage;
+            } else if (typeof rawError === "string" && rawError) {
+                errMsg = rawError;
+            } else if (rawError !== undefined) {
+                errMsg = JSON.stringify(rawError);
+            } else if (axiosErr.response?.data) {
+                errMsg = JSON.stringify(axiosErr.response.data);
+            } else {
+                errMsg = axiosErr.message || "Failed to create Kashier payment session.";
+            }
+
+            console.error(
+                `[Kashier Session Error] Order ${input.orderId}: status=${axiosErr.response?.status}`,
+                JSON.stringify(axiosErr.response?.data)
+            );
             throw new BadRequest(`Payment session creation failed: ${errMsg}`);
         }
     }
@@ -206,15 +226,11 @@ export class KashierService {
                 .limit(1);
 
             const updateData: Record<string, any> = {
-                // ✅ FIX #1: Update paymentStatus to "paid"
                 paymentStatus: "paid",
-                // ✅ FIX #2: Mark which gateway processed the payment
                 paymentGateway: "kashier",
-                // Automatically accept order once online payment succeeds
                 status: "accepted",
             };
 
-            // ✅ FIX #2: Save the Kashier transactionId (was only console.log'd before)
             if (transactionId) {
                 updateData.paymentTransactionId = transactionId;
             }
