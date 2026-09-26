@@ -26,7 +26,7 @@ import {
     offerFoods,
     restaurantPaymentCredentials,
 } from "../../models/schema";
-import { eq, and, inArray, sql, desc, gte } from "drizzle-orm";
+import { eq, and, inArray, sql, desc, gte, ne } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
@@ -1162,9 +1162,12 @@ export const checkout = async (req: Request | any, res: Response) => {
         //     )
         //     .orderBy(desc(orders.dailyOrderNumber))
         //     .limit(1)
-        //     .for("update");
-
-        createdDailyOrderNumber = await getNextDailyOrderNumber(tx, restaurantId, settings, now);
+        // 🔒 2. Daily order number calculation
+        // For cash / wallet orders, calculate dailyOrderNumber immediately.
+        // For online visa orders, defer dailyOrderNumber until confirmed paid by webhook.
+        if (!isVisaPayment) {
+            createdDailyOrderNumber = await getNextDailyOrderNumber(tx, restaurantId, settings, now);
+        }
 
         // 3. Create order record
         await tx.insert(orders).values({
@@ -1178,6 +1181,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             addressId: addressId || null,
             orderSource,
             paymentMethod,
+            paymentStatus: isVisaPayment ? "pending_payment" : "paid",
             orderType: resolvedOrderType,
             subtotal: subtotal.toFixed(2),
             deliveryFee: deliveryFee.toFixed(2),
@@ -1198,7 +1202,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             totalAmount: totalAmount.toFixed(2),
             note: note || null,
             status: "pending",
-            dailyOrderNumber: createdDailyOrderNumber,
+            dailyOrderNumber: isVisaPayment ? null : createdDailyOrderNumber,
             durationOrderPreparing: defaultPreparingDuration,
             offerId: userCart.find(c => c.offerId)?.offerId || null,
             createdAt: now
@@ -1230,14 +1234,16 @@ export const checkout = async (req: Request | any, res: Response) => {
             });
         }
 
-        // Superadmin notification
-        await tx.insert(notifications).values({
-            recipientType: "superadmin",
-            recipientId: "superadmin",
-            title: "New Order",
-            body: `Order #${createdDailyOrderNumber} has been placed at ${restaurant?.name}.`,
-            data: { orderId, orderNumber, createdDailyOrderNumber, restaurantName: restaurant?.name }
-        });
+        // Superadmin notification (only for confirmed orders)
+        if (!isVisaPayment) {
+            await tx.insert(notifications).values({
+                recipientType: "superadmin",
+                recipientId: "superadmin",
+                title: "New Order",
+                body: `Order #${createdDailyOrderNumber} has been placed at ${restaurant?.name}.`,
+                data: { orderId, orderNumber, createdDailyOrderNumber, restaurantName: restaurant?.name }
+            });
+        }
 
         // 4. Coupons and Discounts tracking
         if (appliedCoupon) {
@@ -1264,85 +1270,89 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
         }
 
-        // 5. Restaurant wallet calculations
-        let [restaurantWallet] = await tx.select().from(restaurantWallets).where(eq(restaurantWallets.restaurantId, restaurantId)).for("update");
+        // 5. Restaurant wallet calculations (only for cash or wallet payments; digital payment credited upon webhook confirmation)
+        if (!isVisaPayment) {
+            let [restaurantWallet] = await tx.select().from(restaurantWallets).where(eq(restaurantWallets.restaurantId, restaurantId)).for("update");
 
-        if (!restaurantWallet) {
-            await tx.insert(restaurantWallets).values({
+            if (!restaurantWallet) {
+                await tx.insert(restaurantWallets).values({
+                    id: uuidv4(),
+                    restaurantId: restaurantId,
+                    balance: "0.00",
+                    collectedCash: "0.00",
+                    totalEarning: "0.00"
+                });
+                restaurantWallet = { balance: "0.00", collectedCash: "0.00", totalEarning: "0.00" } as any;
+            }
+
+            const currentRestBalance = parseFloat(restaurantWallet.balance as string);
+            const currentCollectedCash = parseFloat(restaurantWallet.collectedCash as string);
+            const currentTotalEarning = parseFloat(restaurantWallet.totalEarning as string);
+
+            const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
+            const appDues = roundMoney(appCommission + serviceFee);
+
+            let newRestBalance = currentRestBalance;
+            let newCollectedCash = currentCollectedCash;
+
+            if (isCashPayment) {
+                newRestBalance = roundMoney(newRestBalance - appDues);
+                newCollectedCash = roundMoney(newCollectedCash + totalAmount);
+            } else {
+                newRestBalance = roundMoney(newRestBalance + restaurantEarning);
+            }
+
+            await tx.update(restaurantWallets)
+                .set({
+                    balance: newRestBalance.toFixed(2),
+                    collectedCash: newCollectedCash.toFixed(2),
+                    totalEarning: roundMoney(currentTotalEarning + restaurantEarning).toFixed(2)
+                })
+                .where(eq(restaurantWallets.restaurantId, restaurantId));
+
+            await tx.insert(restaurantWalletTransactions).values({
                 id: uuidv4(),
-                restaurantId: restaurantId,
-                balance: "0.00",
-                collectedCash: "0.00",
-                totalEarning: "0.00"
+                restaurantId,
+                type: "order_payment",
+                amount: isCashPayment ? `-${appDues.toFixed(2)}` : `${restaurantEarning.toFixed(2)}`,
+                balanceBefore: currentRestBalance.toFixed(2),
+                balanceAfter: newRestBalance.toFixed(2),
+                method: paymentMethodName,
+                reference: orderNumber,
+                note: isCashPayment ? "Commission deducted from cash order" : "Earnings added from digital payment",
+                createdAt: now
             });
-            restaurantWallet = { balance: "0.00", collectedCash: "0.00", totalEarning: "0.00" } as any;
         }
-
-        const currentRestBalance = parseFloat(restaurantWallet.balance as string);
-        const currentCollectedCash = parseFloat(restaurantWallet.collectedCash as string);
-        const currentTotalEarning = parseFloat(restaurantWallet.totalEarning as string);
-
-        const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
-        const appDues = roundMoney(appCommission + serviceFee);
-
-        let newRestBalance = currentRestBalance;
-        let newCollectedCash = currentCollectedCash;
-
-        if (isCashPayment) {
-            newRestBalance = roundMoney(newRestBalance - appDues);
-            newCollectedCash = roundMoney(newCollectedCash + totalAmount);
-        } else {
-            newRestBalance = roundMoney(newRestBalance + restaurantEarning);
-        }
-
-        await tx.update(restaurantWallets)
-            .set({
-                balance: newRestBalance.toFixed(2),
-                collectedCash: newCollectedCash.toFixed(2),
-                totalEarning: roundMoney(currentTotalEarning + restaurantEarning).toFixed(2)
-            })
-            .where(eq(restaurantWallets.restaurantId, restaurantId));
-
-        await tx.insert(restaurantWalletTransactions).values({
-            id: uuidv4(),
-            restaurantId,
-            type: "order_payment",
-            amount: isCashPayment ? `-${appDues.toFixed(2)}` : `${restaurantEarning.toFixed(2)}`,
-            balanceBefore: currentRestBalance.toFixed(2),
-            balanceAfter: newRestBalance.toFixed(2),
-            method: paymentMethodName,
-            reference: orderNumber,
-            note: isCashPayment ? "Commission deducted from cash order" : "Earnings added from digital payment",
-            createdAt: now
-        });
     });
 
     // ==========================================
-    // 11. Send Notification to Restaurant
+    // 11. Send Notification to Restaurant (only for non-visa orders; visa orders get notified when paid via webhook)
     // ==========================================
-    const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
-        timeZone: "Africa/Cairo",
-        hour: "numeric",
-        minute: "numeric",
-        hour12: true
-    }).format(now);
+    if (!isVisaPayment) {
+        const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
+            timeZone: "Africa/Cairo",
+            hour: "numeric",
+            minute: "numeric",
+            hour12: true
+        }).format(now);
 
-    await sendPushNotification({
-        recipientType: "restaurant",
-        recipientId: restaurantId,
-        branchId: resolvedBranchId || null,
-        title: "طلب جديد! 🛒",
-        body: `تم استلام طلب جديد #${createdDailyOrderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
-        data: {
-            restaurantId,
-            orderId,
-            orderNumber,
+        await sendPushNotification({
+            recipientType: "restaurant",
+            recipientId: restaurantId,
             branchId: resolvedBranchId || null,
-            type: "new_order",
-            createdAt: now.toISOString(),
-            dailyOrderNumber: createdDailyOrderNumber
-        }
-    });
+            title: "طلب جديد! 🛒",
+            body: `تم استلام طلب جديد #${createdDailyOrderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
+            data: {
+                restaurantId,
+                orderId,
+                orderNumber,
+                branchId: resolvedBranchId || null,
+                type: "new_order",
+                createdAt: now.toISOString(),
+                dailyOrderNumber: createdDailyOrderNumber
+            }
+        });
+    }
 
     // ==========================================
     // 12. Create Payment Session (if Visa/Online)
@@ -1463,6 +1473,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             and(
                 eq(orders.userId, userId),
                 restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
+                ne(orders.paymentStatus, "pending_payment"),
                 inArray(orders.status, ["pending", "accepted", "preparing", "out_for_delivery"])
             )
         )

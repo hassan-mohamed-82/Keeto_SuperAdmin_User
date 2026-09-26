@@ -1,4 +1,4 @@
-import { eq, desc, and, inArray, or, gte, lte } from "drizzle-orm";
+import { eq, desc, and, inArray, or, gte, lte, ne } from "drizzle-orm";
 import { addons, foodVariations, addresses, branches, deliveryMen, food, orderItems, orders, paymentMethods, pointsProducts, restaurants, restaurantWallets, restaurantWalletTransactions, restaurantZoneDeliveryFees, selectReasons, userPointsTransactions, userRestaurantPoints, users, userWallets, userWalletTransactions, variationOptions, zones, restaurantSettings } from "../../models/schema";
 import { SuccessResponse } from "../../utils/response";
 import { Request, Response } from "express";
@@ -239,14 +239,15 @@ export const getOrdersByRestaurant = async (req: Request, res: Response) => {
     const { restaurantId } = req.params; // الأيدي بتاع المطعم اللي باعتينه في اللينك
     const { status } = req.query; // لو عايز تفلتر بـ Pending أو Delivered مثلاً
 
-    // بناء الكويري بشكل ديناميكي
     const baseQuery = db
         .select({
             orderId: orders.orderNumber, // الرقم العشوائي (ORD-123)
+            dailyOrderNumber: orders.dailyOrderNumber,
             internalId: orders.id,
             orderDate: orders.createdAt,
             totalAmount: orders.totalAmount,
             orderStatus: orders.status,
+            paymentStatus: orders.paymentStatus,
             customerName: users.name, // اسم العميل من جدول اليوزرز
             customerPhone: users.phone,
             branchName: branches.name,
@@ -263,13 +264,17 @@ export const getOrdersByRestaurant = async (req: Request, res: Response) => {
         .leftJoin(restaurantZoneDeliveryFees, eq(orders.zoneId, restaurantZoneDeliveryFees.id))
         .leftJoin(zones, or(eq(restaurantZoneDeliveryFees.zoneId, zones.id), eq(orders.zoneId, zones.id)));
 
-    // لو الأدمن داس على تابة معينة (مثلاً Pending فقط)
-    let condition = eq(orders.restaurantId, restaurantId);
+    // لا تظهر الأوردرات التي بانتظار الدفع الإلكتروني (pending_payment) للمطعم حتى لا تشوش على المطبخ
+    const conditions = [
+        eq(orders.restaurantId, restaurantId),
+        ne(orders.paymentStatus, "pending_payment")
+    ];
+
     if (status) {
-        condition = and(eq(orders.restaurantId, restaurantId), eq(orders.status, status as any)) as any;
+        conditions.push(eq(orders.status, status as any));
     }
 
-    const result = await baseQuery.where(condition).orderBy(desc(orders.createdAt));
+    const result = await baseQuery.where(and(...conditions)).orderBy(desc(orders.createdAt));
 
     return SuccessResponse(res, {
         message: "Fetched restaurant orders successfully",
@@ -615,6 +620,11 @@ export const getOrderDetails = async (req: Request, res: Response) => {
             updatedAt: orderDetail.order.updatedAt,
             durationOrderPreparing: orderDetail.order.durationOrderPreparing,
             customer: orderDetail.customer,
+
+            paymentStatus: orderDetail.order.paymentStatus,
+            paymentGateway: orderDetail.order.paymentGateway,
+            paymentTransactionId: orderDetail.order.paymentTransactionId,
+            paymentFailureReason: orderDetail.order.paymentFailureReason,
 
             paymentMethod: typeof pmDetails === "object" && pmDetails !== null ? pmDetails.id : pmDetails,
             paymentMethodName: typeof pmDetails === "object" && pmDetails !== null ? pmDetails.name : pmDetails,

@@ -8,6 +8,7 @@ import { eq, or, like, and } from "drizzle-orm";
 import { safeDecrypt } from "../../utils/Safedecrypt";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
 import { createOrderPaymentSession } from "../../services/payments/paymentSession.service";
+import { confirmOrderPayment, recordFailedPayment } from "../../helpers/orderPaymentConfirmation";
 
 /**
  * Controller: Handle Paymob Webhook POST Notification
@@ -186,38 +187,17 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
             }
         }
 
-        // 6. Update Order status based on transaction result
+        // 6. Process Order status based on transaction result
         if (isSuccess) {
-            const [digitalMethod] = await db
-                .select()
-                .from(paymentMethods)
-                .where(
-                    or(
-                        like(paymentMethods.name, "%visa%"),
-                        like(paymentMethods.name, "%card%"),
-                        like(paymentMethods.name, "%paymob%"),
-                        like(paymentMethods.name, "%digital%")
-                    )
-                )
-                .limit(1);
+            await confirmOrderPayment({
+                orderId: matchedOrder.id,
+                gateway: "paymob",
+                transactionId: transactionId || undefined,
+                gatewayOrderId: paymobOrderId || undefined,
+                rawPayload: transactionObj,
+            });
 
-            const updateData: Record<string, any> = {
-                paymentStatus: "paid",
-                paymentGateway: "paymob",
-                status: "accepted", // Order automatically accepted once payment confirmed
-                paymentTransactionId: transactionId,
-            };
-
-            if (digitalMethod) {
-                updateData.paymentMethod = digitalMethod.id;
-            }
-
-            await db
-                .update(orders)
-                .set(updateData)
-                .where(eq(orders.id, matchedOrder.id));
-
-            console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} successfully marked as PAID & ACCEPTED. Tx: ${transactionId}`);
+            console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} successfully confirmed as PAID & ACCEPTED. Tx: ${transactionId}`);
         } else if (isPending) {
             await db
                 .update(orders)
@@ -230,16 +210,26 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
 
             console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} payment PENDING. Tx: ${transactionId}`);
         } else {
-            await db
-                .update(orders)
-                .set({
-                    paymentStatus: "payment_failed",
-                    paymentGateway: "paymob",
-                    paymentTransactionId: transactionId || null,
-                })
-                .where(eq(orders.id, matchedOrder.id));
+            // Extract failure reason from Paymob payload
+            const rawMessage = transactionObj.data?.message;
+            const txnResponseCode = transactionObj.data?.txn_response_code || transactionObj.txn_response_code;
+            const subResponseCode = transactionObj.data?.sub_response_code;
 
-            console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} payment FAILED. Tx: ${transactionId}`);
+            const failureReason =
+                (typeof rawMessage === "string" && rawMessage.trim() ? rawMessage : "") ||
+                (txnResponseCode ? `Transaction declined (Code: ${txnResponseCode}${subResponseCode ? `, SubCode: ${subResponseCode}` : ""})` : "") ||
+                "Payment was declined by card issuer or cancelled by user";
+
+            await recordFailedPayment({
+                orderId: matchedOrder.id,
+                gateway: "paymob",
+                transactionId: transactionId || undefined,
+                gatewayOrderId: paymobOrderId || undefined,
+                failureReason,
+                rawPayload: transactionObj,
+            });
+
+            console.log(`[Paymob Webhook]: Order ${matchedOrder.orderNumber} payment FAILED. Reason: ${failureReason}. Tx: ${transactionId}`);
         }
 
         return SuccessResponse(res, {

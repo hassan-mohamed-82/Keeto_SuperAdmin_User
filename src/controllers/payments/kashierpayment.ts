@@ -8,6 +8,7 @@ import { orders, users, restaurantSettings } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { decryptSecret } from "../../utils/encryption";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
+import { confirmOrderPayment, recordFailedPayment } from "../../helpers/orderPaymentConfirmation";
 
 
 /**
@@ -212,22 +213,35 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
             }
         }
 
-        await KashierService.markOrderAsPaid(String(orderId), transactionId);
-        console.log(`[Kashier Webhook] Order ${orderId} marked as paid. Tx: ${transactionId}`);
+        await confirmOrderPayment({
+            orderId: String(orderId),
+            gateway: "kashier",
+            transactionId: transactionId || undefined,
+            gatewayOrderId: webhookData?.orderId || webhookData?.merchantOrderId || undefined,
+            rawPayload: webhookData,
+        });
+        console.log(`[Kashier Webhook] Order ${orderId} confirmed as paid & accepted. Tx: ${transactionId}`);
     } else if (orderId && (paymentStatus === "FAILED" || paymentStatus === "DECLINED" || paymentStatus === "REJECTED")) {
         try {
-            await db
-                .update(orders)
-                .set({
-                    paymentStatus: "payment_failed",
-                    paymentGateway: "kashier",
-                    paymentTransactionId: transactionId || null,
-                } as any)
-                .where(eq(orders.id, String(orderId)));
+            const failureReason =
+                webhookData?.statusReason ||
+                webhookData?.failureReason ||
+                webhookData?.responseDescription ||
+                webhookData?.message ||
+                `Transaction ${paymentStatus}`;
 
-            console.log(`[Kashier Webhook] Order ${orderId} payment failed. Tx: ${transactionId}`);
+            await recordFailedPayment({
+                orderId: String(orderId),
+                gateway: "kashier",
+                transactionId: transactionId || undefined,
+                gatewayOrderId: webhookData?.orderId || webhookData?.merchantOrderId || undefined,
+                failureReason,
+                rawPayload: webhookData,
+            });
+
+            console.log(`[Kashier Webhook] Order ${orderId} payment failed recorded. Reason: ${failureReason}. Tx: ${transactionId}`);
         } catch (dbErr) {
-            console.error(`[Kashier Webhook] Failed to mark order ${orderId} as payment_failed:`, dbErr);
+            console.error(`[Kashier Webhook] Failed to record order ${orderId} failure:`, dbErr);
         }
     } else {
         console.log(`[Kashier Webhook] Unhandled status "${paymentStatus}" for order ${orderId} — no DB change (this is expected/harmless for a "Test Webhook" click with no real order).`);
