@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import * as querystring from "querystring";
 
 export interface KashierConfig {
     mid: string;
@@ -16,10 +17,10 @@ export const getKashierConfig = (): KashierConfig => {
     const apiKey = process.env.KASHIER_API_KEY || "";
     const secretKey = process.env.KASHIER_SECRET_KEY || "";
     const mode = (process.env.KASHIER_MODE || "test").toLowerCase() === "live" ? "live" : "test";
-    
+
     // Default base URLs: test sandbox vs live production
-    const defaultBaseUrl = mode === "live" 
-        ? "https://api.kashier.io" 
+    const defaultBaseUrl = mode === "live"
+        ? "https://api.kashier.io"
         : "https://test-api.kashier.io";
 
     const baseUrl = process.env.KASHIER_BASE_URL || defaultBaseUrl;
@@ -58,8 +59,7 @@ export const generateKashierOrderHash = ({
 }: GenerateHashParams): string => {
     const config = getKashierConfig();
     const merchantId = mid || config.mid;
-    
-    // Format amount to fixed 2 decimal places if needed or clean string
+
     const formattedAmount = typeof amount === "number" ? amount.toFixed(2) : String(amount);
     const upperCurrency = (currency || "EGP").toUpperCase();
 
@@ -74,13 +74,22 @@ export const generateKashierOrderHash = ({
 /**
  * Validates the incoming webhook signature from Kashier.
  *
- * Kashier algorithm:
- *   1. Use `data.signatureKeys` (array) to determine which fields to sign.
- *   2. Concatenate the VALUES of those fields from `data` in order.
- *   3. HMAC-SHA256 the result using KASHIER_API_KEY (NOT secretKey).
- *   4. Compare with the signature sent in `data.kashierSignature` (or a header).
+ * FIXED per Kashier's official webhook docs
+ * (https://developers.kashier.io/docs/webhooks):
+ *   1. The signature is sent in the `x-kashier-signature` HEADER, not a
+ *      field inside the JSON body. The old code looked for
+ *      `data.kashierSignature` in the body — that field doesn't exist in
+ *      the current webhook format at all, so verification always failed.
+ *   2. `data.signatureKeys` must be SORTED ALPHABETICALLY before building
+ *      the payload — the old code used the array's given order as-is.
+ *   3. The payload is a URL-encoded query string of the picked
+ *      key=value pairs (`querystring.stringify`), NOT a raw concatenation
+ *      of values with no separators.
+ *   4. HMAC-SHA256 with the Payment API Key (unchanged).
  *
- * Reference: https://kashier.io/docs/webhooks
+ * `data` here should be the object that actually CONTAINS `signatureKeys`
+ * (usually `payload.data`, but some events may put it elsewhere — callers
+ * pass whatever object holds `signatureKeys`).
  */
 export const verifyKashierWebhookSignature = (
     data: Record<string, any>,
@@ -95,33 +104,29 @@ export const verifyKashierWebhookSignature = (
     }
 
     try {
-        // The actual received signature comes from data.kashierSignature if not passed separately
-        const signature = receivedSignature || data?.kashierSignature;
+        const signature = receivedSignature;
         if (!signature) {
-            console.error("[Kashier Webhook] No signature found to verify.");
+            console.error("[Kashier Webhook] No signature found to verify (expected x-kashier-signature header).");
             return false;
         }
 
-        // FIX #3: `signatureKeys` MUST come from Kashier itself. Previously, when
-        // it was missing we silently rebuilt the key list from every field in the
-        // incoming body — which means an attacker could add/remove fields to
-        // influence exactly what gets signed (signature malleability), or simply
-        // send a payload shaped to make an unrelated field set "just happen" to
-        // validate. There is no safe way to verify a Kashier signature without
-        // Kashier's own signatureKeys, so we now reject outright instead of guessing.
         if (!Array.isArray(data?.signatureKeys) || data.signatureKeys.length === 0) {
             console.error("[Kashier Webhook] Missing or invalid signatureKeys — rejecting webhook.");
             return false;
         }
-        const signatureKeys: string[] = data.signatureKeys;
 
-        // Concatenate values in specified order
-        const payload = signatureKeys
-            .map((key) => {
-                const val = data[key];
-                return val === null || val === undefined ? "" : String(val);
-            })
-            .join("");
+        // FIX: sort alphabetically before picking values — Kashier signs the
+        // SORTED key order, not the array's given order.
+        const sortedKeys: string[] = [...data.signatureKeys].sort();
+
+        const picked: Record<string, any> = {};
+        for (const key of sortedKeys) {
+            picked[key] = data[key] ?? "";
+        }
+
+        // FIX: build a URL-encoded query string (key=value&key=value), not a
+        // raw concatenation of values.
+        const payload = querystring.stringify(picked);
 
         const expectedSignature = crypto
             .createHmac("sha256", apiKey)
