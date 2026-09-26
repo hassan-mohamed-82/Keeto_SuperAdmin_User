@@ -1,9 +1,24 @@
 import { Router } from "express";
 import { validate } from "../../middlewares/validation";
-import { paymobWebhookSchema } from "../../validation/payment/paymob.validation";
-import { handlePaymobWebhook, handlePaymobRedirect } from "../../controllers/payments/paymobpayment";
+import { paymobSessionSchema, paymobWebhookSchema } from "../../validation/payment/paymob.validation";
+import {
+    generatePaymobPaymentSession,
+    handlePaymobWebhook,
+    handlePaymobRedirect,
+} from "../../controllers/payments/paymobpayment";
 
 const router = Router();
+
+/**
+ * @route   POST /payments/paymob/session
+ * @desc    Create or retry a Paymob hosted payment session for an existing order
+ * @access  Public / Authenticated
+ */
+router.post(
+    "/session",
+    validate(paymobSessionSchema),
+    generatePaymobPaymentSession
+);
 
 /**
  * @route   POST /payments/paymob/webhook

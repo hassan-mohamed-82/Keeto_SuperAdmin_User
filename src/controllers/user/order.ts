@@ -41,11 +41,8 @@ import * as turf from "@turf/turf";
 import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
 import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
-import { KashierService } from "../../services/payments/kashier/kashier.service";
-import { PaymobService } from "../../services/payments/paymob/paymob.service";
-import { decryptSecret } from "../../utils/encryption";
+import { createOrderPaymentSession } from "../../services/payments/paymentSession.service";
 import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
-import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -1353,128 +1350,24 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     let paymentSessionData: any = null;
     if (isVisaPayment) {
-        const gatewayType = settings?.paymentGatewayType || "SYSTEM";
-
-        if (gatewayType === "CUSTOM") {
-            try {
-                const activeGateway = await getActiveCustomGateway(restaurantId);
-
-                if (!activeGateway) {
-                    throw new BadRequest(
-                        "Restaurant is configured for custom gateway, but no active payment credentials (Paymob or Kashier) were found."
-                    );
-                }
-
-                if (activeGateway.provider === "KASHIER") {
-                    const rawCreds = activeGateway.record.credentials as any;
-                    const decryptedCredentials = {
-                        mid: rawCreds.mid,
-                        apiKey: decryptSecret(rawCreds.apiKey),
-                        secretKey: rawCreds.secretKey ? decryptSecret(rawCreds.secretKey) : undefined,
-                        baseUrl: rawCreds.baseUrl,
-                    };
-
-                    const kashierSession = await KashierService.createPaymentSession({
-                        orderId: orderId,
-                        amount: totalAmount,
-                        currency: "EGP",
-                        customerEmail: userInfo?.email || undefined,
-                        credentials: decryptedCredentials,
-                    });
-
-                    paymentSessionData = {
-                        gateway: "KASHIER",
-                        type: "redirect",         // Frontend does full-page redirect
-                        sessionId: kashierSession.sessionId,
-                        sessionUrl: kashierSession.sessionUrl,
-                        status: kashierSession.status,
-                        expireAt: kashierSession.expireAt,
-                    };
-                } else {
-                    // PAYMOB
-                    const rawCreds = activeGateway.record.credentials as any;
-                    const decryptedCredentials = {
-                        ...rawCreds,
-                        secretKey: decryptSecret(rawCreds.secretKey),
-                        publicKey: rawCreds.publicKey,
-                        hmac: decryptSecret(rawCreds.hmac),
-                    };
-
-                    const nameParts = (userInfo?.name || "Customer User").trim().split(" ");
-                    const firstName = nameParts[0] || "Customer";
-                    const lastName = nameParts.slice(1).join(" ") || "User";
-
-                    const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
-
-                    const paymobSession = await PaymobService.createPaymentSession({
-                        credentials: decryptedCredentials,
-                        orderId: orderId,
-                        orderNumber: orderNumber,
-                        amountCents: Math.round(totalAmount * 100),
-                        currency: "EGP",
-                        customer: {
-                            firstName,
-                            lastName,
-                            email: userInfo?.email || "customer@example.com",
-                            phone: userInfo?.phone || "+201000000000",
-                        },
-                        notificationUrl: decryptedCredentials.callbackUrl || `${backendBaseUrl}/api/payments/paymob/webhook`,
-                        redirectionUrl: `${backendBaseUrl}/api/payments/paymob/callback`,
-                    });
-
-                    // Update order with Paymob gateway info
-                    await db
-                        .update(orders)
-                        .set({
-                            paymentOrderId: String(paymobSession.paymobOrderId || paymobSession.sessionId),
-                            paymentGateway: "paymob",
-                            paymentStatus: "pending_payment",
-                        })
-                        .where(eq(orders.id, orderId));
-
-                    paymentSessionData = {
-                        gateway: "PAYMOB",
-                        type: "redirect",         // FIX: بقى redirect لـ Unified Checkout، مش iframe embed
-                        sessionId: paymobSession.sessionId,
-                        sessionUrl: paymobSession.sessionUrl,
-                        status: "CREATED",
-                        paymobOrderId: paymobSession.paymobOrderId,
-                    };
-                }
-            } catch (paymentErr: any) {
-                console.error(`[Checkout] Custom payment session creation failed for order ${orderId}:`, paymentErr?.message);
-                paymentSessionData = {
-                    gateway: "CUSTOM",
-                    error: paymentErr?.message || "Failed to create custom payment session.",
-                };
-            }
-        } else {
-            // SYSTEM gateway -> Kashier (platform's own account)
-            try {
-                const kashierSession = await KashierService.createPaymentSession({
-                    orderId: orderId,
-                    amount: totalAmount,
-                    currency: "EGP",
-                    customerEmail: userInfo?.email || undefined,
-                });
-                // Note: KashierService.createPaymentSession() already saves
-                // sessionId + paymentGateway + paymentStatus to the order row.
-
-                paymentSessionData = {
-                    gateway: "KASHIER",
-                    type: "redirect",         // Frontend does full-page redirect
-                    sessionId: kashierSession.sessionId,
-                    sessionUrl: kashierSession.sessionUrl,
-                    status: kashierSession.status,
-                    expireAt: kashierSession.expireAt,
-                };
-            } catch (paymentErr: any) {
-                console.error(`[Checkout] Kashier session creation failed for order ${orderId}:`, paymentErr?.message);
-                paymentSessionData = {
-                    gateway: "KASHIER",
-                    error: paymentErr?.message || "Failed to create Kashier payment session.",
-                };
-            }
+        try {
+            paymentSessionData = await createOrderPaymentSession({
+                orderId,
+                orderNumber,
+                restaurantId,
+                totalAmount,
+                userInfo: {
+                    name: userInfo?.name,
+                    email: userInfo?.email,
+                    phone: userInfo?.phone,
+                },
+            });
+        } catch (paymentErr: any) {
+            console.error(`[Checkout] Payment session creation failed for order ${orderId}:`, paymentErr?.message);
+            paymentSessionData = {
+                gateway: settings?.paymentGatewayType || "ONLINE",
+                error: paymentErr?.message || "Failed to create payment session.",
+            };
         }
     }
 

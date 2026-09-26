@@ -3,11 +3,11 @@ import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound } from "../../Errors";
 import { PaymobService } from "../../services/payments/paymob/paymob.service";
 import { db } from "../../models/connection";
-import { orders, restaurantPaymentCredentials, restaurantSettings, paymentMethods } from "../../models/schema";
+import { orders, users, restaurantPaymentCredentials, restaurantSettings, paymentMethods } from "../../models/schema";
 import { eq, or, like, and } from "drizzle-orm";
 import { safeDecrypt } from "../../utils/Safedecrypt";
-
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
+import { createOrderPaymentSession } from "../../services/payments/paymentSession.service";
 
 /**
  * Controller: Handle Paymob Webhook POST Notification
@@ -253,6 +253,56 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
 };
 
 /**
+ * Controller: Create or retry Paymob Payment Session
+ * Endpoint: POST /payments/paymob/session
+ */
+export const generatePaymobPaymentSession = async (req: Request, res: Response) => {
+    const { orderId } = req.body;
+
+    const [existingOrder] = await db
+        .select()
+        .from(orders)
+        .where(eq(orders.id, String(orderId)))
+        .limit(1);
+
+    if (!existingOrder) {
+        throw new NotFound("Order does not exist.");
+    }
+
+    let customerEmail: string | undefined;
+    let customerName: string | undefined;
+    let customerPhone: string | undefined;
+
+    if (existingOrder.userId) {
+        const [customer] = await db
+            .select()
+            .from(users)
+            .where(eq(users.id, existingOrder.userId))
+            .limit(1);
+        if (customer) {
+            customerEmail = customer.email || undefined;
+            customerName = customer.name || undefined;
+            customerPhone = customer.phone || undefined;
+        }
+    }
+
+    const sessionData = await createOrderPaymentSession({
+        orderId: existingOrder.id,
+        orderNumber: existingOrder.orderNumber,
+        restaurantId: existingOrder.restaurantId,
+        totalAmount: req.body.amount ? Number(req.body.amount) : parseFloat(existingOrder.totalAmount as string),
+        userInfo: {
+            name: customerName,
+            email: customerEmail || req.body.customerEmail,
+            phone: customerPhone,
+        },
+        preferredGateway: "PAYMOB",
+    });
+
+    return SuccessResponse(res, sessionData);
+};
+
+/**
  * Controller: Handle browser redirection after user completes payment
  * Endpoint: GET /payments/paymob/callback
  * This route is ONLY a user browser redirect (like Kashier merchantRedirect), NOT for confirming payments!
@@ -262,6 +312,6 @@ export const handlePaymobRedirect = (req: Request, res: Response) => {
     const orderId = req.query.merchant_order_id || req.query.order_id || "";
     const frontendBaseUrl = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
-    const redirectUrl = `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(orderId))}`;
+    const redirectUrl = `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=PAYMOB`;
     return res.redirect(redirectUrl);
 };
