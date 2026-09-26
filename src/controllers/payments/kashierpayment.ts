@@ -13,13 +13,6 @@ import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
 /**
  * Controller: Create Kashier Payment Session
  * Endpoint: POST /api/payments/kashier/session
- *
- * Calls Kashier POST /v3/payment/sessions and returns { sessionId, sessionUrl, expireAt, gateway }.
- * The client should redirect (web) or open a WebView (mobile) to sessionUrl.
- * Kashier handles all card input, 3DS verification, and redirects back via merchantRedirect.
- *
- * Note: The service itself now persists the sessionId + paymentGateway to the order row
- * immediately upon session creation, so no extra DB update is needed here.
  */
 export const generatePaymentSession = async (req: Request, res: Response) => {
     let { orderId, amount, currency = "EGP", customerEmail } = req.body;
@@ -74,8 +67,6 @@ export const generatePaymentSession = async (req: Request, res: Response) => {
         }
 
         if (activeGateway.provider !== "KASHIER") {
-            // The restaurant's active custom provider is Paymob, not Kashier —
-            // creating a Kashier session here would be entirely the wrong gateway.
             throw new BadRequest(
                 "This restaurant's active payment provider is Paymob, not Kashier. Use the Paymob session flow instead."
             );
@@ -89,8 +80,6 @@ export const generatePaymentSession = async (req: Request, res: Response) => {
             baseUrl: rawCreds.baseUrl,
         };
     }
-    // else: SYSTEM gateway -> leave kashierCredentials undefined so the service
-    // falls back to the platform's own Kashier account, same as before.
 
     const session = await KashierService.createPaymentSession({
         orderId: String(orderId),
@@ -114,24 +103,30 @@ export const generatePaymentSession = async (req: Request, res: Response) => {
  * Controller: Handle Kashier Webhooks
  * Endpoint: POST /api/payments/kashier/webhook
  *
- * Kashier sends a JSON body with:
- *   - data: { orderId, transactionId, status, amount, currency, kashierSignature, signatureKeys, ... }
- *   - or the flat payload directly at the root level
- *
- * Signature verification uses KASHIER_API_KEY + data.signatureKeys (fixed algorithm).
+ * FIXED to match Kashier's real webhook format:
+ *   - The signature lives in the `x-kashier-signature` HEADER, never in a
+ *     body field. There is no `data.kashierSignature` in real payloads.
+ *   - `signatureKeys` must be sorted alphabetically before signing (handled
+ *     inside verifyKashierWebhookSignature now).
+ *   - The payload can arrive as { event, data: {...} } — `data` holds
+ *     signatureKeys, orderId, status, etc.
  */
 export const handleKashierWebhook = async (req: Request, res: Response) => {
-    // Kashier can send the payload nested under "data" or flat
+    // ⚠️ TEMP DEBUG — keep this until we've confirmed one successful Test
+    // Webhook end-to-end, then remove it.
+    console.log("RAW HEADERS:", JSON.stringify(req.headers));
+    console.log("RAW BODY:", JSON.stringify(req.body));
+
+    // Kashier sends the payload nested under "data"
     const webhookData: Record<string, any> = req.body?.data || req.body;
 
-    // Signature can come from:
-    //   1. webhookData.kashierSignature  (preferred — inside the payload)
-    //   2. x-kashier-signature header
-    //   3. top-level req.body.signature (older Kashier versions)
+    // FIX: the signature ONLY comes from the header now. The old
+    // `webhookData.kashierSignature` body-field fallback is removed because
+    // that field does not exist in Kashier's actual webhook payloads and was
+    // silently masking the real signature source.
     const headerSignature =
         (req.headers["x-kashier-signature"] as string) ||
-        (req.headers["signature"] as string) ||
-        req.body?.signature;
+        (req.headers["Kashier-Signature"] as string);
 
     const orderId = webhookData?.orderId || webhookData?.merchantOrderId;
     const transactionId = webhookData?.transactionId || webhookData?.kashierTransactionId;
@@ -143,21 +138,17 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
         orderId,
         transactionId,
         paymentStatus,
-        hasKashierSig: Boolean(webhookData?.kashierSignature),
         hasHeaderSig: Boolean(headerSignature),
+        signatureKeys: webhookData?.signatureKeys,
     });
 
     // ─── Signature Verification ───────────────────────────────────────────────
-    const hasSomeSignature = Boolean(webhookData?.kashierSignature || headerSignature);
-    if (!hasSomeSignature) {
-        console.error("⚠️ Kashier webhook has no signature — rejecting.");
+    if (!headerSignature) {
+        console.error("⚠️ Kashier webhook has no x-kashier-signature header — rejecting.");
         throw new BadRequest("Webhook signature is required.");
     }
 
     // Look up restaurant to check if CUSTOM gateway credentials should be used.
-    // Uses getActiveCustomGateway so this stays consistent with checkout and
-    // /kashier/session: if the restaurant has a conflicting active-provider
-    // setup, that is surfaced instead of silently picking a key.
     let customApiKey: string | undefined = undefined;
     if (orderId) {
         const [matchedOrder] = await db
@@ -193,6 +184,11 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
 
     if (!isValid) {
         console.error("⚠️ Invalid Kashier webhook signature received.");
+        // TEMP DEBUG: log what we computed vs what we got, to make the next
+        // failure immediately diagnosable from the console without needing
+        // to re-run the separate debug script.
+        console.error("[Kashier Webhook] signatureKeys used:", webhookData?.signatureKeys);
+        console.error("[Kashier Webhook] header signature received:", headerSignature);
         throw new BadRequest("Invalid webhook signature.");
     }
 
@@ -234,7 +230,7 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
             console.error(`[Kashier Webhook] Failed to mark order ${orderId} as payment_failed:`, dbErr);
         }
     } else {
-        console.log(`[Kashier Webhook] Unhandled status "${paymentStatus}" for order ${orderId} — no DB change.`);
+        console.log(`[Kashier Webhook] Unhandled status "${paymentStatus}" for order ${orderId} — no DB change (this is expected/harmless for a "Test Webhook" click with no real order).`);
     }
 
     return SuccessResponse(res, {
