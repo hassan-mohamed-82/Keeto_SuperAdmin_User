@@ -7,6 +7,8 @@ import { orders, restaurantPaymentCredentials, restaurantSettings, paymentMethod
 import { eq, or, like, and } from "drizzle-orm";
 import { safeDecrypt } from "../../utils/Safedecrypt";
 
+import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
+
 /**
  * Controller: Handle Paymob Webhook POST Notification
  * Endpoint: POST /payments/paymob/webhook
@@ -21,7 +23,8 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
         const receivedHmac =
             (req.query.hmac as string) ||
             (req.headers["x-paymob-hmac"] as string) ||
-            payload.hmac;
+            payload.hmac ||
+            transactionObj.hmac;
 
         const merchantOrderId = transactionObj.order?.merchant_order_id;
         const paymobOrderId = String(transactionObj.order?.id || transactionObj.order_id || "");
@@ -71,23 +74,71 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
             .limit(1);
 
         if (settings?.paymentGatewayType === "CUSTOM") {
-            const [credsRecord] = await db
-                .select()
-                .from(restaurantPaymentCredentials)
-                .where(
-                    and(
-                        eq(restaurantPaymentCredentials.restaurantId, matchedOrder.restaurantId),
-                        eq(restaurantPaymentCredentials.provider, "PAYMOB"),
-                        eq(restaurantPaymentCredentials.isActive, true)
-                    )
-                )
-                .limit(1);
+            let credsRecord: typeof restaurantPaymentCredentials.$inferSelect | undefined;
 
-            const rawCreds = credsRecord?.credentials as any;
-            if (!credsRecord || !rawCreds?.hmac) {
+            try {
+                const activeGateway = await getActiveCustomGateway(matchedOrder.restaurantId);
+                if (activeGateway && activeGateway.provider === "PAYMOB") {
+                    credsRecord = activeGateway.record;
+                }
+            } catch (gatewayErr) {
+                console.warn("[Paymob Webhook]: getActiveCustomGateway threw an error:", gatewayErr);
+            }
+
+            if (!credsRecord) {
+                const [directRecord] = await db
+                    .select()
+                    .from(restaurantPaymentCredentials)
+                    .where(
+                        and(
+                            eq(restaurantPaymentCredentials.restaurantId, matchedOrder.restaurantId),
+                            eq(restaurantPaymentCredentials.provider, "PAYMOB"),
+                            eq(restaurantPaymentCredentials.isActive, true)
+                        )
+                    )
+                    .limit(1);
+                credsRecord = directRecord;
+            }
+
+            if (!credsRecord) {
+                console.error(`[Paymob Webhook]: No active Paymob credentials found for restaurant ${matchedOrder.restaurantId}`);
+                throw new BadRequest("Restaurant Paymob credentials missing or inactive in database.");
+            }
+
+            let rawCreds: any = credsRecord.credentials;
+
+            // Handle stringified or multiple-encoded JSON
+            let attempts = 0;
+            while (typeof rawCreds === "string" && attempts < 3) {
+                try {
+                    rawCreds = JSON.parse(rawCreds);
+                } catch {
+                    break;
+                }
+                attempts++;
+            }
+
+            // Handle MySQL character-indexed object {"0": "{", "1": "\"", ...}
+            if (rawCreds && typeof rawCreds === "object" && "0" in rawCreds && !("hmac" in rawCreds)) {
+                try {
+                    const reconstructed = Object.keys(rawCreds)
+                        .sort((a, b) => Number(a) - Number(b))
+                        .map((k) => rawCreds[k])
+                        .join("");
+                    rawCreds = JSON.parse(reconstructed);
+                } catch {}
+            }
+
+            const rawHmac = rawCreds?.hmac || rawCreds?.hmacSecret || rawCreds?.hmac_secret || rawCreds?.HMAC;
+            if (!rawHmac) {
+                console.error(
+                    `[Paymob Webhook]: HMAC secret missing in Paymob credentials for restaurant ${matchedOrder.restaurantId}. Available keys:`,
+                    typeof rawCreds === "object" && rawCreds !== null ? Object.keys(rawCreds) : typeof rawCreds
+                );
                 throw new BadRequest("Restaurant Paymob credentials or HMAC secret missing in database.");
             }
-            hmacSecret = safeDecrypt(rawCreds.hmac);
+
+            hmacSecret = safeDecrypt(rawHmac);
         } else {
             hmacSecret = process.env.PLATFORM_PAYMOB_HMAC || "";
         }
@@ -103,7 +154,12 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
             throw new BadRequest("HMAC signature is required for Paymob webhook verification.");
         }
 
-        const isValid = PaymobService.verifyHmac(transactionObj, hmacSecret, receivedHmac);
+        let isValid = PaymobService.verifyHmac(transactionObj, hmacSecret, receivedHmac);
+        if (!isValid && process.env.PLATFORM_PAYMOB_HMAC && hmacSecret !== process.env.PLATFORM_PAYMOB_HMAC) {
+            console.warn("[Paymob Webhook]: Custom HMAC verification failed. Attempting platform HMAC verification fallback.");
+            isValid = PaymobService.verifyHmac(transactionObj, process.env.PLATFORM_PAYMOB_HMAC, receivedHmac);
+        }
+
         if (!isValid) {
             console.error("⚠️ Invalid Paymob Webhook HMAC signature.");
             throw new BadRequest("Invalid HMAC signature.");
