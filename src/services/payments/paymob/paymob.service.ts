@@ -16,137 +16,43 @@ export interface CreatePaymobSessionInput {
         phone?: string;
     };
     billingData?: Record<string, any>;
+    notificationUrl?: string;
+    redirectionUrl?: string;
 }
 
 export interface PaymobSessionResponse {
-    sessionId: string;
-    sessionUrl: string;
-    paymobOrderId: number;
-    paymentKey: string;
-    iframeId: string;
+    sessionId: string;       // = intention id, نفس المفهوم القديم بتاع sessionId
+    sessionUrl: string;      // رابط Unified Checkout الجاهز للـ redirect
+    paymobOrderId: number;   // Paymob order id (بييجي في transaction callback)
+    intentionId: string;
+    clientSecret: string;
 }
 
 export class PaymobService {
-    private static readonly BASE_URL = "https://accept.paymob.com/api";
+    // FIX: الـ base URL بتاع الـ Intention API (v1)، مختلف عن /api القديم
+    private static readonly INTENTION_URL = "https://accept.paymob.com/v1/intention/";
+    private static readonly UNIFIED_CHECKOUT_BASE = "https://accept.paymob.com/unifiedcheckout/";
 
     /**
-     * Step 1: Authenticate with Paymob using apiKey to obtain an auth_token
+     * Create Intention API — خطوة واحدة بس بدل التلات خطوات القديمة
+     * (auth/tokens -> ecommerce/orders -> acceptance/payment_keys).
+     * الـ auth هنا بيتم بالـ secret_key مباشرة في الهيدر، مفيش auth_token منفصل.
      */
-    static async getAuthToken(apiKey: string): Promise<string> {
-        try {
-            const response = await axios.post(
-                `${this.BASE_URL}/auth/tokens`,
-                { api_key: apiKey },
-                {
-                    headers: { "Content-Type": "application/json" },
-                    timeout: 15000,
-                }
+    static async createIntention(input: CreatePaymobSessionInput): Promise<{
+        intentionId: string;
+        clientSecret: string;
+        paymobOrderId: number;
+    }> {
+        const { credentials, orderNumber, orderId, amountCents, currency = "EGP", customer } = input;
+
+        if (!credentials.secretKey) {
+            throw new BadRequest(
+                "Paymob secretKey is missing. Add secretKey (sk_test_... / sk_live_...) to this restaurant's Paymob credentials."
             );
-            const token = response.data?.token;
-            if (!token) {
-                throw new BadRequest("Failed to obtain Paymob authentication token.");
-            }
-            return token;
-        } catch (error: any) {
-            if (error instanceof BadRequest) throw error;
-            const msg = error.response?.data?.detail || error.message || "Paymob authentication failed";
-            console.error("[Paymob Auth Error]:", msg);
-            throw new BadRequest(`Paymob auth failed: ${msg}`);
         }
-    }
-
-    /**
-     * Step 2: Register Order on Paymob
-     */
-    static async createOrder(
-        authToken: string,
-        merchantOrderId: string,
-        amountCents: number,
-        currency: string = "EGP"
-    ): Promise<number> {
-        try {
-            const response = await axios.post(
-                `${this.BASE_URL}/ecommerce/orders`,
-                {
-                    auth_token: authToken,
-                    delivery_needed: false,
-                    amount_cents: String(Math.round(amountCents)),
-                    currency: currency.toUpperCase(),
-                    merchant_order_id: merchantOrderId,
-                    items: [],
-                },
-                {
-                    headers: { "Content-Type": "application/json" },
-                    timeout: 15000,
-                }
-            );
-            const paymobOrderId = response.data?.id;
-            if (!paymobOrderId) {
-                throw new BadRequest("Failed to register order on Paymob.");
-            }
-            return paymobOrderId;
-        } catch (error: any) {
-            if (error instanceof BadRequest) throw error;
-            const msg = error.response?.data?.message || error.message || "Paymob order registration failed";
-            console.error("[Paymob Order Error]:", msg);
-            throw new BadRequest(`Paymob order creation failed: ${msg}`);
+        if (!credentials.integrationId) {
+            throw new BadRequest("Paymob integrationId is missing from credentials.");
         }
-    }
-
-    /**
-     * Step 3: Generate Payment Key Token
-     */
-    static async getPaymentKey(
-        authToken: string,
-        paymobOrderId: number,
-        integrationId: string,
-        amountCents: number,
-        billingData: Record<string, any>,
-        currency: string = "EGP"
-    ): Promise<string> {
-        try {
-            const response = await axios.post(
-                `${this.BASE_URL}/acceptance/payment_keys`,
-                {
-                    auth_token: authToken,
-                    amount_cents: String(Math.round(amountCents)),
-                    expiration: 3600,
-                    order_id: paymobOrderId,
-                    billing_data: billingData,
-                    currency: currency.toUpperCase(),
-                    integration_id: Number(integrationId),
-                    lock_order_when_paid: true,
-                },
-                {
-                    headers: { "Content-Type": "application/json" },
-                    timeout: 15000,
-                }
-            );
-            const paymentKey = response.data?.token;
-            if (!paymentKey) {
-                throw new BadRequest("Failed to obtain Paymob payment key.");
-            }
-            return paymentKey;
-        } catch (error: any) {
-            if (error instanceof BadRequest) throw error;
-            const msg = error.response?.data?.message || error.message || "Paymob payment key generation failed";
-            console.error("[Paymob Payment Key Error]:", msg);
-            throw new BadRequest(`Paymob payment key failed: ${msg}`);
-        }
-    }
-
-    /**
-     * Helper to build hosted iframe URL
-     */
-    static buildIframeUrl(iframeId: string, paymentToken: string): string {
-        return `https://accept.paymob.com/api/acceptance/iframes/${iframeId}?payment_token=${paymentToken}`;
-    }
-
-    /**
-     * Complete Session Flow: Auth -> Create Order -> Payment Key -> Return hosted sessionUrl
-     */
-    static async createPaymentSession(input: CreatePaymobSessionInput): Promise<PaymobSessionResponse> {
-        const { credentials, orderId, orderNumber, amountCents, currency = "EGP", customer } = input;
 
         const firstName = customer.firstName || "Customer";
         const lastName = customer.lastName || "User";
@@ -155,7 +61,7 @@ export class PaymobService {
 
         const billingData = {
             apartment: "NA",
-            email: email,
+            email,
             floor: "NA",
             first_name: firstName,
             street: "NA",
@@ -170,29 +76,93 @@ export class PaymobService {
             ...(input.billingData || {}),
         };
 
-        const authToken = await this.getAuthToken(credentials.apiKey);
-        const paymobOrderId = await this.createOrder(authToken, orderNumber || orderId, amountCents, currency);
-        const paymentKey = await this.getPaymentKey(
-            authToken,
-            paymobOrderId,
-            credentials.integrationId,
-            amountCents,
-            billingData,
-            currency
-        );
-        const sessionUrl = this.buildIframeUrl(credentials.iframeId, paymentKey);
+        try {
+            const response = await axios.post(
+                this.INTENTION_URL,
+                {
+                    amount: Math.round(amountCents), // بالقروش/السنتات، زي القديم
+                    currency: currency.toUpperCase(),
+                    payment_methods: [Number(credentials.integrationId)],
+                    items: [],
+                    billing_data: billingData,
+                    customer: {
+                        first_name: firstName,
+                        last_name: lastName,
+                        email,
+                    },
+                    special_reference: orderNumber || orderId,
+                    notification_url: input.notificationUrl || credentials.callbackUrl,
+                    redirection_url: input.redirectionUrl,
+                },
+                {
+                    headers: {
+                        Authorization: `Token ${credentials.secretKey}`,
+                        "Content-Type": "application/json",
+                    },
+                    timeout: 15000,
+                }
+            );
+
+            const data = response.data;
+            const clientSecret = data?.client_secret;
+            const intentionId = data?.id;
+            const paymobOrderId = data?.intention_order_id ?? data?.order?.id;
+
+            if (!clientSecret || !intentionId) {
+                throw new BadRequest("Paymob Intention API did not return a client_secret/id.");
+            }
+
+            return { intentionId, clientSecret, paymobOrderId };
+        } catch (error: any) {
+            if (error instanceof BadRequest) throw error;
+            // FIX: زي التشخيص اللي عملناه قبل كده — نطبع الـ response body الكامل
+            // عشان أي خطأ يبان سببه الحقيقي (مش نص عام بيخفي التفاصيل).
+            console.error("[Paymob Intention Error] status:", error.response?.status);
+            console.error("[Paymob Intention Error] response body:", JSON.stringify(error.response?.data));
+            const msg =
+                error.response?.data?.detail ||
+                JSON.stringify(error.response?.data) ||
+                error.message ||
+                "Paymob intention creation failed";
+            throw new BadRequest(`Paymob intention failed: ${msg}`);
+        }
+    }
+
+    /**
+     * Unified Checkout URL — الصفحة اللي المستخدم هيتوجه لها يدفع فيها
+     */
+    static buildUnifiedCheckoutUrl(publicKey: string, clientSecret: string): string {
+        return `${this.UNIFIED_CHECKOUT_BASE}?publicKey=${encodeURIComponent(publicKey)}&clientSecret=${encodeURIComponent(clientSecret)}`;
+    }
+
+    /**
+     * Complete Session Flow (الاسم اتسيب زي ما هو عشان الـ caller في checkout
+     * controller مايتغيّرش كتير، بس المحتوى بقى Intention API مش الـ 3 خطوات)
+     */
+    static async createPaymentSession(input: CreatePaymobSessionInput): Promise<PaymobSessionResponse> {
+        if (!input.credentials.publicKey) {
+            throw new BadRequest(
+                "Paymob publicKey is missing. Add publicKey (pk_test_... / pk_live_...) to this restaurant's Paymob credentials."
+            );
+        }
+
+        const { intentionId, clientSecret, paymobOrderId } = await this.createIntention(input);
+        const sessionUrl = this.buildUnifiedCheckoutUrl(input.credentials.publicKey, clientSecret);
 
         return {
-            sessionId: String(paymobOrderId),
+            sessionId: intentionId,
             sessionUrl,
             paymobOrderId,
-            paymentKey,
-            iframeId: credentials.iframeId,
+            intentionId,
+            clientSecret,
         };
     }
 
     /**
-     * Verify Paymob Webhook HMAC signature according to official specification
+     * Verify Paymob Webhook HMAC signature according to official specification.
+     * ملحوظة: ده بيفضل شغال زي ما هو — الـ transaction callback (notification_url)
+     * بيرجع بنفس الشكل القديم بالظبط سواء الجلسة اتعملت بالـ Intention API
+     * أو الـ flow القديم، فمفيش تغيير مطلوب هنا.
      */
     static verifyHmac(transactionObj: Record<string, any>, hmacSecret: string, receivedHmac: string): boolean {
         if (!hmacSecret || !receivedHmac) {

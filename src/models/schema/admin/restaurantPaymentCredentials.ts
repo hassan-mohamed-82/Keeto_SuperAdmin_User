@@ -15,11 +15,13 @@ import { restaurants } from "./restaurants";
 // ==========================================
 
 export interface PaymobCredentials {
-    apiKey: string;
+    secretKey: string;
+    publicKey: string;
     integrationId: string;
-    iframeId: string;
     hmac: string;
     callbackUrl?: string;
+    apiKey?: string;
+    iframeId?: string;
 }
 
 export interface KashierCredentials {

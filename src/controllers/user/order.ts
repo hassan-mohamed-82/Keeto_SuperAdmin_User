@@ -1395,13 +1395,16 @@ export const checkout = async (req: Request | any, res: Response) => {
                     const rawCreds = activeGateway.record.credentials as any;
                     const decryptedCredentials = {
                         ...rawCreds,
-                        apiKey: decryptSecret(rawCreds.apiKey),
+                        secretKey: decryptSecret(rawCreds.secretKey),
+                        publicKey: rawCreds.publicKey,
                         hmac: decryptSecret(rawCreds.hmac),
                     };
 
                     const nameParts = (userInfo?.name || "Customer User").trim().split(" ");
                     const firstName = nameParts[0] || "Customer";
                     const lastName = nameParts.slice(1).join(" ") || "User";
+
+                    const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
 
                     const paymobSession = await PaymobService.createPaymentSession({
                         credentials: decryptedCredentials,
@@ -1415,13 +1418,15 @@ export const checkout = async (req: Request | any, res: Response) => {
                             email: userInfo?.email || "customer@example.com",
                             phone: userInfo?.phone || "+201000000000",
                         },
+                        notificationUrl: decryptedCredentials.callbackUrl || `${backendBaseUrl}/api/payments/paymob/webhook`,
+                        redirectionUrl: `${backendBaseUrl}/api/payments/paymob/callback`,
                     });
 
                     // Update order with Paymob gateway info
                     await db
                         .update(orders)
                         .set({
-                            paymentOrderId: String(paymobSession.paymobOrderId),
+                            paymentOrderId: String(paymobSession.paymobOrderId || paymobSession.sessionId),
                             paymentGateway: "paymob",
                             paymentStatus: "pending_payment",
                         })
@@ -1429,7 +1434,7 @@ export const checkout = async (req: Request | any, res: Response) => {
 
                     paymentSessionData = {
                         gateway: "PAYMOB",
-                        type: "iframe",           // Frontend uses iframe embed
+                        type: "redirect",         // FIX: بقى redirect لـ Unified Checkout، مش iframe embed
                         sessionId: paymobSession.sessionId,
                         sessionUrl: paymobSession.sessionUrl,
                         status: "CREATED",

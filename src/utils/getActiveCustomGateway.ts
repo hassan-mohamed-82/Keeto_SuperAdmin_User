@@ -7,6 +7,38 @@ export type ActiveCustomGateway =
     | { provider: "KASHIER"; record: typeof restaurantPaymentCredentials.$inferSelect }
     | { provider: "PAYMOB"; record: typeof restaurantPaymentCredentials.$inferSelect };
 
+function ensureParsedCredentials(
+    record: typeof restaurantPaymentCredentials.$inferSelect
+): typeof restaurantPaymentCredentials.$inferSelect {
+    let creds: any = record.credentials;
+
+    // ممكن الـ string يكون متكرر أكتر من مرة (double/triple encoded) في حالات نادرة،
+    // فبنحاول نعمل parse لحد ما نوصل لـ object حقيقي أو نفشل بوضوح.
+    let attempts = 0;
+    while (typeof creds === "string" && attempts < 3) {
+        try {
+            creds = JSON.parse(creds);
+        } catch (err) {
+            console.error(
+                `[getActiveCustomGateway] Failed to parse credentials JSON string for row ${record.id} (provider: ${record.provider}):`,
+                err
+            );
+            throw new BadRequest(
+                `Payment credentials for provider ${record.provider} are stored in an invalid format. Please re-save them from the restaurant settings.`
+            );
+        }
+        attempts++;
+    }
+
+    if (typeof creds !== "object" || creds === null) {
+        throw new BadRequest(
+            `Payment credentials for provider ${record.provider} are not a valid object after parsing.`
+        );
+    }
+
+    return { ...record, credentials: creds };
+}
+
 /**
  * Resolves the single active CUSTOM payment provider for a restaurant.
  *
@@ -59,8 +91,8 @@ export async function getActiveCustomGateway(restaurantId: string): Promise<Acti
     }
 
     if (kashierCreds.length === 1) {
-        return { provider: "KASHIER", record: kashierCreds[0] };
+        return { provider: "KASHIER", record: ensureParsedCredentials(kashierCreds[0]) };
     }
 
-    return { provider: "PAYMOB", record: paymobCreds[0] };
+    return { provider: "PAYMOB", record: ensureParsedCredentials(paymobCreds[0]) };
 }
