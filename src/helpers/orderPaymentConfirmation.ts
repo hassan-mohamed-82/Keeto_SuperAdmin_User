@@ -106,7 +106,7 @@ export async function confirmOrderPayment({
                 paymentGateway: gateway,
                 paymentTransactionId: transactionId || order.paymentTransactionId,
                 paymentOrderId: gatewayOrderId || order.paymentOrderId,
-                status: "accepted",
+                status: "pending",
                 dailyOrderNumber: assignedDailyOrderNumber,
                 paymentMethod: digitalMethod?.id || order.paymentMethod,
                 paymentFailureReason: null, // تصفير سبب الفشل لأن المحاولة الحالية نجحت

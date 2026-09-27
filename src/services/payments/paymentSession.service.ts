@@ -13,6 +13,7 @@ export interface CreateOrderPaymentSessionParams {
     orderNumber?: string;
     restaurantId: string;
     totalAmount: number;
+    restaurantSlug?: string; // used as callbackSlug in frontend redirect URL
     userInfo?: {
         name?: string | null;
         email?: string | null;
@@ -40,7 +41,13 @@ export interface PaymentSessionResult {
 export async function createOrderPaymentSession(
     params: CreateOrderPaymentSessionParams
 ): Promise<PaymentSessionResult> {
-    const { orderId, orderNumber, restaurantId, totalAmount, userInfo, preferredGateway } = params;
+    const { orderId, orderNumber, restaurantId, totalAmount, userInfo, preferredGateway, restaurantSlug } = params;
+
+    // Build frontend redirect URL with callbackSlug when a restaurant slug is available
+    const appBaseUrl = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+    const frontendRedirectUrl = restaurantSlug
+        ? `${appBaseUrl}/profile?callbackSlug=${encodeURIComponent(restaurantSlug)}`
+        : `${appBaseUrl}/payment/result`;
 
     const [settings] = await db
         .select({ paymentGatewayType: restaurantSettings.paymentGatewayType })
@@ -80,6 +87,7 @@ export async function createOrderPaymentSession(
                 currency: "EGP",
                 customerEmail: userInfo?.email || undefined,
                 credentials: decryptedCredentials,
+                merchantRedirect: frontendRedirectUrl,
             });
 
             return {
@@ -106,6 +114,12 @@ export async function createOrderPaymentSession(
 
             const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
 
+            // Paymob browser redirect goes through the backend callback handler which then
+            // forwards to the frontend. We embed callbackSlug so it survives the relay.
+            const paymobCallbackUrl = restaurantSlug
+                ? `${backendBaseUrl}/api/payments/paymob/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
+                : `${backendBaseUrl}/api/payments/paymob/callback`;
+
             const paymobSession = await PaymobService.createPaymentSession({
                 credentials: decryptedCredentials,
                 orderId,
@@ -119,7 +133,7 @@ export async function createOrderPaymentSession(
                     phone: userInfo?.phone || "+201000000000",
                 },
                 notificationUrl: decryptedCredentials.callbackUrl || `${backendBaseUrl}/api/payments/paymob/webhook`,
-                redirectionUrl: `${backendBaseUrl}/api/payments/paymob/callback`,
+                redirectionUrl: paymobCallbackUrl,
             });
 
             // Update order with Paymob gateway info
@@ -154,6 +168,7 @@ export async function createOrderPaymentSession(
             amount: totalAmount,
             currency: "EGP",
             customerEmail: userInfo?.email || undefined,
+            merchantRedirect: frontendRedirectUrl,
         });
 
         return {

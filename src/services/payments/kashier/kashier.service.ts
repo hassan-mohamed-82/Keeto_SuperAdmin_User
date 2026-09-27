@@ -14,6 +14,7 @@ export interface CreateSessionInput {
     amount: number;
     currency?: string;
     customerEmail?: string;
+    merchantRedirect?: string; // optional override; defaults to APP_BASE_URL/payment/result
     credentials?: {
         mid: string;
         apiKey: string;
@@ -66,7 +67,7 @@ export class KashierService {
         const appBaseUrl = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
         const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
 
-        const merchantRedirect = `${appBaseUrl}/payment/result`;
+        const merchantRedirect = input.merchantRedirect || `${appBaseUrl}/payment/result`;
         const serverWebhook = backendBaseUrl ? `${backendBaseUrl}/api/payments/kashier/webhook` : undefined;
 
         const body: Record<string, unknown> = {

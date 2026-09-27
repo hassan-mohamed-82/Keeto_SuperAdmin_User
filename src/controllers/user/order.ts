@@ -204,6 +204,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         couponCode,
         guestInfo,
         guestAddress,
+        restaurantName
     } = req.body;
 
     let addressId: string | null = inputAddressId || null;
@@ -301,9 +302,11 @@ export const checkout = async (req: Request | any, res: Response) => {
     }
 
     const [selectedPayment] = await db.select().from(paymentMethods).where(eq(paymentMethods.id, paymentMethod)).limit(1);
-    // if (!selectedPayment || !selectedPayment.isActive) {
-    //     throw new BadRequest("Invalid or inactive payment method");
-    // }
+
+    if (!selectedPayment || !selectedPayment.isActive) {
+        throw new BadRequest("Invalid or inactive payment method");
+    }
+    
     const paymentMethodName = selectedPayment.name;
     const paymentMethodNameAr = selectedPayment.nameAr;
     const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
@@ -1360,12 +1363,18 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     let paymentSessionData: any = null;
     if (isVisaPayment) {
+        // 🛡️ Check that the restaurant has online payment enabled
+        if (!settings?.enableOnlinePayment) {
+            throw new BadRequest("Online payment is not enabled for this restaurant.");
+        }
+
         try {
             paymentSessionData = await createOrderPaymentSession({
                 orderId,
                 orderNumber,
                 restaurantId,
                 totalAmount,
+                restaurantSlug: restaurantName || restaurant?.name || undefined,
                 userInfo: {
                     name: userInfo?.name,
                     email: userInfo?.email,
@@ -1837,10 +1846,11 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         userAddresses,
         restaurantBranches,
         zoneFees,
-        activePaymentMethods,
+        allActivePaymentMethods,
         getCancelReasons,
         businessPlans,
-        freeDeliveryOfferRows
+        freeDeliveryOfferRows,
+        restaurantSettingsRows
     ] = await Promise.all([
         db.select().from(addresses).where(eq(addresses.userId, userId)),
         db.select().from(branches).where(
@@ -1893,8 +1903,26 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                     eq(freeDeliveryOffers.status, "active")
                 )
             )
+            .limit(1),
+        // 🛡️ جلب إعدادات المطعم لمعرفة هل الدفع الإلكتروني مفعّل أم لا
+        db.select({ enableOnlinePayment: restaurantSettings.enableOnlinePayment })
+            .from(restaurantSettings)
+            .where(eq(restaurantSettings.restaurantId, restaurantId))
             .limit(1)
     ]);
+
+    // 🛡️ تحقق من إعداد الدفع الإلكتروني للمطعم
+    const enableOnlinePayment = restaurantSettingsRows[0]?.enableOnlinePayment ?? true;
+
+    // إذا كان الدفع الإلكتروني معطلاً للمطعم، نحذف طريقة الدفع بالفيزا من القائمة
+    const activePaymentMethods = enableOnlinePayment
+        ? allActivePaymentMethods
+        : allActivePaymentMethods.filter((pm) => {
+            const name = pm.name?.toLowerCase() ?? "";
+            const nameAr = pm.nameAr ?? "";
+            // Visa / card payment methods are the online-only ones
+            return name !== "visa" && name !== "card" && nameAr !== "بطاقة";
+          });
 
     const plan = businessPlans[0];
     if (!plan) {
@@ -1982,7 +2010,8 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
             addresses: addressesWithDeliveryInfo,
             branches: restaurantBranches,
             zones: zoneFees, // 👈 إرجاع مناطق التوصيل وأسعارها الخاصة بالمطعم
-            paymentMethods: activePaymentMethods,
+            paymentMethods: activePaymentMethods, // visa filtered out when enableOnlinePayment=false
+            enableOnlinePayment, // 👈 هل الدفع الإلكتروني (فيزا) مفعّل لهذا المطعم؟
             reasons: getCancelReasons,
             serviceFee: serviceFee.toFixed(2),
             freeDeliveryOffer: freeDeliveryOfferData,

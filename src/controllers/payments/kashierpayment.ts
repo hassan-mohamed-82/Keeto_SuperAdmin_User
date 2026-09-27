@@ -252,3 +252,23 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
         message: "Webhook processed successfully",
     });
 };
+
+/**
+ * Controller: Handle browser redirection after user completes Kashier payment
+ * Endpoint: GET /payments/kashier/callback
+ * This route is ONLY a user browser redirect, NOT for confirming payments!
+ * Payment confirmation is handled exclusively via the server-to-server webhook.
+ */
+export const handleKashierRedirect = (req: Request, res: Response) => {
+    const success = (req.query.status || "").toString().toUpperCase() === "SUCCESS";
+    const orderId = req.query.orderId || req.query.order || "";
+    const callbackSlug = req.query.callbackSlug as string | undefined;
+    const frontendBaseUrl = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
+
+    // If a restaurant slug is available, redirect to the restaurant's profile page
+    const redirectUrl = callbackSlug
+        ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=KASHIER`
+        : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=KASHIER`;
+
+    return res.redirect(redirectUrl);
+};

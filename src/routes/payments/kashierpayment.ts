@@ -7,6 +7,7 @@ import {
 import {
     generatePaymentSession,
     handleKashierWebhook,
+    handleKashierRedirect,
 } from "../../controllers/payments/kashierpayment";
 
 const router = Router();
@@ -31,6 +32,16 @@ router.post(
     "/webhook",
     validate(webhookSchema),
     handleKashierWebhook
+);
+
+/**
+ * @route   GET /payments/kashier/callback
+ * @desc    User browser redirect after payment completion on Kashier hosted checkout
+ * @access  Public (Redirect only)
+ */
+router.get(
+    "/callback",
+    handleKashierRedirect
 );
 
 export default router;

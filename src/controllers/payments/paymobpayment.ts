@@ -300,8 +300,13 @@ export const generatePaymobPaymentSession = async (req: Request, res: Response) 
 export const handlePaymobRedirect = (req: Request, res: Response) => {
     const success = req.query.success === "true";
     const orderId = req.query.merchant_order_id || req.query.order_id || "";
+    const callbackSlug = req.query.callbackSlug as string | undefined;
     const frontendBaseUrl = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
-    const redirectUrl = `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=PAYMOB`;
+    // If a restaurant slug is available, redirect to the restaurant's profile page
+    const redirectUrl = callbackSlug
+        ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=PAYMOB`
+        : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=PAYMOB`;
+
     return res.redirect(redirectUrl);
 };
