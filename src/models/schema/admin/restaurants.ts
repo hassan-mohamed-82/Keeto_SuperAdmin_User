@@ -7,7 +7,8 @@ import { cities } from "./city";
 export const restaurants = mysqlTable("restaurants", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     fcmToken: text("fcm_token"),
-
+    firebaseProject: mysqlEnum("firebase_project", ["primary", "secondary"]).default("primary"),
+        
     name: varchar("name", { length: 255 }).notNull(),
     nameAr: varchar("name_ar", { length: 255 }),
     nameFr: varchar("name_fr", { length: 255 }),

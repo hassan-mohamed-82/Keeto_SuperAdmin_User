@@ -9,6 +9,7 @@ export const restrauntadmin = mysqlTable("restrauntadmins", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(uuid())`),
 
     fcmToken: text("fcm_token"),
+    firebaseProject: mysqlEnum("firebase_project", ["primary", "secondary"]).default("primary"),
 
     // الموظف ده تبع أنهي مطعم؟ (إجباري للكل)
     restaurantId: char("restaurant_id", { length: 36 })
