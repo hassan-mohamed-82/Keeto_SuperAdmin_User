@@ -43,7 +43,7 @@ export class PaymobService {
         clientSecret: string;
         paymobOrderId: number;
     }> {
-        const { credentials, orderNumber, orderId, amountCents, currency = "EGP", customer } = input;
+        const { credentials,orderId, amountCents, currency = "EGP", customer } = input;
 
         if (!credentials.secretKey) {
             throw new BadRequest(
@@ -90,7 +90,7 @@ export class PaymobService {
                         last_name: lastName,
                         email,
                     },
-                    special_reference: orderNumber || orderId,
+                    special_reference: orderId,
                     notification_url: input.notificationUrl || credentials.callbackUrl,
                     redirection_url: input.redirectionUrl,
                 },
