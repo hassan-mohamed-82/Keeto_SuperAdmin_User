@@ -47,15 +47,17 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
             throw new BadRequest("No matching order identifier found in Paymob webhook payload.");
         }
 
-        // 1. Locate the order in DB
+        // Paymob field mapping:
+        //   merchant_order_id → رقمنا (= orders.id)    → للبحث في DB
+        //   order.id          → رقم البوابة             → يُحفظ في payment_order_id
+        //   id (transaction)  → رقم العملية             → يُحفظ في payment_transaction_id
         const [matchedOrder] = await db
             .select()
             .from(orders)
             .where(
                 or(
                     paymobOrderId ? eq(orders.paymentOrderId, paymobOrderId) : undefined,
-                    merchantOrderId ? eq(orders.id, merchantOrderId) : undefined,
-                    merchantOrderId ? eq(orders.orderNumber, merchantOrderId) : undefined
+                    merchantOrderId ? eq(orders.id, merchantOrderId) : undefined
                 )
             )
             .limit(1);

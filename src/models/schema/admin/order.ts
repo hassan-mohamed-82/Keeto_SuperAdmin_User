@@ -150,8 +150,8 @@ export const orders = mysqlTable("orders", {
 
     // Unified payment gateway columns (supports both Kashier and Paymob)
     paymentGateway: mysqlEnum("payment_gateway", ["kashier", "paymob"]),
-    paymentOrderId: varchar("payment_order_id", { length: 150 }),        // Kashier sessionId / Paymob orderId
-    paymentTransactionId: varchar("payment_transaction_id", { length: 150 }), // Kashier transactionId / Paymob transactionId
+    paymentOrderId: varchar("payment_order_id", { length: 150 }),        // رقم البوابة: Kashier orderId / Paymob order.id
+    paymentTransactionId: varchar("payment_transaction_id", { length: 150 }), // رقم العملية: Kashier transactionId / Paymob id
     paymentStatus: mysqlEnum("payment_status", ["pending_payment", "paid", "payment_failed"]).default("pending_payment"),
     paymentFailureReason: text("payment_failure_reason"), // سبب آخر فشل لسرعة العرض في تفاصيل الأوردر
 
