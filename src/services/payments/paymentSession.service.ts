@@ -7,6 +7,7 @@ import { decryptSecret } from "../../utils/encryption";
 import { safeDecrypt } from "../../utils/Safedecrypt";
 import { KashierService } from "./kashier/kashier.service";
 import { PaymobService } from "./paymob/paymob.service";
+import { GeideaService } from "./geidea/geidea.service";
 
 export interface CreateOrderPaymentSessionParams {
     orderId: string;
@@ -19,23 +20,24 @@ export interface CreateOrderPaymentSessionParams {
         email?: string | null;
         phone?: string | null;
     };
-    preferredGateway?: "KASHIER" | "PAYMOB";
+    preferredGateway?: "KASHIER" | "PAYMOB" | "GEIDEA";
 }
 
 export interface PaymentSessionResult {
-    gateway: "KASHIER" | "PAYMOB" | "CUSTOM";
+    gateway: "KASHIER" | "PAYMOB" | "GEIDEA" | "CUSTOM";
     type: "redirect";
     sessionId: string;
     sessionUrl: string;
     status: string;
     expireAt?: string;
     paymobOrderId?: string;
+    geideaOrderId?: string;
     error?: string;
 }
 
 /**
  * Unified Payment Session Service
- * Resolves the appropriate payment gateway (SYSTEM Kashier or CUSTOM Kashier/Paymob)
+ * Resolves the appropriate payment gateway (SYSTEM Kashier or CUSTOM Kashier/Paymob/Geidea)
  * and generates the hosted payment session URL for the customer.
  */
 export async function createOrderPaymentSession(
@@ -62,7 +64,7 @@ export async function createOrderPaymentSession(
 
         if (!activeGateway) {
             throw new BadRequest(
-                "Restaurant is configured for custom gateway, but no active payment credentials (Paymob or Kashier) were found."
+                "Restaurant is configured for custom gateway, but no active payment credentials (Paymob, Kashier, or Geidea) were found."
             );
         }
 
@@ -98,7 +100,7 @@ export async function createOrderPaymentSession(
                 status: kashierSession.status,
                 expireAt: kashierSession.expireAt,
             };
-        } else {
+        } else if (activeGateway.provider === "PAYMOB") {
             // PAYMOB
             const rawCreds = activeGateway.record.credentials as any;
             const decryptedCredentials = {
@@ -154,12 +156,60 @@ export async function createOrderPaymentSession(
                 status: "CREATED",
                 paymobOrderId: String(paymobSession.paymobOrderId),
             };
+        } else {
+            // GEIDEA
+            const rawCreds = activeGateway.record.credentials as any;
+            const decryptedCredentials = {
+                ...rawCreds,
+                publicKey: rawCreds.publicKey,
+                apiPassword: rawCreds.apiPassword ? safeDecrypt(rawCreds.apiPassword) : "",
+                environment: rawCreds.environment,
+            };
+
+            const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
+            const geideaCallbackUrl = restaurantSlug
+                ? `${backendBaseUrl}/api/payments/geidea/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
+                : `${backendBaseUrl}/api/payments/geidea/callback`;
+
+            const geideaSession = await GeideaService.createPaymentSession({
+                credentials: decryptedCredentials,
+                orderId,
+                orderNumber: orderNumber || orderId,
+                amount: totalAmount,
+                currency: "EGP",
+                customer: {
+                    name: userInfo?.name || "Customer",
+                    email: userInfo?.email || "customer@example.com",
+                    phone: userInfo?.phone || "+201000000000",
+                },
+                callbackUrl: decryptedCredentials.callbackUrl || `${backendBaseUrl}/api/payments/geidea/webhook`,
+                returnUrl: geideaCallbackUrl,
+            });
+
+            // Update order with Geidea gateway info
+            await db
+                .update(orders)
+                .set({
+                    paymentOrderId: String(geideaSession.sessionId),
+                    paymentGateway: "geidea",
+                    paymentStatus: "pending_payment",
+                })
+                .where(eq(orders.id, orderId));
+
+            return {
+                gateway: "GEIDEA",
+                type: "redirect",
+                sessionId: geideaSession.sessionId,
+                sessionUrl: geideaSession.sessionUrl,
+                status: geideaSession.status,
+                geideaOrderId: geideaSession.sessionId,
+            };
         }
     } else {
         // SYSTEM gateway -> Kashier (platform's own account)
         if (preferredGateway && preferredGateway !== "KASHIER") {
             throw new BadRequest(
-                "This restaurant uses the system platform payment gateway (Kashier). Paymob is not enabled for this restaurant."
+                "This restaurant uses the system platform payment gateway (Kashier). Paymob and Geidea are not enabled for this restaurant."
             );
         }
 

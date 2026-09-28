@@ -30,7 +30,7 @@ export const paymentTransactions = mysqlTable("payment_transactions", {
     restaurantId: char("restaurant_id", { length: 36 })
         .references(() => restaurants.id, { onDelete: "set null" }),
 
-    gateway: mysqlEnum("gateway", ["kashier", "paymob"]).notNull(),
+    gateway: mysqlEnum("gateway", ["kashier", "paymob", "geidea"]).notNull(),
 
     // المعرف الخاص بالمعاملة من البوابة (مثل transaction id)
     transactionId: varchar("transaction_id", { length: 150 }),

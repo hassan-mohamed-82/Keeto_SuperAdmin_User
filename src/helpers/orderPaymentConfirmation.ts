@@ -16,7 +16,7 @@ const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
 
 interface ConfirmPaymentOptions {
     orderId: string;
-    gateway: "paymob" | "kashier";
+    gateway: "paymob" | "kashier" | "geidea";
     transactionId?: string;
     gatewayOrderId?: string;
     rawPayload?: any;
@@ -24,7 +24,7 @@ interface ConfirmPaymentOptions {
 
 interface FailPaymentOptions {
     orderId: string;
-    gateway: "paymob" | "kashier";
+    gateway: "paymob" | "kashier" | "geidea";
     transactionId?: string;
     gatewayOrderId?: string;
     failureReason: string;
@@ -32,7 +32,7 @@ interface FailPaymentOptions {
 }
 
 /**
- * دالة مركزية لتأكيد نجاح عملية الدفع الإلكتروني (Paymob / Kashier)
+ * دالة مركزية لتأكيد نجاح عملية الدفع الإلكتروني (Paymob / Kashier / Geidea)
  * 1. تمنع التكرار (Idempotency) إذا كان الأوردر مدفوعاً بالفعل
  * 2. تحسب الرقم التسلسلي اليومي للمطعم (dailyOrderNumber) لحظة السداد
  * 3. تحدث الأوردر إلى paid و accepted

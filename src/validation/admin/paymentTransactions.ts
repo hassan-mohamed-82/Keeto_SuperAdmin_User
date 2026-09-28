@@ -4,7 +4,7 @@ export const getPaymentTransactionsQuerySchema = z.object({
     orderId: z.string().optional(),
     orderNumber: z.string().optional(),
     restaurantId: z.string().optional(),
-    gateway: z.enum(["paymob", "kashier"]).optional(),
+    gateway: z.enum(["paymob", "kashier", "geidea"]).optional(),
     status: z.enum(["pending", "success", "failed"]).optional(),
     page: z.string().optional(),
     limit: z.string().optional(),

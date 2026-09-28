@@ -31,7 +31,17 @@ export interface KashierCredentials {
     baseUrl?: string;
 }
 
-export type PaymentCredentialsData = PaymobCredentials | KashierCredentials | Record<string, any>;
+export interface GeideaCredentials {
+    publicKey: string;
+    apiPassword: string;
+    name?: string;
+    logoUrl?: string;
+    environment?: string;
+    callbackUrl?: string;
+    returnUrl?: string;
+}
+
+export type PaymentCredentialsData = PaymobCredentials | KashierCredentials | GeideaCredentials | Record<string, any>;
 
 // ==========================================
 // 2. تعريف الجدول باستخدام الـ Type المعرّف
@@ -44,12 +54,12 @@ export const restaurantPaymentCredentials = mysqlTable("restaurant_payment_crede
         .notNull()
         .references(() => restaurants.id, { onDelete: "cascade" }),
 
-    provider: mysqlEnum("provider", ["PAYMOB", "KASHIER"]).notNull(),
+    provider: mysqlEnum("provider", ["PAYMOB", "KASHIER", "GEIDEA"]).notNull(),
 
     title: varchar("title", { length: 255 }).notNull(),
     environment: mysqlEnum("environment", ["LIVE", "TEST"]).default("LIVE"),
 
-    // 💡 استخدام Type المخصص هنا لدعم Paymob و Kashier
+    // 💡 استخدام Type المخصص هنا لدعم Paymob و Kashier و Geidea
     credentials: json("credentials").$type<PaymentCredentialsData>().notNull(),
 
     logoUrl: varchar("logo_url", { length: 500 }),

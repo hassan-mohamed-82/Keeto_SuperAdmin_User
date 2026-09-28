@@ -73,6 +73,11 @@ const extractRawCredentials = (item: any): Record<string, any> => {
         mid: item?.mid,
         secretKey: item?.secretKey,
         baseUrl: item?.baseUrl,
+        publicKey: item?.publicKey,
+        apiPassword: item?.apiPassword,
+        environment: item?.environment,
+        returnUrl: item?.returnUrl,
+        name: item?.name,
     };
 };
 
@@ -105,6 +110,9 @@ const encryptCredFields = (creds: any): Record<string, any> => {
     if (enc.secretKey && typeof enc.secretKey === "string" && !enc.secretKey.startsWith("******")) {
         enc.secretKey = encryptSecret(enc.secretKey);
     }
+    if (enc.apiPassword && typeof enc.apiPassword === "string" && !enc.apiPassword.startsWith("******")) {
+        enc.apiPassword = encryptSecret(enc.apiPassword);
+    }
     return enc;
 };
 
@@ -133,6 +141,7 @@ const sanitizePaymentCredentialRecord = (record: any) => {
     if (safeCreds.apiKey) safeCreds.apiKey = "******";
     if (safeCreds.hmac) safeCreds.hmac = "******";
     if (safeCreds.secretKey) safeCreds.secretKey = "******";
+    if (safeCreds.apiPassword) safeCreds.apiPassword = "******";
     return {
         ...record,
         credentials: safeCreds,
@@ -397,8 +406,9 @@ export const createRestaurant = async (req: Request, res: Response) => {
         // 5. بيانات بوابات الدفع (Payment Credentials)
         if (parsedPaymentCredentials.length > 0) {
             for (const credItem of parsedPaymentCredentials) {
-                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid) continue;
-                const provider = (credItem.provider || (credItem.mid ? "KASHIER" : "PAYMOB")).toUpperCase() as "PAYMOB" | "KASHIER";
+                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid && !credItem.publicKey && !credItem.apiPassword) continue;
+                const rawProvider = (credItem.provider || (credItem.mid ? "KASHIER" : (credItem.publicKey || credItem.apiPassword) ? "GEIDEA" : "PAYMOB")).toUpperCase();
+                const provider = rawProvider as "PAYMOB" | "KASHIER" | "GEIDEA";
                 const title = credItem.title || provider;
                 const environment = (credItem.environment || "LIVE").toUpperCase() as "LIVE" | "TEST";
                 const rawCreds = extractRawCredentials(credItem);
@@ -834,8 +844,9 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         // 👈 تحديث بيانات بوابات الدفع (Payment Credentials)
         if (parsedPaymentCredentials !== undefined) {
             for (const credItem of parsedPaymentCredentials) {
-                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid) continue;
-                const provider = (credItem.provider || (credItem.mid ? "KASHIER" : "PAYMOB")).toUpperCase() as "PAYMOB" | "KASHIER";
+                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid && !credItem.publicKey && !credItem.apiPassword) continue;
+                const rawProvider = (credItem.provider || (credItem.mid ? "KASHIER" : (credItem.publicKey || credItem.apiPassword) ? "GEIDEA" : "PAYMOB")).toUpperCase();
+                const provider = rawProvider as "PAYMOB" | "KASHIER" | "GEIDEA";
                 const title = credItem.title || provider;
                 const environment = (credItem.environment || "LIVE").toUpperCase() as "LIVE" | "TEST";
                 const rawCreds = extractRawCredentials(credItem);

@@ -32,6 +32,7 @@ const sanitizeCredentialRecord = (record: any) => {
     if (safeCreds.apiKey) safeCreds.apiKey = "******";
     if (safeCreds.hmac) safeCreds.hmac = "******";
     if (safeCreds.secretKey) safeCreds.secretKey = "******";
+    if (safeCreds.apiPassword) safeCreds.apiPassword = "******";
     return {
         ...record,
         credentials: safeCreds,
@@ -76,9 +77,12 @@ export const createCredentials = async (req: Request, res: Response): Promise<vo
     if (rawCreds.secretKey && !rawCreds.secretKey.startsWith("******")) {
         encryptedCredentials.secretKey = encryptSecret(rawCreds.secretKey);
     }
+    if (rawCreds.apiPassword && !rawCreds.apiPassword.startsWith("******")) {
+        encryptedCredentials.apiPassword = encryptSecret(rawCreds.apiPassword);
+    }
 
     const newId = uuidv4();
-    const formattedProvider = String(provider).toUpperCase() as "PAYMOB" | "KASHIER";
+    const formattedProvider = String(provider).toUpperCase() as "PAYMOB" | "KASHIER" | "GEIDEA";
 
     await db.insert(restaurantPaymentCredentials).values({
         id: newId,
@@ -153,7 +157,7 @@ export const updateCredential = async (req: Request, res: Response): Promise<voi
     const { provider, title, environment, credentials, logoUrl, isActive } = req.body;
 
     const updatePayload: Record<string, any> = {};
-    if (provider !== undefined) updatePayload.provider = String(provider).toUpperCase() as "PAYMOB" | "KASHIER";
+    if (provider !== undefined) updatePayload.provider = String(provider).toUpperCase() as "PAYMOB" | "KASHIER" | "GEIDEA";
     if (title !== undefined) updatePayload.title = title;
     if (environment !== undefined) updatePayload.environment = environment;
     if (logoUrl !== undefined) updatePayload.logoUrl = logoUrl || null;
@@ -188,6 +192,9 @@ export const updateCredential = async (req: Request, res: Response): Promise<voi
         }
         if (rawCreds?.secretKey && typeof rawCreds.secretKey === "string" && !rawCreds.secretKey.startsWith("******")) {
             mergedCredentials.secretKey = encryptSecret(rawCreds.secretKey);
+        }
+        if (rawCreds?.apiPassword && typeof rawCreds.apiPassword === "string" && !rawCreds.apiPassword.startsWith("******")) {
+            mergedCredentials.apiPassword = encryptSecret(rawCreds.apiPassword);
         }
         updatePayload.credentials = mergedCredentials;
     }

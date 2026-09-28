@@ -15,14 +15,24 @@ const kashierCredentialsSchema = z.object({
     baseUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")),
 });
 
+const geideaCredentialsSchema = z.object({
+    publicKey: z.string().min(1, "Geidea Public Key is required"),
+    apiPassword: z.string().min(1, "Geidea API Password is required"),
+    name: z.string().optional(),
+    environment: z.string().optional(),
+    callbackUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")),
+    returnUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")),
+});
+
 const credentialsSchema = z.union([
     paymobCredentialsSchema,
     kashierCredentialsSchema,
+    geideaCredentialsSchema,
     z.record(z.any()),
 ]);
 
 export const createPaymentCredentialsSchema = z.object({
-    provider: z.enum(["PAYMOB", "KASHIER"]),
+    provider: z.enum(["PAYMOB", "KASHIER", "GEIDEA"]),
     title: z.string().optional(),
     environment: z.enum(["LIVE", "TEST"]).default("LIVE"),
     credentials: credentialsSchema,
@@ -31,7 +41,7 @@ export const createPaymentCredentialsSchema = z.object({
 });
 
 export const updatePaymentCredentialsSchema = z.object({
-    provider: z.enum(["PAYMOB", "KASHIER"]).optional(),
+    provider: z.enum(["PAYMOB", "KASHIER", "GEIDEA"]).optional(),
     title: z.string().optional(),
     environment: z.enum(["LIVE", "TEST"]).optional(),
     credentials: z.record(z.any()).optional(),
