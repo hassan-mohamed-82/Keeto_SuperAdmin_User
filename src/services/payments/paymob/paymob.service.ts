@@ -229,7 +229,10 @@ export class PaymobService {
         const billingData = this.buildBillingData(input);
 
         const authToken = await this.getAuthToken(credentials.apiKey!);
-        const paymobOrderId = await this.createOrder(authToken, orderNumber || orderId, amountCents, currency);
+        // Always use the UUID (orderId) as merchant_order_id so Paymob echoes back
+        // the real UUID in the callback — NOT the orderNumber (ORD-xxx).
+        // This ensures the redirect handler can find the order by orders.id only.
+        const paymobOrderId = await this.createOrder(authToken, orderId, amountCents, currency);
         const paymentKey = await this.getPaymentKey(
             authToken,
             paymobOrderId,

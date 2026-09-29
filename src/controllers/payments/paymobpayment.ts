@@ -302,7 +302,8 @@ export const generatePaymobPaymentSession = async (req: Request, res: Response) 
 export const handlePaymobRedirect = async (req: Request, res: Response) => {
     const success = req.query.success === "true";
 
-    // بايموب ترسل merchant_order_id (الخاص بك) أو order / order_id (الخاص ببايموب)
+    // Paymob echoes back merchant_order_id (our UUID since we now always send orderId,
+    // not orderNumber, to Paymob) or order_id (Paymob's internal order ID = paymentOrderId).
     const rawOrderId = (
         req.query.merchant_order_id ||
         req.query.order_id ||
@@ -312,31 +313,41 @@ export const handlePaymobRedirect = async (req: Request, res: Response) => {
     let callbackSlug = req.query.callbackSlug as string | undefined;
     const frontendBaseUrl = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
-    if (!callbackSlug && rawOrderId) {
+    // Resolve the real orders.id (UUID) from DB. Since we now always send the UUID
+    // as merchant_order_id to Paymob, we only need to search by orders.id and
+    // orders.paymentOrderId — orderNumber is no longer needed.
+    let resolvedOrderId = rawOrderId;
+
+    if (rawOrderId) {
         try {
             const [result] = await db
-                .select({ slug: restaurants.slug })
+                .select({ id: orders.id, slug: restaurants.slug })
                 .from(orders)
                 .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
                 .where(
                     or(
-                        eq(orders.id, rawOrderId),                   // مطابقة الـ UUID الخاص بالداتا بيز
-                        eq(orders.paymentOrderId, rawOrderId)        // مطابقة رقم طلب بايموب
+                        eq(orders.id, rawOrderId),             // UUID — الحالة المعتادة
+                        eq(orders.paymentOrderId, rawOrderId)  // Paymob internal order_id
                     )
                 )
                 .limit(1);
 
-            if (result?.slug) {
-                callbackSlug = result.slug;
+            if (result) {
+                resolvedOrderId = result.id;  // ← UUID الحقيقي دايمًا
+                if (!callbackSlug && result.slug) {
+                    callbackSlug = result.slug;
+                }
+            } else {
+                console.warn(`[Paymob Redirect]: Could not resolve order for raw value "${rawOrderId}" — falling back to raw value in redirect URL.`);
             }
         } catch (error) {
-            console.error("Error fetching restaurant slug for Paymob redirect:", error);
+            console.error("Error fetching order/restaurant slug for Paymob redirect:", error);
         }
     }
 
     const redirectUrl = callbackSlug
-        ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=PAYMOB`
-        : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=PAYMOB`;
+        ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(resolvedOrderId || ""))}&gateway=PAYMOB`
+        : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(resolvedOrderId || ""))}&gateway=PAYMOB`;
 
     return res.redirect(redirectUrl);
 };
