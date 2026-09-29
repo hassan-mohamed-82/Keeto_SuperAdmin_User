@@ -16,6 +16,8 @@ export const restaurants = mysqlTable("restaurants", {
     addressAr: text("address_ar").default(''),
     addressFr: text("address_fr").default(''),
 
+    slug: varchar("slug", { length: 255 }).unique(),
+
     cuisineId: json("cuisine_id").$type<string[]>().default([]),
     cityId: char("city_id", { length: 36 }).references(() => cities.id),
     zoneId: char("zone_id", { length: 36 }).references(() => zones.id),

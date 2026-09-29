@@ -3,7 +3,7 @@ import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound } from "../../Errors";
 import { PaymobService } from "../../services/payments/paymob/paymob.service";
 import { db } from "../../models/connection";
-import { orders, users, restaurantPaymentCredentials, restaurantSettings, paymentMethods } from "../../models/schema";
+import { orders, users, restaurantPaymentCredentials, restaurantSettings, paymentMethods, restaurants } from "../../models/schema";
 import { eq, or, like, and } from "drizzle-orm";
 import { safeDecrypt } from "../../utils/Safedecrypt";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
@@ -299,16 +299,44 @@ export const generatePaymobPaymentSession = async (req: Request, res: Response) 
  * Endpoint: GET /payments/paymob/callback
  * This route is ONLY a user browser redirect (like Kashier merchantRedirect), NOT for confirming payments!
  */
-export const handlePaymobRedirect = (req: Request, res: Response) => {
+export const handlePaymobRedirect = async (req: Request, res: Response) => {
     const success = req.query.success === "true";
-    const orderId = req.query.merchant_order_id || req.query.order_id || "";
-    const callbackSlug = req.query.callbackSlug as string | undefined;
+
+    // بايموب ترسل merchant_order_id (الخاص بك) أو order / order_id (الخاص ببايموب)
+    const rawOrderId = (
+        req.query.merchant_order_id ||
+        req.query.order_id ||
+        req.query.order
+    ) as string | undefined;
+
+    let callbackSlug = req.query.callbackSlug as string | undefined;
     const frontendBaseUrl = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
-    // If a restaurant slug is available, redirect to the restaurant's profile page
+    if (!callbackSlug && rawOrderId) {
+        try {
+            const [result] = await db
+                .select({ slug: restaurants.slug })
+                .from(orders)
+                .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+                .where(
+                    or(
+                        eq(orders.id, rawOrderId),                   // مطابقة الـ UUID الخاص بالداتا بيز
+                        eq(orders.paymentOrderId, rawOrderId)        // مطابقة رقم طلب بايموب
+                    )
+                )
+                .limit(1);
+
+            if (result?.slug) {
+                callbackSlug = result.slug;
+            }
+        } catch (error) {
+            console.error("Error fetching restaurant slug for Paymob redirect:", error);
+        }
+    }
+
     const redirectUrl = callbackSlug
-        ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=PAYMOB`
-        : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=PAYMOB`;
+        ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=PAYMOB`
+        : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=PAYMOB`;
 
     return res.redirect(redirectUrl);
 };

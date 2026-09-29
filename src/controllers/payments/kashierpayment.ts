@@ -4,8 +4,8 @@ import { BadRequest } from "../../Errors";
 import { verifyKashierWebhookSignature } from "../../services/payments/kashier/kashier";
 import { KashierService } from "../../services/payments/kashier/kashier.service";
 import { db } from "../../models/connection";
-import { orders, users, restaurantSettings } from "../../models/schema";
-import { eq } from "drizzle-orm";
+import { orders, users, restaurantSettings, restaurants } from "../../models/schema";
+import { eq, or } from "drizzle-orm";
 import { decryptSecret } from "../../utils/encryption";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
 import { confirmOrderPayment, recordFailedPayment } from "../../helpers/orderPaymentConfirmation";
@@ -265,16 +265,42 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
  * This route is ONLY a user browser redirect, NOT for confirming payments!
  * Payment confirmation is handled exclusively via the server-to-server webhook.
  */
-export const handleKashierRedirect = (req: Request, res: Response) => {
-    const success = (req.query.status || "").toString().toUpperCase() === "SUCCESS";
-    const orderId = req.query.orderId || req.query.order || "";
-    const callbackSlug = req.query.callbackSlug as string | undefined;
+export const handleKashierRedirect = async (req: Request, res: Response) => {
+    const success = req.query.success === "true";
+
+    const rawOrderId = (
+        req.query.order_id ||
+        req.query.order
+    ) as string | undefined;
+
+    let callbackSlug = req.query.callbackSlug as string | undefined;
     const frontendBaseUrl = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
-    // If a restaurant slug is available, redirect to the restaurant's profile page
+    if (!callbackSlug && rawOrderId) {
+        try {
+            const [result] = await db
+                .select({ slug: restaurants.slug })
+                .from(orders)
+                .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+                .where(
+                    or(
+                        eq(orders.id, rawOrderId),
+                        eq(orders.paymentOrderId, rawOrderId)
+                    )
+                )
+                .limit(1);
+
+            if (result?.slug) {
+                callbackSlug = result.slug;
+            }
+        } catch (error) {
+            console.error("Error fetching restaurant slug for Kashier redirect:", error);
+        }
+    }
+
     const redirectUrl = callbackSlug
-        ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=KASHIER`
-        : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(orderId))}&gateway=KASHIER`;
+        ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=KASHIER`
+        : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=KASHIER`;
 
     return res.redirect(redirectUrl);
 };

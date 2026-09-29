@@ -292,7 +292,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         });
         addressId = newAddressId;
     }
-
+    
     // ==========================================
     // 🛡️ 1. Validation
     // ==========================================
@@ -367,6 +367,16 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (!restaurant) throw new BadRequest("Restaurant not found");
     if (!plan) {
         throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
+    }
+
+    if(!restaurant.slug && restaurantName) 
+    {
+        await db
+            .update(restaurants)
+            .set({
+                slug: restaurantName,
+            })
+            .where(eq(restaurants.id, restaurant.id));
     }
 
     // ==========================================

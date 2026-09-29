@@ -235,7 +235,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans,
         type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor,
-        callcenterphone, paymentGatewayType, enableOnlinePayment
+        callcenterphone, paymentGatewayType, enableOnlinePayment , slug
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -321,6 +321,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
             logo: logoUrl || '',
             cover: coverUrl || '',
+            slug: slug || '',
             lat: lat || '',
             lng: lng || '',
             deliveryRadiusKm: deliveryRadiusKm ? clean(deliveryRadiusKm) : null,
@@ -486,6 +487,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         lat: restaurants.lat,
         lng: restaurants.lng,
         cover: restaurants.cover,
+        slug: restaurants.slug,
         status: restaurants.status,
         type: restaurants.type, // 👈 استرجاع النوع
         salesId: restaurants.salesId, // 👈 استرجاع المندوب
@@ -551,6 +553,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             addressFr: r.addressFr,
             logo: r.logo,
             cover: r.cover,
+            slug: r.slug,
             status: r.status,
             type: r.type,
             salesId: r.salesId,
@@ -666,7 +669,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
         type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId,
-        callcenterphone, paymentGatewayType, enableOnlinePayment
+        callcenterphone, paymentGatewayType, enableOnlinePayment ,slug
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -736,7 +739,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (lat !== undefined) restaurantUpdateData.lat = lat;
     if (lng !== undefined) restaurantUpdateData.lng = lng;
     if (deliveryRadiusKm !== undefined) restaurantUpdateData.deliveryRadiusKm = deliveryRadiusKm;
-
+    if (slug !== undefined) restaurantUpdateData.slug = slug;
     if (type !== undefined) restaurantUpdateData.type = resolvedType; // 👈 تحديث النوع
     if (salesId !== undefined) restaurantUpdateData.salesId = resolvedSalesId; // 👈 تحديث المندوب
     if (ownerposition !== undefined) restaurantUpdateData.ownerposition = (ownerposition === "" || ownerposition === null) ? null : ownerposition; // 👈 تحديث منصب المالك

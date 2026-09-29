@@ -3,7 +3,7 @@ import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound } from "../../Errors";
 import { GeideaService } from "../../services/payments/geidea/geidea.service";
 import { db } from "../../models/connection";
-import { orders, users, restaurantPaymentCredentials, restaurantSettings } from "../../models/schema";
+import { orders, users, restaurantPaymentCredentials, restaurantSettings, restaurants } from "../../models/schema";
 import { eq, or, and } from "drizzle-orm";
 import { safeDecrypt } from "../../utils/Safedecrypt";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
@@ -239,23 +239,47 @@ export const handleGeideaWebhook = async (req: Request, res: Response) => {
 export const handleGeideaRedirect = async (req: Request, res: Response) => {
     try {
         const query = req.query as Record<string, string>;
-        const responseCode = query.responseCode || query.ResponseCode;
-        const merchantReferenceId = query.merchantReferenceId || query.orderId;
+        const success = query.success === "true";
+        const responseCode = query.responseCode;
         const sessionId = query.sessionId || query.orderId;
-        const callbackSlug = query.callbackSlug;
+        const merchantReferenceId = query.merchantReferenceId || query.orderId;
 
-        console.log("[Geidea Redirect Callback]:", query);
-
-        const appBaseUrl = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+        const rawOrderId = (
+            req.query.merchant_order_id ||
+            req.query.order_id ||
+            req.query.order
+        ) as string | undefined;
 
         const isSuccess = responseCode === "000" || query.status === "Success" || query.status === "SUCCESS";
+        let callbackSlug = req.query.callbackSlug as string | undefined;
+        const frontendBaseUrl = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
-        let redirectUrl: string;
-        if (callbackSlug) {
-            redirectUrl = `${appBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&payment_status=${isSuccess ? "success" : "failed"}`;
-        } else {
-            redirectUrl = `${appBaseUrl}/payment/result?status=${isSuccess ? "success" : "failed"}&orderId=${encodeURIComponent(merchantReferenceId || "")}`;
+        if (!callbackSlug && rawOrderId) {
+            try {
+                const [result] = await db
+                    .select({ slug: restaurants.slug })
+                    .from(orders)
+                    .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+                    .where(
+                        or(
+                            eq(orders.id, rawOrderId),                   // مطابقة الـ UUID الخاص بالداتا بيز
+                            eq(orders.paymentOrderId, rawOrderId)        // مطابقة رقم طلب بايموب
+                        )
+                    )
+                    .limit(1);
+
+                if (result?.slug) {
+                    callbackSlug = result.slug;
+                }
+            } catch (error) {
+                console.error("Error fetching restaurant slug for Paymob redirect:", error);
+            }
         }
+
+        const redirectUrl = callbackSlug
+            ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`
+            : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`;
+
 
         if (merchantReferenceId && isSuccess) {
             // Confirm payment if not already confirmed by webhook
