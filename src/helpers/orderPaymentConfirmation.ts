@@ -246,6 +246,7 @@ export async function recordFailedPayment({
         await tx
             .update(orders)
             .set({
+                status: "cancelled",
                 paymentStatus: "payment_failed",
                 paymentGateway: gateway,
                 paymentTransactionId: transactionId || order.paymentTransactionId,
