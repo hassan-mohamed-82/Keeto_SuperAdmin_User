@@ -27,6 +27,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         process.env.GOOGLE_CLIENT_ID_WEB!,
         process.env.GOOGLE_CLIENT_ID_IOS!,
         process.env.GOOGLE_CLIENT_ID_ANDROID!,
+        process.env.GOOGLE_CLIENT_ID_WEB2!,
       ],
     });
     const payload = ticket.getPayload();
