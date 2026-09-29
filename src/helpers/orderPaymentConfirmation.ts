@@ -6,8 +6,11 @@ import {
     restaurantWalletTransactions,
     paymentMethods,
     paymentTransactions,
+    cartItems,
+    couponUsages,
+    coupons,
 } from "../models/schema";
-import { eq, or, like } from "drizzle-orm";
+import { eq, or, like, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { getNextDailyOrderNumber } from "./getNextDailyOrderNumber";
 import { sendPushNotification } from "../utils/notifications";
@@ -183,6 +186,9 @@ export async function confirmOrderPayment({
             rawResponse: rawPayload || null,
             createdAt: now,
         });
+
+        // تفريغ سلة العميل بعد نجاح وتأكيد الدفع الإلكتروني
+        await tx.delete(cartItems).where(eq(cartItems.userId, order.userId));
     });
 
     // إرسال الإشعار للمطعم بالرقم اليومي المؤكد
@@ -217,9 +223,11 @@ export async function confirmOrderPayment({
 }
 
 /**
- * دالة مركزية لتسجيل فشل الدفع الإلكتروني (Paymob / Kashier)
- * 1. تحديث الأوردر إلى payment_failed
- * 2. تسجيل العملية وسبب الرفض في payment_transactions
+ * دالة مركزية لتسجيل فشل الدفع الإلكتروني (Paymob / Kashier / Geidea)
+ * 1. تحديث الأوردر إلى status: "failed" و paymentStatus: "payment_failed"
+ * 2. الاحتفاظ بسلة المستخدم كما هي (لم تُحذف عند checkout لفيزا)
+ * 3. تسجيل العملية الفاشلة في payment_transactions
+ * 4. استرجاع الكوبون في حال تم استخدامه
  */
 export async function recordFailedPayment({
     orderId,
@@ -243,19 +251,21 @@ export async function recordFailedPayment({
     const now = new Date();
 
     await db.transaction(async (tx) => {
+        // 1. تحديث حالة الأوردر إلى failed بدل cancelled أو الحذف
         await tx
             .update(orders)
             .set({
-                status: "cancelled",
+                status: "failed",
                 paymentStatus: "payment_failed",
                 paymentGateway: gateway,
                 paymentTransactionId: transactionId || order.paymentTransactionId,
                 paymentOrderId: gatewayOrderId || order.paymentOrderId,
-                paymentFailureReason: failureReason || "Payment was rejected or cancelled",
+                paymentFailureReason: failureReason || "Payment was rejected or failed",
                 updatedAt: now,
             })
             .where(eq(orders.id, order.id));
 
+        // 2. تسجيل العملية الفاشلة في payment_transactions
         await tx.insert(paymentTransactions).values({
             id: uuidv4(),
             orderId: order.id,
@@ -268,12 +278,29 @@ export async function recordFailedPayment({
             amount: order.totalAmount,
             currency: "EGP",
             status: "failed",
-            failureReason: failureReason || "Payment was rejected or cancelled",
+            failureReason: failureReason || "Payment was rejected or failed",
             rawResponse: rawPayload || null,
             createdAt: now,
         });
+
+        // 3. استرجاع الكوبون إن وجد حتى لا يخسره العميل
+        const [usage] = await tx
+            .select()
+            .from(couponUsages)
+            .where(eq(couponUsages.orderId, order.id))
+            .limit(1);
+
+        if (usage) {
+            await tx.delete(couponUsages).where(eq(couponUsages.id, usage.id));
+            if (usage.couponId) {
+                await tx
+                    .update(coupons)
+                    .set({ usedCount: sql`GREATEST(used_count - 1, 0)` })
+                    .where(eq(coupons.id, usage.couponId));
+            }
+        }
     });
 
-    console.log(`[RecordFailedPayment]: Order ${order.orderNumber} recorded as FAILED. Reason: ${failureReason}`);
+    console.log(`[RecordFailedPayment]: Order ${order.orderNumber} marked as FAILED. Reason: ${failureReason}`);
     return { success: true };
 }

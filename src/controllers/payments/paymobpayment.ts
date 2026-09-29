@@ -345,9 +345,13 @@ export const handlePaymobRedirect = async (req: Request, res: Response) => {
         }
     }
 
-    const redirectUrl = callbackSlug
-        ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(resolvedOrderId || ""))}&gateway=PAYMOB`
-        : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(resolvedOrderId || ""))}&gateway=PAYMOB`;
+    const redirectUrl = success
+        ? (callbackSlug
+            ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=true&orderId=${encodeURIComponent(String(resolvedOrderId || ""))}&gateway=PAYMOB`
+            : `${frontendBaseUrl}/payment/result?success=true&orderId=${encodeURIComponent(String(resolvedOrderId || ""))}&gateway=PAYMOB`)
+        : (callbackSlug
+            ? `${frontendBaseUrl}/home/restaurants/${encodeURIComponent(callbackSlug)}/order?success=false&orderId=${encodeURIComponent(String(resolvedOrderId || ""))}&gateway=PAYMOB`
+            : `${frontendBaseUrl}/payment/result?success=false&orderId=${encodeURIComponent(String(resolvedOrderId || ""))}&gateway=PAYMOB`);
 
     return res.redirect(redirectUrl);
 };

@@ -31,7 +31,8 @@ export const createOrderSchema = z.object({
         "out_for_delivery", 
         "delivered", 
         "cancelled", 
-        "refund"
+        "refund",
+        "failed"
     ]).optional(),
     
     cancelReason: z.string().optional(),

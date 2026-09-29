@@ -1124,6 +1124,31 @@ export const checkout = async (req: Request | any, res: Response) => {
         .from(users).where(eq(users.id, userId)).limit(1);
 
     // ==========================================
+    // 11. Create Payment Session BEFORE the DB transaction (if Visa/Online)
+    // If this fails the order is never written to DB — no rollback needed.
+    // ==========================================
+    let paymentSessionData: any = null;
+    if (isVisaPayment) {
+        if (!settings?.enableOnlinePayment) {
+            throw new BadRequest("Online payment is not enabled for this restaurant.");
+        }
+
+        paymentSessionData = await createOrderPaymentSession({
+            orderId,
+            orderNumber,
+            restaurantId,
+            totalAmount,
+            restaurantSlug: restaurant?.slug || restaurantName || undefined,
+            userInfo: {
+                name: userInfo?.name,
+                email: userInfo?.email,
+                phone: userInfo?.phone,
+            },
+        });
+        // ↑ throws BadRequest automatically on failure — order not created yet
+    }
+
+    // ==========================================
     // 🛡️ 10. Execute Order (Transaction)
     // ==========================================
     const now = new Date();
@@ -1222,7 +1247,11 @@ export const checkout = async (req: Request | any, res: Response) => {
         });
 
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
-        await tx.delete(cartItems).where(eq(cartItems.userId, userId));
+
+        // تفريغ السلة فوراً للدفع كاش أو المحفظة. للدفع بالفيزا/أونلاين السلة تظل موجودة حتى يتأكد الدفع، أو تبقى كما هي لو فشل
+        if (!isVisaPayment) {
+            await tx.delete(cartItems).where(eq(cartItems.userId, userId));
+        }
 
         // Increment user's total orders count
         await tx.update(users)
@@ -1367,38 +1396,6 @@ export const checkout = async (req: Request | any, res: Response) => {
         });
     }
 
-    // ==========================================
-    // 12. Create Payment Session (if Visa/Online)
-    // Supports SYSTEM (Kashier) or CUSTOM (Paymob OR Kashier from restaurant_payment_credentials)
-    // ==========================================
-    let paymentSessionData: any = null;
-    if (isVisaPayment) {
-        // 🛡️ Check that the restaurant has online payment enabled
-        if (!settings?.enableOnlinePayment) {
-            throw new BadRequest("Online payment is not enabled for this restaurant.");
-        }
-
-        try {
-            paymentSessionData = await createOrderPaymentSession({
-                orderId,
-                orderNumber,
-                restaurantId,
-                totalAmount,
-                restaurantSlug: restaurantName || restaurant?.name || undefined,
-                userInfo: {
-                    name: userInfo?.name,
-                    email: userInfo?.email,
-                    phone: userInfo?.phone,
-                },
-            });
-        } catch (paymentErr: any) {
-            console.error(`[Checkout] Payment session creation failed for order ${orderId}:`, paymentErr?.message);
-            paymentSessionData = {
-                gateway: settings?.paymentGatewayType || "ONLINE",
-                error: paymentErr?.message || "Failed to create payment session.",
-            };
-        }
-    }
 
     // ==========================================
     // 📤 إرجاع البيانات في الـ Response
@@ -1493,6 +1490,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
                 eq(orders.userId, userId),
                 restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
                 ne(orders.paymentStatus, "pending_payment"),
+                ne(orders.status, "failed"),
                 inArray(orders.status, ["pending", "accepted", "preparing", "out_for_delivery"])
             )
         )
@@ -1610,6 +1608,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             and(
                 eq(orders.userId, userId),
                 restaurantId ? eq(orders.restaurantId, String(restaurantId)) : undefined,
+                ne(orders.status, "failed"),
                 inArray(orders.status, ["delivered", "cancelled", "refund"])
             )
         )
@@ -1745,7 +1744,13 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
-        .where(eq(orders.id, orderId))
+        .where(
+            and(
+                eq(orders.id, orderId),
+                eq(orders.userId, userId),
+                ne(orders.status, "failed")
+            )
+        )
         .limit(1);
 
     if (!orderInfo.length) {

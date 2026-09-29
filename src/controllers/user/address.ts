@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { eq, and, isNotNull } from "drizzle-orm";
+import { eq, and, isNotNull, ne } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../../models/connection";
 import { SuccessResponse } from "../../utils/response";
@@ -130,7 +130,7 @@ export const getUserAddresses = async (req: Request, res: Response) => {
             .where(eq(addresses.userId, userId));
 
         // 2. التحقق من العناوين المرتبطة بطلبات سابقة (isRelatedToOrder)
-        const orderConditions = [eq(orders.userId, userId), isNotNull(orders.addressId)];
+        const orderConditions = [eq(orders.userId, userId), isNotNull(orders.addressId), ne(orders.status, "failed")];
         if (restaurantId && restaurantId.trim() !== "") {
             orderConditions.push(eq(orders.restaurantId, restaurantId.trim()));
         }

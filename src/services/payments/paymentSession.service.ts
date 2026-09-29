@@ -83,13 +83,18 @@ export async function createOrderPaymentSession(
                 baseUrl: rawCreds.baseUrl,
             };
 
+            const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
+            const kashierCallbackUrl = restaurantSlug
+                ? `${backendBaseUrl}/api/payments/kashier/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
+                : `${backendBaseUrl}/api/payments/kashier/callback`;
+
             const kashierSession = await KashierService.createPaymentSession({
                 orderId,
                 amount: totalAmount,
                 currency: "EGP",
                 customerEmail: userInfo?.email || undefined,
                 credentials: decryptedCredentials,
-                merchantRedirect: frontendRedirectUrl,
+                merchantRedirect: kashierCallbackUrl,
             });
 
             return {
@@ -215,12 +220,17 @@ export async function createOrderPaymentSession(
             );
         }
 
+        const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
+        const kashierCallbackUrl = restaurantSlug
+            ? `${backendBaseUrl}/api/payments/kashier/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
+            : `${backendBaseUrl}/api/payments/kashier/callback`;
+
         const kashierSession = await KashierService.createPaymentSession({
             orderId,
             amount: totalAmount,
             currency: "EGP",
             customerEmail: userInfo?.email || undefined,
-            merchantRedirect: frontendRedirectUrl,
+            merchantRedirect: kashierCallbackUrl,
         });
 
         return {

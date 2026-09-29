@@ -81,7 +81,8 @@ export const orders = mysqlTable("orders", {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "refund"
+        "refund",
+        "failed"
     ]).default("pending"),
 
     // Duration (in minutes) the restaurant expects to prepare the order

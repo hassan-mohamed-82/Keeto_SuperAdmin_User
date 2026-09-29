@@ -2,7 +2,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { cities, countries, orders, users, userWallets, zones, userRestaurantPoints, restaurants, addresses } from "../../models/schema";
-import { eq, sql, and, isNotNull } from "drizzle-orm";
+import { eq, sql, and, isNotNull, ne } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import bcrypt from "bcrypt";
@@ -72,7 +72,7 @@ export const getProfile = async (req: Request | any, res: Response) => {
         .where(eq(addresses.userId, userId));
 
     // 🟢 2.1 Check which addresses are linked to existing orders
-    const orderConditions = [eq(orders.userId, userId), isNotNull(orders.addressId)];
+    const orderConditions = [eq(orders.userId, userId), isNotNull(orders.addressId), ne(orders.status, "failed")];
     if (restaurantId && restaurantId.trim() !== "") {
         orderConditions.push(eq(orders.restaurantId, restaurantId.trim()));
     }
@@ -91,9 +91,12 @@ export const getProfile = async (req: Request | any, res: Response) => {
     }));
 
     // 3. Fetch Orders Count (scoped to a restaurant if restaurantId query param is provided)
-    const ordersCountCondition = restaurantId
-        ? and(eq(orders.userId, userId), eq(orders.restaurantId, restaurantId))
-        : eq(orders.userId, userId);
+    const ordersCountCondition = and(
+        eq(orders.userId, userId),
+        ne(orders.status, "failed"),
+        ne(orders.paymentStatus, "pending_payment"),
+        restaurantId ? eq(orders.restaurantId, restaurantId) : undefined
+    );
 
     const [ordersCount] = await db
         .select({ count: sql`COUNT(*)` })

@@ -276,9 +276,13 @@ export const handleGeideaRedirect = async (req: Request, res: Response) => {
             }
         }
 
-        const redirectUrl = callbackSlug
-            ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`
-            : `${frontendBaseUrl}/payment/result?success=${success}&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`;
+        const redirectUrl = success
+            ? (callbackSlug
+                ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=true&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`
+                : `${frontendBaseUrl}/payment/result?success=true&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`)
+            : (callbackSlug
+                ? `${frontendBaseUrl}/home/restaurants/${encodeURIComponent(callbackSlug)}/order?success=false&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`
+                : `${frontendBaseUrl}/payment/result?success=false&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`);
 
 
         if (merchantReferenceId && isSuccess) {

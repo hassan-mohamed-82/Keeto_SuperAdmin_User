@@ -264,10 +264,11 @@ export const getOrdersByRestaurant = async (req: Request, res: Response) => {
         .leftJoin(restaurantZoneDeliveryFees, eq(orders.zoneId, restaurantZoneDeliveryFees.id))
         .leftJoin(zones, or(eq(restaurantZoneDeliveryFees.zoneId, zones.id), eq(orders.zoneId, zones.id)));
 
-    // لا تظهر الأوردرات التي بانتظار الدفع الإلكتروني (pending_payment) للمطعم حتى لا تشوش على المطبخ
+    // لا تظهر الأوردرات التي بانتظار الدفع الإلكتروني (pending_payment) أو الفاشلة (failed) للمطعم حتى لا تشوش على المطبخ
     const conditions = [
         eq(orders.restaurantId, restaurantId),
-        ne(orders.paymentStatus, "pending_payment")
+        ne(orders.paymentStatus, "pending_payment"),
+        ne(orders.status, "failed")
     ];
 
     if (status) {
@@ -648,6 +649,8 @@ export const getAllOrders = async (req: Request, res: Response) => {
 
     if (status) {
         conditions.push(eq(orders.status, status as any));
+    } else {
+        conditions.push(ne(orders.status, "failed"));
     }
 
     // Default to current date if no start or end date is provided
