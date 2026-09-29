@@ -180,22 +180,28 @@ export const updateCredential = async (req: Request, res: Response): Promise<voi
                 existingCreds = JSON.parse(reconstructed);
             } catch {}
         }
+        const sensitiveFields = ["apiKey", "hmac", "secretKey", "apiPassword"];
         const mergedCredentials: Record<string, any> = {
             ...(existingCreds && typeof existingCreds === "object" ? existingCreds : {}),
-            ...(rawCreds && typeof rawCreds === "object" ? rawCreds : {}),
         };
-        if (rawCreds?.apiKey && typeof rawCreds.apiKey === "string" && !rawCreds.apiKey.startsWith("******")) {
-            mergedCredentials.apiKey = encryptSecret(rawCreds.apiKey);
+
+        if (rawCreds && typeof rawCreds === "object") {
+            for (const [k, v] of Object.entries(rawCreds)) {
+                if (!sensitiveFields.includes(k) && v !== undefined && v !== null && v !== "") {
+                    mergedCredentials[k] = v;
+                }
+            }
         }
-        if (rawCreds?.hmac && typeof rawCreds.hmac === "string" && !rawCreds.hmac.startsWith("******")) {
-            mergedCredentials.hmac = encryptSecret(rawCreds.hmac);
+
+        for (const field of sensitiveFields) {
+            const incomingVal = rawCreds?.[field];
+            if (typeof incomingVal === "string" && incomingVal.trim() !== "" && !incomingVal.startsWith("******")) {
+                mergedCredentials[field] = encryptSecret(incomingVal.trim());
+            } else if (existingCreds?.[field] !== undefined && existingCreds?.[field] !== null && existingCreds?.[field] !== "") {
+                mergedCredentials[field] = existingCreds[field];
+            }
         }
-        if (rawCreds?.secretKey && typeof rawCreds.secretKey === "string" && !rawCreds.secretKey.startsWith("******")) {
-            mergedCredentials.secretKey = encryptSecret(rawCreds.secretKey);
-        }
-        if (rawCreds?.apiPassword && typeof rawCreds.apiPassword === "string" && !rawCreds.apiPassword.startsWith("******")) {
-            mergedCredentials.apiPassword = encryptSecret(rawCreds.apiPassword);
-        }
+
         updatePayload.credentials = mergedCredentials;
     }
 

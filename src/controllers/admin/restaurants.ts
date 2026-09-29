@@ -62,23 +62,88 @@ const extractRawCredentials = (item: any): Record<string, any> => {
         } catch {}
     }
     if (creds && typeof creds === "object") {
-        return { ...creds };
+        const cleanCreds: Record<string, any> = {};
+        for (const [k, v] of Object.entries(creds)) {
+            if (v !== undefined && v !== null) cleanCreds[k] = v;
+        }
+        return cleanCreds;
     }
-    return {
-        apiKey: item?.apiKey,
-        hmac: item?.hmac,
-        integrationId: item?.integrationId,
-        iframeId: item?.iframeId,
-        callbackUrl: item?.callbackUrl,
-        mid: item?.mid,
-        secretKey: item?.secretKey,
-        baseUrl: item?.baseUrl,
-        publicKey: item?.publicKey,
-        apiPassword: item?.apiPassword,
-        environment: item?.environment,
-        returnUrl: item?.returnUrl,
-        name: item?.name,
-    };
+    const result: Record<string, any> = {};
+    const candidate = item && typeof item === "object" ? item : {};
+    for (const key of [
+        "apiKey", "hmac", "integrationId", "iframeId", "callbackUrl",
+        "mid", "secretKey", "baseUrl", "publicKey", "apiPassword",
+        "environment", "returnUrl", "name"
+    ]) {
+        if (candidate[key] !== undefined && candidate[key] !== null) {
+            result[key] = candidate[key];
+        }
+    }
+    return result;
+};
+
+// Helper: Safely merge incoming credentials with existing DB credentials without overwriting secrets with '******'
+const mergePaymentCredentials = (
+    existingCredsRaw: any,
+    incomingCredsRaw: any
+): Record<string, any> => {
+    let existing: Record<string, any> = {};
+    if (typeof existingCredsRaw === "string") {
+        try { existing = JSON.parse(existingCredsRaw); } catch { existing = {}; }
+    } else if (existingCredsRaw && typeof existingCredsRaw === "object") {
+        existing = { ...existingCredsRaw };
+    }
+
+    if ("0" in existing && !("mid" in existing) && !("apiKey" in existing)) {
+        try {
+            const reconstructed = Object.keys(existing)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => existing[k])
+                .join("");
+            existing = JSON.parse(reconstructed);
+        } catch {}
+    }
+
+    let incoming: Record<string, any> = {};
+    const credCandidate = incomingCredsRaw?.credentials ?? incomingCredsRaw;
+    if (typeof credCandidate === "string") {
+        try { incoming = JSON.parse(credCandidate); } catch { incoming = {}; }
+    } else if (credCandidate && typeof credCandidate === "object") {
+        incoming = { ...credCandidate };
+    }
+
+    const sensitiveFields = ["apiKey", "hmac", "secretKey", "apiPassword"];
+    const merged: Record<string, any> = {};
+
+    // 1. Copy existing fields from DB
+    for (const [k, v] of Object.entries(existing)) {
+        if (v !== undefined && v !== null) {
+            merged[k] = v;
+        }
+    }
+
+    // 2. Update non-sensitive fields from incoming
+    for (const [k, v] of Object.entries(incoming)) {
+        if (!sensitiveFields.includes(k)) {
+            if (v !== undefined && v !== null && v !== "") {
+                merged[k] = v;
+            }
+        }
+    }
+
+    // 3. Handle sensitive fields safely:
+    // If incoming value is a new real secret (not starting with "******"), encrypt it.
+    // If incoming value is masked ("******") or empty/missing, KEEP the existing DB encrypted value!
+    for (const field of sensitiveFields) {
+        const newVal = incoming[field];
+        if (typeof newVal === "string" && newVal.trim() !== "" && !newVal.startsWith("******")) {
+            merged[field] = encryptSecret(newVal.trim());
+        } else if (existing[field] !== undefined && existing[field] !== null && existing[field] !== "") {
+            merged[field] = existing[field];
+        }
+    }
+
+    return merged;
 };
 
 // Helper: Encrypt sensitive fields in payment credentials
@@ -886,16 +951,12 @@ export const updateRestaurant = async (req: Request, res: Response) => {
 
                 if (existingRecord) {
                     const existingCreds = extractRawCredentials(existingRecord);
-                    const mergedCreds = {
-                        ...existingCreds,
-                        ...rawCreds,
-                    };
-                    const encryptedCreds = encryptCredFields(mergedCreds);
+                    const mergedCreds = mergePaymentCredentials(existingCreds, rawCreds);
                     const updatePayload: Record<string, any> = {
                         provider,
                         title,
                         environment,
-                        credentials: encryptedCreds,
+                        credentials: mergedCreds,
                         updatedAt: new Date(),
                     };
                     if (credItem.logoUrl !== undefined) updatePayload.logoUrl = credItem.logoUrl || null;
