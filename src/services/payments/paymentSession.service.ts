@@ -105,8 +105,10 @@ export async function createOrderPaymentSession(
             const rawCreds = activeGateway.record.credentials as any;
             const decryptedCredentials = {
                 ...rawCreds,
+                apiKey: rawCreds.apiKey ? decryptSecret(rawCreds.apiKey) : "",
                 secretKey: rawCreds.secretKey ? decryptSecret(rawCreds.secretKey) : "",
                 publicKey: rawCreds.publicKey,
+                iframeId: rawCreds.iframeId,
                 hmac: safeDecrypt(rawCreds.hmac),
             };
 
