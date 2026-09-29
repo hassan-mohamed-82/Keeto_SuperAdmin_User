@@ -71,11 +71,19 @@ export const createDiscount = async (req: Request, res: Response) => {
 
     const shouldBeActive = isActive !== undefined ? isActive : true;
     const start = startDate ? new Date(startDate) : null;
-    const end = endDate ? new Date(endDate) : null;
+    let end = endDate ? new Date(endDate) : null;
+
     if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime()))) {
         throw new BadRequest("Invalid discount dates");
     }
-    if (start && end && start > end) throw new BadRequest("startDate must be before endDate");
+
+    if (end) {
+        end.setHours(23, 59, 59, 999);
+    }
+
+    if (start && end && start > end) {
+        throw new BadRequest("startDate must be before endDate");
+    }
 
     const existingFoods = await db.select({ id: food.id })
         .from(food)
@@ -331,8 +339,19 @@ export const updateDiscount = async (req: Request, res: Response) => {
     if (nameFr !== undefined) updateData.nameFr = nameFr;
     if (minOrderAmount !== undefined) updateData.minOrderAmount = minOrderAmount.toString();
     if (usageLimit !== undefined) updateData.usageLimit = usageLimit;
-    if (startDate !== undefined) updateData.startDate = startDate ? new Date(startDate) : null;
-    if (endDate !== undefined) updateData.endDate = endDate ? new Date(endDate) : null;
+    if (startDate !== undefined) {
+        updateData.startDate = startDate ? new Date(startDate) : null;
+    }
+
+    if (endDate !== undefined) {
+        if (endDate) {
+            const updatedEnd = new Date(endDate);
+            updatedEnd.setHours(23, 59, 59, 999); // ضبط التوقيت حتى نهاية اليوم
+            updateData.endDate = updatedEnd;
+        } else {
+            updateData.endDate = null;
+        }
+    }
     if (isActive !== undefined) updateData.isActive = isActive;
     if (logo !== undefined) updateData.logo = FinalLogo;
 
@@ -477,4 +496,4 @@ export const getAllDiscountsByAdmin = getAllDiscounts;
 export const getDiscountByIdByAdmin = getDiscountById;
 export const updateDiscountByAdmin = updateDiscount;
 export const deleteDiscountByAdmin = deleteDiscount;
-export const toggleDiscountStatusByAdmin = toggleDiscountStatus;
+export const toggleDiscountStatusByAdmin = toggleDiscountStatus;
