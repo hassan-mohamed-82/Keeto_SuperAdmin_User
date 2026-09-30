@@ -7,8 +7,7 @@ import { cities } from "./city";
 export const restaurants = mysqlTable("restaurants", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     fcmToken: text("fcm_token"),
-    firebaseProject: mysqlEnum("firebase_project", ["primary", "secondary"]).default("primary"),
-        
+
     name: varchar("name", { length: 255 }).notNull(),
     nameAr: varchar("name_ar", { length: 255 }),
     nameFr: varchar("name_fr", { length: 255 }),
@@ -27,8 +26,8 @@ export const restaurants = mysqlTable("restaurants", {
     likes: int("likes").default(0),
     facebookLink: varchar("facebook_link", { length: 500 }),
     orderLink: varchar("order_link", { length: 500 }),
-    
-    iosApp: varchar("ios_app", { length: 500 }),     
+
+    iosApp: varchar("ios_app", { length: 500 }),
     androidApp: varchar("android_app", { length: 500 }),
 
     logo: varchar("logo", { length: 500 }).notNull(),
@@ -57,6 +56,8 @@ export const restaurants = mysqlTable("restaurants", {
     deliverystatus: mysqlEnum("delivery_status", ["delivered", "not_delivered"]).default("not_delivered"),
 
     appBundleId: varchar("app_bundle_id", { length: 255 }).unique(),
+    iosFirebaseProject: varchar("ios_firebase_project", { length: 50 }).notNull().default("primary"),
+    androidFirebaseProject: varchar("android_firebase_project", { length: 50 }).notNull().default("primary"),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),

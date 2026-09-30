@@ -1,15 +1,16 @@
-import { mysqlTable, varchar, char, timestamp, mysqlEnum, json , text } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, char, timestamp, mysqlEnum, json, text } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
-import { rolesadmin } from "./rolesadmin";
 import { Permission } from "../../../types/custom";
 import { restaurants } from "./restaurants";
 import { branches } from "./branches";
+import { role_restaurant } from "./roles";
 
 export const restrauntadmin = mysqlTable("restrauntadmins", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(uuid())`),
 
     fcmToken: text("fcm_token"),
-    firebaseProject: mysqlEnum("firebase_project", ["primary", "secondary"]).default("primary"),
+    deviceType: mysqlEnum("device_type", ["web", "android", "ios"]).default("android"),
+    firebaseProject: varchar("firebase_project", { length: 50 }).default("primary"),
 
     // الموظف ده تبع أنهي مطعم؟ (إجباري للكل)
     restaurantId: char("restaurant_id", { length: 36 })
@@ -32,11 +33,12 @@ export const restrauntadmin = mysqlTable("restrauntadmins", {
         .default("branch_manager"),
 
     // نظام الصلاحيات المفضل (عبر الـ Role)
-    roleId: char("role_id", { length: 36 }).references(() => rolesadmin.id),
-    
+    roleId: char("role_id", { length: 36 }).references(() => role_restaurant.id, { onDelete: "set null" }),
+
     // اختياري: لو حابة تدي صلاحيات استثنائية مخصصة للشخص ده برضه بره الرول العامة بتاعته
     permissions: json("permissions").$type<Permission[]>().default([]),
-    status: mysqlEnum("status", ["active", "inactive"]).notNull().default("active"),
+
+    status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
