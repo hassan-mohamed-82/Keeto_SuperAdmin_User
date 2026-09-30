@@ -47,7 +47,8 @@ export const orders = mysqlTable("orders", {
         "online_order_web",
         "online_order_app",
         "food_aggregator",
-        "my_keeto"
+        "my_keeto",
+        "pos"
     ]).notNull(),
 
     paymentMethod: char("payment_method", { length: 36 }),
@@ -151,6 +152,7 @@ export const orders = mysqlTable("orders", {
 
     // Unified payment gateway columns (supports Kashier, Paymob, and Geidea)
     paymentGateway: mysqlEnum("payment_gateway", ["kashier", "paymob", "geidea"]),
+    paymentGatewayType: mysqlEnum("payment_gateway_type", ["SYSTEM", "CUSTOM"]),
     paymentOrderId: varchar("payment_order_id", { length: 150 }),        // رقم البوابة: Kashier orderId / Paymob order.id / Geidea orderId
     paymentTransactionId: varchar("payment_transaction_id", { length: 150 }), // رقم العملية: Kashier transactionId / Paymob id / Geidea transactionId
     paymentStatus: mysqlEnum("payment_status", ["pending_payment", "paid", "payment_failed"]),

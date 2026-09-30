@@ -2,8 +2,6 @@ import { db } from "../models/connection";
 import {
     orders,
     restaurantSettings,
-    restaurantWallets,
-    restaurantWalletTransactions,
     paymentMethods,
     paymentTransactions,
     cartItems,
@@ -116,58 +114,6 @@ export async function confirmOrderPayment({
                 updatedAt: now,
             })
             .where(eq(orders.id, order.id));
-
-        // حسابات محفظة المطعم
-        const subtotal = parseFloat(order.subtotal as string || "0");
-        const deliveryFee = parseFloat(order.deliveryFee as string || "0");
-        const appCommission = parseFloat(order.appCommission as string || "0");
-        const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
-
-        let [restaurantWallet] = await tx
-            .select()
-            .from(restaurantWallets)
-            .where(eq(restaurantWallets.restaurantId, order.restaurantId))
-            .for("update");
-
-        if (!restaurantWallet) {
-            await tx.insert(restaurantWallets).values({
-                id: uuidv4(),
-                restaurantId: order.restaurantId,
-                balance: "0.00",
-                collectedCash: "0.00",
-                totalEarning: "0.00",
-            });
-            restaurantWallet = {
-                balance: "0.00",
-                collectedCash: "0.00",
-                totalEarning: "0.00",
-            } as any;
-        }
-
-        const currentRestBalance = parseFloat(restaurantWallet.balance as string);
-        const currentTotalEarning = parseFloat(restaurantWallet.totalEarning as string);
-        const newRestBalance = roundMoney(currentRestBalance + restaurantEarning);
-
-        await tx
-            .update(restaurantWallets)
-            .set({
-                balance: newRestBalance.toFixed(2),
-                totalEarning: roundMoney(currentTotalEarning + restaurantEarning).toFixed(2),
-            })
-            .where(eq(restaurantWallets.restaurantId, order.restaurantId));
-
-        await tx.insert(restaurantWalletTransactions).values({
-            id: uuidv4(),
-            restaurantId: order.restaurantId,
-            type: "order_payment",
-            amount: `${restaurantEarning.toFixed(2)}`,
-            balanceBefore: currentRestBalance.toFixed(2),
-            balanceAfter: newRestBalance.toFixed(2),
-            method: digitalMethod?.name || gateway,
-            reference: order.orderNumber,
-            note: `Earnings added from confirmed ${gateway} digital payment`,
-            createdAt: now,
-        });
 
         // تسجيل العملية في جدول payment_transactions
         await tx.insert(paymentTransactions).values({

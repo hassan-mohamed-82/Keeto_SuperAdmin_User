@@ -7,6 +7,7 @@ import { BadRequest, NotFound } from "../../Errors";
 import { sendPushNotification } from "../../utils/notifications";
 import { v4 as uuidv4 } from "uuid";
 import PDFDocument from "pdfkit";
+import { handleCancelledOrder, settleDeliveredOrder } from "../../services/restaurantWalletService";
 
 // ==========================================
 // Helper: استنتاج الزون من إحداثيات العنوان
@@ -772,10 +773,14 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
 
     let reason: any = null;
     if (status === "cancelled") {
+        const cancelReasonType = req.body.cancelReasonType === "user" ? "user" : "restaurant";
+        if (cancelReasonType === "user" && !isSuperAdmin) {
+            throw new BadRequest("Only a super admin can cancel an order on behalf of the user");
+        }
         const [found] = await db.select().from(selectReasons)
-            .where(and(eq(selectReasons.id, cancelReasonId), eq(selectReasons.type, "restaurant")))
+            .where(and(eq(selectReasons.id, cancelReasonId), eq(selectReasons.type, cancelReasonType)))
             .limit(1);
-        if (!found) throw new BadRequest("Invalid cancel reason for restaurant");
+        if (!found) throw new BadRequest(`Invalid cancel reason for ${cancelReasonType}`);
         reason = found;
     }
 
@@ -786,9 +791,20 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
                 status: status,
                 cancelReasonId: status === "cancelled" ? reason.id : null,
                 cancelReason: status === "cancelled" ? reason.name : null,
+                cancelReasonType: status === "cancelled" ? reason.type : null,
                 updatedAt: new Date()
             })
             .where(eq(orders.id, orderId));
+
+        if (status === "delivered") {
+            await settleDeliveredOrder(orderId, tx);
+        } else if (status === "cancelled") {
+            await handleCancelledOrder({
+                orderId,
+                cancelReasonType: reason.type,
+                tx,
+            });
+        }
 
         // ==========================================
         // 💰 2. الـ Refund لمحفظة العميل (User Wallet) عند الإلغاء
@@ -834,74 +850,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
                 }
             }
 
-            // ==========================================
-            // 💰 3. التسوية العكسية لمحفظة المطعم (Restaurant Wallet Reversal)
-            // ==========================================
-            let payment = null;
-
-            if (existingOrder.paymentMethod) {
-                [payment] = await tx
-                    .select()
-                    .from(paymentMethods)
-                    .where(eq(paymentMethods.id, existingOrder.paymentMethod))
-                    .limit(1);
-            }
-            const pmName = (payment?.name || "").toLowerCase();
-            const isCashPayment = pmName.includes("cash") || pmName.includes("استلام");
-
-            const appCommission = parseFloat(existingOrder.appCommission as string || "0");
-            const serviceFee = parseFloat(existingOrder.serviceFee as string || "0");
-            const totalAmount = parseFloat(existingOrder.totalAmount as string || "0");
-            const subtotal = parseFloat(existingOrder.subtotal as string || "0");
-            const deliveryFee = parseFloat(existingOrder.deliveryFee as string || "0");
-
-            const appDues = appCommission + serviceFee;
-            const restaurantEarning = subtotal + deliveryFee - appCommission;
-
-            let [restWallet] = await tx.select().from(restaurantWallets)
-                .where(eq(restaurantWallets.restaurantId, existingOrder.restaurantId)).limit(1);
-
-            if (!restWallet) {
-                await tx.insert(restaurantWallets).values({ id: uuidv4(), restaurantId: existingOrder.restaurantId });
-                [restWallet] = await tx.select().from(restaurantWallets)
-                    .where(eq(restaurantWallets.restaurantId, existingOrder.restaurantId)).limit(1);
-            }
-
-            let currentBalance = parseFloat(restWallet.balance as string || "0");
-            let currentCollectedCash = parseFloat(restWallet.collectedCash as string || "0");
-            let currentTotalEarning = parseFloat(restWallet.totalEarning as string || "0");
-
-            if (isCashPayment) {
-                currentBalance += appDues;
-                currentCollectedCash -= totalAmount;
-            } else {
-                currentBalance -= restaurantEarning;
-            }
-            currentTotalEarning -= restaurantEarning;
-
-            const balanceAfterPenalty = currentBalance - appDues;
-
-            await tx.update(restaurantWallets)
-                .set({
-                    balance: balanceAfterPenalty.toFixed(2),
-                    collectedCash: currentCollectedCash.toFixed(2),
-                    totalEarning: currentTotalEarning.toFixed(2),
-                    updatedAt: new Date()
-                })
-                .where(eq(restaurantWallets.restaurantId, existingOrder.restaurantId));
-
-            await tx.insert(restaurantWalletTransactions).values({
-                id: uuidv4(),
-                restaurantId: existingOrder.restaurantId,
-                type: "order_payment",
-                amount: `-${appDues.toFixed(2)}`,
-                balanceBefore: currentBalance.toFixed(2),
-                balanceAfter: balanceAfterPenalty.toFixed(2),
-                method: existingOrder.paymentMethod,
-                reference: existingOrder.orderNumber,
-                note: `Order Reversal & Penalty: Cancelled by restaurant. Commission deducted: ${appDues}`,
-                createdAt: new Date()
-            });
         }
 
         // ==========================================

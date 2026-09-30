@@ -2,7 +2,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import {
-    restaurantWallets, restaurantWalletTransactions,
     restaurantZoneDeliveryFees, zoneDeliveryFees, restaurantSettings,
     restaurantSchedules, cartItems, users, addresses, branches,
     userWallets, userWalletTransactions, paymentMethods,
@@ -43,6 +42,7 @@ import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
 import { createOrderPaymentSession } from "../../services/payments/paymentSession.service";
 import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
+import { handleCancelledOrder, mapOrderSourceToPlatformType } from "../../services/restaurantWalletService";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -337,6 +337,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (!userCart.length) throw new BadRequest("Your cart is empty");
 
     const restaurantId = userCart[0].restaurantId;
+    const storedOrderSource = orderSource === "mykeeto" ? "my_keeto" : orderSource;
 
     // Run block check in parallel with cart retrieval setup
     await validateUserNotBlocked(userId, restaurantId);
@@ -356,7 +357,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             .where(
                 and(
                     eq(restaurantBusinessPlans.restaurantId, restaurantId),
-                    eq(restaurantBusinessPlans.platformType, orderSource as any)
+                    eq(restaurantBusinessPlans.platformType, mapOrderSourceToPlatformType(orderSource))
                 )
             )
             .limit(1),
@@ -1217,8 +1218,9 @@ export const checkout = async (req: Request | any, res: Response) => {
             branchId: resolvedBranchId,
             zoneId: resolvedZoneId,
             addressId: addressId || null,
-            orderSource,
+            orderSource: storedOrderSource,
             paymentMethod,
+            paymentGatewayType: settings?.paymentGatewayType || "SYSTEM",
             paymentStatus: isVisaPayment ? "pending_payment" : "paid",
             orderType: resolvedOrderType,
             subtotal: subtotal.toFixed(2),
@@ -1312,59 +1314,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
         }
 
-        // 5. Restaurant wallet calculations (only for cash or wallet payments; digital payment credited upon webhook confirmation)
-        if (!isVisaPayment) {
-            let [restaurantWallet] = await tx.select().from(restaurantWallets).where(eq(restaurantWallets.restaurantId, restaurantId)).for("update");
-
-            if (!restaurantWallet) {
-                await tx.insert(restaurantWallets).values({
-                    id: uuidv4(),
-                    restaurantId: restaurantId,
-                    balance: "0.00",
-                    collectedCash: "0.00",
-                    totalEarning: "0.00"
-                });
-                restaurantWallet = { balance: "0.00", collectedCash: "0.00", totalEarning: "0.00" } as any;
-            }
-
-            const currentRestBalance = parseFloat(restaurantWallet.balance as string);
-            const currentCollectedCash = parseFloat(restaurantWallet.collectedCash as string);
-            const currentTotalEarning = parseFloat(restaurantWallet.totalEarning as string);
-
-            const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
-            const appDues = roundMoney(appCommission + serviceFee);
-
-            let newRestBalance = currentRestBalance;
-            let newCollectedCash = currentCollectedCash;
-
-            if (isCashPayment) {
-                newRestBalance = roundMoney(newRestBalance - appDues);
-                newCollectedCash = roundMoney(newCollectedCash + totalAmount);
-            } else {
-                newRestBalance = roundMoney(newRestBalance + restaurantEarning);
-            }
-
-            await tx.update(restaurantWallets)
-                .set({
-                    balance: newRestBalance.toFixed(2),
-                    collectedCash: newCollectedCash.toFixed(2),
-                    totalEarning: roundMoney(currentTotalEarning + restaurantEarning).toFixed(2)
-                })
-                .where(eq(restaurantWallets.restaurantId, restaurantId));
-
-            await tx.insert(restaurantWalletTransactions).values({
-                id: uuidv4(),
-                restaurantId,
-                type: "order_payment",
-                amount: isCashPayment ? `-${appDues.toFixed(2)}` : `${restaurantEarning.toFixed(2)}`,
-                balanceBefore: currentRestBalance.toFixed(2),
-                balanceAfter: newRestBalance.toFixed(2),
-                method: paymentMethodName,
-                reference: orderNumber,
-                note: isCashPayment ? "Commission deducted from cash order" : "Earnings added from digital payment",
-                createdAt: now
-            });
-        }
+        // Wallet settlement is recorded once the restaurant marks the order delivered.
     });
 
     // ==========================================
@@ -1906,7 +1856,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
             .where(
                 and(
                     eq(restaurantBusinessPlans.restaurantId, restaurantId),
-                    eq(restaurantBusinessPlans.platformType, orderSource as any)
+                    eq(restaurantBusinessPlans.platformType, mapOrderSourceToPlatformType(orderSource))
                 )
             )
             .limit(1),
@@ -2085,15 +2035,6 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
 
         // حسابات المبالغ التي تم دفعها أو خصمها
         const totalAmount = parseFloat(order.totalAmount as string || "0");
-        const appCommission = parseFloat(order.appCommission as string || "0");
-        const serviceFee = parseFloat(order.serviceFee as string || "0");
-        const subtotal = parseFloat(order.subtotal as string || "0");
-        const deliveryFee = parseFloat(order.deliveryFee as string || "0");
-        const appDues = appCommission + serviceFee;
-        const restaurantEarning = subtotal + deliveryFee - appCommission;
-
-        const isCashPayment = order.paymentMethod === "cash_on_delivery" || order.paymentMethod === "cash"; // Assuming ID handling elsewhere or this is resolved
-
         // إرجاع فلوس المستخدم لو دفع بالمحفظة
         // note: paymentMethod stores UUID, so we check userWalletTransactions to know if it was a wallet payment
         const [walletTx] = await tx.select().from(userWalletTransactions).where(and(eq(userWalletTransactions.reference, order.orderNumber), eq(userWalletTransactions.transactionType, "order_payment"))).limit(1);
@@ -2118,43 +2059,7 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
             }
         }
 
-        // إرجاع الفلوس/العمولات من المطعم (حيث أن الإلغاء من المستخدم، المطعم لا يتحمل العمولة)
-        const [restaurantWallet] = await tx.select().from(restaurantWallets).where(eq(restaurantWallets.restaurantId, order.restaurantId)).limit(1);
-        if (restaurantWallet) {
-            let currentRestBalance = parseFloat(restaurantWallet.balance as string || "0");
-            let currentCollectedCash = parseFloat(restaurantWallet.collectedCash as string || "0");
-            let currentTotalEarning = parseFloat(restaurantWallet.totalEarning as string || "0");
-
-            if (isCashPayment) {
-                // نلغي خصم العمولة من رصيد المطعم، ونلغي الكاش المحصل
-                currentRestBalance += appDues;
-                currentCollectedCash -= totalAmount;
-            } else {
-                // نلغي الأرباح اللي انضافت للمطعم
-                currentRestBalance -= restaurantEarning;
-            }
-
-            await tx.update(restaurantWallets)
-                .set({
-                    balance: currentRestBalance.toString(),
-                    collectedCash: currentCollectedCash.toString(),
-                    totalEarning: (currentTotalEarning - restaurantEarning).toString()
-                })
-                .where(eq(restaurantWallets.restaurantId, order.restaurantId));
-
-            // تسجيل العملية
-            await tx.insert(restaurantWalletTransactions).values({
-                id: uuidv4(),
-                restaurantId: order.restaurantId,
-                type: "order_payment", // Or create a new type "refund"
-                amount: isCashPayment ? `${appDues}` : `-${restaurantEarning}`,
-                balanceBefore: restaurantWallet.balance as string,
-                balanceAfter: currentRestBalance.toString(),
-                method: order.paymentMethod,
-                reference: order.orderNumber,
-                note: "Refund/Revert due to user cancellation"
-            });
-        }
+        await handleCancelledOrder({ orderId, cancelReasonType: "user", tx });
     });
 
     // 4. إرسال إشعارات إلغاء الطلب (Type: cancel)
