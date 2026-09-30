@@ -223,6 +223,7 @@ export const formatProductsWithDiscounts = async <T extends { id?: string | null
                 nameAr: discounts.nameAr,
                 nameFr: discounts.nameFr,
                 logo: discounts.logo,
+                mainDiscountId: discounts.id,
             })
             .from(discountGroups)
             .innerJoin(discounts, eq(discountGroups.discountId, discounts.id))

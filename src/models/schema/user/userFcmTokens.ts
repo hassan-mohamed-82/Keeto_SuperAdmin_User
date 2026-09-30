@@ -16,5 +16,5 @@ export const userFcmTokens = mysqlTable("user_fcm_tokens", {
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow()
 }, (table) => ({
-    userRestaurantTokenIdx: uniqueIndex("unique_user_restaurant_device ").on(table.userId, table.restaurantId, table.deviceType),
+    userRestaurantTokenIdx: uniqueIndex("unique_user_restaurant_device").on(table.userId, table.restaurantId, table.deviceType),
 }));

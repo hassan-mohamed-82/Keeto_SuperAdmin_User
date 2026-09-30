@@ -1,24 +1,24 @@
-import admin from "firebase-admin";
+// import admin from "firebase-admin";
 
-const serviceAccount = {
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-} as admin.ServiceAccount;
+// const serviceAccount = {
+//   projectId: process.env.FIREBASE_PROJECT_ID,
+//   clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+//   privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+// } as admin.ServiceAccount;
 
-if (!serviceAccount.privateKey) {
-  throw new Error("Firebase service account is missing in .env");
-}
+// if (!serviceAccount.privateKey) {
+//   throw new Error("Firebase service account is missing in .env");
+// }
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-}
+// if (!admin.apps.length) {
+//   admin.initializeApp({
+//     credential: admin.credential.cert(serviceAccount),
+//   });
+// }
 
-export const messaging: admin.messaging.Messaging = admin.messaging();
-export const firestore = admin.firestore();
-export default admin;
+// export const messaging: admin.messaging.Messaging = admin.messaging();
+// export const firestore = admin.firestore();
+// export default admin;
 
 
 // import admin from "firebase-admin";
@@ -95,3 +95,47 @@ export default admin;
 // export const firestore: admin.firestore.Firestore = primaryApp.firestore();
 
 // export default admin;
+
+
+
+import admin from "firebase-admin";
+
+const PROJECTS: Record<string, string> = {
+  primary: "FIREBASE",
+  secondary: "FIREBASE2",
+};
+
+// المشروع اللي فيه تطبيقات الأدمن (Android + iOS)
+export const ADMIN_PROJECT = "primary";
+
+export type FirebaseProjectKey = string;
+
+function getApp(key: string): admin.app.App {
+  const existing = admin.apps.find((a) => a?.name === key);
+  if (existing) return existing;
+
+  const prefix = PROJECTS[key];
+  if (!prefix) throw new Error(`Unknown Firebase project key: "${key}"`);
+
+  const projectId = process.env[`${prefix}_PROJECT_ID`];
+  const clientEmail = process.env[`${prefix}_CLIENT_EMAIL`];
+  const privateKey = process.env[`${prefix}_PRIVATE_KEY`]?.replace(/\\n/g, "\n");
+
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error(`Missing env vars for Firebase project "${key}" (${prefix}_*)`);
+  }
+
+  return admin.initializeApp(
+    { credential: admin.credential.cert({ projectId, clientEmail, privateKey }) },
+    key
+  );
+}
+
+export function getMessaging(key: string = "primary") {
+  return getApp(key).messaging();
+}
+
+// للكود القديم اللي بيستورد messaging مباشرة
+export const messaging = getMessaging("primary");
+export const firestore = getApp("primary").firestore();
+export default admin;

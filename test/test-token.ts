@@ -27,7 +27,7 @@ const secondaryApp = admin.initializeApp(
 );
 
 // FCM Token to test
-const tokenToTest = 'copmOYf-rUmgsgFcVFdSCC:APA91bHrfffHKuXVIVTZ1M0-pKK9kqCv033RMiBXyKKK2udDnb73G6rGZS0KPP9pZ93B2f00OCDcHsfNVk_4Kp2ezorC0UgpFCVP_psowg33zSNvikaft5A';
+const tokenToTest = 'fEwH0K3pMEM-gKN_zr3ORo:APA91bH5uha2txQR9i6-le5KqBC9eFKQTyOFNT4MManiNPurspT6WoH9U1Y1RHoO9eHln_muvRJ0yzoQKgh7VAXiXfbJzN0DoxdoOpxgp1gcnygGP1Zh3nk';
 
 async function testTokenLocally(): Promise<void> {
   const message: admin.messaging.Message = {
