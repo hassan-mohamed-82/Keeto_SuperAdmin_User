@@ -98,6 +98,7 @@
 
 
 
+
 import admin from "firebase-admin";
 
 const PROJECTS: Record<string, string> = {
@@ -117,9 +118,19 @@ function getApp(key: string): admin.app.App {
   const prefix = PROJECTS[key];
   if (!prefix) throw new Error(`Unknown Firebase project key: "${key}"`);
 
+  function cleanKey(rawKey: string | undefined): string | undefined {
+    if (!rawKey) return undefined;
+    let k = rawKey.trim();
+    if (k.endsWith(',')) k = k.slice(0, -1).trim();
+    if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
+      k = k.slice(1, -1).trim();
+    }
+    return k.replace(/\\n/g, "\n");
+  }
+
   const projectId = process.env[`${prefix}_PROJECT_ID`];
   const clientEmail = process.env[`${prefix}_CLIENT_EMAIL`];
-  const privateKey = process.env[`${prefix}_PRIVATE_KEY`]?.replace(/\\n/g, "\n");
+  const privateKey = cleanKey(process.env[`${prefix}_PRIVATE_KEY`]);
 
   if (!projectId || !clientEmail || !privateKey) {
     throw new Error(`Missing env vars for Firebase project "${key}" (${prefix}_*)`);
