@@ -22,8 +22,8 @@ export function mapOrderSourceToPlatformType(orderSource: string): PlatformType 
     if (normalized === "my_keeto" || normalized === "mykeeto") return "mykeeto";
     if (normalized === "online_order_web") return "online_order_web";
     if (normalized === "food_aggregator") return "food_aggregator";
-    if (normalized === "pos") return "pos";
-    return "online_order_app";
+    if (normalized === "online_order_app") return "online_order_app";
+    return "pos";
 }
 
 /**
