@@ -8,6 +8,7 @@ import { safeDecrypt } from "../../utils/Safedecrypt";
 import { KashierService } from "./kashier/kashier.service";
 import { PaymobService } from "./paymob/paymob.service";
 import { GeideaService } from "./geidea/geidea.service";
+import { checkAndApplyVisaSwitch } from "../restaurantWalletService";
 
 export interface CreateOrderPaymentSessionParams {
     orderId: string;
@@ -50,6 +51,9 @@ export async function createOrderPaymentSession(
     const frontendRedirectUrl = restaurantSlug
         ? `${appBaseUrl}/profile?callbackSlug=${encodeURIComponent(restaurantSlug)}`
         : `${appBaseUrl}/payment/result`;
+
+    // 1. Just-In-Time check: هل حان موعد السويتش التلقائي لبوابة الفيزا (شرط التاريخ أو المبلغ)؟
+    await checkAndApplyVisaSwitch(restaurantId, 0);
 
     const [settings] = await db
         .select({ paymentGatewayType: restaurantSettings.paymentGatewayType })

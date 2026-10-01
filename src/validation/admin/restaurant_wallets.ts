@@ -23,9 +23,9 @@ export const createWalletTransactionSchema = z.object({
     type: z.enum([
         "order_payment",
         "cash_collection",
-        "withdraw_request",
-        "withdraw_approved",
-        "adjustment"
+        "withdraw",
+        "adjustment",
+        "subscription",
     ], { required_error: "Transaction type is required" }),
     
     amount: z.coerce.string().min(1, "Amount is required"),
@@ -38,3 +38,17 @@ export const createWalletTransactionSchema = z.object({
 });
 
 export const updateWalletTransactionSchema = createWalletTransactionSchema.partial();
+
+// ==========================================
+// 3. Record Subscription Validation
+// ==========================================
+export const recordSubscriptionSchema = z.object({
+    restaurantId: z.string().uuid("Invalid Restaurant ID"),
+    subscriptionType: z.enum(["monthly", "quarterly", "annually"], {
+        required_error: "subscriptionType is required",
+        invalid_type_error: "subscriptionType must be 'monthly', 'quarterly', or 'annually'",
+    }),
+    amount: z.coerce.number().positive("Amount must be > 0"),
+    subscriptionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "subscriptionDate must be in YYYY-MM-DD format").optional(),
+    note: z.string().optional(),
+});

@@ -357,6 +357,34 @@ export const createRestaurant = async (req: Request, res: Response) => {
             ? true
             : Boolean(enableOnlinePayment);
 
+    // ==========================================
+    // 👈 إعدادات switch الفيزة التلقائي
+    // ==========================================
+    const {
+        visaSwitchConditionType,  // "none" | "amount" | "date"
+        visaSwitchAmountThreshold, // رقم (لو النوع amount)
+        visaSwitchDate,            // تاريخ بصيغة "YYYY-MM-DD" (لو النوع date)
+    } = req.body;
+
+    const resolvedVisaSwitchType: "none" | "amount" | "date" =
+        ["amount", "date"].includes(String(visaSwitchConditionType)) 
+            ? (String(visaSwitchConditionType) as "amount" | "date")
+            : "none";
+
+    // تحقق: لو اختار amount لازم يبعت قيمة
+    if (resolvedVisaSwitchType === "amount") {
+        if (!visaSwitchAmountThreshold || parseFloat(visaSwitchAmountThreshold) <= 0) {
+            throw new BadRequest("visaSwitchAmountThreshold is required and must be > 0 when visaSwitchConditionType is 'amount'");
+        }
+    }
+
+    // تحقق: لو اختار date لازم يبعت تاريخ
+    if (resolvedVisaSwitchType === "date") {
+        if (!visaSwitchDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(visaSwitchDate))) {
+            throw new BadRequest("visaSwitchDate is required in 'YYYY-MM-DD' format when visaSwitchConditionType is 'date'");
+        }
+    }
+
     // 👈 لو النوع CUSTOM لازم يبعت بيانات بوابة دفع واحدة على الأقل
     if (resolvedPaymentGatewayType === "CUSTOM" && parsedPaymentCredentials.length === 0) {
         throw new BadRequest("paymentCredentials are required when paymentGatewayType is CUSTOM");
@@ -467,6 +495,13 @@ export const createRestaurant = async (req: Request, res: Response) => {
             secondTextColor: secondTextColor ? clean(secondTextColor) : null,
             paymentGatewayType: resolvedPaymentGatewayType, // 👈 نوع بوابة الدفع
             enableOnlinePayment: resolvedEnableOnlinePayment, // 👈 تفعيل الدفع أونلاين
+            // 👈 إعدادات التحويل التلقائي للفيزة
+            visaSwitchConditionType: resolvedVisaSwitchType,
+            visaSwitchAmountThreshold: resolvedVisaSwitchType === "amount" 
+                ? String(parseFloat(visaSwitchAmountThreshold).toFixed(2)) 
+                : null,
+            visaSwitchDate: resolvedVisaSwitchType === "date" ? String(visaSwitchDate) : null,
+            visaSwitchApplied: false,
         });
 
         // 5. بيانات بوابات الدفع (Payment Credentials)
@@ -529,6 +564,12 @@ export const createRestaurant = async (req: Request, res: Response) => {
             callcenterphone: callcenterphone || null,
             paymentGatewayType: resolvedPaymentGatewayType,
             enableOnlinePayment: resolvedEnableOnlinePayment,
+            visaSwitch: {
+                conditionType: resolvedVisaSwitchType,
+                amountThreshold: resolvedVisaSwitchType === "amount" ? visaSwitchAmountThreshold : null,
+                switchDate: resolvedVisaSwitchType === "date" ? visaSwitchDate : null,
+                applied: false,
+            },
             businessPlans: plansToReturn,
             paymentCredentials: credentialsToReturn,
         }
@@ -571,6 +612,11 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         androidApp: restaurants.androidApp,
         paymentGatewayType: restaurantSettings.paymentGatewayType, // 👈 نوع بوابة الدفع
         enableOnlinePayment: restaurantSettings.enableOnlinePayment, // 👈 تفعيل الدفع أونلاين
+        // 👈 إعدادات التحويل التلقائي للفيزة
+        visaSwitchConditionType: restaurantSettings.visaSwitchConditionType,
+        visaSwitchAmountThreshold: restaurantSettings.visaSwitchAmountThreshold,
+        visaSwitchDate: restaurantSettings.visaSwitchDate,
+        visaSwitchApplied: restaurantSettings.visaSwitchApplied,
     })
         .from(restaurants)
         .leftJoin(cities, eq(restaurants.cityId, cities.id))
@@ -641,6 +687,12 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             androidApp: r.androidApp || null,
             paymentGatewayType: r.paymentGatewayType || "SYSTEM", // 👈
             enableOnlinePayment: r.enableOnlinePayment ?? true, // 👈
+            visaSwitch: {
+                conditionType: r.visaSwitchConditionType || "none",
+                amountThreshold: r.visaSwitchConditionType === "amount" ? r.visaSwitchAmountThreshold : null,
+                switchDate: r.visaSwitchConditionType === "date" ? r.visaSwitchDate : null,
+                applied: r.visaSwitchApplied ?? false,
+            },
         };
     });
 
@@ -715,6 +767,12 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         secondTextColor: row.settingsObj?.secondTextColor || null,
         paymentGatewayType: row.settingsObj?.paymentGatewayType || "SYSTEM", // 👈 نوع بوابة الدفع
         enableOnlinePayment: row.settingsObj?.enableOnlinePayment ?? true, // 👈 تفعيل الدفع أونلاين
+        visaSwitch: {
+            conditionType: row.settingsObj?.visaSwitchConditionType || "none",
+            amountThreshold: row.settingsObj?.visaSwitchConditionType === "amount" ? row.settingsObj?.visaSwitchAmountThreshold : null,
+            switchDate: row.settingsObj?.visaSwitchConditionType === "date" ? row.settingsObj?.visaSwitchDate : null,
+            applied: row.settingsObj?.visaSwitchApplied ?? false,
+        },
     };
     delete (formattedRestaurant as any).cuisineId;
 
@@ -784,6 +842,33 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     let resolvedEnableOnlinePayment: boolean | undefined;
     if (enableOnlinePayment !== undefined) {
         resolvedEnableOnlinePayment = enableOnlinePayment === true || enableOnlinePayment === "true";
+    }
+
+    // ==========================================
+    // 👈 إعدادات switch الفيزة التلقائي (يتحدث فقط لو اتبعت)
+    // ==========================================
+    const {
+        visaSwitchConditionType,
+        visaSwitchAmountThreshold,
+        visaSwitchDate,
+    } = req.body;
+
+    let resolvedVisaSwitchType: "none" | "amount" | "date" | undefined;
+    if (visaSwitchConditionType !== undefined) {
+        resolvedVisaSwitchType = ["amount", "date"].includes(String(visaSwitchConditionType))
+            ? (String(visaSwitchConditionType) as "amount" | "date")
+            : "none";
+
+        if (resolvedVisaSwitchType === "amount") {
+            if (!visaSwitchAmountThreshold || parseFloat(visaSwitchAmountThreshold) <= 0) {
+                throw new BadRequest("visaSwitchAmountThreshold is required and must be > 0 when visaSwitchConditionType is 'amount'");
+            }
+        }
+        if (resolvedVisaSwitchType === "date") {
+            if (!visaSwitchDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(visaSwitchDate))) {
+                throw new BadRequest("visaSwitchDate is required in 'YYYY-MM-DD' format when visaSwitchConditionType is 'date'");
+            }
+        }
     }
 
     if (email && existingOwner && email !== existingOwner.email) {
@@ -862,7 +947,8 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         if (
             firstColor !== undefined || secondColor !== undefined ||
             firstTextColor !== undefined || secondTextColor !== undefined ||
-            resolvedPaymentGatewayType !== undefined || resolvedEnableOnlinePayment !== undefined
+            resolvedPaymentGatewayType !== undefined || resolvedEnableOnlinePayment !== undefined ||
+            resolvedVisaSwitchType !== undefined
         ) {
             const settingsUpdateData: any = {};
             if (firstColor !== undefined) settingsUpdateData.firstColor = (firstColor === "" || firstColor === null) ? null : clean(firstColor);
@@ -871,6 +957,18 @@ export const updateRestaurant = async (req: Request, res: Response) => {
             if (secondTextColor !== undefined) settingsUpdateData.secondTextColor = (secondTextColor === "" || secondTextColor === null) ? null : clean(secondTextColor);
             if (resolvedPaymentGatewayType !== undefined) settingsUpdateData.paymentGatewayType = resolvedPaymentGatewayType; // 👈
             if (resolvedEnableOnlinePayment !== undefined) settingsUpdateData.enableOnlinePayment = resolvedEnableOnlinePayment; // 👈
+            // 👈 visaSwitch fields
+            if (resolvedVisaSwitchType !== undefined) {
+                settingsUpdateData.visaSwitchConditionType = resolvedVisaSwitchType;
+                settingsUpdateData.visaSwitchAmountThreshold = resolvedVisaSwitchType === "amount"
+                    ? String(parseFloat(visaSwitchAmountThreshold).toFixed(2))
+                    : null;
+                settingsUpdateData.visaSwitchDate = resolvedVisaSwitchType === "date" ? String(visaSwitchDate) : null;
+                // لو تغير نوع الشرط، نعيد ضبط applied و accumulated fees
+                settingsUpdateData.visaSwitchApplied = false;
+                settingsUpdateData.customGatewayAccumulatedFees = "0.00";
+                settingsUpdateData.gatewayAutoSwitchTriggeredAt = null;
+            }
 
             if (Object.keys(settingsUpdateData).length > 0) {
                 const existingSettings = await tx.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, id)).limit(1);
@@ -1034,7 +1132,19 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         for (const cid of newCuisines) if (!oldCuisines.includes(cid)) await incrementCuisineCount(cid);
     }
 
-    return SuccessResponse(res, { message: "Update restaurant, owner account, and plans success" });
+    return SuccessResponse(res, {
+        message: "Update restaurant, owner account, and plans success",
+        ...(resolvedVisaSwitchType !== undefined && {
+            data: {
+                visaSwitch: {
+                    conditionType: resolvedVisaSwitchType,
+                    amountThreshold: resolvedVisaSwitchType === "amount" ? visaSwitchAmountThreshold : null,
+                    switchDate: resolvedVisaSwitchType === "date" ? visaSwitchDate : null,
+                    applied: false,
+                },
+            },
+        }),
+    });
 };
 
 // ==========================================

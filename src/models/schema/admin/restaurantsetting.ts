@@ -7,7 +7,8 @@ import {
   decimal,
   mysqlEnum,
   char,
-  json
+  json,
+  timestamp
 } from "drizzle-orm/mysql-core";
 
 // 1. جدول الإعدادات العامة
@@ -63,6 +64,22 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   paymentGatewayType: mysqlEnum("payment_gateway_type", ["SYSTEM", "CUSTOM"]).default("SYSTEM"),
   // تمكين/تعطيل دفع الفيزا أونلاين للمطعم
   enableOnlinePayment: boolean("enable_online_payment").default(true),
+
+  // ==========================================
+  // إعدادات التحويل التلقائي للفيزة لـ SYSTEM
+  // ==========================================
+  // نوع شرط التحويل: amount (عند وصول service fees لمبلغ)، date (بعد تاريخ معين)، none (بدون تحويل تلقائي)
+  visaSwitchConditionType: mysqlEnum("visa_switch_condition_type", ["none", "amount", "date"]).default("none"),
+  // المبلغ المستهدف من service fees اللي بعده تتحول الفيزة لـ SYSTEM (لو النوع amount)
+  visaSwitchAmountThreshold: decimal("visa_switch_amount_threshold", { precision: 10, scale: 2 }),
+  // التاريخ اللي بعده تتحول الفيزة لـ SYSTEM (لو النوع date)
+  visaSwitchDate: varchar("visa_switch_date", { length: 10 }),
+  // هل تم التحويل التلقائي فعلًا أم لا
+  visaSwitchApplied: boolean("visa_switch_applied").default(false),
+  // تاريخ ووقت حدوث التحويل التلقائي لـ SYSTEM
+  gatewayAutoSwitchTriggeredAt: timestamp("gateway_auto_switch_triggered_at"),
+  // العداد التراكمي للسيرفيس فيز أثناء تشغيل بوابة CUSTOM لمقارنتها بالـ Threshold
+  customGatewayAccumulatedFees: decimal("custom_gateway_accumulated_fees", { precision: 10, scale: 2 }).default("0.00"),
 });
 
 

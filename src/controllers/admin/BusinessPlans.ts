@@ -1,12 +1,95 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurantBusinessPlans, restaurants } from "../../models/schema";
+import { restaurantBusinessPlans, restaurants, restaurantWallets, restaurantWalletTransactions } from "../../models/schema";
 import { eq, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { v4 as uuidv4 } from "uuid";
 import { UnauthorizedError } from "../../Errors";
+
+// ==========================================
+// Helper: تسجيل الاشتراكات الفعّالة في محفظة المطعم
+// ==========================================
+const recordPlanSubscriptionsInWallet = async (
+    tx: any,
+    restaurantId: string,
+    plan: {
+        isMonthlyActive?: boolean;
+        monthlyAmount?: string;
+        isQuarterlyActive?: boolean;
+        quarterlyAmount?: string;
+        isAnnuallyActive?: boolean;
+        annuallyAmount?: string;
+        subscriptionStartDate?: string;
+    },
+    chargeNow: boolean = true
+) => {
+    // جلب بيانات المحفظة
+    const wallet = await tx
+        .select()
+        .from(restaurantWallets)
+        .where(eq(restaurantWallets.restaurantId, restaurantId))
+        .limit(1);
+
+    if (!wallet[0]) return; // لو مفيش محفظة، نتجاهل
+
+    const currentBalance = parseFloat(wallet[0].balance as string || "0");
+    let currentTotalSubs = parseFloat(wallet[0].totalSubscriptions as string || "0");
+    let newBalance = currentBalance;
+
+    const startDate = plan.subscriptionStartDate || new Date().toISOString().split("T")[0];
+    const walletUpdate: Record<string, string> = {};
+    const subscriptionRecords: any[] = [];
+
+    const handleCycle = (cycleName: string, amountStr?: string, lastField?: string) => {
+        const amount = parseFloat(amountStr || "0");
+        if (amount <= 0) return;
+
+        currentTotalSubs = Math.round((currentTotalSubs + amount + Number.EPSILON) * 100) / 100;
+        walletUpdate.totalSubscriptions = currentTotalSubs.toFixed(2);
+        if (lastField) walletUpdate[lastField] = amount.toFixed(2);
+
+        // إذا كان مطلوب الخصم الآن (الافتراضي عند بداية التسجيل)
+        if (chargeNow) {
+            const prevBalance = newBalance;
+            newBalance = Math.round((newBalance - amount + Number.EPSILON) * 100) / 100;
+            walletUpdate.balance = newBalance.toFixed(2);
+
+            subscriptionRecords.push({
+                id: uuidv4(),
+                restaurantId,
+                type: "subscription",
+                amount: `-${amount.toFixed(2)}`,
+                balanceBefore: prevBalance.toFixed(2),
+                balanceAfter: newBalance.toFixed(2),
+                method: "system",
+                note: `${cycleName} subscription charged to wallet (Start Date: ${startDate}): ${amount.toFixed(2)}`,
+                createdAt: new Date(),
+            });
+        }
+    };
+
+    if (plan.isMonthlyActive) {
+        handleCycle("Monthly", plan.monthlyAmount, "lastMonthlySubscription");
+    }
+    if (plan.isQuarterlyActive) {
+        handleCycle("Quarterly", plan.quarterlyAmount, "lastQuarterlySubscription");
+    }
+    if (plan.isAnnuallyActive) {
+        handleCycle("Annually", plan.annuallyAmount, "lastAnnuallySubscription");
+    }
+
+    if (Object.keys(walletUpdate).length > 0) {
+        await tx.update(restaurantWallets)
+            .set(walletUpdate)
+            .where(eq(restaurantWallets.restaurantId, restaurantId));
+    }
+
+    for (const record of subscriptionRecords) {
+        await tx.insert(restaurantWalletTransactions).values(record);
+    }
+};
 
 // ==========================================
 // 1. إضافة خطط عمل (الـ pos مربوط بـ isOn وبدون عمولات)
@@ -25,7 +108,8 @@ export const createBusinessPlan = async (req: Request, res: Response) => {
         .where(eq(restaurantBusinessPlans.restaurantId, restaurantId));
 
     const existingTypes = existingPlans.map(p => p.platformType);
-    const valuesToInsert = [];
+    const valuesToInsert: any[] = [];
+    const todayStr = new Date().toISOString().split("T")[0];
 
     for (const platform of platforms) {
         const isPos = platform.platformType === "pos";
@@ -50,6 +134,9 @@ export const createBusinessPlan = async (req: Request, res: Response) => {
             throw new BadRequest(`You can't activate the annually plan with a zero amount for ${platform.platformType}`);
         }
 
+        // تاريخ بدء الاشتراك: الافتراضي اليوم أو يحدده المستخدم
+        const startDate = platform.subscriptionStartDate || todayStr;
+
         // تجهيز الداتا للحفظ
         valuesToInsert.push({
             id: uuidv4(),
@@ -63,6 +150,7 @@ export const createBusinessPlan = async (req: Request, res: Response) => {
             quarterlyAmount: platform.quarterlyAmount || "0.00",
             isAnnuallyActive: platform.isAnnuallyActive || false,
             annuallyAmount: platform.annuallyAmount || "0.00",
+            subscriptionStartDate: startDate,
             
             // العمولات: لو المنصة pos بنجبرها تبقى 0.00، لو غير كده بناخد القيمة المبعوتة
             commissionRate: isPos ? "0.00" : (platform.commissionRate || "0.00"),
@@ -75,14 +163,40 @@ export const createBusinessPlan = async (req: Request, res: Response) => {
         throw new BadRequest("No valid platforms provided to be saved");
     }
 
-    // الإضافة الجماعية في خطوة واحدة
-    await db.insert(restaurantBusinessPlans).values(valuesToInsert);
+    // الإضافة الجماعية داخل transaction مع تسجيل الاشتراكات في المحفظة
+    await db.transaction(async (tx) => {
+        await tx.insert(restaurantBusinessPlans).values(valuesToInsert);
+
+        // تسجيل وخصم الاشتراكات الفعّالة في محفظة المطعم
+        for (const plan of valuesToInsert) {
+            const rawPlatform = platforms.find((p: any) => p.platformType === plan.platformType);
+            const shouldCharge = rawPlatform?.chargeSubscriptionNow !== undefined
+                ? Boolean(rawPlatform.chargeSubscriptionNow)
+                : ((plan.subscriptionStartDate || todayStr) <= todayStr);
+
+            await recordPlanSubscriptionsInWallet(
+                tx,
+                restaurantId,
+                {
+                    isMonthlyActive: plan.isMonthlyActive,
+                    monthlyAmount: plan.monthlyAmount,
+                    isQuarterlyActive: plan.isQuarterlyActive,
+                    quarterlyAmount: plan.quarterlyAmount,
+                    isAnnuallyActive: plan.isAnnuallyActive,
+                    annuallyAmount: plan.annuallyAmount,
+                    subscriptionStartDate: plan.subscriptionStartDate,
+                },
+                shouldCharge
+            );
+        }
+    });
 
     return SuccessResponse(res, { 
-        message: "Business plans created successfully", 
+        message: "Business plans created successfully and subscriptions recorded", 
         insertedCount: valuesToInsert.length 
     }, 201);
 };
+
 
 // ==========================================
 // 2. جلب خطط العمل الخاصة بمطعم معين (Read All for a Restaurant)

@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, char, timestamp, decimal, boolean, mysqlEnum } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, char, timestamp, decimal, boolean, mysqlEnum, date as mysqlDate } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants"; 
 
@@ -18,6 +18,9 @@ export const restaurantBusinessPlans = mysqlTable("restaurant_business_plans", {
 
     isAnnuallyActive: boolean("is_annually_active").default(false),
     annuallyAmount: decimal("annually_amount", { precision: 10, scale: 2 }).default("0.00"),
+
+    // تاريخ بدء الاشتراك / التسجيل (افتراضياً اليوم أو يحدده الأدمن)
+    subscriptionStartDate: mysqlDate("subscription_start_date"),
 
     // العمولات والرسوم
     commissionRate: decimal("commission_rate", { precision: 5, scale: 2 }).default("0.00"), 

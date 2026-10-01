@@ -27,6 +27,90 @@ export function mapOrderSourceToPlatformType(orderSource: string): PlatformType 
 }
 
 /**
+ * Just-In-Time Visa Switch Helper
+ * 
+ * يُستدعى بعد كل أوردر مكتمل (delivered) أو عند بدء جلسة دفع.
+ * يتحقق من شرط التحويل (amount أو date)، وإذا تحقق الشرط يحول البوابة
+ * تلقائياً من CUSTOM إلى SYSTEM في نفس اللحظة.
+ * 
+ * @param restaurantId - معرف المطعم
+ * @param addedServiceFee - السيرفيس فيز المضافة من الأوردر الحالي (لشرط المبلغ فقط)
+ * @param executor - db أو tx (داخل transaction)
+ */
+export async function checkAndApplyVisaSwitch(
+    restaurantId: string,
+    addedServiceFee: number = 0,
+    executor: any = db
+): Promise<void> {
+    // 1. جلب الإعدادات الحالية
+    const [settings] = await executor
+        .select({
+            paymentGatewayType: restaurantSettings.paymentGatewayType,
+            visaSwitchConditionType: restaurantSettings.visaSwitchConditionType,
+            visaSwitchAmountThreshold: restaurantSettings.visaSwitchAmountThreshold,
+            visaSwitchDate: restaurantSettings.visaSwitchDate,
+            visaSwitchApplied: restaurantSettings.visaSwitchApplied,
+            customGatewayAccumulatedFees: restaurantSettings.customGatewayAccumulatedFees,
+        })
+        .from(restaurantSettings)
+        .where(eq(restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+
+    // لا توجد إعدادات أو البوابة مش CUSTOM أو السويتش حصل فعلاً → خروج
+    if (!settings) return;
+    if (settings.paymentGatewayType !== "CUSTOM") return;
+    if (settings.visaSwitchApplied === true) return;
+    if (!settings.visaSwitchConditionType || settings.visaSwitchConditionType === "none") return;
+
+    let shouldSwitch = false;
+
+    // ========================
+    // شرط المبلغ (amount)
+    // ========================
+    if (settings.visaSwitchConditionType === "amount") {
+        const threshold = parseFloat(settings.visaSwitchAmountThreshold as string || "0");
+        const currentAccumulated = parseFloat(settings.customGatewayAccumulatedFees as string || "0");
+        const newAccumulated = roundMoney(currentAccumulated + addedServiceFee);
+
+        // تحديث العداد التراكمي أولاً
+        await executor
+            .update(restaurantSettings)
+            .set({ customGatewayAccumulatedFees: newAccumulated.toFixed(2) })
+            .where(eq(restaurantSettings.restaurantId, restaurantId));
+
+        // فحص هل وصل أو تخطى الـ threshold
+        if (threshold > 0 && newAccumulated >= threshold) {
+            shouldSwitch = true;
+        }
+    }
+
+    // ========================
+    // شرط التاريخ (date)
+    // ========================
+    if (settings.visaSwitchConditionType === "date" && settings.visaSwitchDate) {
+        const today = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD"
+        const switchDate = String(settings.visaSwitchDate);
+        if (today >= switchDate) {
+            shouldSwitch = true;
+        }
+    }
+
+    // ========================
+    // تنفيذ التحويل الفعلي
+    // ========================
+    if (shouldSwitch) {
+        await executor
+            .update(restaurantSettings)
+            .set({
+                paymentGatewayType: "SYSTEM",
+                visaSwitchApplied: true,
+                gatewayAutoSwitchTriggeredAt: new Date(),
+            })
+            .where(eq(restaurantSettings.restaurantId, restaurantId));
+    }
+}
+
+/**
  * 1. Fetch fees and commission based on restaurantBusinessPlans for the specific platform
  */
 export async function getBusinessPlanFees(params: {
@@ -263,15 +347,24 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
     await tx.insert(restaurantWalletTransactions).values({
         id: uuidv4(),
         restaurantId: order.restaurantId,
+        orderId: order.id,
         type: "order_payment",
         amount: transactionAmount.toFixed(2),
         balanceBefore: currentBalance.toFixed(2),
         balanceAfter: newBalance.toFixed(2),
         method: isCash ? "cash" : `visa_${paymentGatewayType.toLowerCase()}`,
         reference: order.orderNumber,
+        // تفاصيل الرسوم الخاصة بهذا الأوردر بالتحديد
+        serviceFee: serviceFee.toFixed(2),
+        commission: appCommission.toFixed(2),
+        orderAmount: totalAmount.toFixed(2),
         note: transactionNote,
         createdAt: new Date()
     });
+
+    // 4. Just-In-Time Visa Switch Check (Event-Driven)
+    // إذا وصل المطعم للحد الأقصى من السيرفيس فيز أو حل موعد التاريخ، يتم التحويل فوراً لـ SYSTEM
+    await checkAndApplyVisaSwitch(order.restaurantId, serviceFee, tx);
 }
 
 /**
@@ -343,6 +436,7 @@ export async function handleCancelledOrder(params: {
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
             restaurantId: order.restaurantId,
+            orderId: order.id,
             type: "adjustment",
             amount: isCash || paymentGatewayType === "CUSTOM" ? `+${appDues.toFixed(2)}` : `-${restaurantEarning.toFixed(2)}`,
             balanceBefore: wallet.balance as string,
@@ -360,11 +454,16 @@ export async function handleCancelledOrder(params: {
         const balanceBefore = currentBalance;
         const balanceAfter = roundMoney(currentBalance - appDues);
 
+        const currentFees = parseFloat((wallet as any).totalServiceFees as string || "0");
+        const currentComm = parseFloat((wallet as any).totalCommission as string || "0");
+
         await tx.update(restaurantWallets)
             .set({
                 balance: balanceAfter.toFixed(2),
                 collectedCash: currentCollectedCash.toFixed(2),
                 totalEarning: currentTotalEarning.toFixed(2),
+                totalServiceFees: roundMoney(currentFees + serviceFee).toFixed(2),
+                totalCommission: roundMoney(currentComm + appCommission).toFixed(2),
                 updatedAt: new Date()
             })
             .where(eq(restaurantWallets.id, wallet.id));
@@ -372,12 +471,17 @@ export async function handleCancelledOrder(params: {
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
             restaurantId: order.restaurantId,
+            orderId: order.id,
             type: "adjustment",
             amount: `-${appDues.toFixed(2)}`,
             balanceBefore: balanceBefore.toFixed(2),
             balanceAfter: balanceAfter.toFixed(2),
             method: "penalty",
             reference: order.orderNumber,
+            // تفاصيل الرسوم الخاصة بهذا الأوردر بالتحديد
+            serviceFee: serviceFee.toFixed(2),
+            commission: appCommission.toFixed(2),
+            orderAmount: totalAmount.toFixed(2),
             note: `Cancellation penalty: order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; cancelledBy=restaurant; commission=${appCommission.toFixed(2)}; serviceFee=${serviceFee.toFixed(2)}; charged=${appDues.toFixed(2)}.`,
             createdAt: new Date()
         });
@@ -397,6 +501,7 @@ export async function handleCancelledOrder(params: {
             await tx.insert(restaurantWalletTransactions).values({
                 id: uuidv4(),
                 restaurantId: order.restaurantId,
+                orderId: order.id,
                 type: "adjustment",
                 amount: "0.00",
                 balanceBefore: currentBalance.toFixed(2),
@@ -407,8 +512,6 @@ export async function handleCancelledOrder(params: {
                 createdAt: new Date()
             });
         }
-        // If the order was in pending/preparing and user cancelled:
-        // Restaurant wallet is not affected at all (0 dues charged).
     }
 }
 
