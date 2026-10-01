@@ -42,7 +42,7 @@ import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
 import { createOrderPaymentSession } from "../../services/payments/paymentSession.service";
 import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
-import { handleCancelledOrder, mapOrderSourceToPlatformType } from "../../services/restaurantWalletService";
+import { chargePendingServiceFee, handleCancelledOrder, mapOrderSourceToPlatformType } from "../../services/restaurantWalletService";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -1247,6 +1247,10 @@ export const checkout = async (req: Request | any, res: Response) => {
             offerId: userCart.find(c => c.offerId)?.offerId || null,
             createdAt: now
         });
+
+        if (isCashPayment) {
+            await chargePendingServiceFee(orderId, tx, "cash_pending");
+        }
 
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
 

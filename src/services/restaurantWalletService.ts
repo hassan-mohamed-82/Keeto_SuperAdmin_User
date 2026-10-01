@@ -187,6 +187,81 @@ export async function getOrCreateWallet(restaurantId: string, tx: any) {
     return wallet;
 }
 
+export async function chargePendingServiceFee(
+    orderId: string,
+    tx: any,
+    chargeTiming: "cash_pending" | "custom_paid"
+) {
+    const [order] = await tx
+        .select()
+        .from(orders)
+        .where(eq(orders.id, orderId))
+        .for("update");
+
+    if (!order) return;
+
+    const { isCash } = await resolvePaymentTypeAndGateway({
+        restaurantId: order.restaurantId,
+        paymentMethodId: order.paymentMethod,
+        paymentGateway: order.paymentGateway,
+        orderGatewayType: order.paymentGatewayType,
+        executor: tx,
+    });
+
+    if (chargeTiming === "cash_pending") {
+        if (!isCash || order.status !== "pending") return;
+    } else if (isCash || order.paymentStatus !== "paid" || order.paymentGatewayType !== "CUSTOM") {
+        return;
+    }
+
+    const serviceFee = parseFloat(order.serviceFee as string || "0");
+    if (serviceFee <= 0) return;
+
+    const [existingCharge] = await tx
+        .select({ id: restaurantWalletTransactions.id })
+        .from(restaurantWalletTransactions)
+        .where(and(
+            eq(restaurantWalletTransactions.orderId, order.id),
+            eq(restaurantWalletTransactions.type, "adjustment"),
+            eq(restaurantWalletTransactions.method, "pending_service_fee")
+        ))
+        .limit(1);
+
+    if (existingCharge) return;
+
+    const wallet = await getOrCreateWallet(order.restaurantId, tx);
+    const balanceBefore = parseFloat(wallet.balance as string || "0");
+    const balanceAfter = roundMoney(balanceBefore - serviceFee);
+    const totalServiceFees = parseFloat(wallet.totalServiceFees as string || "0");
+
+    await tx.update(restaurantWallets)
+        .set({
+            balance: balanceAfter.toFixed(2),
+            totalServiceFees: roundMoney(totalServiceFees + serviceFee).toFixed(2),
+            updatedAt: new Date(),
+        })
+        .where(eq(restaurantWallets.id, wallet.id));
+
+    await tx.insert(restaurantWalletTransactions).values({
+        id: uuidv4(),
+        restaurantId: order.restaurantId,
+        orderId: order.id,
+        type: "adjustment",
+        amount: (-serviceFee).toFixed(2),
+        balanceBefore: balanceBefore.toFixed(2),
+        balanceAfter: balanceAfter.toFixed(2),
+        method: "pending_service_fee",
+        reference: order.orderNumber,
+        serviceFee: serviceFee.toFixed(2),
+        commission: "0.00",
+        orderAmount: order.totalAmount,
+        note: chargeTiming === "cash_pending"
+            ? `Pending-time service fee charged for cash order #${order.dailyOrderNumber || order.orderNumber}.`
+            : `Pending-time service fee charged after CUSTOM payment confirmation for #${order.dailyOrderNumber || order.orderNumber}.`,
+        createdAt: new Date(),
+    });
+}
+
 /**
  * Checks whether an order is cash or digital (visa/online), and checks the gateway type
  */
@@ -288,7 +363,29 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
     const appCommission = parseFloat(order.appCommission as string || "0");
     const totalAmount = parseFloat(order.totalAmount as string || "0");
 
-    const appDues = roundMoney(appCommission + serviceFee);
+    const [pendingServiceFeeTx] = await tx
+        .select({ id: restaurantWalletTransactions.id })
+        .from(restaurantWalletTransactions)
+        .where(and(
+            eq(restaurantWalletTransactions.orderId, order.id),
+            eq(restaurantWalletTransactions.type, "adjustment"),
+            eq(restaurantWalletTransactions.method, "pending_service_fee")
+        ))
+        .limit(1);
+
+    const [serviceFeeRefundTx] = await tx
+        .select({ id: restaurantWalletTransactions.id })
+        .from(restaurantWalletTransactions)
+        .where(and(
+            eq(restaurantWalletTransactions.orderId, order.id),
+            eq(restaurantWalletTransactions.type, "adjustment"),
+            eq(restaurantWalletTransactions.method, "user_service_fee_refund")
+        ))
+        .limit(1);
+
+    const pendingFeeAlreadyCharged = Boolean(pendingServiceFeeTx) && !serviceFeeRefundTx;
+    const settlementServiceFee = pendingFeeAlreadyCharged ? 0 : serviceFee;
+    const appDues = roundMoney(appCommission + settlementServiceFee);
     const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
 
     const wallet = await getOrCreateWallet(order.restaurantId, tx);
@@ -329,7 +426,8 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
         // Restaurant balance with SuperAdmin DECREASES by appDues (identical to cash).
         newBalance = roundMoney(currentBalance - appDues);
         transactionAmount = -appDues;
-        transactionNote = `Delivered order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; subtotal=${subtotal.toFixed(2)}; delivery=${deliveryFee.toFixed(2)}; commission=${appCommission.toFixed(2)}; serviceFee=${serviceFee.toFixed(2)}; total=${totalAmount.toFixed(2)}; payment=CUSTOM; restaurant owes platform=${appDues.toFixed(2)}.`;
+        transactionNote = `Delivered order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; subtotal=${subtotal.toFixed(2)}; delivery=${deliveryFee.toFixed(2)}; commission=${appCommission.toFixed(2)}; serviceFee=${settlementServiceFee.toFixed(2)}; total=${totalAmount.toFixed(2)}; payment=CUSTOM; restaurant owes platform=${appDues.toFixed(2)}.`;
+        await checkAndApplyVisaSwitch(order.restaurantId, serviceFee, tx);
     }
 
     // Update restaurant wallet
@@ -355,16 +453,12 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
         method: isCash ? "cash" : `visa_${paymentGatewayType.toLowerCase()}`,
         reference: order.orderNumber,
         // تفاصيل الرسوم الخاصة بهذا الأوردر بالتحديد
-        serviceFee: serviceFee.toFixed(2),
+        serviceFee: settlementServiceFee.toFixed(2),
         commission: appCommission.toFixed(2),
         orderAmount: totalAmount.toFixed(2),
         note: transactionNote,
         createdAt: new Date()
     });
-
-    // 4. Just-In-Time Visa Switch Check (Event-Driven)
-    // إذا وصل المطعم للحد الأقصى من السيرفيس فيز أو حل موعد التاريخ، يتم التحويل فوراً لـ SYSTEM
-    await checkAndApplyVisaSwitch(order.restaurantId, serviceFee, tx);
 }
 
 /**
@@ -386,7 +480,7 @@ export async function handleCancelledOrder(params: {
 
     if (!order) return;
 
-    // Check if this order was already settled as delivered previously
+    // Was this order ever settled as "delivered" before?
     const [settledTx] = await tx
         .select()
         .from(restaurantWalletTransactions)
@@ -399,21 +493,53 @@ export async function handleCancelledOrder(params: {
         )
         .limit(1);
 
+    // Was a service fee already charged while the order was pending (cash,
+    // or CUSTOM-gateway once charged on payment confirmation)?
+    const [pendingServiceFeeTx] = await tx
+        .select()
+        .from(restaurantWalletTransactions)
+        .where(and(
+            eq(restaurantWalletTransactions.orderId, order.id),
+            eq(restaurantWalletTransactions.type, "adjustment"),
+            eq(restaurantWalletTransactions.method, "pending_service_fee")
+        ))
+        .limit(1);
+
+    // Has that pending fee already been refunded once (avoid double refund
+    // if this function somehow runs twice for the same order)?
+    const [serviceFeeRefundTx] = await tx
+        .select({ id: restaurantWalletTransactions.id })
+        .from(restaurantWalletTransactions)
+        .where(and(
+            eq(restaurantWalletTransactions.orderId, order.id),
+            eq(restaurantWalletTransactions.type, "adjustment"),
+            eq(restaurantWalletTransactions.method, "user_service_fee_refund")
+        ))
+        .limit(1);
+
     const subtotal = parseFloat(order.subtotal as string || "0");
     const deliveryFee = parseFloat(order.deliveryFee as string || "0");
     const serviceFee = parseFloat(order.serviceFee as string || "0");
     const appCommission = parseFloat(order.appCommission as string || "0");
     const totalAmount = parseFloat(order.totalAmount as string || "0");
 
-    const appDues = roundMoney(appCommission + serviceFee);
+    const pendingFeeAlreadyCharged = Boolean(pendingServiceFeeTx) && !serviceFeeRefundTx;
+    const appDues = roundMoney(appCommission + (pendingFeeAlreadyCharged ? 0 : serviceFee));
     const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
 
     const wallet = await getOrCreateWallet(order.restaurantId, tx);
     let currentBalance = parseFloat(wallet.balance as string || "0");
     let currentCollectedCash = parseFloat(wallet.collectedCash as string || "0");
     let currentTotalEarning = parseFloat(wallet.totalEarning as string || "0");
+    let currentFees = parseFloat((wallet as any).totalServiceFees as string || "0");
+    let currentComm = parseFloat((wallet as any).totalCommission as string || "0");
 
-    // Case 1: Order was already delivered before being cancelled/refunded -> Revert delivery settlement
+    // ============================================================
+    // Case 1: Order was already delivered/settled before this
+    // cancellation — reverse the delivery settlement completely,
+    // INCLUDING any pending-time service fee that was charged earlier
+    // and never reversed.
+    // ============================================================
     if (settledTx) {
         const { isCash, paymentGatewayType } = await resolvePaymentTypeAndGateway({
             restaurantId: order.restaurantId,
@@ -423,13 +549,16 @@ export async function handleCancelledOrder(params: {
             executor: tx,
         });
 
+        // Reverse whatever was actually charged/credited AT settlement time.
+        const settledDues = roundMoney(appCommission + parseFloat(settledTx.serviceFee as string || "0"));
+
         if (isCash) {
-            currentBalance = roundMoney(currentBalance + appDues);
+            currentBalance = roundMoney(currentBalance + settledDues);
             currentCollectedCash = roundMoney(currentCollectedCash - totalAmount);
         } else if (paymentGatewayType === "SYSTEM") {
             currentBalance = roundMoney(currentBalance - restaurantEarning);
         } else {
-            currentBalance = roundMoney(currentBalance + appDues);
+            currentBalance = roundMoney(currentBalance + settledDues);
         }
         currentTotalEarning = roundMoney(currentTotalEarning - restaurantEarning);
 
@@ -438,31 +567,84 @@ export async function handleCancelledOrder(params: {
             restaurantId: order.restaurantId,
             orderId: order.id,
             type: "adjustment",
-            amount: isCash || paymentGatewayType === "CUSTOM" ? `+${appDues.toFixed(2)}` : `-${restaurantEarning.toFixed(2)}`,
+            amount: isCash || paymentGatewayType === "CUSTOM" ? `+${settledDues.toFixed(2)}` : `-${restaurantEarning.toFixed(2)}`,
             balanceBefore: wallet.balance as string,
             balanceAfter: currentBalance.toFixed(2),
             method: isCash ? "cash" : `visa_${paymentGatewayType.toLowerCase()}`,
             reference: order.orderNumber,
-            note: `Reversal: order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; commission=${appCommission.toFixed(2)}; serviceFee=${serviceFee.toFixed(2)}; restaurantEarning=${restaurantEarning.toFixed(2)}; cancelledBy=${cancelReasonType}.`,
+            note: `Reversal: order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; commission=${appCommission.toFixed(2)}; settlementServiceFee=${parseFloat(settledTx.serviceFee as string || "0").toFixed(2)}; restaurantEarning=${restaurantEarning.toFixed(2)}; cancelledBy=${cancelReasonType}.`,
             createdAt: new Date()
         });
+
+        // FIX: also refund the EARLIER pending-time service fee charge, if
+        // one exists and hasn't been refunded yet — previously this was
+        // silently left un-reversed when a delivered order was cancelled.
+        if (pendingFeeAlreadyCharged) {
+            const balanceBeforePendingRefund = currentBalance;
+            currentBalance = roundMoney(currentBalance + serviceFee);
+            currentFees = roundMoney(currentFees - serviceFee);
+
+            await tx.insert(restaurantWalletTransactions).values({
+                id: uuidv4(),
+                restaurantId: order.restaurantId,
+                orderId: order.id,
+                type: "adjustment",
+                amount: serviceFee.toFixed(2),
+                balanceBefore: balanceBeforePendingRefund.toFixed(2),
+                balanceAfter: currentBalance.toFixed(2),
+                method: "user_service_fee_refund",
+                reference: order.orderNumber,
+                serviceFee: (-serviceFee).toFixed(2),
+                commission: "0.00",
+                orderAmount: totalAmount.toFixed(2),
+                note: `Pending-time service fee refunded as part of delivered-order reversal for #${order.dailyOrderNumber || order.orderNumber}; refunded=${serviceFee.toFixed(2)}.`,
+                createdAt: new Date()
+            });
+        }
+
+        // Persist the fully-reversed wallet state and stop here — the
+        // settlement reversal above (plus the pending-fee refund if any) is
+        // the correct and COMPLETE adjustment for an order that was already
+        // delivered. Do NOT also apply the "cancelled before delivery"
+        // penalty logic below; that is a separate scenario.
+        await tx.update(restaurantWallets)
+            .set({
+                balance: currentBalance.toFixed(2),
+                collectedCash: currentCollectedCash.toFixed(2),
+                totalEarning: currentTotalEarning.toFixed(2),
+                totalServiceFees: currentFees.toFixed(2),
+                updatedAt: new Date()
+            })
+            .where(eq(restaurantWallets.id, wallet.id));
+
+        return;
     }
 
-    // Case 2: Cancellation penalty logic
-    if (cancelReasonType === "restaurant") {
-        // Restaurant cancelled the order: Restaurant is penalized by the app dues (commission + service fee)
+    // ============================================================
+    // Case 2: Order was cancelled BEFORE delivery/settlement.
+    // Only reached when settledTx is null (order never completed).
+    // ============================================================
+    const { isCash } = await resolvePaymentTypeAndGateway({
+        restaurantId: order.restaurantId,
+        paymentMethodId: order.paymentMethod,
+        paymentGateway: order.paymentGateway,
+        orderGatewayType: order.paymentGatewayType,
+        executor: tx,
+    });
+
+    if (cancelReasonType === "restaurant" && (isCash || order.paymentStatus === "paid")) {
+        // Restaurant cancelled an order that was never delivered: charge
+        // the full appDues as a penalty (minus any serviceFee portion
+        // already charged while pending, so it isn't double-counted).
         const balanceBefore = currentBalance;
         const balanceAfter = roundMoney(currentBalance - appDues);
-
-        const currentFees = parseFloat((wallet as any).totalServiceFees as string || "0");
-        const currentComm = parseFloat((wallet as any).totalCommission as string || "0");
 
         await tx.update(restaurantWallets)
             .set({
                 balance: balanceAfter.toFixed(2),
                 collectedCash: currentCollectedCash.toFixed(2),
                 totalEarning: currentTotalEarning.toFixed(2),
-                totalServiceFees: roundMoney(currentFees + serviceFee).toFixed(2),
+                totalServiceFees: roundMoney(currentFees + (pendingFeeAlreadyCharged ? 0 : serviceFee)).toFixed(2),
                 totalCommission: roundMoney(currentComm + appCommission).toFixed(2),
                 updatedAt: new Date()
             })
@@ -478,26 +660,48 @@ export async function handleCancelledOrder(params: {
             balanceAfter: balanceAfter.toFixed(2),
             method: "penalty",
             reference: order.orderNumber,
-            // تفاصيل الرسوم الخاصة بهذا الأوردر بالتحديد
-            serviceFee: serviceFee.toFixed(2),
+            serviceFee: (pendingFeeAlreadyCharged ? 0 : serviceFee).toFixed(2),
             commission: appCommission.toFixed(2),
             orderAmount: totalAmount.toFixed(2),
-            note: `Cancellation penalty: order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; cancelledBy=restaurant; commission=${appCommission.toFixed(2)}; serviceFee=${serviceFee.toFixed(2)}; charged=${appDues.toFixed(2)}.`,
+            note: `Cancellation penalty: order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; cancelledBy=restaurant; commission=${appCommission.toFixed(2)}; serviceFee=${(pendingFeeAlreadyCharged ? 0 : serviceFee).toFixed(2)}; charged=${appDues.toFixed(2)}.`,
             createdAt: new Date()
         });
     } else {
-        // Cancelled by USER:
-        // Restaurant is NOT penalized. If there was a previous delivery reversal, update the wallet state.
-        if (settledTx) {
+        // No restaurant penalty applies; refund any pending-time fee already charged.
+        // Refund any service fee that was already charged while pending.
+        if (pendingFeeAlreadyCharged) {
+            const balanceBefore = currentBalance;
+            currentBalance = roundMoney(currentBalance + serviceFee);
+
             await tx.update(restaurantWallets)
                 .set({
                     balance: currentBalance.toFixed(2),
                     collectedCash: currentCollectedCash.toFixed(2),
                     totalEarning: currentTotalEarning.toFixed(2),
+                    totalServiceFees: roundMoney(currentFees - serviceFee).toFixed(2),
                     updatedAt: new Date()
                 })
                 .where(eq(restaurantWallets.id, wallet.id));
+
+            await tx.insert(restaurantWalletTransactions).values({
+                id: uuidv4(),
+                restaurantId: order.restaurantId,
+                orderId: order.id,
+                type: "adjustment",
+                amount: serviceFee.toFixed(2),
+                balanceBefore: balanceBefore.toFixed(2),
+                balanceAfter: currentBalance.toFixed(2),
+                method: "user_service_fee_refund",
+                reference: order.orderNumber,
+                serviceFee: (-serviceFee).toFixed(2),
+                commission: "0.00",
+                orderAmount: totalAmount.toFixed(2),
+                note: `Service fee refunded for order #${order.dailyOrderNumber || order.orderNumber}; cancelledBy=${cancelReasonType}; refunded=${serviceFee.toFixed(2)}.`,
+                createdAt: new Date()
+            });
         } else {
+            // Nothing was ever charged for this order — just log a
+            // zero-impact record for visibility/audit purposes.
             await tx.insert(restaurantWalletTransactions).values({
                 id: uuidv4(),
                 restaurantId: order.restaurantId,
@@ -508,7 +712,7 @@ export async function handleCancelledOrder(params: {
                 balanceAfter: currentBalance.toFixed(2),
                 method: "cancellation",
                 reference: order.orderNumber,
-                note: `Order #${order.dailyOrderNumber || order.orderNumber} cancelled by user; platform=${mapOrderSourceToPlatformType(order.orderSource)}; no restaurant fees charged.`,
+                note: `Order #${order.dailyOrderNumber || order.orderNumber} cancelled by ${cancelReasonType}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; no restaurant fees charged.`,
                 createdAt: new Date()
             });
         }

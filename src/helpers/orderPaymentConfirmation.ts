@@ -12,6 +12,7 @@ import { eq, or, like, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { getNextDailyOrderNumber } from "./getNextDailyOrderNumber";
 import { sendPushNotification } from "../utils/notifications";
+import { chargePendingServiceFee } from "../services/restaurantWalletService";
 
 const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
 
@@ -132,6 +133,8 @@ export async function confirmOrderPayment({
             rawResponse: rawPayload || null,
             createdAt: now,
         });
+
+        await chargePendingServiceFee(order.id, tx, "custom_paid");
 
         // تفريغ سلة العميل بعد نجاح وتأكيد الدفع الإلكتروني
         await tx.delete(cartItems).where(eq(cartItems.userId, order.userId));
