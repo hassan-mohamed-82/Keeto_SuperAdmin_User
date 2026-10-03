@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import fs from 'fs';
 import swaggerAutogen from 'swagger-autogen';
 import { getTableColumns, is, Table } from 'drizzle-orm';
