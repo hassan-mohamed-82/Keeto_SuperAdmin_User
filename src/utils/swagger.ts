@@ -8,7 +8,10 @@ const doc = {
         title: 'Suparadmin & User API',
         description: 'API Documentation',
     },
-    servers: [{ url: process.env.Back_BASE_URL ?? 'http://localhost:3000' }],
+    servers: [
+        { url: process.env.Back_BASE_URL ?? 'http://localhost:3000', description: 'Main' },
+        { url: 'http://localhost:3000', description: 'Local' },
+    ],
     components: {
         securitySchemes: {
             bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
