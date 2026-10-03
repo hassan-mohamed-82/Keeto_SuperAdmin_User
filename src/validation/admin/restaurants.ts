@@ -37,6 +37,12 @@ export const createRestaurantSchema = z.object({
     status: z.enum(["active", "inactive"]).optional(),
     paymentCredentials: z.any().optional(),
     paymentcredition: z.any().optional(),
+    paymentGatewayType: z.enum(["SYSTEM", "CUSTOM"]).optional(),
+    enableOnlinePayment: z.boolean().optional(),
+    visaSwitchConditionType: z.enum(["none", "amount", "day_of_week", "day_of_month"]).optional(),
+    visaSwitchAmountThreshold: z.coerce.string().optional(),
+    visaSwitchDayOfWeek: z.enum(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]).optional(),
+    visaSwitchDayOfMonth: z.coerce.number().int().min(1).max(31).optional(),
 });
 
 export const updateRestaurantSchema = createRestaurantSchema.partial();

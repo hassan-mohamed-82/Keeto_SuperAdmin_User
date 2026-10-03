@@ -68,12 +68,14 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   // ==========================================
   // إعدادات التحويل التلقائي للفيزة لـ SYSTEM
   // ==========================================
-  // نوع شرط التحويل: amount (عند وصول service fees لمبلغ)، date (بعد تاريخ معين)، none (بدون تحويل تلقائي)
-  visaSwitchConditionType: mysqlEnum("visa_switch_condition_type", ["none", "amount", "date"]).default("none"),
+  // نوع شرط التحويل: amount | day_of_week | day_of_month | none
+  visaSwitchConditionType: mysqlEnum("visa_switch_condition_type", ["none", "amount", "day_of_week", "day_of_month"]).default("none"),
   // المبلغ المستهدف من service fees اللي بعده تتحول الفيزة لـ SYSTEM (لو النوع amount)
   visaSwitchAmountThreshold: decimal("visa_switch_amount_threshold", { precision: 10, scale: 2 }),
-  // التاريخ اللي بعده تتحول الفيزة لـ SYSTEM (لو النوع date)
-  visaSwitchDate: varchar("visa_switch_date", { length: 10 }),
+  // يوم الأسبوع اللي بعده تتحول الفيزة لـ SYSTEM (لو النوع day_of_week) مثلاً: "saturday" أو "sunday"
+  visaSwitchDayOfWeek: varchar("visa_switch_day_of_week", { length: 10 }),
+  // يوم الشهر اللي بعده تتحول الفيزة لـ SYSTEM (لو النوع day_of_month) مثلاً: 15 أو 20
+  visaSwitchDayOfMonth: int("visa_switch_day_of_month"),
   // هل تم التحويل التلقائي فعلًا أم لا
   visaSwitchApplied: boolean("visa_switch_applied").default(false),
   // تاريخ ووقت حدوث التحويل التلقائي لـ SYSTEM

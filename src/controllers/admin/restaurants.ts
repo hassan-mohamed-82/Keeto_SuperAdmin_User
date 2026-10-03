@@ -361,14 +361,17 @@ export const createRestaurant = async (req: Request, res: Response) => {
     // 👈 إعدادات switch الفيزة التلقائي
     // ==========================================
     const {
-        visaSwitchConditionType,  // "none" | "amount" | "date"
+        visaSwitchConditionType,  // "none" | "amount" | "day_of_week" | "day_of_month"
         visaSwitchAmountThreshold, // رقم (لو النوع amount)
-        visaSwitchDate,            // تاريخ بصيغة "YYYY-MM-DD" (لو النوع date)
+        visaSwitchDayOfWeek,       // اسم اليوم بالإنجليزي بالحروف الصغيرة (لو النوع day_of_week) مثلاً: "saturday"
+        visaSwitchDayOfMonth,      // رقم يوم الشهر 1-31 (لو النوع day_of_month) مثلاً: 15
     } = req.body;
 
-    const resolvedVisaSwitchType: "none" | "amount" | "date" =
-        ["amount", "date"].includes(String(visaSwitchConditionType)) 
-            ? (String(visaSwitchConditionType) as "amount" | "date")
+    const VALID_DAYS_OF_WEEK = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+    const resolvedVisaSwitchType: "none" | "amount" | "day_of_week" | "day_of_month" =
+        ["amount", "day_of_week", "day_of_month"].includes(String(visaSwitchConditionType))
+            ? (String(visaSwitchConditionType) as "amount" | "day_of_week" | "day_of_month")
             : "none";
 
     // تحقق: لو اختار amount لازم يبعت قيمة
@@ -378,10 +381,18 @@ export const createRestaurant = async (req: Request, res: Response) => {
         }
     }
 
-    // تحقق: لو اختار date لازم يبعت تاريخ
-    if (resolvedVisaSwitchType === "date") {
-        if (!visaSwitchDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(visaSwitchDate))) {
-            throw new BadRequest("visaSwitchDate is required in 'YYYY-MM-DD' format when visaSwitchConditionType is 'date'");
+    // تحقق: لو اختار day_of_week لازم يبعت اسم يوم صحيح
+    if (resolvedVisaSwitchType === "day_of_week") {
+        if (!visaSwitchDayOfWeek || !VALID_DAYS_OF_WEEK.includes(String(visaSwitchDayOfWeek).toLowerCase())) {
+            throw new BadRequest(`visaSwitchDayOfWeek is required and must be one of: ${VALID_DAYS_OF_WEEK.join(", ")} when visaSwitchConditionType is 'day_of_week'`);
+        }
+    }
+
+    // تحقق: لو اختار day_of_month لازم يبعت رقم يوم صحيح (1-31)
+    if (resolvedVisaSwitchType === "day_of_month") {
+        const dom = parseInt(String(visaSwitchDayOfMonth), 10);
+        if (!visaSwitchDayOfMonth || isNaN(dom) || dom < 1 || dom > 31) {
+            throw new BadRequest("visaSwitchDayOfMonth is required and must be between 1 and 31 when visaSwitchConditionType is 'day_of_month'");
         }
     }
 
@@ -498,10 +509,15 @@ export const createRestaurant = async (req: Request, res: Response) => {
             enableOnlinePayment: resolvedEnableOnlinePayment, // 👈 تفعيل الدفع أونلاين
             // 👈 إعدادات التحويل التلقائي للفيزة
             visaSwitchConditionType: resolvedVisaSwitchType,
-            visaSwitchAmountThreshold: resolvedVisaSwitchType === "amount" 
-                ? String(parseFloat(visaSwitchAmountThreshold).toFixed(2)) 
+            visaSwitchAmountThreshold: resolvedVisaSwitchType === "amount"
+                ? String(parseFloat(visaSwitchAmountThreshold).toFixed(2))
                 : null,
-            visaSwitchDate: resolvedVisaSwitchType === "date" ? String(visaSwitchDate) : null,
+            visaSwitchDayOfWeek: resolvedVisaSwitchType === "day_of_week"
+                ? String(visaSwitchDayOfWeek).toLowerCase()
+                : null,
+            visaSwitchDayOfMonth: resolvedVisaSwitchType === "day_of_month"
+                ? parseInt(String(visaSwitchDayOfMonth), 10)
+                : null,
             visaSwitchApplied: false,
         });
 
@@ -568,7 +584,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
             visaSwitch: {
                 conditionType: resolvedVisaSwitchType,
                 amountThreshold: resolvedVisaSwitchType === "amount" ? visaSwitchAmountThreshold : null,
-                switchDate: resolvedVisaSwitchType === "date" ? visaSwitchDate : null,
+                dayOfWeek: resolvedVisaSwitchType === "day_of_week" ? visaSwitchDayOfWeek : null,
+                dayOfMonth: resolvedVisaSwitchType === "day_of_month" ? visaSwitchDayOfMonth : null,
                 applied: false,
             },
             businessPlans: plansToReturn,
@@ -616,7 +633,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         // 👈 إعدادات التحويل التلقائي للفيزة
         visaSwitchConditionType: restaurantSettings.visaSwitchConditionType,
         visaSwitchAmountThreshold: restaurantSettings.visaSwitchAmountThreshold,
-        visaSwitchDate: restaurantSettings.visaSwitchDate,
+        visaSwitchDayOfWeek: restaurantSettings.visaSwitchDayOfWeek,
+        visaSwitchDayOfMonth: restaurantSettings.visaSwitchDayOfMonth,
         visaSwitchApplied: restaurantSettings.visaSwitchApplied,
     })
         .from(restaurants)
@@ -691,7 +709,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             visaSwitch: {
                 conditionType: r.visaSwitchConditionType || "none",
                 amountThreshold: r.visaSwitchConditionType === "amount" ? r.visaSwitchAmountThreshold : null,
-                switchDate: r.visaSwitchConditionType === "date" ? r.visaSwitchDate : null,
+                dayOfWeek: r.visaSwitchConditionType === "day_of_week" ? r.visaSwitchDayOfWeek : null,
+                dayOfMonth: r.visaSwitchConditionType === "day_of_month" ? r.visaSwitchDayOfMonth : null,
                 applied: r.visaSwitchApplied ?? false,
             },
         };
@@ -771,7 +790,8 @@ export const getRestaurantById = async (req: Request, res: Response) => {
         visaSwitch: {
             conditionType: row.settingsObj?.visaSwitchConditionType || "none",
             amountThreshold: row.settingsObj?.visaSwitchConditionType === "amount" ? row.settingsObj?.visaSwitchAmountThreshold : null,
-            switchDate: row.settingsObj?.visaSwitchConditionType === "date" ? row.settingsObj?.visaSwitchDate : null,
+            dayOfWeek: row.settingsObj?.visaSwitchConditionType === "day_of_week" ? row.settingsObj?.visaSwitchDayOfWeek : null,
+            dayOfMonth: row.settingsObj?.visaSwitchConditionType === "day_of_month" ? row.settingsObj?.visaSwitchDayOfMonth : null,
             applied: row.settingsObj?.visaSwitchApplied ?? false,
         },
     };
@@ -851,13 +871,16 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     const {
         visaSwitchConditionType,
         visaSwitchAmountThreshold,
-        visaSwitchDate,
+        visaSwitchDayOfWeek,
+        visaSwitchDayOfMonth,
     } = req.body;
 
-    let resolvedVisaSwitchType: "none" | "amount" | "date" | undefined;
+    let resolvedVisaSwitchType: "none" | "amount" | "day_of_week" | "day_of_month" | undefined;
     if (visaSwitchConditionType !== undefined) {
-        resolvedVisaSwitchType = ["amount", "date"].includes(String(visaSwitchConditionType))
-            ? (String(visaSwitchConditionType) as "amount" | "date")
+        const VALID_DAYS_OF_WEEK = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+        resolvedVisaSwitchType = ["amount", "day_of_week", "day_of_month"].includes(String(visaSwitchConditionType))
+            ? (String(visaSwitchConditionType) as "amount" | "day_of_week" | "day_of_month")
             : "none";
 
         if (resolvedVisaSwitchType === "amount") {
@@ -865,9 +888,15 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                 throw new BadRequest("visaSwitchAmountThreshold is required and must be > 0 when visaSwitchConditionType is 'amount'");
             }
         }
-        if (resolvedVisaSwitchType === "date") {
-            if (!visaSwitchDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(visaSwitchDate))) {
-                throw new BadRequest("visaSwitchDate is required in 'YYYY-MM-DD' format when visaSwitchConditionType is 'date'");
+        if (resolvedVisaSwitchType === "day_of_week") {
+            if (!visaSwitchDayOfWeek || !VALID_DAYS_OF_WEEK.includes(String(visaSwitchDayOfWeek).toLowerCase())) {
+                throw new BadRequest(`visaSwitchDayOfWeek is required and must be one of: ${VALID_DAYS_OF_WEEK.join(", ")} when visaSwitchConditionType is 'day_of_week'`);
+            }
+        }
+        if (resolvedVisaSwitchType === "day_of_month") {
+            const dom = parseInt(String(visaSwitchDayOfMonth), 10);
+            if (!visaSwitchDayOfMonth || isNaN(dom) || dom < 1 || dom > 31) {
+                throw new BadRequest("visaSwitchDayOfMonth is required and must be between 1 and 31 when visaSwitchConditionType is 'day_of_month'");
             }
         }
     }
@@ -964,7 +993,12 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                 settingsUpdateData.visaSwitchAmountThreshold = resolvedVisaSwitchType === "amount"
                     ? String(parseFloat(visaSwitchAmountThreshold).toFixed(2))
                     : null;
-                settingsUpdateData.visaSwitchDate = resolvedVisaSwitchType === "date" ? String(visaSwitchDate) : null;
+                settingsUpdateData.visaSwitchDayOfWeek = resolvedVisaSwitchType === "day_of_week"
+                    ? String(visaSwitchDayOfWeek).toLowerCase()
+                    : null;
+                settingsUpdateData.visaSwitchDayOfMonth = resolvedVisaSwitchType === "day_of_month"
+                    ? parseInt(String(visaSwitchDayOfMonth), 10)
+                    : null;
                 // لو تغير نوع الشرط، نعيد ضبط applied و accumulated fees
                 settingsUpdateData.visaSwitchApplied = false;
                 settingsUpdateData.customGatewayAccumulatedFees = "0.00";
@@ -1141,7 +1175,8 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                 visaSwitch: {
                     conditionType: resolvedVisaSwitchType,
                     amountThreshold: resolvedVisaSwitchType === "amount" ? visaSwitchAmountThreshold : null,
-                    switchDate: resolvedVisaSwitchType === "date" ? visaSwitchDate : null,
+                    dayOfWeek: resolvedVisaSwitchType === "day_of_week" ? visaSwitchDayOfWeek : null,
+                    dayOfMonth: resolvedVisaSwitchType === "day_of_month" ? visaSwitchDayOfMonth : null,
                     applied: false,
                 },
             },

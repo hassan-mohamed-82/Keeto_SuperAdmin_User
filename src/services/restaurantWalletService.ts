@@ -48,7 +48,8 @@ export async function checkAndApplyVisaSwitch(
             paymentGatewayType: restaurantSettings.paymentGatewayType,
             visaSwitchConditionType: restaurantSettings.visaSwitchConditionType,
             visaSwitchAmountThreshold: restaurantSettings.visaSwitchAmountThreshold,
-            visaSwitchDate: restaurantSettings.visaSwitchDate,
+            visaSwitchDayOfWeek: restaurantSettings.visaSwitchDayOfWeek,
+            visaSwitchDayOfMonth: restaurantSettings.visaSwitchDayOfMonth,
             visaSwitchApplied: restaurantSettings.visaSwitchApplied,
             customGatewayAccumulatedFees: restaurantSettings.customGatewayAccumulatedFees,
         })
@@ -85,12 +86,22 @@ export async function checkAndApplyVisaSwitch(
     }
 
     // ========================
-    // شرط التاريخ (date)
+    // شرط يوم الأسبوع (day_of_week)
     // ========================
-    if (settings.visaSwitchConditionType === "date" && settings.visaSwitchDate) {
-        const today = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD"
-        const switchDate = String(settings.visaSwitchDate);
-        if (today >= switchDate) {
+    if (settings.visaSwitchConditionType === "day_of_week" && settings.visaSwitchDayOfWeek) {
+        const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+        const todayName = dayNames[new Date().getDay()]; // e.g. "saturday"
+        if (todayName === String(settings.visaSwitchDayOfWeek).toLowerCase()) {
+            shouldSwitch = true;
+        }
+    }
+
+    // ========================
+    // شرط يوم الشهر (day_of_month)
+    // ========================
+    if (settings.visaSwitchConditionType === "day_of_month" && settings.visaSwitchDayOfMonth != null) {
+        const todayDayOfMonth = new Date().getDate(); // 1-31
+        if (todayDayOfMonth === Number(settings.visaSwitchDayOfMonth)) {
             shouldSwitch = true;
         }
     }
