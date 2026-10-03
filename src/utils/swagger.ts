@@ -129,15 +129,27 @@ swaggerAutogen({ openapi: '3.0.0' })(outputFile, endpointsFiles, doc).then(() =>
         const table = resourceSeg ? findTable(resourceSeg) : undefined;
         const isPublic = parts.includes('auth'); // routes الـ login/register مش محتاجة token
 
+        // الـ body الافتراضي لو مفيش جدول
+        const genericBody = {
+            required: true,
+            content: {
+                'application/json': {
+                    schema: { type: 'object', additionalProperties: true },
+                    example: {},
+                },
+            },
+        };
+
         for (const method in spec.paths[path]) {
             const op = spec.paths[path][method];
             op.tags = [tag];
             if (isPublic) op.security = [];
 
-            // body أوتوماتيك من الجدول (POST/PUT بس، ومن غير ما نكتب فوق body موجود)
-            if (table && (method === 'post' || method === 'put') && !op.requestBody) {
-                op.requestBody = tableToBody(table, method === 'put');
-                withBody++;
+            const hasBody = ['post', 'put', 'patch'].includes(method);
+            if (hasBody && !op.requestBody) {
+                op.requestBody = table
+                    ? tableToBody(table, method !== 'post')   // الجدول لو لقاه
+                    : genericBody;                            // وإلا body فاضي تكتب فيه
             }
         }
     }
