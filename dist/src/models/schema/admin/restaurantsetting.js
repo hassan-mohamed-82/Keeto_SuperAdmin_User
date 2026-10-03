@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.restaurantSchedules = exports.restaurantSettings = void 0;
+const drizzle_orm_1 = require("drizzle-orm");
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 // 1. جدول الإعدادات العامة
 exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings", {
@@ -39,11 +40,28 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     repeatNotificationStatuses: (0, mysql_core_1.json)("repeat_notification_statuses")
         .$type()
         .default(["pending"]), // pending, accepted, preparing, out_for_delivery
-    resetDailyOrderNumberTime: (0, mysql_core_1.varchar)("reset_daily_order_number_time", { length: 5 }),
+    resetDailyOrderNumberTime: (0, mysql_core_1.varchar)("reset_daily_order_number_time", { length: 5 }).default((0, drizzle_orm_1.sql) `NULL`),
     // نوع حساب بوابات الدفع (حساب المنصة ولا حساب خاص بالمطعم)
     paymentGatewayType: (0, mysql_core_1.mysqlEnum)("payment_gateway_type", ["SYSTEM", "CUSTOM"]).default("SYSTEM"),
     // تمكين/تعطيل دفع الفيزا أونلاين للمطعم
-    enableOnlinePayment: (0, mysql_core_1.boolean)("enable_online_payment").default(true),
+    enableOnlinePayment: (0, mysql_core_1.boolean)("enable_online_payment").default(false),
+    // ==========================================
+    // إعدادات التحويل التلقائي للفيزة لـ SYSTEM
+    // ==========================================
+    // نوع شرط التحويل: amount | day_of_week | day_of_month | none
+    visaSwitchConditionType: (0, mysql_core_1.mysqlEnum)("visa_switch_condition_type", ["none", "amount", "day_of_week", "day_of_month"]).default("none"),
+    // المبلغ المستهدف من service fees اللي بعده تتحول الفيزة لـ SYSTEM (لو النوع amount)
+    visaSwitchAmountThreshold: (0, mysql_core_1.decimal)("visa_switch_amount_threshold", { precision: 10, scale: 2 }),
+    // يوم الأسبوع اللي بعده تتحول الفيزة لـ SYSTEM (لو النوع day_of_week) مثلاً: "saturday" أو "sunday"
+    visaSwitchDayOfWeek: (0, mysql_core_1.varchar)("visa_switch_day_of_week", { length: 10 }),
+    // يوم الشهر اللي بعده تتحول الفيزة لـ SYSTEM (لو النوع day_of_month) مثلاً: 15 أو 20
+    visaSwitchDayOfMonth: (0, mysql_core_1.int)("visa_switch_day_of_month"),
+    // هل تم التحويل التلقائي فعلًا أم لا
+    visaSwitchApplied: (0, mysql_core_1.boolean)("visa_switch_applied").default(false),
+    // تاريخ ووقت حدوث التحويل التلقائي لـ SYSTEM
+    gatewayAutoSwitchTriggeredAt: (0, mysql_core_1.timestamp)("gateway_auto_switch_triggered_at"),
+    // العداد التراكمي للسيرفيس فيز أثناء تشغيل بوابة CUSTOM لمقارنتها بالـ Threshold
+    customGatewayAccumulatedFees: (0, mysql_core_1.decimal)("custom_gateway_accumulated_fees", { precision: 10, scale: 2 }).default("0.00"),
 });
 // 2. جدول مواعيد العمل (يدعم الفترات المتعددة)
 exports.restaurantSchedules = (0, mysql_core_1.mysqlTable)("restaurant_schedules", {

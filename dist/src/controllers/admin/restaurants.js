@@ -35,9 +35,138 @@ const parsePaymentCredentialsInput = (input) => {
     }
     return [];
 };
+// Helper: Safely extract credentials object from input (tolerates JSON strings and character-spread objects)
+const extractRawCredentials = (item) => {
+    let creds = item?.credentials ?? item;
+    if (typeof creds === "string") {
+        try {
+            creds = JSON.parse(creds);
+        }
+        catch {
+            creds = null;
+        }
+    }
+    // Auto-heal if previously corrupted with character-spread keys: { 0: '{', 1: '"', ... }
+    if (creds && typeof creds === "object" && "0" in creds && !("mid" in creds) && !("apiKey" in creds)) {
+        try {
+            const reconstructed = Object.keys(creds)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => creds[k])
+                .join("");
+            creds = JSON.parse(reconstructed);
+        }
+        catch { }
+    }
+    if (creds && typeof creds === "object") {
+        const cleanCreds = {};
+        for (const [k, v] of Object.entries(creds)) {
+            if (v !== undefined && v !== null)
+                cleanCreds[k] = v;
+        }
+        return cleanCreds;
+    }
+    const result = {};
+    const candidate = item && typeof item === "object" ? item : {};
+    for (const key of [
+        "apiKey", "hmac", "integrationId", "iframeId", "callbackUrl",
+        "mid", "secretKey", "baseUrl", "publicKey", "apiPassword",
+        "environment", "returnUrl", "name"
+    ]) {
+        if (candidate[key] !== undefined && candidate[key] !== null) {
+            result[key] = candidate[key];
+        }
+    }
+    return result;
+};
+// Helper: Safely merge incoming credentials with existing DB credentials without overwriting secrets with '******'
+const mergePaymentCredentials = (existingCredsRaw, incomingCredsRaw) => {
+    let existing = {};
+    if (typeof existingCredsRaw === "string") {
+        try {
+            existing = JSON.parse(existingCredsRaw);
+        }
+        catch {
+            existing = {};
+        }
+    }
+    else if (existingCredsRaw && typeof existingCredsRaw === "object") {
+        existing = { ...existingCredsRaw };
+    }
+    if ("0" in existing && !("mid" in existing) && !("apiKey" in existing)) {
+        try {
+            const reconstructed = Object.keys(existing)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => existing[k])
+                .join("");
+            existing = JSON.parse(reconstructed);
+        }
+        catch { }
+    }
+    let incoming = {};
+    const credCandidate = incomingCredsRaw?.credentials ?? incomingCredsRaw;
+    if (typeof credCandidate === "string") {
+        try {
+            incoming = JSON.parse(credCandidate);
+        }
+        catch {
+            incoming = {};
+        }
+    }
+    else if (credCandidate && typeof credCandidate === "object") {
+        incoming = { ...credCandidate };
+    }
+    const sensitiveFields = ["apiKey", "hmac", "secretKey", "apiPassword"];
+    const merged = {};
+    // 1. Copy existing fields from DB
+    for (const [k, v] of Object.entries(existing)) {
+        if (v !== undefined && v !== null) {
+            merged[k] = v;
+        }
+    }
+    // 2. Update non-sensitive fields from incoming
+    for (const [k, v] of Object.entries(incoming)) {
+        if (!sensitiveFields.includes(k)) {
+            if (v !== undefined && v !== null && v !== "") {
+                merged[k] = v;
+            }
+        }
+    }
+    // 3. Handle sensitive fields safely:
+    // If incoming value is a new real secret (not starting with "******"), encrypt it.
+    // If incoming value is masked ("******") or empty/missing, KEEP the existing DB encrypted value!
+    for (const field of sensitiveFields) {
+        const newVal = incoming[field];
+        if (typeof newVal === "string" && newVal.trim() !== "" && !newVal.startsWith("******")) {
+            merged[field] = (0, encryption_1.encryptSecret)(newVal.trim());
+        }
+        else if (existing[field] !== undefined && existing[field] !== null && existing[field] !== "") {
+            merged[field] = existing[field];
+        }
+    }
+    return merged;
+};
 // Helper: Encrypt sensitive fields in payment credentials
 const encryptCredFields = (creds) => {
-    const enc = { ...creds };
+    let parsed = creds;
+    if (typeof creds === "string") {
+        try {
+            parsed = JSON.parse(creds);
+        }
+        catch {
+            parsed = {};
+        }
+    }
+    if (parsed && typeof parsed === "object" && "0" in parsed && !("mid" in parsed) && !("apiKey" in parsed)) {
+        try {
+            const reconstructed = Object.keys(parsed)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => parsed[k])
+                .join("");
+            parsed = JSON.parse(reconstructed);
+        }
+        catch { }
+    }
+    const enc = parsed && typeof parsed === "object" ? { ...parsed } : {};
     if (enc.apiKey && typeof enc.apiKey === "string" && !enc.apiKey.startsWith("******")) {
         enc.apiKey = (0, encryption_1.encryptSecret)(enc.apiKey);
     }
@@ -47,22 +176,47 @@ const encryptCredFields = (creds) => {
     if (enc.secretKey && typeof enc.secretKey === "string" && !enc.secretKey.startsWith("******")) {
         enc.secretKey = (0, encryption_1.encryptSecret)(enc.secretKey);
     }
+    if (enc.apiPassword && typeof enc.apiPassword === "string" && !enc.apiPassword.startsWith("******")) {
+        enc.apiPassword = (0, encryption_1.encryptSecret)(enc.apiPassword);
+    }
     return enc;
 };
 // Helper: Sanitize credentials record for API responses
 const sanitizePaymentCredentialRecord = (record) => {
     if (!record)
         return null;
-    const creds = record.credentials ? { ...record.credentials } : {};
-    if (creds.apiKey)
-        creds.apiKey = "******";
-    if (creds.hmac)
-        creds.hmac = "******";
-    if (creds.secretKey)
-        creds.secretKey = "******";
+    let creds = record.credentials;
+    if (typeof creds === "string") {
+        try {
+            creds = JSON.parse(creds);
+        }
+        catch {
+            creds = {};
+        }
+    }
+    // Auto-heal if previously corrupted with character-spread keys: { 0: '{', 1: '"', ... }
+    if (creds && typeof creds === "object" && "0" in creds && !("mid" in creds) && !("apiKey" in creds)) {
+        try {
+            const reconstructed = Object.keys(creds)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => creds[k])
+                .join("");
+            creds = JSON.parse(reconstructed);
+        }
+        catch { }
+    }
+    const safeCreds = creds && typeof creds === "object" ? { ...creds } : {};
+    if (safeCreds.apiKey)
+        safeCreds.apiKey = "******";
+    if (safeCreds.hmac)
+        safeCreds.hmac = "******";
+    if (safeCreds.secretKey)
+        safeCreds.secretKey = "******";
+    if (safeCreds.apiPassword)
+        safeCreds.apiPassword = "******";
     return {
         ...record,
-        credentials: creds,
+        credentials: safeCreds,
     };
 };
 // Helper: increment total_restaurants on a cuisine
@@ -136,7 +290,7 @@ const adjustSalesRepPoints = async (tx, salesId, delta) => {
 // ==========================================
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
-    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, cityId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans, type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, callcenterphone, paymentGatewayType, enableOnlinePayment } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, cityId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans, type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, callcenterphone, paymentGatewayType, enableOnlinePayment, slug } = req.body;
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
     if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
@@ -185,6 +339,37 @@ const createRestaurant = async (req, res) => {
     const resolvedEnableOnlinePayment = enableOnlinePayment === true || enableOnlinePayment === "true" || enableOnlinePayment === undefined
         ? true
         : Boolean(enableOnlinePayment);
+    // ==========================================
+    // 👈 إعدادات switch الفيزة التلقائي
+    // ==========================================
+    const { visaSwitchConditionType, // "none" | "amount" | "day_of_week" | "day_of_month"
+    visaSwitchAmountThreshold, // رقم (لو النوع amount)
+    visaSwitchDayOfWeek, // اسم اليوم بالإنجليزي بالحروف الصغيرة (لو النوع day_of_week) مثلاً: "saturday"
+    visaSwitchDayOfMonth, // رقم يوم الشهر 1-31 (لو النوع day_of_month) مثلاً: 15
+     } = req.body;
+    const VALID_DAYS_OF_WEEK = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const resolvedVisaSwitchType = ["amount", "day_of_week", "day_of_month"].includes(String(visaSwitchConditionType))
+        ? String(visaSwitchConditionType)
+        : "none";
+    // تحقق: لو اختار amount لازم يبعت قيمة
+    if (resolvedVisaSwitchType === "amount") {
+        if (!visaSwitchAmountThreshold || parseFloat(visaSwitchAmountThreshold) <= 0) {
+            throw new BadRequest_1.BadRequest("visaSwitchAmountThreshold is required and must be > 0 when visaSwitchConditionType is 'amount'");
+        }
+    }
+    // تحقق: لو اختار day_of_week لازم يبعت اسم يوم صحيح
+    if (resolvedVisaSwitchType === "day_of_week") {
+        if (!visaSwitchDayOfWeek || !VALID_DAYS_OF_WEEK.includes(String(visaSwitchDayOfWeek).toLowerCase())) {
+            throw new BadRequest_1.BadRequest(`visaSwitchDayOfWeek is required and must be one of: ${VALID_DAYS_OF_WEEK.join(", ")} when visaSwitchConditionType is 'day_of_week'`);
+        }
+    }
+    // تحقق: لو اختار day_of_month لازم يبعت رقم يوم صحيح (1-31)
+    if (resolvedVisaSwitchType === "day_of_month") {
+        const dom = parseInt(String(visaSwitchDayOfMonth), 10);
+        if (!visaSwitchDayOfMonth || isNaN(dom) || dom < 1 || dom > 31) {
+            throw new BadRequest_1.BadRequest("visaSwitchDayOfMonth is required and must be between 1 and 31 when visaSwitchConditionType is 'day_of_month'");
+        }
+    }
     // 👈 لو النوع CUSTOM لازم يبعت بيانات بوابة دفع واحدة على الأقل
     if (resolvedPaymentGatewayType === "CUSTOM" && parsedPaymentCredentials.length === 0) {
         throw new BadRequest_1.BadRequest("paymentCredentials are required when paymentGatewayType is CUSTOM");
@@ -210,6 +395,7 @@ const createRestaurant = async (req, res) => {
             callcenterphone: callcenterphone ? clean(callcenterphone) : null,
             logo: logoUrl || '',
             cover: coverUrl || '',
+            slug: slug || '',
             lat: lat || '',
             lng: lng || '',
             deliveryRadiusKm: deliveryRadiusKm ? clean(deliveryRadiusKm) : null,
@@ -261,6 +447,7 @@ const createRestaurant = async (req, res) => {
                     id: (0, uuid_1.v4)(),
                     restaurantId: restaurantId,
                     platformType: plan.platformType,
+                    subscriptionStartDate: plan.subscriptionStartDate || new Date(),
                     isMonthlyActive: plan.isMonthlyActive === true || plan.isMonthlyActive === "true",
                     monthlyAmount: plan.monthlyAmount ? String(plan.monthlyAmount) : "0.00",
                     isQuarterlyActive: plan.isQuarterlyActive === true || plan.isQuarterlyActive === "true",
@@ -285,27 +472,29 @@ const createRestaurant = async (req, res) => {
             secondTextColor: secondTextColor ? clean(secondTextColor) : null,
             paymentGatewayType: resolvedPaymentGatewayType, // 👈 نوع بوابة الدفع
             enableOnlinePayment: resolvedEnableOnlinePayment, // 👈 تفعيل الدفع أونلاين
+            // 👈 إعدادات التحويل التلقائي للفيزة
+            visaSwitchConditionType: resolvedVisaSwitchType,
+            visaSwitchAmountThreshold: resolvedVisaSwitchType === "amount"
+                ? String(parseFloat(visaSwitchAmountThreshold).toFixed(2))
+                : null,
+            visaSwitchDayOfWeek: resolvedVisaSwitchType === "day_of_week"
+                ? String(visaSwitchDayOfWeek).toLowerCase()
+                : null,
+            visaSwitchDayOfMonth: resolvedVisaSwitchType === "day_of_month"
+                ? parseInt(String(visaSwitchDayOfMonth), 10)
+                : null,
+            visaSwitchApplied: false,
         });
         // 5. بيانات بوابات الدفع (Payment Credentials)
         if (parsedPaymentCredentials.length > 0) {
             for (const credItem of parsedPaymentCredentials) {
-                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid)
+                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid && !credItem.publicKey && !credItem.apiPassword)
                     continue;
-                const provider = (credItem.provider || (credItem.mid ? "KASHIER" : "PAYMOB")).toUpperCase();
+                const rawProvider = (credItem.provider || (credItem.mid ? "KASHIER" : (credItem.publicKey || credItem.apiPassword) ? "GEIDEA" : "PAYMOB")).toUpperCase();
+                const provider = rawProvider;
                 const title = credItem.title || provider;
                 const environment = (credItem.environment || "LIVE").toUpperCase();
-                const rawCreds = credItem.credentials && typeof credItem.credentials === "object"
-                    ? credItem.credentials
-                    : {
-                        apiKey: credItem.apiKey,
-                        hmac: credItem.hmac,
-                        integrationId: credItem.integrationId,
-                        iframeId: credItem.iframeId,
-                        callbackUrl: credItem.callbackUrl,
-                        mid: credItem.mid,
-                        secretKey: credItem.secretKey,
-                        baseUrl: credItem.baseUrl,
-                    };
+                const rawCreds = extractRawCredentials(credItem);
                 const encryptedCreds = encryptCredFields(rawCreds);
                 const credId = (0, uuid_1.v4)();
                 const isActiveFlag = credItem.isActive !== undefined ? Boolean(credItem.isActive) : true;
@@ -350,6 +539,13 @@ const createRestaurant = async (req, res) => {
             callcenterphone: callcenterphone || null,
             paymentGatewayType: resolvedPaymentGatewayType,
             enableOnlinePayment: resolvedEnableOnlinePayment,
+            visaSwitch: {
+                conditionType: resolvedVisaSwitchType,
+                amountThreshold: resolvedVisaSwitchType === "amount" ? visaSwitchAmountThreshold : null,
+                dayOfWeek: resolvedVisaSwitchType === "day_of_week" ? visaSwitchDayOfWeek : null,
+                dayOfMonth: resolvedVisaSwitchType === "day_of_month" ? visaSwitchDayOfMonth : null,
+                applied: false,
+            },
             businessPlans: plansToReturn,
             paymentCredentials: credentialsToReturn,
         }
@@ -373,6 +569,7 @@ const getAllRestaurants = async (req, res) => {
         lat: schema_1.restaurants.lat,
         lng: schema_1.restaurants.lng,
         cover: schema_1.restaurants.cover,
+        slug: schema_1.restaurants.slug,
         status: schema_1.restaurants.status,
         type: schema_1.restaurants.type, // 👈 استرجاع النوع
         salesId: schema_1.restaurants.salesId, // 👈 استرجاع المندوب
@@ -391,6 +588,12 @@ const getAllRestaurants = async (req, res) => {
         androidApp: schema_1.restaurants.androidApp,
         paymentGatewayType: schema_1.restaurantSettings.paymentGatewayType, // 👈 نوع بوابة الدفع
         enableOnlinePayment: schema_1.restaurantSettings.enableOnlinePayment, // 👈 تفعيل الدفع أونلاين
+        // 👈 إعدادات التحويل التلقائي للفيزة
+        visaSwitchConditionType: schema_1.restaurantSettings.visaSwitchConditionType,
+        visaSwitchAmountThreshold: schema_1.restaurantSettings.visaSwitchAmountThreshold,
+        visaSwitchDayOfWeek: schema_1.restaurantSettings.visaSwitchDayOfWeek,
+        visaSwitchDayOfMonth: schema_1.restaurantSettings.visaSwitchDayOfMonth,
+        visaSwitchApplied: schema_1.restaurantSettings.visaSwitchApplied,
     })
         .from(schema_1.restaurants)
         .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
@@ -430,6 +633,7 @@ const getAllRestaurants = async (req, res) => {
             addressFr: r.addressFr,
             logo: r.logo,
             cover: r.cover,
+            slug: r.slug,
             status: r.status,
             type: r.type,
             salesId: r.salesId,
@@ -452,6 +656,13 @@ const getAllRestaurants = async (req, res) => {
             androidApp: r.androidApp || null,
             paymentGatewayType: r.paymentGatewayType || "SYSTEM", // 👈
             enableOnlinePayment: r.enableOnlinePayment ?? true, // 👈
+            visaSwitch: {
+                conditionType: r.visaSwitchConditionType || "none",
+                amountThreshold: r.visaSwitchConditionType === "amount" ? r.visaSwitchAmountThreshold : null,
+                dayOfWeek: r.visaSwitchConditionType === "day_of_week" ? r.visaSwitchDayOfWeek : null,
+                dayOfMonth: r.visaSwitchConditionType === "day_of_month" ? r.visaSwitchDayOfMonth : null,
+                applied: r.visaSwitchApplied ?? false,
+            },
         };
     });
     return (0, response_1.SuccessResponse)(res, { message: "Get all restaurants success", data: formatted });
@@ -516,6 +727,13 @@ const getRestaurantById = async (req, res) => {
         secondTextColor: row.settingsObj?.secondTextColor || null,
         paymentGatewayType: row.settingsObj?.paymentGatewayType || "SYSTEM", // 👈 نوع بوابة الدفع
         enableOnlinePayment: row.settingsObj?.enableOnlinePayment ?? true, // 👈 تفعيل الدفع أونلاين
+        visaSwitch: {
+            conditionType: row.settingsObj?.visaSwitchConditionType || "none",
+            amountThreshold: row.settingsObj?.visaSwitchConditionType === "amount" ? row.settingsObj?.visaSwitchAmountThreshold : null,
+            dayOfWeek: row.settingsObj?.visaSwitchConditionType === "day_of_week" ? row.settingsObj?.visaSwitchDayOfWeek : null,
+            dayOfMonth: row.settingsObj?.visaSwitchConditionType === "day_of_month" ? row.settingsObj?.visaSwitchDayOfMonth : null,
+            applied: row.settingsObj?.visaSwitchApplied ?? false,
+        },
     };
     delete formattedRestaurant.cuisineId;
     return (0, response_1.SuccessResponse)(res, { message: "Get restaurant by id success", data: formattedRestaurant });
@@ -527,7 +745,7 @@ exports.getRestaurantById = getRestaurantById;
 const updateRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
     const { id } = req.params;
-    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm, type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId, callcenterphone, paymentGatewayType, enableOnlinePayment } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm, type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId, callcenterphone, paymentGatewayType, enableOnlinePayment, slug } = req.body;
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
     const [existingRestaurant] = await connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id)).limit(1);
     if (!existingRestaurant)
@@ -575,6 +793,33 @@ const updateRestaurant = async (req, res) => {
     if (enableOnlinePayment !== undefined) {
         resolvedEnableOnlinePayment = enableOnlinePayment === true || enableOnlinePayment === "true";
     }
+    // ==========================================
+    // 👈 إعدادات switch الفيزة التلقائي (يتحدث فقط لو اتبعت)
+    // ==========================================
+    const { visaSwitchConditionType, visaSwitchAmountThreshold, visaSwitchDayOfWeek, visaSwitchDayOfMonth, } = req.body;
+    let resolvedVisaSwitchType;
+    if (visaSwitchConditionType !== undefined) {
+        const VALID_DAYS_OF_WEEK = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+        resolvedVisaSwitchType = ["amount", "day_of_week", "day_of_month"].includes(String(visaSwitchConditionType))
+            ? String(visaSwitchConditionType)
+            : "none";
+        if (resolvedVisaSwitchType === "amount") {
+            if (!visaSwitchAmountThreshold || parseFloat(visaSwitchAmountThreshold) <= 0) {
+                throw new BadRequest_1.BadRequest("visaSwitchAmountThreshold is required and must be > 0 when visaSwitchConditionType is 'amount'");
+            }
+        }
+        if (resolvedVisaSwitchType === "day_of_week") {
+            if (!visaSwitchDayOfWeek || !VALID_DAYS_OF_WEEK.includes(String(visaSwitchDayOfWeek).toLowerCase())) {
+                throw new BadRequest_1.BadRequest(`visaSwitchDayOfWeek is required and must be one of: ${VALID_DAYS_OF_WEEK.join(", ")} when visaSwitchConditionType is 'day_of_week'`);
+            }
+        }
+        if (resolvedVisaSwitchType === "day_of_month") {
+            const dom = parseInt(String(visaSwitchDayOfMonth), 10);
+            if (!visaSwitchDayOfMonth || isNaN(dom) || dom < 1 || dom > 31) {
+                throw new BadRequest_1.BadRequest("visaSwitchDayOfMonth is required and must be between 1 and 31 when visaSwitchConditionType is 'day_of_month'");
+            }
+        }
+    }
     if (email && existingOwner && email !== existingOwner.email) {
         const [emailExists] = await connection_1.db.select().from(schema_1.restrauntadmin).where((0, drizzle_orm_1.eq)(schema_1.restrauntadmin.email, email.trim())).limit(1);
         if (emailExists)
@@ -602,6 +847,8 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.lng = lng;
     if (deliveryRadiusKm !== undefined)
         restaurantUpdateData.deliveryRadiusKm = deliveryRadiusKm;
+    if (slug !== undefined)
+        restaurantUpdateData.slug = slug;
     if (type !== undefined)
         restaurantUpdateData.type = resolvedType; // 👈 تحديث النوع
     if (salesId !== undefined)
@@ -675,7 +922,8 @@ const updateRestaurant = async (req, res) => {
         }
         if (firstColor !== undefined || secondColor !== undefined ||
             firstTextColor !== undefined || secondTextColor !== undefined ||
-            resolvedPaymentGatewayType !== undefined || resolvedEnableOnlinePayment !== undefined) {
+            resolvedPaymentGatewayType !== undefined || resolvedEnableOnlinePayment !== undefined ||
+            resolvedVisaSwitchType !== undefined) {
             const settingsUpdateData = {};
             if (firstColor !== undefined)
                 settingsUpdateData.firstColor = (firstColor === "" || firstColor === null) ? null : clean(firstColor);
@@ -689,6 +937,23 @@ const updateRestaurant = async (req, res) => {
                 settingsUpdateData.paymentGatewayType = resolvedPaymentGatewayType; // 👈
             if (resolvedEnableOnlinePayment !== undefined)
                 settingsUpdateData.enableOnlinePayment = resolvedEnableOnlinePayment; // 👈
+            // 👈 visaSwitch fields
+            if (resolvedVisaSwitchType !== undefined) {
+                settingsUpdateData.visaSwitchConditionType = resolvedVisaSwitchType;
+                settingsUpdateData.visaSwitchAmountThreshold = resolvedVisaSwitchType === "amount"
+                    ? String(parseFloat(visaSwitchAmountThreshold).toFixed(2))
+                    : null;
+                settingsUpdateData.visaSwitchDayOfWeek = resolvedVisaSwitchType === "day_of_week"
+                    ? String(visaSwitchDayOfWeek).toLowerCase()
+                    : null;
+                settingsUpdateData.visaSwitchDayOfMonth = resolvedVisaSwitchType === "day_of_month"
+                    ? parseInt(String(visaSwitchDayOfMonth), 10)
+                    : null;
+                // لو تغير نوع الشرط، نعيد ضبط applied و accumulated fees
+                settingsUpdateData.visaSwitchApplied = false;
+                settingsUpdateData.customGatewayAccumulatedFees = "0.00";
+                settingsUpdateData.gatewayAutoSwitchTriggeredAt = null;
+            }
             if (Object.keys(settingsUpdateData).length > 0) {
                 const existingSettings = await tx.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, id)).limit(1);
                 if (existingSettings.length > 0) {
@@ -710,6 +975,7 @@ const updateRestaurant = async (req, res) => {
                         id: (0, uuid_1.v4)(),
                         restaurantId: id,
                         platformType: plan.platformType,
+                        subscriptionStartDate: plan.subscriptionStartDate || new Date(),
                         isMonthlyActive: plan.isMonthlyActive === true || plan.isMonthlyActive === "true",
                         monthlyAmount: plan.monthlyAmount ? String(plan.monthlyAmount) : "0.00",
                         isQuarterlyActive: plan.isQuarterlyActive === true || plan.isQuarterlyActive === "true",
@@ -728,23 +994,13 @@ const updateRestaurant = async (req, res) => {
         // 👈 تحديث بيانات بوابات الدفع (Payment Credentials)
         if (parsedPaymentCredentials !== undefined) {
             for (const credItem of parsedPaymentCredentials) {
-                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid)
+                if (!credItem.provider && !credItem.credentials && !credItem.apiKey && !credItem.mid && !credItem.publicKey && !credItem.apiPassword)
                     continue;
-                const provider = (credItem.provider || (credItem.mid ? "KASHIER" : "PAYMOB")).toUpperCase();
+                const rawProvider = (credItem.provider || (credItem.mid ? "KASHIER" : (credItem.publicKey || credItem.apiPassword) ? "GEIDEA" : "PAYMOB")).toUpperCase();
+                const provider = rawProvider;
                 const title = credItem.title || provider;
                 const environment = (credItem.environment || "LIVE").toUpperCase();
-                const rawCreds = credItem.credentials && typeof credItem.credentials === "object"
-                    ? credItem.credentials
-                    : {
-                        apiKey: credItem.apiKey,
-                        hmac: credItem.hmac,
-                        integrationId: credItem.integrationId,
-                        iframeId: credItem.iframeId,
-                        callbackUrl: credItem.callbackUrl,
-                        mid: credItem.mid,
-                        secretKey: credItem.secretKey,
-                        baseUrl: credItem.baseUrl,
-                    };
+                const rawCreds = extractRawCredentials(credItem);
                 let existingRecord = null;
                 if (credItem.id) {
                     const [foundById] = await tx
@@ -764,16 +1020,13 @@ const updateRestaurant = async (req, res) => {
                 }
                 let savedRecordId;
                 if (existingRecord) {
-                    const mergedCreds = {
-                        ...existingRecord.credentials,
-                        ...rawCreds,
-                    };
-                    const encryptedCreds = encryptCredFields(mergedCreds);
+                    const existingCreds = extractRawCredentials(existingRecord);
+                    const mergedCreds = mergePaymentCredentials(existingCreds, rawCreds);
                     const updatePayload = {
                         provider,
                         title,
                         environment,
-                        credentials: encryptedCreds,
+                        credentials: mergedCreds,
                         updatedAt: new Date(),
                     };
                     if (credItem.logoUrl !== undefined)
@@ -842,7 +1095,20 @@ const updateRestaurant = async (req, res) => {
             if (!oldCuisines.includes(cid))
                 await incrementCuisineCount(cid);
     }
-    return (0, response_1.SuccessResponse)(res, { message: "Update restaurant, owner account, and plans success" });
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Update restaurant, owner account, and plans success",
+        ...(resolvedVisaSwitchType !== undefined && {
+            data: {
+                visaSwitch: {
+                    conditionType: resolvedVisaSwitchType,
+                    amountThreshold: resolvedVisaSwitchType === "amount" ? visaSwitchAmountThreshold : null,
+                    dayOfWeek: resolvedVisaSwitchType === "day_of_week" ? visaSwitchDayOfWeek : null,
+                    dayOfMonth: resolvedVisaSwitchType === "day_of_month" ? visaSwitchDayOfMonth : null,
+                    applied: false,
+                },
+            },
+        }),
+    });
 };
 exports.updateRestaurant = updateRestaurant;
 // ==========================================

@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const catchAsync_1 = require("../../utils/catchAsync");
+const validation_1 = require("../../middlewares/validation");
+const paymentTransactions_1 = require("../../validation/admin/paymentTransactions");
+const paymentTransactions_2 = require("../../controllers/admin/paymentTransactions");
+const hasPermission_1 = require("../../middlewares/hasPermission");
+const router = (0, express_1.Router)();
+router.get("/", (0, hasPermission_1.hasPermission)("Orders", "View"), (0, validation_1.validate)(paymentTransactions_1.getPaymentTransactionsQuerySchema, "query"), (0, catchAsync_1.catchAsync)(paymentTransactions_2.getPaymentTransactions));
+router.get("/:id", (0, hasPermission_1.hasPermission)("Orders", "View"), (0, catchAsync_1.catchAsync)(paymentTransactions_2.getPaymentTransactionDetails));
+exports.default = router;

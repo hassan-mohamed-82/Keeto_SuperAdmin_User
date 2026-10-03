@@ -15,6 +15,7 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     address: (0, mysql_core_1.text)("address"),
     addressAr: (0, mysql_core_1.text)("address_ar").default(''),
     addressFr: (0, mysql_core_1.text)("address_fr").default(''),
+    slug: (0, mysql_core_1.varchar)("slug", { length: 255 }).unique(),
     cuisineId: (0, mysql_core_1.json)("cuisine_id").$type().default([]),
     cityId: (0, mysql_core_1.char)("city_id", { length: 36 }).references(() => city_1.cities.id),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }).references(() => zone_1.zones.id),
@@ -46,6 +47,8 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     deliverystatus: (0, mysql_core_1.mysqlEnum)("delivery_status", ["delivered", "not_delivered"]).default("not_delivered"),
     appBundleId: (0, mysql_core_1.varchar)("app_bundle_id", { length: 255 }).unique(),
+    iosFirebaseProject: (0, mysql_core_1.varchar)("ios_firebase_project", { length: 50 }).notNull().default("primary"),
+    androidFirebaseProject: (0, mysql_core_1.varchar)("android_firebase_project", { length: 50 }).notNull().default("primary"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

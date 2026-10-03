@@ -12,6 +12,7 @@ const Errors_1 = require("../../Errors");
 const notifications_1 = require("../../utils/notifications");
 const uuid_1 = require("uuid");
 const pdfkit_1 = __importDefault(require("pdfkit"));
+const restaurantWalletService_1 = require("../../services/restaurantWalletService");
 // ==========================================
 // Helper: استنتاج الزون من إحداثيات العنوان
 // يُستخدم عندما يكون zoneId في العنوان فارغاً (null) أو لتحديد الزون بدقة
@@ -219,14 +220,15 @@ async function resolveZoneFromCoords(lat, lng, restaurantId) {
 const getOrdersByRestaurant = async (req, res) => {
     const { restaurantId } = req.params; // الأيدي بتاع المطعم اللي باعتينه في اللينك
     const { status } = req.query; // لو عايز تفلتر بـ Pending أو Delivered مثلاً
-    // بناء الكويري بشكل ديناميكي
     const baseQuery = connection_1.db
         .select({
         orderId: schema_1.orders.orderNumber, // الرقم العشوائي (ORD-123)
+        dailyOrderNumber: schema_1.orders.dailyOrderNumber,
         internalId: schema_1.orders.id,
         orderDate: schema_1.orders.createdAt,
         totalAmount: schema_1.orders.totalAmount,
         orderStatus: schema_1.orders.status,
+        paymentStatus: schema_1.orders.paymentStatus,
         customerName: schema_1.users.name, // اسم العميل من جدول اليوزرز
         customerPhone: schema_1.users.phone,
         branchName: schema_1.branches.name,
@@ -242,12 +244,16 @@ const getOrdersByRestaurant = async (req, res) => {
         .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.orders.branchId, schema_1.branches.id))
         .leftJoin(schema_1.restaurantZoneDeliveryFees, (0, drizzle_orm_1.eq)(schema_1.orders.zoneId, schema_1.restaurantZoneDeliveryFees.id))
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, schema_1.zones.id), (0, drizzle_orm_1.eq)(schema_1.orders.zoneId, schema_1.zones.id)));
-    // لو الأدمن داس على تابة معينة (مثلاً Pending فقط)
-    let condition = (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId);
+    // لا تظهر الأوردرات التي بانتظار الدفع الإلكتروني (pending_payment) أو الفاشلة (failed) للمطعم حتى لا تشوش على المطبخ
+    const conditions = [
+        (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId),
+        (0, drizzle_orm_1.ne)(schema_1.orders.paymentStatus, "pending_payment"),
+        (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")
+    ];
     if (status) {
-        condition = (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.orders.status, status));
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.status, status));
     }
-    const result = await baseQuery.where(condition).orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
+    const result = await baseQuery.where((0, drizzle_orm_1.and)(...conditions)).orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
     return (0, response_1.SuccessResponse)(res, {
         message: "Fetched restaurant orders successfully",
         data: result
@@ -560,6 +566,10 @@ const getOrderDetails = async (req, res) => {
             updatedAt: orderDetail.order.updatedAt,
             durationOrderPreparing: orderDetail.order.durationOrderPreparing,
             customer: orderDetail.customer,
+            paymentStatus: orderDetail.order.paymentStatus,
+            paymentGateway: orderDetail.order.paymentGateway,
+            paymentTransactionId: orderDetail.order.paymentTransactionId,
+            paymentFailureReason: orderDetail.order.paymentFailureReason,
             paymentMethod: typeof pmDetails === "object" && pmDetails !== null ? pmDetails.id : pmDetails,
             paymentMethodName: typeof pmDetails === "object" && pmDetails !== null ? pmDetails.name : pmDetails,
             paymentMethodNameAr: typeof pmDetails === "object" && pmDetails !== null ? pmDetails.nameAr : pmDetails,
@@ -579,6 +589,9 @@ const getAllOrders = async (req, res) => {
     const conditions = [];
     if (status) {
         conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.status, status));
+    }
+    else {
+        conditions.push((0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"));
     }
     // Default to current date if no start or end date is provided
     let start = new Date();
@@ -688,11 +701,15 @@ const updateOrderStatus = async (req, res) => {
     }
     let reason = null;
     if (status === "cancelled") {
+        const cancelReasonType = req.body.cancelReasonType === "user" ? "user" : "restaurant";
+        if (cancelReasonType === "user" && !isSuperAdmin) {
+            throw new Errors_1.BadRequest("Only a super admin can cancel an order on behalf of the user");
+        }
         const [found] = await connection_1.db.select().from(schema_1.selectReasons)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.selectReasons.id, cancelReasonId), (0, drizzle_orm_1.eq)(schema_1.selectReasons.type, "restaurant")))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.selectReasons.id, cancelReasonId), (0, drizzle_orm_1.eq)(schema_1.selectReasons.type, cancelReasonType)))
             .limit(1);
         if (!found)
-            throw new Errors_1.BadRequest("Invalid cancel reason for restaurant");
+            throw new Errors_1.BadRequest(`Invalid cancel reason for ${cancelReasonType}`);
         reason = found;
     }
     await connection_1.db.transaction(async (tx) => {
@@ -702,9 +719,20 @@ const updateOrderStatus = async (req, res) => {
             status: status,
             cancelReasonId: status === "cancelled" ? reason.id : null,
             cancelReason: status === "cancelled" ? reason.name : null,
+            cancelReasonType: status === "cancelled" ? reason.type : null,
             updatedAt: new Date()
         })
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
+        if (status === "delivered") {
+            await (0, restaurantWalletService_1.settleDeliveredOrder)(orderId, tx);
+        }
+        else if (status === "cancelled") {
+            await (0, restaurantWalletService_1.handleCancelledOrder)({
+                orderId,
+                cancelReasonType: reason.type,
+                tx,
+            });
+        }
         // ==========================================
         // 💰 2. الـ Refund لمحفظة العميل (User Wallet) عند الإلغاء
         // ==========================================
@@ -741,65 +769,6 @@ const updateOrderStatus = async (req, res) => {
                     });
                 }
             }
-            // ==========================================
-            // 💰 3. التسوية العكسية لمحفظة المطعم (Restaurant Wallet Reversal)
-            // ==========================================
-            let payment = null;
-            if (existingOrder.paymentMethod) {
-                [payment] = await tx
-                    .select()
-                    .from(schema_1.paymentMethods)
-                    .where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.id, existingOrder.paymentMethod))
-                    .limit(1);
-            }
-            const pmName = (payment?.name || "").toLowerCase();
-            const isCashPayment = pmName.includes("cash") || pmName.includes("استلام");
-            const appCommission = parseFloat(existingOrder.appCommission || "0");
-            const serviceFee = parseFloat(existingOrder.serviceFee || "0");
-            const totalAmount = parseFloat(existingOrder.totalAmount || "0");
-            const subtotal = parseFloat(existingOrder.subtotal || "0");
-            const deliveryFee = parseFloat(existingOrder.deliveryFee || "0");
-            const appDues = appCommission + serviceFee;
-            const restaurantEarning = subtotal + deliveryFee - appCommission;
-            let [restWallet] = await tx.select().from(schema_1.restaurantWallets)
-                .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, existingOrder.restaurantId)).limit(1);
-            if (!restWallet) {
-                await tx.insert(schema_1.restaurantWallets).values({ id: (0, uuid_1.v4)(), restaurantId: existingOrder.restaurantId });
-                [restWallet] = await tx.select().from(schema_1.restaurantWallets)
-                    .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, existingOrder.restaurantId)).limit(1);
-            }
-            let currentBalance = parseFloat(restWallet.balance || "0");
-            let currentCollectedCash = parseFloat(restWallet.collectedCash || "0");
-            let currentTotalEarning = parseFloat(restWallet.totalEarning || "0");
-            if (isCashPayment) {
-                currentBalance += appDues;
-                currentCollectedCash -= totalAmount;
-            }
-            else {
-                currentBalance -= restaurantEarning;
-            }
-            currentTotalEarning -= restaurantEarning;
-            const balanceAfterPenalty = currentBalance - appDues;
-            await tx.update(schema_1.restaurantWallets)
-                .set({
-                balance: balanceAfterPenalty.toFixed(2),
-                collectedCash: currentCollectedCash.toFixed(2),
-                totalEarning: currentTotalEarning.toFixed(2),
-                updatedAt: new Date()
-            })
-                .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, existingOrder.restaurantId));
-            await tx.insert(schema_1.restaurantWalletTransactions).values({
-                id: (0, uuid_1.v4)(),
-                restaurantId: existingOrder.restaurantId,
-                type: "order_payment",
-                amount: `-${appDues.toFixed(2)}`,
-                balanceBefore: currentBalance.toFixed(2),
-                balanceAfter: balanceAfterPenalty.toFixed(2),
-                method: existingOrder.paymentMethod,
-                reference: existingOrder.orderNumber,
-                note: `Order Reversal & Penalty: Cancelled by restaurant. Commission deducted: ${appDues}`,
-                createdAt: new Date()
-            });
         }
         // ==========================================
         // ⭐ LOYALTY POINTS: إضافة نقاط المطعم عند التوصيل (DELIVERED)

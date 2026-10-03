@@ -12,10 +12,10 @@ exports.restaurantPaymentCredentials = (0, mysql_core_1.mysqlTable)("restaurant_
     restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 })
         .notNull()
         .references(() => restaurants_1.restaurants.id, { onDelete: "cascade" }),
-    provider: (0, mysql_core_1.mysqlEnum)("provider", ["PAYMOB", "KASHIER"]).notNull(),
+    provider: (0, mysql_core_1.mysqlEnum)("provider", ["PAYMOB", "KASHIER", "GEIDEA"]).notNull(),
     title: (0, mysql_core_1.varchar)("title", { length: 255 }).notNull(),
     environment: (0, mysql_core_1.mysqlEnum)("environment", ["LIVE", "TEST"]).default("LIVE"),
-    // 💡 استخدام Type المخصص هنا لدعم Paymob و Kashier
+    // 💡 استخدام Type المخصص هنا لدعم Paymob و Kashier و Geidea
     credentials: (0, mysql_core_1.json)("credentials").$type().notNull(),
     logoUrl: (0, mysql_core_1.varchar)("logo_url", { length: 500 }),
     isActive: (0, mysql_core_1.boolean)("is_active").default(true),

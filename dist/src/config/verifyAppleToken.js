@@ -1,11 +1,4 @@
 "use strict";
-// import { Request, Response } from "express";
-// import appleSignin from "apple-signin-auth";
-// import jwt from "jsonwebtoken";
-// import { users, restaurant_users } from "../models/schema";
-// import { db } from "../models/connection";
-// import { eq, or, and } from "drizzle-orm";
-// import { v4 as uuidv4 } from "uuid";
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getWalletTransactions = exports.approveWithdrawal = exports.collectCashFromRestaurant = exports.getRestaurantWallet = exports.getAllWallets = void 0;
+exports.recordSubscription = exports.getWalletTransactions = exports.approveWithdrawal = exports.collectCashFromRestaurant = exports.getDetailedWallet = exports.getRestaurantWallet = exports.getAllWallets = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -8,6 +8,71 @@ const uuid_1 = require("uuid");
 const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const NotFound_1 = require("../../Errors/NotFound");
+/**
+ * دالة مساعدة لجلب حركات المحفظة مربوطة ببيانات الأوردر (dailyOrderNumber, orderNumber, ...)
+ * إذا كان نوع الحركة order_payment
+ */
+async function getWalletTransactionsWithOrderDetails(restaurantId, limit) {
+    const query = connection_1.db
+        .select({
+        id: schema_1.restaurantWalletTransactions.id,
+        restaurantId: schema_1.restaurantWalletTransactions.restaurantId,
+        orderId: schema_1.restaurantWalletTransactions.orderId,
+        type: schema_1.restaurantWalletTransactions.type,
+        amount: schema_1.restaurantWalletTransactions.amount,
+        balanceBefore: schema_1.restaurantWalletTransactions.balanceBefore,
+        balanceAfter: schema_1.restaurantWalletTransactions.balanceAfter,
+        method: schema_1.restaurantWalletTransactions.method,
+        reference: schema_1.restaurantWalletTransactions.reference,
+        serviceFee: schema_1.restaurantWalletTransactions.serviceFee,
+        commission: schema_1.restaurantWalletTransactions.commission,
+        orderAmount: schema_1.restaurantWalletTransactions.orderAmount,
+        note: schema_1.restaurantWalletTransactions.note,
+        createdAt: schema_1.restaurantWalletTransactions.createdAt,
+        order: {
+            id: schema_1.orders.id,
+            orderNumber: schema_1.orders.orderNumber,
+            dailyOrderNumber: schema_1.orders.dailyOrderNumber,
+            status: schema_1.orders.status,
+            orderType: schema_1.orders.orderType,
+            orderSource: schema_1.orders.orderSource,
+            totalAmount: schema_1.orders.totalAmount,
+            createdAt: schema_1.orders.createdAt,
+        }
+    })
+        .from(schema_1.restaurantWalletTransactions)
+        .leftJoin(schema_1.orders, (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.orderId, schema_1.orders.id), (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.type, "order_payment"), (0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.reference, schema_1.orders.orderNumber))))
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.restaurantId, restaurantId))
+        .orderBy((0, drizzle_orm_1.desc)(schema_1.restaurantWalletTransactions.createdAt));
+    const rows = limit ? await query.limit(limit) : await query;
+    return rows.map(r => ({
+        id: r.id,
+        restaurantId: r.restaurantId,
+        orderId: r.orderId || (r.order?.id ?? null),
+        type: r.type,
+        amount: r.amount,
+        balanceBefore: r.balanceBefore,
+        balanceAfter: r.balanceAfter,
+        method: r.method,
+        reference: r.reference,
+        serviceFee: r.serviceFee,
+        commission: r.commission,
+        orderAmount: r.orderAmount,
+        note: r.note,
+        createdAt: r.createdAt,
+        // إذا كان نوع الحركة order_payment يتم إرجاع تفاصيل الأوردر مع dailyOrderNumber
+        order: (r.type === "order_payment" && r.order?.id) ? {
+            id: r.order.id,
+            orderNumber: r.order.orderNumber,
+            dailyOrderNumber: r.order.dailyOrderNumber,
+            status: r.order.status,
+            orderType: r.order.orderType,
+            orderSource: r.order.orderSource,
+            totalAmount: r.order.totalAmount,
+            createdAt: r.order.createdAt,
+        } : null
+    }));
+}
 // ==========================================
 // 1. GET ALL WALLETS (Super Admin)
 // ==========================================
@@ -18,6 +83,9 @@ const getAllWallets = async (req, res) => {
         balance: schema_1.restaurantWallets.balance,
         collectedCash: schema_1.restaurantWallets.collectedCash,
         pendingWithdraw: schema_1.restaurantWallets.pendingWithdraw,
+        totalServiceFees: schema_1.restaurantWallets.totalServiceFees,
+        totalCommission: schema_1.restaurantWallets.totalCommission,
+        totalSubscriptions: schema_1.restaurantWallets.totalSubscriptions,
         restaurant: {
             id: schema_1.restaurants.id,
             name: schema_1.restaurants.name,
@@ -29,11 +97,10 @@ const getAllWallets = async (req, res) => {
 };
 exports.getAllWallets = getAllWallets;
 // ==========================================
-// 2. GET SINGLE WALLET
+// 2. GET SINGLE WALLET (Basic)
 // ==========================================
 const getRestaurantWallet = async (req, res, next) => {
     try {
-        // 👇 التعديل هنا: غيرنا id لـ restaurantId
         const restaurantId = req.params.restaurantId;
         const wallet = await connection_1.db
             .select()
@@ -51,7 +118,134 @@ const getRestaurantWallet = async (req, res, next) => {
 };
 exports.getRestaurantWallet = getRestaurantWallet;
 // ==========================================
-// 3. COLLECT CASH (Super Admin)
+// 3. GET DETAILED WALLET (تفصيل كامل)
+// ==========================================
+const getDetailedWallet = async (req, res) => {
+    const restaurantId = req.params.restaurantId;
+    // جلب بيانات المحفظة
+    const wallet = await connection_1.db
+        .select()
+        .from(schema_1.restaurantWallets)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId))
+        .limit(1);
+    if (!wallet[0]) {
+        throw new NotFound_1.NotFound("Wallet not found");
+    }
+    // جلب الخطط النشطة الخاصة بالمطعم (للاشتراكات الفعّالة)
+    const activePlans = await connection_1.db
+        .select({
+        platformType: schema_1.restaurantBusinessPlans.platformType,
+        isMonthlyActive: schema_1.restaurantBusinessPlans.isMonthlyActive,
+        monthlyAmount: schema_1.restaurantBusinessPlans.monthlyAmount,
+        isQuarterlyActive: schema_1.restaurantBusinessPlans.isQuarterlyActive,
+        quarterlyAmount: schema_1.restaurantBusinessPlans.quarterlyAmount,
+        isAnnuallyActive: schema_1.restaurantBusinessPlans.isAnnuallyActive,
+        annuallyAmount: schema_1.restaurantBusinessPlans.annuallyAmount,
+        commissionRate: schema_1.restaurantBusinessPlans.commissionRate,
+        serviceFee: schema_1.restaurantBusinessPlans.serviceFee,
+    })
+        .from(schema_1.restaurantBusinessPlans)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId));
+    // تجميع الاشتراكات الفعالة حسب نوعها
+    const activeSubscriptions = {
+        monthly: activePlans
+            .filter((p) => p.isMonthlyActive)
+            .map((p) => ({
+            platformType: p.platformType,
+            amount: p.monthlyAmount,
+        })),
+        quarterly: activePlans
+            .filter((p) => p.isQuarterlyActive)
+            .map((p) => ({
+            platformType: p.platformType,
+            amount: p.quarterlyAmount,
+        })),
+        annually: activePlans
+            .filter((p) => p.isAnnuallyActive)
+            .map((p) => ({
+            platformType: p.platformType,
+            amount: p.annuallyAmount,
+        })),
+    };
+    // حساب مجموع الاشتراكات الفعّالة (مبلغ يتم دفعه دوريًا)
+    const totalActiveMonthly = activeSubscriptions.monthly.reduce((acc, s) => acc + parseFloat(s.amount || "0"), 0);
+    const totalActiveQuarterly = activeSubscriptions.quarterly.reduce((acc, s) => acc + parseFloat(s.amount || "0"), 0);
+    const totalActiveAnnually = activeSubscriptions.annually.reduce((acc, s) => acc + parseFloat(s.amount || "0"), 0);
+    // إجمالي service fees وcommission من الخطط
+    const totalPlanServiceFee = activePlans.reduce((acc, p) => acc + parseFloat(p.serviceFee || "0"), 0);
+    const totalPlanCommissionRate = activePlans.reduce((acc, p) => acc + parseFloat(p.commissionRate || "0"), 0);
+    // جلب آخر 10 transactions مع تفاصيل الأوردرات
+    const recentTransactions = await getWalletTransactionsWithOrderDetails(restaurantId, 10);
+    const w = wallet[0];
+    const numericBalance = parseFloat(w.balance || "0");
+    const accountStatus = numericBalance < 0
+        ? "DUE_ON_RESTAURANT" // المطعم عليه فلوس للمنصة
+        : numericBalance > 0
+            ? "DUE_TO_RESTAURANT" // المطعم ليه فلوس عند المنصة
+            : "SETTLED"; // الحساب متساوي وخالص
+    const statusDescription = numericBalance < 0
+        ? `المطعم عليه مديونية للمنصة بقيمة ${Math.abs(numericBalance).toFixed(2)} ج.م`
+        : numericBalance > 0
+            ? `المطعم ليه مستحقات عند المنصة بقيمة ${numericBalance.toFixed(2)} ج.م`
+            : "الحساب متوازن وخالص (0.00 ج.م)";
+    return (0, response_1.SuccessResponse)(res, {
+        data: {
+            // ==================
+            // ملخص الحساب المالي المباشر
+            // ==================
+            accountSummary: {
+                status: accountStatus, // "DUE_ON_RESTAURANT" | "DUE_TO_RESTAURANT" | "SETTLED"
+                description: statusDescription, // رسالة واضحة بالعربي
+                netAmount: Math.abs(numericBalance).toFixed(2), // المبلغ الصافي المستحق
+                balance: w.balance, // رصيد المحفظة الأصلي
+                collectedCash: w.collectedCash, // الكاش الموجود في يد المطعم
+                totalEarning: w.totalEarning, // إجمالي أرباح ومبيعات المطعم
+            },
+            // ==================
+            // الرسوم والعمولات المتراكمة (مسجّلة في المحفظة)
+            // ==================
+            fees: {
+                totalServiceFeesRecorded: w.totalServiceFees, // إجمالي service fees المسجلة
+                totalCommissionRecorded: w.totalCommission, // إجمالي الكوميشن المسجل
+                totalSubscriptionsRecorded: w.totalSubscriptions, // إجمالي الاشتراكات المسجلة
+                lastMonthlySubscription: w.lastMonthlySubscription,
+                lastQuarterlySubscription: w.lastQuarterlySubscription,
+                lastAnnuallySubscription: w.lastAnnuallySubscription,
+            },
+            // ==================
+            // الاشتراكات الحالية الفعّالة (من الخطط النشطة)
+            // ==================
+            activeSubscriptions: {
+                monthly: {
+                    plans: activeSubscriptions.monthly,
+                    totalPerCycle: totalActiveMonthly.toFixed(2),
+                },
+                quarterly: {
+                    plans: activeSubscriptions.quarterly,
+                    totalPerCycle: totalActiveQuarterly.toFixed(2),
+                },
+                annually: {
+                    plans: activeSubscriptions.annually,
+                    totalPerCycle: totalActiveAnnually.toFixed(2),
+                },
+            },
+            // ==================
+            // الرسوم الجارية من الخطط
+            // ==================
+            currentPlanFees: {
+                totalServiceFeePerOrder: totalPlanServiceFee.toFixed(2),
+                totalCommissionRatePercent: totalPlanCommissionRate.toFixed(2),
+            },
+            // ==================
+            // آخر التعاملات
+            // ==================
+            recentTransactions,
+        }
+    });
+};
+exports.getDetailedWallet = getDetailedWallet;
+// ==========================================
+// 4. COLLECT CASH (Super Admin)
 // ==========================================
 const collectCashFromRestaurant = async (req, res) => {
     // 👇 التعديل هنا
@@ -102,7 +296,7 @@ const collectCashFromRestaurant = async (req, res) => {
 };
 exports.collectCashFromRestaurant = collectCashFromRestaurant;
 // ==========================================
-// 4. APPROVE WITHDRAWAL
+// 5. APPROVE WITHDRAWAL
 // ==========================================
 const approveWithdrawal = async (req, res) => {
     // 👇 التعديل هنا
@@ -135,11 +329,11 @@ const approveWithdrawal = async (req, res) => {
         await tx.insert(schema_1.restaurantWalletTransactions).values({
             id: (0, uuid_1.v4)(),
             restaurantId,
-            type: "withdraw_approved", // استخدم النوع المناسب اللي في الـ Enum عندك (مثلا withdraw)
+            type: "withdraw",
             amount: approveAmount.toFixed(2),
             balanceBefore: pending.toFixed(2),
             balanceAfter: (pending - approveAmount).toFixed(2),
-            method: "bank", // أو wallet
+            method: "bank",
             note: "Withdrawal approved by admin",
         });
     });
@@ -147,18 +341,82 @@ const approveWithdrawal = async (req, res) => {
 };
 exports.approveWithdrawal = approveWithdrawal;
 // ==========================================
-// 5. WALLET TRANSACTIONS HISTORY
+// 6. WALLET TRANSACTIONS HISTORY
 // ==========================================
 const getWalletTransactions = async (req, res) => {
     // 👇 التعديل هنا
     const restaurantId = req.params.restaurantId || req.params.id;
     if (!restaurantId)
         throw new BadRequest_1.BadRequest("Restaurant ID is required");
-    const data = await connection_1.db
-        .select()
-        .from(schema_1.restaurantWalletTransactions)
-        .where((0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.restaurantId, restaurantId))
-        .orderBy((0, drizzle_orm_1.desc)(schema_1.restaurantWalletTransactions.createdAt)); // ترتيب من الأحدث للأقدم
+    const data = await getWalletTransactionsWithOrderDetails(restaurantId);
     return (0, response_1.SuccessResponse)(res, { data });
 };
 exports.getWalletTransactions = getWalletTransactions;
+// ==========================================
+// 7. RECORD SUBSCRIPTION (تسجيل اشتراك دوري في المحفظة)
+// يُستخدم يدويًا أو تلقائيًا لتسجيل الاشتراك الدوري في محفظة المطعم
+// ==========================================
+const recordSubscription = async (req, res) => {
+    const { restaurantId, subscriptionType, amount, subscriptionDate, note } = req.body;
+    if (!restaurantId)
+        throw new BadRequest_1.BadRequest("Restaurant ID is required");
+    if (!subscriptionType || !["monthly", "quarterly", "annually"].includes(subscriptionType)) {
+        throw new BadRequest_1.BadRequest("subscriptionType must be 'monthly', 'quarterly', or 'annually'");
+    }
+    const subAmount = parseFloat(amount);
+    if (!subAmount || subAmount <= 0)
+        throw new BadRequest_1.BadRequest("Invalid subscription amount");
+    // تاريخ بداية/تسجيل الاشتراك: الافتراضي هو اليوم أو التاريخ المحدد
+    const effectiveDate = subscriptionDate || new Date().toISOString().split("T")[0];
+    const wallet = await connection_1.db
+        .select()
+        .from(schema_1.restaurantWallets)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId))
+        .limit(1);
+    if (!wallet[0])
+        throw new NotFound_1.NotFound("Wallet not found");
+    const currentBalance = parseFloat(wallet[0].balance || "0");
+    const currentTotalSubs = parseFloat(wallet[0].totalSubscriptions || "0");
+    // 🟢 الاشتراك يخصم من الرصيد ويزيد مديونية المطعم
+    const newBalance = Math.round((currentBalance - subAmount + Number.EPSILON) * 100) / 100;
+    const newTotalSubs = Math.round((currentTotalSubs + subAmount + Number.EPSILON) * 100) / 100;
+    const walletUpdateFields = {
+        balance: newBalance.toFixed(2),
+        totalSubscriptions: newTotalSubs.toFixed(2),
+    };
+    if (subscriptionType === "monthly") {
+        walletUpdateFields.lastMonthlySubscription = subAmount.toFixed(2);
+    }
+    else if (subscriptionType === "quarterly") {
+        walletUpdateFields.lastQuarterlySubscription = subAmount.toFixed(2);
+    }
+    else if (subscriptionType === "annually") {
+        walletUpdateFields.lastAnnuallySubscription = subAmount.toFixed(2);
+    }
+    await connection_1.db.transaction(async (tx) => {
+        await tx.update(schema_1.restaurantWallets)
+            .set(walletUpdateFields)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId));
+        await tx.insert(schema_1.restaurantWalletTransactions).values({
+            id: (0, uuid_1.v4)(),
+            restaurantId,
+            type: "subscription",
+            amount: `-${subAmount.toFixed(2)}`,
+            balanceBefore: currentBalance.toFixed(2),
+            balanceAfter: newBalance.toFixed(2),
+            method: "system",
+            note: note || `${subscriptionType} subscription charged to wallet (Date: ${effectiveDate})`,
+            createdAt: new Date(),
+        });
+    });
+    return (0, response_1.SuccessResponse)(res, {
+        message: `${subscriptionType} subscription charged successfully to wallet`,
+        data: {
+            deductedAmount: subAmount.toFixed(2),
+            balanceBefore: currentBalance.toFixed(2),
+            balanceAfter: newBalance.toFixed(2),
+            subscriptionDate: effectiveDate
+        }
+    });
+};
+exports.recordSubscription = recordSubscription;

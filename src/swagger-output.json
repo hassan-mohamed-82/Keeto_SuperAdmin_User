@@ -7,7 +7,12 @@
   },
   "servers": [
     {
-      "url": "http://localhost:3000"
+      "url": "https://Keetobcknd.keeto.org",
+      "description": "Main"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Local"
     }
   ],
   "paths": {
@@ -457,7 +462,19 @@
         },
         "tags": [
           "Superadmin / Report"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/report/invoice/{invoiceId}/mark-paid": {
@@ -490,7 +507,19 @@
         },
         "tags": [
           "Superadmin / Report"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/report/restaurant-orders": {
@@ -777,7 +806,51 @@
         },
         "tags": [
           "Superadmin / Admin"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "super_admin",
+                      "admin"
+                    ]
+                  },
+                  "phoneNumber": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "roleId": {
+                    "type": "string"
+                  },
+                  "permissions": {
+                    "type": "object"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "inactive"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       "delete": {
         "description": "",
@@ -861,7 +934,19 @@
         },
         "tags": [
           "Superadmin / Roles"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "get": {
         "description": "",
@@ -951,7 +1036,19 @@
         },
         "tags": [
           "Superadmin / Roles"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "delete": {
         "description": "",
@@ -4617,7 +4714,35 @@
         },
         "tags": [
           "Superadmin / Adonescategory"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "nameAr": {
+                    "type": "string"
+                  },
+                  "nameFr": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "inactive"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/superadmin/restaurants/select": {
@@ -5687,7 +5812,19 @@
         },
         "tags": [
           "Superadmin / Order Delay Alerts"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "get": {
         "description": "",
@@ -5802,7 +5939,19 @@
         },
         "tags": [
           "Superadmin / Order Delay Alerts"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "delete": {
         "description": "",
@@ -5866,7 +6015,19 @@
         },
         "tags": [
           "Superadmin / Order Delay Alerts"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/addons/select": {
@@ -7140,7 +7301,19 @@
         },
         "tags": [
           "Superadmin / Businessplans"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/businessplans/restaurant/{restaurantId}": {
@@ -7237,7 +7410,19 @@
         },
         "tags": [
           "Superadmin / Businessplans"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "delete": {
         "description": "",
@@ -7743,7 +7928,19 @@
         },
         "tags": [
           "Superadmin / Wallets"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/wallets/collect/{id}": {
@@ -7776,7 +7973,19 @@
         },
         "tags": [
           "Superadmin / Wallets"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/wallets/record-subscription": {
@@ -7804,7 +8013,19 @@
         },
         "tags": [
           "Superadmin / Wallets"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/restaurantsetting/{restaurantId}": {
@@ -7868,7 +8089,19 @@
         },
         "tags": [
           "Superadmin / Restaurantsetting"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/payment-methods/": {
@@ -8387,7 +8620,19 @@
         },
         "tags": [
           "Superadmin / Ratings"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/ratings/requests/{id}/reject": {
@@ -8423,7 +8668,19 @@
         },
         "tags": [
           "Superadmin / Ratings"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/ratings/all-customer-ratings": {
@@ -8572,7 +8829,19 @@
         },
         "tags": [
           "Superadmin / Ratings"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "delete": {
         "description": "",
@@ -9252,7 +9521,78 @@
         },
         "tags": [
           "Superadmin / Coupons"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "nameAr": {
+                    "type": "string"
+                  },
+                  "nameFr": {
+                    "type": "string"
+                  },
+                  "discountType": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "fixed_amount",
+                      "free_delivery"
+                    ]
+                  },
+                  "discountValue": {
+                    "type": "string"
+                  },
+                  "maxDiscount": {
+                    "type": "string"
+                  },
+                  "minOrderAmount": {
+                    "type": "string"
+                  },
+                  "usageLimit": {
+                    "type": "integer"
+                  },
+                  "usedCount": {
+                    "type": "integer"
+                  },
+                  "userUsageType": {
+                    "type": "string",
+                    "enum": [
+                      "fixed",
+                      "unlimited"
+                    ]
+                  },
+                  "perUserLimit": {
+                    "type": "integer"
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "isActive": {
+                    "type": "boolean"
+                  },
+                  "isGlobal": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/superadmin/coupons/{id}/usages": {
@@ -9335,7 +9675,19 @@
         },
         "tags": [
           "Superadmin / Keeto Users"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/keeto-users/": {
@@ -9460,7 +9812,19 @@
         },
         "tags": [
           "Superadmin / Keeto Users"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "delete": {
         "description": "",
@@ -9807,7 +10171,19 @@
         },
         "tags": [
           "Superadmin / Dashboard"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/platform/": {
@@ -10606,7 +10982,19 @@
         },
         "tags": [
           "User / Home"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/auth/signup": {
@@ -10632,7 +11020,19 @@
         "tags": [
           "User / Auth"
         ],
-        "security": []
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/auth/verify-email": {
@@ -10684,7 +11084,19 @@
         "tags": [
           "User / Auth"
         ],
-        "security": []
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/auth/forgot-password": {
@@ -10710,7 +11122,19 @@
         "tags": [
           "User / Auth"
         ],
-        "security": []
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/auth/verify-reset-code": {
@@ -10736,7 +11160,19 @@
         "tags": [
           "User / Auth"
         ],
-        "security": []
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/auth/reset-password": {
@@ -10762,7 +11198,19 @@
         "tags": [
           "User / Auth"
         ],
-        "security": []
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/auth/guest-session": {
@@ -10788,7 +11236,19 @@
         "tags": [
           "User / Auth"
         ],
-        "security": []
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/auth/google": {
@@ -10814,7 +11274,19 @@
         "tags": [
           "User / Auth"
         ],
-        "security": []
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/auth/facebook": {
@@ -10840,7 +11312,19 @@
         "tags": [
           "User / Auth"
         ],
-        "security": []
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/auth/apple": {
@@ -10866,7 +11350,19 @@
         "tags": [
           "User / Auth"
         ],
-        "security": []
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/zone-delivery-fee/": {
@@ -11044,7 +11540,19 @@
         },
         "tags": [
           "User / Rating"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/rating/{restaurantId}": {
@@ -11994,7 +12502,19 @@
         },
         "tags": [
           "User / Profile"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "delete": {
         "description": "",
@@ -12042,7 +12562,19 @@
         },
         "tags": [
           "User / Profile"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/profile/cahange": {
@@ -12067,7 +12599,19 @@
         },
         "tags": [
           "User / Profile"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/profile/points/{restaurantId}": {
@@ -12959,7 +13503,19 @@
         },
         "tags": [
           "User / Wallet"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/wallet/history": {
@@ -13009,7 +13565,19 @@
         },
         "tags": [
           "User / Address"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "get": {
         "description": "",
@@ -13096,7 +13664,19 @@
         },
         "tags": [
           "User / Address"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/cart/validate-pricing": {
@@ -13121,7 +13701,19 @@
         },
         "tags": [
           "User / Cart"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/cart/": {
@@ -13146,7 +13738,19 @@
         },
         "tags": [
           "User / Cart"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "get": {
         "description": "",
@@ -13225,7 +13829,19 @@
         },
         "tags": [
           "User / Cart"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       },
       "delete": {
         "description": "",
@@ -13281,7 +13897,19 @@
         },
         "tags": [
           "User / Favlist"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/favlist/": {
@@ -13525,7 +14153,19 @@
         },
         "tags": [
           "User / Points"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/user/coupon/check": {
@@ -13744,7 +14384,19 @@
         },
         "tags": [
           "Payments / Kashier"
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/payments/kashier/callback": {
@@ -14190,166 +14842,145 @@
       "name": "General"
     },
     {
-      "name": "Payments / Geidea"
-    },
-    {
-      "name": "Payments / Kashier"
-    },
-    {
-      "name": "Payments / Paymob"
-    },
-    {
-      "name": "Superadmin / Addons"
-    },
-    {
-      "name": "Superadmin / Admin"
-    },
-    {
-      "name": "Superadmin / Adonescategory"
-    },
-    {
       "name": "Superadmin / Auth"
-    },
-    {
-      "name": "Superadmin / Basiccampaign"
-    },
-    {
-      "name": "Superadmin / Branches"
-    },
-    {
-      "name": "Superadmin / Businessplans"
-    },
-    {
-      "name": "Superadmin / Categories"
-    },
-    {
-      "name": "Superadmin / Cities"
-    },
-    {
-      "name": "Superadmin / Countries"
-    },
-    {
-      "name": "Superadmin / Coupons"
-    },
-    {
-      "name": "Superadmin / Dashboard"
-    },
-    {
-      "name": "Superadmin / Discounts"
-    },
-    {
-      "name": "Superadmin / Food"
-    },
-    {
-      "name": "Superadmin / Keeto Users"
     },
     {
       "name": "Superadmin / Notifications"
     },
     {
-      "name": "Superadmin / Order"
-    },
-    {
-      "name": "Superadmin / Order Delay Alerts"
-    },
-    {
-      "name": "Superadmin / Payment Methods"
-    },
-    {
-      "name": "Superadmin / Payment Transactions"
-    },
-    {
-      "name": "Superadmin / Platform"
-    },
-    {
-      "name": "Superadmin / Policy"
-    },
-    {
-      "name": "Superadmin / Popup"
-    },
-    {
-      "name": "Superadmin / Ratings"
-    },
-    {
       "name": "Superadmin / Report"
     },
     {
-      "name": "Superadmin / Restaurant Groups"
-    },
-    {
-      "name": "Superadmin / Restaurant Payment Credentials"
-    },
-    {
-      "name": "Superadmin / Restaurants"
-    },
-    {
-      "name": "Superadmin / Restaurantsetting"
+      "name": "Superadmin / Admin"
     },
     {
       "name": "Superadmin / Roles"
     },
     {
-      "name": "Superadmin / Sales"
+      "name": "Superadmin / Countries"
+    },
+    {
+      "name": "Superadmin / Popup"
     },
     {
       "name": "Superadmin / Select Reasons"
     },
     {
-      "name": "Superadmin / Subcategories"
-    },
-    {
-      "name": "Superadmin / User Wallets"
-    },
-    {
-      "name": "Superadmin / Wallets"
-    },
-    {
-      "name": "Superadmin / Zone Delivery Fees"
+      "name": "Superadmin / Cities"
     },
     {
       "name": "Superadmin / Zones"
     },
     {
-      "name": "User / Address"
+      "name": "Superadmin / Categories"
     },
     {
-      "name": "User / Auth"
+      "name": "Superadmin / Subcategories"
     },
     {
-      "name": "User / Bundles"
+      "name": "Superadmin / Order"
     },
     {
-      "name": "User / Cart"
+      "name": "Superadmin / Branches"
     },
     {
-      "name": "User / Coupon"
+      "name": "Superadmin / Policy"
     },
     {
-      "name": "User / Favlist"
+      "name": "Superadmin / Adonescategory"
     },
     {
-      "name": "User / Foods"
+      "name": "Superadmin / Restaurants"
+    },
+    {
+      "name": "Superadmin / Restaurant Groups"
+    },
+    {
+      "name": "Superadmin / Order Delay Alerts"
+    },
+    {
+      "name": "Superadmin / Addons"
+    },
+    {
+      "name": "Superadmin / Food"
+    },
+    {
+      "name": "Superadmin / Businessplans"
+    },
+    {
+      "name": "Superadmin / Basiccampaign"
+    },
+    {
+      "name": "Superadmin / Wallets"
+    },
+    {
+      "name": "Superadmin / Restaurantsetting"
+    },
+    {
+      "name": "Superadmin / Payment Methods"
+    },
+    {
+      "name": "Superadmin / User Wallets"
+    },
+    {
+      "name": "Superadmin / Zone Delivery Fees"
+    },
+    {
+      "name": "Superadmin / Ratings"
+    },
+    {
+      "name": "Superadmin / Discounts"
+    },
+    {
+      "name": "Superadmin / Coupons"
+    },
+    {
+      "name": "Superadmin / Keeto Users"
+    },
+    {
+      "name": "Superadmin / Sales"
+    },
+    {
+      "name": "Superadmin / Dashboard"
+    },
+    {
+      "name": "Superadmin / Platform"
+    },
+    {
+      "name": "Superadmin / Restaurant Payment Credentials"
+    },
+    {
+      "name": "Superadmin / Payment Transactions"
     },
     {
       "name": "User / Home"
     },
     {
+      "name": "User / Auth"
+    },
+    {
+      "name": "User / Zone Delivery Fee"
+    },
+    {
+      "name": "User / Socialmedia"
+    },
+    {
+      "name": "User / Slider"
+    },
+    {
       "name": "User / Image"
+    },
+    {
+      "name": "User / Rating"
     },
     {
       "name": "User / Landing Page"
     },
     {
-      "name": "User / Notifications"
+      "name": "User / Settings"
     },
     {
-      "name": "User / Offers"
-    },
-    {
-      "name": "User / Order"
-    },
-    {
-      "name": "User / Points"
+      "name": "User / Recommended Foods"
     },
     {
       "name": "User / Policy"
@@ -14358,34 +14989,55 @@
       "name": "User / Popup"
     },
     {
-      "name": "User / Profile"
+      "name": "User / Offers"
     },
     {
-      "name": "User / Rating"
-    },
-    {
-      "name": "User / Recommended Foods"
+      "name": "User / Bundles"
     },
     {
       "name": "User / Restaurant Groups"
     },
     {
+      "name": "User / Foods"
+    },
+    {
       "name": "User / Restaurants"
     },
     {
-      "name": "User / Settings"
+      "name": "User / Profile"
     },
     {
-      "name": "User / Slider"
-    },
-    {
-      "name": "User / Socialmedia"
+      "name": "User / Order"
     },
     {
       "name": "User / Wallet"
     },
     {
-      "name": "User / Zone Delivery Fee"
+      "name": "User / Address"
+    },
+    {
+      "name": "User / Cart"
+    },
+    {
+      "name": "User / Favlist"
+    },
+    {
+      "name": "User / Notifications"
+    },
+    {
+      "name": "User / Points"
+    },
+    {
+      "name": "User / Coupon"
+    },
+    {
+      "name": "Payments / Kashier"
+    },
+    {
+      "name": "Payments / Paymob"
+    },
+    {
+      "name": "Payments / Geidea"
     }
   ]
 }

@@ -36,7 +36,9 @@ class KashierService {
         const expireAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         // Redirect URL after Kashier hosted checkout completes
         const appBaseUrl = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
-        const merchantRedirect = `${appBaseUrl}/payment/result`;
+        const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
+        const merchantRedirect = input.merchantRedirect || `${appBaseUrl}/payment/result`;
+        const serverWebhook = backendBaseUrl ? `${backendBaseUrl}/api/payments/kashier/webhook` : undefined;
         const body = {
             merchantId: mid,
             order: input.orderId,
@@ -44,6 +46,7 @@ class KashierService {
             currency,
             expireAt,
             merchantRedirect,
+            ...(serverWebhook ? { serverWebhook } : {}),
             paymentType: "one-time",
             type: "one-time",
             display: "en",
@@ -55,7 +58,7 @@ class KashierService {
                 reference: `CUST-${input.orderId}`,
             },
         };
-        console.log(`[Kashier Session] Creating session for order ${input.orderId}, amount: ${amount} ${currency}`);
+        console.log(`[Kashier Session] Creating session for order ${input.orderId}, amount: ${amount} ${currency}, serverWebhook: ${serverWebhook || "NOT SET"}`);
         const requestHeaders = {
             "Content-Type": "application/json",
             "api-key": apiKey,
@@ -107,11 +110,26 @@ class KashierService {
             if (error instanceof Errors_1.BadRequest)
                 throw error;
             const axiosErr = error;
-            const errMsg = axiosErr.response?.data?.message ||
-                axiosErr.response?.data?.error ||
-                axiosErr.message ||
-                "Failed to create Kashier payment session.";
-            console.error(`[Kashier Session Error] Order ${input.orderId}:`, errMsg);
+            // FIX: axiosErr.response.data.error can be an OBJECT (Kashier
+            const rawMessage = axiosErr.response?.data?.message;
+            const rawError = axiosErr.response?.data?.error;
+            let errMsg;
+            if (typeof rawMessage === "string" && rawMessage) {
+                errMsg = rawMessage;
+            }
+            else if (typeof rawError === "string" && rawError) {
+                errMsg = rawError;
+            }
+            else if (rawError !== undefined) {
+                errMsg = JSON.stringify(rawError);
+            }
+            else if (axiosErr.response?.data) {
+                errMsg = JSON.stringify(axiosErr.response.data);
+            }
+            else {
+                errMsg = axiosErr.message || "Failed to create Kashier payment session.";
+            }
+            console.error(`[Kashier Session Error] Order ${input.orderId}: status=${axiosErr.response?.status}`, JSON.stringify(axiosErr.response?.data));
             throw new Errors_1.BadRequest(`Payment session creation failed: ${errMsg}`);
         }
     }
@@ -147,14 +165,10 @@ class KashierService {
                 .where((0, drizzle_orm_1.or)((0, drizzle_orm_1.like)(schema_1.paymentMethods.name, "%kashier%"), (0, drizzle_orm_1.like)(schema_1.paymentMethods.name, "%visa%"), (0, drizzle_orm_1.like)(schema_1.paymentMethods.name, "%card%"), (0, drizzle_orm_1.like)(schema_1.paymentMethods.name, "%digital%")))
                 .limit(1);
             const updateData = {
-                // ✅ FIX #1: Update paymentStatus to "paid"
                 paymentStatus: "paid",
-                // ✅ FIX #2: Mark which gateway processed the payment
                 paymentGateway: "kashier",
-                // Automatically accept order once online payment succeeds
-                status: "accepted",
+                status: "pending",
             };
-            // ✅ FIX #2: Save the Kashier transactionId (was only console.log'd before)
             if (transactionId) {
                 updateData.paymentTransactionId = transactionId;
             }

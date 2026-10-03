@@ -16,6 +16,8 @@ exports.restaurantBusinessPlans = (0, mysql_core_1.mysqlTable)("restaurant_busin
     quarterlyAmount: (0, mysql_core_1.decimal)("quarterly_amount", { precision: 10, scale: 2 }).default("0.00"),
     isAnnuallyActive: (0, mysql_core_1.boolean)("is_annually_active").default(false),
     annuallyAmount: (0, mysql_core_1.decimal)("annually_amount", { precision: 10, scale: 2 }).default("0.00"),
+    // تاريخ بدء الاشتراك / التسجيل (افتراضياً اليوم أو يحدده الأدمن)
+    subscriptionStartDate: (0, mysql_core_1.date)("subscription_start_date"),
     // العمولات والرسوم
     commissionRate: (0, mysql_core_1.decimal)("commission_rate", { precision: 5, scale: 2 }).default("0.00"),
     serviceFee: (0, mysql_core_1.decimal)("service_fee", { precision: 10, scale: 2 }).default("0.00"),

@@ -10,6 +10,68 @@ const NotFound_1 = require("../../Errors/NotFound");
 const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
 // ==========================================
+// Helper: تسجيل الاشتراكات الفعّالة في محفظة المطعم
+// ==========================================
+const recordPlanSubscriptionsInWallet = async (tx, restaurantId, plan, chargeNow = true) => {
+    // جلب بيانات المحفظة
+    const wallet = await tx
+        .select()
+        .from(schema_1.restaurantWallets)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId))
+        .limit(1);
+    if (!wallet[0])
+        return; // لو مفيش محفظة، نتجاهل
+    const currentBalance = parseFloat(wallet[0].balance || "0");
+    let currentTotalSubs = parseFloat(wallet[0].totalSubscriptions || "0");
+    let newBalance = currentBalance;
+    const startDate = plan.subscriptionStartDate || new Date().toISOString().split("T")[0];
+    const walletUpdate = {};
+    const subscriptionRecords = [];
+    const handleCycle = (cycleName, amountStr, lastField) => {
+        const amount = parseFloat(amountStr || "0");
+        if (amount <= 0)
+            return;
+        currentTotalSubs = Math.round((currentTotalSubs + amount + Number.EPSILON) * 100) / 100;
+        walletUpdate.totalSubscriptions = currentTotalSubs.toFixed(2);
+        if (lastField)
+            walletUpdate[lastField] = amount.toFixed(2);
+        // إذا كان مطلوب الخصم الآن (الافتراضي عند بداية التسجيل)
+        if (chargeNow) {
+            const prevBalance = newBalance;
+            newBalance = Math.round((newBalance - amount + Number.EPSILON) * 100) / 100;
+            walletUpdate.balance = newBalance.toFixed(2);
+            subscriptionRecords.push({
+                id: (0, uuid_1.v4)(),
+                restaurantId,
+                type: "subscription",
+                amount: `-${amount.toFixed(2)}`,
+                balanceBefore: prevBalance.toFixed(2),
+                balanceAfter: newBalance.toFixed(2),
+                method: "system",
+                note: `${cycleName} subscription charged to wallet (Start Date: ${startDate}): ${amount.toFixed(2)}`,
+                createdAt: new Date(),
+            });
+        }
+    };
+    if (plan.isMonthlyActive) {
+        handleCycle("Monthly", plan.monthlyAmount, "lastMonthlySubscription");
+    }
+    if (plan.isQuarterlyActive) {
+        handleCycle("Quarterly", plan.quarterlyAmount, "lastQuarterlySubscription");
+    }
+    if (plan.isAnnuallyActive) {
+        handleCycle("Annually", plan.annuallyAmount, "lastAnnuallySubscription");
+    }
+    if (Object.keys(walletUpdate).length > 0) {
+        await tx.update(schema_1.restaurantWallets)
+            .set(walletUpdate)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId));
+    }
+    for (const record of subscriptionRecords) {
+        await tx.insert(schema_1.restaurantWalletTransactions).values(record);
+    }
+};
+// ==========================================
 // 1. إضافة خطط عمل (الـ pos مربوط بـ isOn وبدون عمولات)
 // ==========================================
 const createBusinessPlan = async (req, res) => {
@@ -24,6 +86,7 @@ const createBusinessPlan = async (req, res) => {
         .where((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId));
     const existingTypes = existingPlans.map(p => p.platformType);
     const valuesToInsert = [];
+    const todayStr = new Date().toISOString().split("T")[0];
     for (const platform of platforms) {
         const isPos = platform.platformType === "pos";
         // 💡 لو المنصة POS والسويتش بتاعها مش true، نتجاهلها
@@ -43,6 +106,8 @@ const createBusinessPlan = async (req, res) => {
         if (platform.isAnnuallyActive && parseFloat(platform.annuallyAmount || "0") <= 0) {
             throw new BadRequest_1.BadRequest(`You can't activate the annually plan with a zero amount for ${platform.platformType}`);
         }
+        // تاريخ بدء الاشتراك: الافتراضي اليوم أو يحدده المستخدم
+        const startDate = platform.subscriptionStartDate || todayStr;
         // تجهيز الداتا للحفظ
         valuesToInsert.push({
             id: (0, uuid_1.v4)(),
@@ -55,6 +120,7 @@ const createBusinessPlan = async (req, res) => {
             quarterlyAmount: platform.quarterlyAmount || "0.00",
             isAnnuallyActive: platform.isAnnuallyActive || false,
             annuallyAmount: platform.annuallyAmount || "0.00",
+            subscriptionStartDate: startDate,
             // العمولات: لو المنصة pos بنجبرها تبقى 0.00، لو غير كده بناخد القيمة المبعوتة
             commissionRate: isPos ? "0.00" : (platform.commissionRate || "0.00"),
             serviceFee: isPos ? "0.00" : (platform.serviceFee || "0.00")
@@ -64,10 +130,28 @@ const createBusinessPlan = async (req, res) => {
     if (valuesToInsert.length === 0) {
         throw new BadRequest_1.BadRequest("No valid platforms provided to be saved");
     }
-    // الإضافة الجماعية في خطوة واحدة
-    await connection_1.db.insert(schema_1.restaurantBusinessPlans).values(valuesToInsert);
+    // الإضافة الجماعية داخل transaction مع تسجيل الاشتراكات في المحفظة
+    await connection_1.db.transaction(async (tx) => {
+        await tx.insert(schema_1.restaurantBusinessPlans).values(valuesToInsert);
+        // تسجيل وخصم الاشتراكات الفعّالة في محفظة المطعم
+        for (const plan of valuesToInsert) {
+            const rawPlatform = platforms.find((p) => p.platformType === plan.platformType);
+            const shouldCharge = rawPlatform?.chargeSubscriptionNow !== undefined
+                ? Boolean(rawPlatform.chargeSubscriptionNow)
+                : ((plan.subscriptionStartDate || todayStr) <= todayStr);
+            await recordPlanSubscriptionsInWallet(tx, restaurantId, {
+                isMonthlyActive: plan.isMonthlyActive,
+                monthlyAmount: plan.monthlyAmount,
+                isQuarterlyActive: plan.isQuarterlyActive,
+                quarterlyAmount: plan.quarterlyAmount,
+                isAnnuallyActive: plan.isAnnuallyActive,
+                annuallyAmount: plan.annuallyAmount,
+                subscriptionStartDate: plan.subscriptionStartDate,
+            }, shouldCharge);
+        }
+    });
     return (0, response_1.SuccessResponse)(res, {
-        message: "Business plans created successfully",
+        message: "Business plans created successfully and subscriptions recorded",
         insertedCount: valuesToInsert.length
     }, 201);
 };

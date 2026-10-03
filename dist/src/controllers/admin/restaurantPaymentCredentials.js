@@ -12,16 +12,38 @@ const encryption_1 = require("../../utils/encryption");
 const sanitizeCredentialRecord = (record) => {
     if (!record)
         return null;
-    const creds = record.credentials ? { ...record.credentials } : {};
-    if (creds.apiKey)
-        creds.apiKey = "******";
-    if (creds.hmac)
-        creds.hmac = "******";
-    if (creds.secretKey)
-        creds.secretKey = "******";
+    let creds = record.credentials;
+    if (typeof creds === "string") {
+        try {
+            creds = JSON.parse(creds);
+        }
+        catch {
+            creds = {};
+        }
+    }
+    // Auto-heal if previously corrupted with character-spread keys: { 0: '{', 1: '"', ... }
+    if (creds && typeof creds === "object" && "0" in creds && !("mid" in creds) && !("apiKey" in creds)) {
+        try {
+            const reconstructed = Object.keys(creds)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => creds[k])
+                .join("");
+            creds = JSON.parse(reconstructed);
+        }
+        catch { }
+    }
+    const safeCreds = creds && typeof creds === "object" ? { ...creds } : {};
+    if (safeCreds.apiKey)
+        safeCreds.apiKey = "******";
+    if (safeCreds.hmac)
+        safeCreds.hmac = "******";
+    if (safeCreds.secretKey)
+        safeCreds.secretKey = "******";
+    if (safeCreds.apiPassword)
+        safeCreds.apiPassword = "******";
     return {
         ...record,
-        credentials: creds,
+        credentials: safeCreds,
     };
 };
 /**
@@ -55,6 +77,9 @@ const createCredentials = async (req, res) => {
     }
     if (rawCreds.secretKey && !rawCreds.secretKey.startsWith("******")) {
         encryptedCredentials.secretKey = (0, encryption_1.encryptSecret)(rawCreds.secretKey);
+    }
+    if (rawCreds.apiPassword && !rawCreds.apiPassword.startsWith("******")) {
+        encryptedCredentials.apiPassword = (0, encryption_1.encryptSecret)(rawCreds.apiPassword);
     }
     const newId = (0, uuid_1.v4)();
     const formattedProvider = String(provider).toUpperCase();
@@ -128,19 +153,53 @@ const updateCredential = async (req, res) => {
     if (isActive !== undefined)
         updatePayload.isActive = isActive;
     if (credentials !== undefined) {
-        const rawCreds = typeof credentials === "string" ? JSON.parse(credentials) : credentials;
+        let rawCreds = credentials;
+        if (typeof rawCreds === "string") {
+            try {
+                rawCreds = JSON.parse(rawCreds);
+            }
+            catch {
+                rawCreds = {};
+            }
+        }
+        let existingCreds = existing.credentials;
+        if (typeof existingCreds === "string") {
+            try {
+                existingCreds = JSON.parse(existingCreds);
+            }
+            catch {
+                existingCreds = {};
+            }
+        }
+        if (existingCreds && typeof existingCreds === "object" && "0" in existingCreds && !("mid" in existingCreds) && !("apiKey" in existingCreds)) {
+            try {
+                const reconstructed = Object.keys(existingCreds)
+                    .sort((a, b) => Number(a) - Number(b))
+                    .map((k) => existingCreds[k])
+                    .join("");
+                existingCreds = JSON.parse(reconstructed);
+            }
+            catch { }
+        }
+        const sensitiveFields = ["apiKey", "hmac", "secretKey", "apiPassword"];
         const mergedCredentials = {
-            ...existing.credentials,
-            ...rawCreds,
+            ...(existingCreds && typeof existingCreds === "object" ? existingCreds : {}),
         };
-        if (rawCreds.apiKey && !rawCreds.apiKey.startsWith("******")) {
-            mergedCredentials.apiKey = (0, encryption_1.encryptSecret)(rawCreds.apiKey);
+        if (rawCreds && typeof rawCreds === "object") {
+            for (const [k, v] of Object.entries(rawCreds)) {
+                if (!sensitiveFields.includes(k) && v !== undefined && v !== null && v !== "") {
+                    mergedCredentials[k] = v;
+                }
+            }
         }
-        if (rawCreds.hmac && !rawCreds.hmac.startsWith("******")) {
-            mergedCredentials.hmac = (0, encryption_1.encryptSecret)(rawCreds.hmac);
-        }
-        if (rawCreds.secretKey && !rawCreds.secretKey.startsWith("******")) {
-            mergedCredentials.secretKey = (0, encryption_1.encryptSecret)(rawCreds.secretKey);
+        for (const field of sensitiveFields) {
+            const incomingVal = rawCreds?.[field];
+            if (typeof incomingVal === "string" && incomingVal.trim() !== "" && !incomingVal.startsWith("******")) {
+                mergedCredentials[field] = (0, encryption_1.encryptSecret)(incomingVal.trim());
+            }
+            else if (existingCreds?.[field] !== undefined && existingCreds?.[field] !== null && existingCreds?.[field] !== "") {
+                mergedCredentials[field] = existingCreds[field];
+            }
         }
         updatePayload.credentials = mergedCredentials;
     }

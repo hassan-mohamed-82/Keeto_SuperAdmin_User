@@ -80,3 +80,5 @@ __exportStar(require("./schema/admin/restaurantGroups"), exports);
 __exportStar(require("./schema/admin/noteGroup"), exports);
 __exportStar(require("./schema/admin/orderDelayAlertGroup"), exports);
 __exportStar(require("./schema/admin/restaurantPaymentCredentials"), exports);
+__exportStar(require("./schema/admin/paymentTransactions"), exports);
+__exportStar(require("./schema/admin/adminFcmTokens"), exports);

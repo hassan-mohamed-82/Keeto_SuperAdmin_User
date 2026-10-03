@@ -153,6 +153,7 @@ const formatProductsWithDiscounts = async (rawFoods, restaurantId) => {
             nameAr: schema_1.discounts.nameAr,
             nameFr: schema_1.discounts.nameFr,
             logo: schema_1.discounts.logo,
+            mainDiscountId: schema_1.discounts.id,
         })
             .from(schema_1.discountGroups)
             .innerJoin(schema_1.discounts, (0, drizzle_orm_1.eq)(schema_1.discountGroups.discountId, schema_1.discounts.id))

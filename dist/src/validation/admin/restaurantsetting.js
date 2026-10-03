@@ -30,6 +30,11 @@ exports.createRestaurantSettingsSchema = zod_1.z.object({
     maxDeliveryTime: zod_1.z.coerce.number().int().min(0).optional(),
     paymentGatewayType: zod_1.z.enum(["SYSTEM", "CUSTOM"]).optional(),
     enableOnlinePayment: zod_1.z.boolean().optional(),
+    visaSwitchConditionType: zod_1.z.enum(["none", "amount", "day_of_week", "day_of_month"]).optional(),
+    visaSwitchAmountThreshold: zod_1.z.coerce.string().optional(),
+    visaSwitchDayOfWeek: zod_1.z.enum(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]).optional(),
+    visaSwitchDayOfMonth: zod_1.z.coerce.number().int().min(1).max(31).optional(),
+    visaSwitchApplied: zod_1.z.boolean().optional(),
 });
 exports.updateRestaurantSettingsSchema = exports.createRestaurantSettingsSchema.partial();
 // ==========================================

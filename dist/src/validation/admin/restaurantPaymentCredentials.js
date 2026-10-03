@@ -15,13 +15,22 @@ const kashierCredentialsSchema = zod_1.z.object({
     secretKey: zod_1.z.string().optional().or(zod_1.z.literal("")),
     baseUrl: zod_1.z.string().url("Must be a valid URL").optional().or(zod_1.z.literal("")),
 });
+const geideaCredentialsSchema = zod_1.z.object({
+    publicKey: zod_1.z.string().min(1, "Geidea Public Key is required"),
+    apiPassword: zod_1.z.string().min(1, "Geidea API Password is required"),
+    name: zod_1.z.string().optional(),
+    environment: zod_1.z.string().optional(),
+    callbackUrl: zod_1.z.string().url("Must be a valid URL").optional().or(zod_1.z.literal("")),
+    returnUrl: zod_1.z.string().url("Must be a valid URL").optional().or(zod_1.z.literal("")),
+});
 const credentialsSchema = zod_1.z.union([
     paymobCredentialsSchema,
     kashierCredentialsSchema,
+    geideaCredentialsSchema,
     zod_1.z.record(zod_1.z.any()),
 ]);
 exports.createPaymentCredentialsSchema = zod_1.z.object({
-    provider: zod_1.z.enum(["PAYMOB", "KASHIER"]),
+    provider: zod_1.z.enum(["PAYMOB", "KASHIER", "GEIDEA"]),
     title: zod_1.z.string().optional(),
     environment: zod_1.z.enum(["LIVE", "TEST"]).default("LIVE"),
     credentials: credentialsSchema,
@@ -29,7 +38,7 @@ exports.createPaymentCredentialsSchema = zod_1.z.object({
     isActive: zod_1.z.boolean().optional().default(true),
 });
 exports.updatePaymentCredentialsSchema = zod_1.z.object({
-    provider: zod_1.z.enum(["PAYMOB", "KASHIER"]).optional(),
+    provider: zod_1.z.enum(["PAYMOB", "KASHIER", "GEIDEA"]).optional(),
     title: zod_1.z.string().optional(),
     environment: zod_1.z.enum(["LIVE", "TEST"]).optional(),
     credentials: zod_1.z.record(zod_1.z.any()).optional(),

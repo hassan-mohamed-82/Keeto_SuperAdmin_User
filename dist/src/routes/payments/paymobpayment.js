@@ -6,6 +6,12 @@ const paymob_validation_1 = require("../../validation/payment/paymob.validation"
 const paymobpayment_1 = require("../../controllers/payments/paymobpayment");
 const router = (0, express_1.Router)();
 /**
+ * @route   POST /payments/paymob/session
+ * @desc    Create or retry a Paymob hosted payment session for an existing order
+ * @access  Public / Authenticated
+ */
+router.post("/session", (0, validation_1.validate)(paymob_validation_1.paymobSessionSchema), paymobpayment_1.generatePaymobPaymentSession);
+/**
  * @route   POST /payments/paymob/webhook
  * @desc    Paymob Webhook Transaction Callback (Server-to-Server)
  * @access  Public (HMAC Verified)

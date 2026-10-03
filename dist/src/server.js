@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const path_1 = __importDefault(require("path"));
+const crypto_1 = __importDefault(require("crypto"));
 const routes_1 = __importDefault(require("./routes"));
 const errorHandler_1 = require("./middlewares/errorHandler");
 const Errors_1 = require("./Errors");
@@ -15,6 +16,8 @@ const helmet_1 = __importDefault(require("helmet"));
 const http_1 = __importDefault(require("http"));
 const socket_io_1 = require("socket.io");
 const connection_1 = require("./models/connection");
+const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
+const swagger_output_json_1 = __importDefault(require("./swagger-output.json"));
 // import { initAbandonedCartCron } from "./services/abandonedCartCron";
 // import { initOrderNotificationCron } from "./services/orderNotificationCron";
 dotenv_1.default.config();
@@ -57,17 +60,53 @@ app.get("/api", (req, res) => {
 });
 // الصفحة الرئيسية
 app.get("/", (req, res) => {
-    // إذا لم يكن الملف موجوداً، يفضل إرسال نص بسيط أو التأكد من وجود index.html
     res.sendFile(path_1.default.join(process.cwd(), "public", "index.html"), (err) => {
         if (err) {
             res.status(200).send("<h1>Welcome to Keeto API</h1>");
         }
     });
 });
+/* ================= Swagger Docs ================= */
+const docsEnabled = process.env.NODE_ENV !== 'production' || process.env.ENABLE_DOCS === 'true';
+// Basic Auth بسيط من غير مكتبات
+const docsAuth = (req, res, next) => {
+    // في الـ development مفيش باسورد
+    if (process.env.NODE_ENV !== 'production')
+        return next();
+    const user = process.env.DOCS_USER;
+    const pass = process.env.DOCS_PASSWORD;
+    if (!user || !pass)
+        return res.status(503).send('Docs credentials not configured');
+    const header = req.headers.authorization ?? '';
+    const [scheme, encoded] = header.split(' ');
+    const [u = '', p = ''] = Buffer.from(encoded ?? '', 'base64').toString().split(':');
+    const safeEqual = (a, b) => {
+        const ab = Buffer.from(a);
+        const bb = Buffer.from(b);
+        return ab.length === bb.length && crypto_1.default.timingSafeEqual(ab, bb);
+    };
+    if (scheme === 'Basic' && safeEqual(u, user) && safeEqual(p, pass))
+        return next();
+    res.setHeader('WWW-Authenticate', 'Basic realm="API Docs"');
+    return res.status(401).send('Authentication required');
+};
+if (docsEnabled) {
+    app.use('/api-docs', docsAuth, swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(swagger_output_json_1.default, {
+        customSiteTitle: 'Keeto API Docs',
+        swaggerOptions: {
+            persistAuthorization: true,
+            docExpansion: 'none',
+            filter: true,
+            displayRequestDuration: true,
+            // tagsSorter: 'alpha',
+        },
+    }));
+    app.get('/swagger.json', docsAuth, (_req, res) => res.json(swagger_output_json_1.default));
+}
+/* ================================================= */
 // مسارات الـ API
 app.use("/api", routes_1.default);
-app.use("/api/v1", routes_1.default);
-// معالج مسارات 404 - تم تعديله لتجنب خطأ ENOENT
+// معالج مسارات 404
 app.use((req, res, next) => {
     // إذا كان الطلب صفحة (Browser) وليس API
     if (!req.path.startsWith("/api") && req.method === "GET") {

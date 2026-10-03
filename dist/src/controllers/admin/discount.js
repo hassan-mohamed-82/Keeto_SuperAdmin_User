@@ -58,12 +58,16 @@ const createDiscount = async (req, res) => {
     });
     const shouldBeActive = isActive !== undefined ? isActive : true;
     const start = startDate ? new Date(startDate) : null;
-    const end = endDate ? new Date(endDate) : null;
+    let end = endDate ? new Date(endDate) : null;
     if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime()))) {
         throw new BadRequest_1.BadRequest("Invalid discount dates");
     }
-    if (start && end && start > end)
+    if (end) {
+        end.setHours(23, 59, 59, 999);
+    }
+    if (start && end && start > end) {
         throw new BadRequest_1.BadRequest("startDate must be before endDate");
+    }
     const existingFoods = await connection_1.db.select({ id: schema_1.food.id })
         .from(schema_1.food)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.food.restaurantid, restaurantId), (0, drizzle_orm_1.inArray)(schema_1.food.id, [...assignedFoodIds])));
@@ -275,10 +279,19 @@ const updateDiscount = async (req, res) => {
         updateData.minOrderAmount = minOrderAmount.toString();
     if (usageLimit !== undefined)
         updateData.usageLimit = usageLimit;
-    if (startDate !== undefined)
+    if (startDate !== undefined) {
         updateData.startDate = startDate ? new Date(startDate) : null;
-    if (endDate !== undefined)
-        updateData.endDate = endDate ? new Date(endDate) : null;
+    }
+    if (endDate !== undefined) {
+        if (endDate) {
+            const updatedEnd = new Date(endDate);
+            updatedEnd.setHours(23, 59, 59, 999); // ضبط التوقيت حتى نهاية اليوم
+            updateData.endDate = updatedEnd;
+        }
+        else {
+            updateData.endDate = null;
+        }
+    }
     if (isActive !== undefined)
         updateData.isActive = isActive;
     if (logo !== undefined)

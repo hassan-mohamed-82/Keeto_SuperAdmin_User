@@ -17,10 +17,9 @@ const restaurantFeatures_1 = require("./restaurantFeatures");
 const pricing_helper_1 = require("../../helpers/pricing.helper");
 const coupon_helper_1 = require("../../helpers/coupon.helper");
 const foodConditions_1 = require("../../helpers/foodConditions");
-const kashier_service_1 = require("../../services/payments/kashier/kashier.service");
-const paymob_service_1 = require("../../services/payments/paymob/paymob.service");
-const encryption_1 = require("../../utils/encryption");
+const paymentSession_service_1 = require("../../services/payments/paymentSession.service");
 const getNextDailyOrderNumber_1 = require("../../helpers/getNextDailyOrderNumber");
+const restaurantWalletService_1 = require("../../services/restaurantWalletService");
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date) => {
     return new Intl.DateTimeFormat("ar-EG", {
@@ -157,7 +156,7 @@ const checkout = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const isGuestUser = Boolean(req.user.isGuest);
-    const { orderSource, paymentMethod, orderType, idempotencyKey, zoneId, branchId, addressId: inputAddressId, note, couponCode, guestInfo, guestAddress, } = req.body;
+    const { orderSource, paymentMethod, orderType, idempotencyKey, zoneId, branchId, addressId: inputAddressId, note, couponCode, guestInfo, guestAddress, restaurantName } = req.body;
     let addressId = inputAddressId || null;
     let effectiveUserId = req.user.id;
     // ==========================================
@@ -236,9 +235,9 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Invalid order source");
     }
     const [selectedPayment] = await connection_1.db.select().from(schema_1.paymentMethods).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.id, paymentMethod)).limit(1);
-    // if (!selectedPayment || !selectedPayment.isActive) {
-    //     throw new BadRequest("Invalid or inactive payment method");
-    // }
+    if (!selectedPayment || !selectedPayment.isActive) {
+        throw new BadRequest_1.BadRequest("Invalid or inactive payment method");
+    }
     const paymentMethodName = selectedPayment.name;
     const paymentMethodNameAr = selectedPayment.nameAr;
     const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
@@ -248,8 +247,7 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Wallet payment is only available for registered accounts.");
     }
     // Visa payment check using VISA_PAYMENT_METHOD_ID from database schema
-    const isVisaPayment = paymentMethod === selectedPayment.id ||
-        paymentMethodName?.toLowerCase() === "visa" ||
+    const isVisaPayment = paymentMethodName?.toLowerCase() === "visa" ||
         paymentMethodNameAr === "بطاقة";
     // ==========================================
     // 2. Idempotency Check
@@ -266,6 +264,7 @@ const checkout = async (req, res) => {
     if (!userCart.length)
         throw new BadRequest_1.BadRequest("Your cart is empty");
     const restaurantId = userCart[0].restaurantId;
+    const storedOrderSource = orderSource === "mykeeto" ? "my_keeto" : orderSource;
     // Run block check in parallel with cart retrieval setup
     await (0, userBlockCheck_1.validateUserNotBlocked)(userId, restaurantId);
     // ==========================================
@@ -275,7 +274,7 @@ const checkout = async (req, res) => {
         connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId)).limit(1),
         connection_1.db.select()
             .from(schema_1.restaurantBusinessPlans)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.platformType, orderSource)))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.platformType, (0, restaurantWalletService_1.mapOrderSourceToPlatformType)(orderSource))))
             .limit(1),
         connection_1.db.select().from(schema_1.restaurantSchedules).where((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId)),
         connection_1.db.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1)
@@ -284,6 +283,14 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Restaurant not found");
     if (!plan) {
         throw new BadRequest_1.BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
+    }
+    if (!restaurant.slug && restaurantName) {
+        await connection_1.db
+            .update(schema_1.restaurants)
+            .set({
+            slug: restaurantName,
+        })
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurant.id));
     }
     // ==========================================
     // 🛡️ 4.5 Operating Hours & Channel Validation
@@ -548,37 +555,6 @@ const checkout = async (req, res) => {
                 oldUnitPrice: storedUnit,
                 newUnitPrice: liveUnit,
             });
-            //      else {
-            //     const foodRow = foodMap.get(cartItem.foodId);
-            //     if (!foodRow) throw new BadRequest(`Food item with ID ${cartItem.foodId} not found`);
-            //     channelBasePrice = parseFloat(foodRow.price as string || "0");
-            //     itemIsAvailable = foodRow.status !== "inactive" && !foodRow.isOutOfStock;
-            //     varPrice = 0;
-            //     if (optionIds.length > 0) {
-            //         for (const v of parsedVariations) {
-            //             if (v.optionId) {
-            //                 const opt = optionsWithParentMap.get(v.optionId);
-            //                 if (!opt) {
-            //                     return res.status(422).json({
-            //                         success: false,
-            //                         message: `Option '${v.optionName || 'selected'}' is no longer available. Please refresh your cart.`,
-            //                         data: { affectedFoodId: cartItem.foodId },
-            //                     });
-            //                 }
-            //                 if (opt.status === false) {
-            //                     return res.status(422).json({
-            //                         success: false,
-            //                         message: `Option '${opt.optionName}' is currently unavailable.`,
-            //                         data: { affectedFoodId: cartItem.foodId },
-            //                     });
-            //                 }
-            //                 const resolvedPrice = (opt.additionalPrice as string || "0");
-            //                 varPrice += parseFloat(resolvedPrice);
-            //                 v.additionalPrice = resolvedPrice;
-            //             }
-            //         }
-            //     }
-            // }
         }
         if (!itemIsAvailable)
             checkoutHasUnavailable = true;
@@ -945,24 +921,32 @@ const checkout = async (req, res) => {
     const [userInfo] = await connection_1.db.select({ id: schema_1.users.id, name: schema_1.users.name, phone: schema_1.users.phone, email: schema_1.users.email })
         .from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, userId)).limit(1);
     // ==========================================
+    // 11. Create Payment Session BEFORE the DB transaction (if Visa/Online)
+    // If this fails the order is never written to DB — no rollback needed.
+    // ==========================================
+    let paymentSessionData = null;
+    if (isVisaPayment) {
+        if (!settings?.enableOnlinePayment) {
+            throw new BadRequest_1.BadRequest("Online payment is not enabled for this restaurant.");
+        }
+        paymentSessionData = await (0, paymentSession_service_1.createOrderPaymentSession)({
+            orderId,
+            orderNumber,
+            restaurantId,
+            totalAmount,
+            restaurantSlug: restaurant?.slug || restaurantName || undefined,
+            userInfo: {
+                name: userInfo?.name,
+                email: userInfo?.email,
+                phone: userInfo?.phone,
+            },
+        });
+        // ↑ throws BadRequest automatically on failure — order not created yet
+    }
+    // ==========================================
     // 🛡️ 10. Execute Order (Transaction)
     // ==========================================
     const now = new Date();
-    // ⏰ 1. Fetch value from settings
-    // const resetTimeStr = (settings as any)?.resetDailyOrderNumberTime || "00:00";
-    // const [resetHourRaw, resetMinuteRaw] = resetTimeStr.split(":").map(Number);
-    // const resetHour = isNaN(resetHourRaw) ? 0 : resetHourRaw;
-    // const resetMinute = isNaN(resetMinuteRaw) ? 0 : resetMinuteRaw;
-    // // 🌍 2. Dynamic Timezone Handling (Africa/Cairo)
-    // const egyptDateStr = now.toLocaleString("en-US", { timeZone: "Africa/Cairo" });
-    // const nowLocal = new Date(egyptDateStr);
-    // const startOfTodayLocal = new Date(nowLocal);
-    // startOfTodayLocal.setHours(resetHour, resetMinute, 0, 0);
-    // if (nowLocal < startOfTodayLocal) {
-    //     startOfTodayLocal.setDate(startOfTodayLocal.getDate() - 1);
-    // }
-    // const diffMs = nowLocal.getTime() - startOfTodayLocal.getTime();
-    // const startOfTodayQuery = new Date(now.getTime() - diffMs);
     // 🔒 3. Fetch Last Order
     let createdDailyOrderNumber = 1;
     await connection_1.db.transaction(async (tx) => {
@@ -1004,8 +988,12 @@ const checkout = async (req, res) => {
         //     )
         //     .orderBy(desc(orders.dailyOrderNumber))
         //     .limit(1)
-        //     .for("update");
-        createdDailyOrderNumber = await (0, getNextDailyOrderNumber_1.getNextDailyOrderNumber)(tx, restaurantId, settings, now);
+        // 🔒 2. Daily order number calculation
+        // For cash / wallet orders, calculate dailyOrderNumber immediately.
+        // For online visa orders, defer dailyOrderNumber until confirmed paid by webhook.
+        if (!isVisaPayment) {
+            createdDailyOrderNumber = await (0, getNextDailyOrderNumber_1.getNextDailyOrderNumber)(tx, restaurantId, settings, now);
+        }
         // 3. Create order record
         await tx.insert(schema_1.orders).values({
             id: orderId,
@@ -1016,8 +1004,10 @@ const checkout = async (req, res) => {
             branchId: resolvedBranchId,
             zoneId: resolvedZoneId,
             addressId: addressId || null,
-            orderSource,
+            orderSource: storedOrderSource,
             paymentMethod,
+            paymentGatewayType: settings?.paymentGatewayType || "SYSTEM",
+            paymentStatus: isVisaPayment ? "pending_payment" : "paid",
             orderType: resolvedOrderType,
             subtotal: subtotal.toFixed(2),
             deliveryFee: deliveryFee.toFixed(2),
@@ -1035,13 +1025,19 @@ const checkout = async (req, res) => {
             totalAmount: totalAmount.toFixed(2),
             note: note || null,
             status: "pending",
-            dailyOrderNumber: createdDailyOrderNumber,
+            dailyOrderNumber: isVisaPayment ? null : createdDailyOrderNumber,
             durationOrderPreparing: defaultPreparingDuration,
             offerId: userCart.find(c => c.offerId)?.offerId || null,
             createdAt: now
         });
+        if (isCashPayment) {
+            await (0, restaurantWalletService_1.chargePendingServiceFee)(orderId, tx, "cash_pending");
+        }
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
-        await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
+        // تفريغ السلة فوراً للدفع كاش أو المحفظة. للدفع بالفيزا/أونلاين السلة تظل موجودة حتى يتأكد الدفع، أو تبقى كما هي لو فشل
+        if (!isVisaPayment) {
+            await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
+        }
         // Increment user's total orders count
         await tx.update(schema_1.users)
             .set({ totalOrders: (0, drizzle_orm_1.sql) `${schema_1.users.totalOrders} + 1` })
@@ -1063,14 +1059,16 @@ const checkout = async (req, res) => {
                 points: 0
             });
         }
-        // Superadmin notification
-        await tx.insert(schema_1.notifications).values({
-            recipientType: "superadmin",
-            recipientId: "superadmin",
-            title: "New Order",
-            body: `Order #${createdDailyOrderNumber} has been placed at ${restaurant?.name}.`,
-            data: { orderId, orderNumber, createdDailyOrderNumber, restaurantName: restaurant?.name }
-        });
+        // Superadmin notification (only for confirmed orders)
+        if (!isVisaPayment) {
+            await tx.insert(schema_1.notifications).values({
+                recipientType: "superadmin",
+                recipientId: "superadmin",
+                title: "New Order",
+                body: `Order #${createdDailyOrderNumber} has been placed at ${restaurant?.name}.`,
+                data: { orderId, orderNumber, createdDailyOrderNumber, restaurantName: restaurant?.name }
+            });
+        }
         // 4. Coupons and Discounts tracking
         if (appliedCoupon) {
             await tx.insert(schema_1.couponUsages).values({
@@ -1093,198 +1091,34 @@ const checkout = async (req, res) => {
                     .where((0, drizzle_orm_1.eq)(schema_1.discounts.id, dId));
             }
         }
-        // 5. Restaurant wallet calculations
-        let [restaurantWallet] = await tx.select().from(schema_1.restaurantWallets).where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId)).for("update");
-        if (!restaurantWallet) {
-            await tx.insert(schema_1.restaurantWallets).values({
-                id: (0, uuid_1.v4)(),
-                restaurantId: restaurantId,
-                balance: "0.00",
-                collectedCash: "0.00",
-                totalEarning: "0.00"
-            });
-            restaurantWallet = { balance: "0.00", collectedCash: "0.00", totalEarning: "0.00" };
-        }
-        const currentRestBalance = parseFloat(restaurantWallet.balance);
-        const currentCollectedCash = parseFloat(restaurantWallet.collectedCash);
-        const currentTotalEarning = parseFloat(restaurantWallet.totalEarning);
-        const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
-        const appDues = roundMoney(appCommission + serviceFee);
-        let newRestBalance = currentRestBalance;
-        let newCollectedCash = currentCollectedCash;
-        if (isCashPayment) {
-            newRestBalance = roundMoney(newRestBalance - appDues);
-            newCollectedCash = roundMoney(newCollectedCash + totalAmount);
-        }
-        else {
-            newRestBalance = roundMoney(newRestBalance + restaurantEarning);
-        }
-        await tx.update(schema_1.restaurantWallets)
-            .set({
-            balance: newRestBalance.toFixed(2),
-            collectedCash: newCollectedCash.toFixed(2),
-            totalEarning: roundMoney(currentTotalEarning + restaurantEarning).toFixed(2)
-        })
-            .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId));
-        await tx.insert(schema_1.restaurantWalletTransactions).values({
-            id: (0, uuid_1.v4)(),
-            restaurantId,
-            type: "order_payment",
-            amount: isCashPayment ? `-${appDues.toFixed(2)}` : `${restaurantEarning.toFixed(2)}`,
-            balanceBefore: currentRestBalance.toFixed(2),
-            balanceAfter: newRestBalance.toFixed(2),
-            method: paymentMethodName,
-            reference: orderNumber,
-            note: isCashPayment ? "Commission deducted from cash order" : "Earnings added from digital payment",
-            createdAt: now
-        });
+        // Wallet settlement is recorded once the restaurant marks the order delivered.
     });
     // ==========================================
-    // 11. Send Notification to Restaurant
+    // 11. Send Notification to Restaurant (only for non-visa orders; visa orders get notified when paid via webhook)
     // ==========================================
-    const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
-        timeZone: "Africa/Cairo",
-        hour: "numeric",
-        minute: "numeric",
-        hour12: true
-    }).format(now);
-    await (0, notifications_1.sendPushNotification)({
-        recipientType: "restaurant",
-        recipientId: restaurantId,
-        branchId: resolvedBranchId || null,
-        title: "طلب جديد! 🛒",
-        body: `تم استلام طلب جديد #${createdDailyOrderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
-        data: {
-            restaurantId,
-            orderId,
-            orderNumber,
+    if (!isVisaPayment) {
+        const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
+            timeZone: "Africa/Cairo",
+            hour: "numeric",
+            minute: "numeric",
+            hour12: true
+        }).format(now);
+        await (0, notifications_1.sendPushNotification)({
+            recipientType: "restaurant",
+            recipientId: restaurantId,
             branchId: resolvedBranchId || null,
-            type: "new_order",
-            createdAt: now.toISOString(),
-            dailyOrderNumber: createdDailyOrderNumber
-        }
-    });
-    // ==========================================
-    // 12. Create Payment Session (if Visa/Online)
-    // Supports SYSTEM (Kashier) or CUSTOM (Paymob from restaurant_payment_credentials)
-    // ==========================================
-    let paymentSessionData = null;
-    if (isVisaPayment) {
-        const gatewayType = settings?.paymentGatewayType || "SYSTEM";
-        if (gatewayType === "CUSTOM") {
-            try {
-                // Find active credentials (KASHIER or PAYMOB) for this restaurant
-                const activeCreds = await connection_1.db
-                    .select()
-                    .from(schema_1.restaurantPaymentCredentials)
-                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.isActive, true)));
-                const kashierCredRecord = activeCreds.find((c) => c.provider === "KASHIER");
-                const paymobCredRecord = activeCreds.find((c) => c.provider === "PAYMOB");
-                if (!kashierCredRecord && !paymobCredRecord) {
-                    throw new BadRequest_1.BadRequest("Restaurant is configured for custom gateway, but no active payment credentials (Paymob or Kashier) were found.");
-                }
-                if (kashierCredRecord && kashierCredRecord.credentials) {
-                    const rawCreds = kashierCredRecord.credentials;
-                    const decryptedCredentials = {
-                        mid: rawCreds.mid,
-                        apiKey: (0, encryption_1.decryptSecret)(rawCreds.apiKey),
-                        secretKey: rawCreds.secretKey ? (0, encryption_1.decryptSecret)(rawCreds.secretKey) : undefined,
-                        baseUrl: rawCreds.baseUrl,
-                    };
-                    const kashierSession = await kashier_service_1.KashierService.createPaymentSession({
-                        orderId: orderId,
-                        amount: totalAmount,
-                        currency: "EGP",
-                        customerEmail: userInfo?.email || undefined,
-                        credentials: decryptedCredentials,
-                    });
-                    paymentSessionData = {
-                        gateway: "KASHIER",
-                        type: "redirect", // Frontend does full-page redirect
-                        sessionId: kashierSession.sessionId,
-                        sessionUrl: kashierSession.sessionUrl,
-                        status: kashierSession.status,
-                        expireAt: kashierSession.expireAt,
-                    };
-                }
-                else if (paymobCredRecord && paymobCredRecord.credentials) {
-                    const rawCreds = paymobCredRecord.credentials;
-                    const decryptedCredentials = {
-                        ...rawCreds,
-                        apiKey: (0, encryption_1.decryptSecret)(rawCreds.apiKey),
-                        hmac: (0, encryption_1.decryptSecret)(rawCreds.hmac),
-                    };
-                    const nameParts = (userInfo?.name || "Customer User").trim().split(" ");
-                    const firstName = nameParts[0] || "Customer";
-                    const lastName = nameParts.slice(1).join(" ") || "User";
-                    const paymobSession = await paymob_service_1.PaymobService.createPaymentSession({
-                        credentials: decryptedCredentials,
-                        orderId: orderId,
-                        orderNumber: orderNumber,
-                        amountCents: Math.round(totalAmount * 100),
-                        currency: "EGP",
-                        customer: {
-                            firstName,
-                            lastName,
-                            email: userInfo?.email || "customer@example.com",
-                            phone: userInfo?.phone || "+201000000000",
-                        },
-                    });
-                    // Update order with Paymob gateway info
-                    await connection_1.db
-                        .update(schema_1.orders)
-                        .set({
-                        paymentOrderId: String(paymobSession.paymobOrderId),
-                        paymentGateway: "paymob",
-                        paymentStatus: "pending_payment",
-                    })
-                        .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
-                    paymentSessionData = {
-                        gateway: "PAYMOB",
-                        type: "iframe", // Frontend uses iframe embed
-                        sessionId: paymobSession.sessionId,
-                        sessionUrl: paymobSession.sessionUrl,
-                        status: "CREATED",
-                        paymobOrderId: paymobSession.paymobOrderId,
-                    };
-                }
+            title: "طلب جديد! 🛒",
+            body: `تم استلام طلب جديد #${createdDailyOrderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
+            data: {
+                restaurantId,
+                orderId,
+                orderNumber,
+                branchId: resolvedBranchId || null,
+                type: "new_order",
+                createdAt: now.toISOString(),
+                dailyOrderNumber: createdDailyOrderNumber
             }
-            catch (paymentErr) {
-                console.error(`[Checkout] Custom payment session creation failed for order ${orderId}:`, paymentErr?.message);
-                paymentSessionData = {
-                    gateway: "CUSTOM",
-                    error: paymentErr?.message || "Failed to create custom payment session.",
-                };
-            }
-        }
-        else {
-            // SYSTEM gateway -> Kashier
-            try {
-                const kashierSession = await kashier_service_1.KashierService.createPaymentSession({
-                    orderId: orderId,
-                    amount: totalAmount,
-                    currency: "EGP",
-                    customerEmail: userInfo?.email || undefined,
-                });
-                // Note: KashierService.createPaymentSession() already saves
-                // sessionId + paymentGateway + paymentStatus to the order row.
-                paymentSessionData = {
-                    gateway: "KASHIER",
-                    type: "redirect", // Frontend does full-page redirect
-                    sessionId: kashierSession.sessionId,
-                    sessionUrl: kashierSession.sessionUrl,
-                    status: kashierSession.status,
-                    expireAt: kashierSession.expireAt,
-                };
-            }
-            catch (paymentErr) {
-                console.error(`[Checkout] Kashier session creation failed for order ${orderId}:`, paymentErr?.message);
-                paymentSessionData = {
-                    gateway: "KASHIER",
-                    error: paymentErr?.message || "Failed to create Kashier payment session.",
-                };
-            }
-        }
+        });
     }
     // ==========================================
     // 📤 إرجاع البيانات في الـ Response
@@ -1374,7 +1208,7 @@ const getActiveOrders = async (req, res) => {
         .leftJoin(schema_1.addresses, (0, drizzle_orm_1.eq)(schema_1.orders.addressId, schema_1.addresses.id))
         .leftJoin(schema_1.deliveryMen, (0, drizzle_orm_1.eq)(schema_1.orders.deliveryManId, schema_1.deliveryMen.id))
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, String(restaurantId)) : undefined, (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["pending", "accepted", "preparing", "out_for_delivery"])))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, String(restaurantId)) : undefined, (0, drizzle_orm_1.ne)(schema_1.orders.paymentStatus, "pending_payment"), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"), (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["pending", "accepted", "preparing", "out_for_delivery"])))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
     // Fetch items for the active orders
     const orderIds = activeOrders.map(o => o.orderId);
@@ -1481,7 +1315,7 @@ const getOrderHistory = async (req, res) => {
         .leftJoin(schema_1.addresses, (0, drizzle_orm_1.eq)(schema_1.orders.addressId, schema_1.addresses.id))
         .leftJoin(schema_1.deliveryMen, (0, drizzle_orm_1.eq)(schema_1.orders.deliveryManId, schema_1.deliveryMen.id))
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, String(restaurantId)) : undefined, (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["delivered", "cancelled", "refund"])))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, String(restaurantId)) : undefined, (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"), (0, drizzle_orm_1.inArray)(schema_1.orders.status, ["delivered", "cancelled", "refund"])))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
     // Fetch items for the history orders
     const orderIds = historyOrders.map(o => o.orderId);
@@ -1605,7 +1439,7 @@ const getOrderDetails = async (req, res) => {
         .leftJoin(schema_1.addresses, (0, drizzle_orm_1.eq)(schema_1.orders.addressId, schema_1.addresses.id))
         .leftJoin(schema_1.deliveryMen, (0, drizzle_orm_1.eq)(schema_1.orders.deliveryManId, schema_1.deliveryMen.id))
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
-        .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId), (0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
         .limit(1);
     if (!orderInfo.length) {
         throw new NotFound_1.NotFound("Order not found");
@@ -1703,7 +1537,7 @@ const getOrderPrerequisites = async (req, res) => {
         throw new BadRequest_1.BadRequest("Invalid or missing order source");
     }
     // 1. جلب البيانات من الداتا بيز بالتوازي
-    const [userAddresses, restaurantBranches, zoneFees, activePaymentMethods, getCancelReasons, businessPlans, freeDeliveryOfferRows] = await Promise.all([
+    const [userAddresses, restaurantBranches, zoneFees, allActivePaymentMethods, getCancelReasons, businessPlans, freeDeliveryOfferRows, restaurantSettingsRows] = await Promise.all([
         connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId)),
         connection_1.db.select().from(schema_1.branches).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active"))),
         connection_1.db.select({
@@ -1730,13 +1564,29 @@ const getOrderPrerequisites = async (req, res) => {
         connection_1.db.select().from(schema_1.selectReasons).where((0, drizzle_orm_1.eq)(schema_1.selectReasons.type, "user")),
         connection_1.db.select({ serviceFee: schema_1.restaurantBusinessPlans.serviceFee })
             .from(schema_1.restaurantBusinessPlans)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.platformType, orderSource)))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.platformType, (0, restaurantWalletService_1.mapOrderSourceToPlatformType)(orderSource))))
             .limit(1),
         connection_1.db.select()
             .from(schema_1.freeDeliveryOffers)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.freeDeliveryOffers.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.freeDeliveryOffers.status, "active")))
+            .limit(1),
+        // 🛡️ جلب إعدادات المطعم لمعرفة هل الدفع الإلكتروني مفعّل أم لا
+        connection_1.db.select({ enableOnlinePayment: schema_1.restaurantSettings.enableOnlinePayment })
+            .from(schema_1.restaurantSettings)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
             .limit(1)
     ]);
+    // 🛡️ تحقق من إعداد الدفع الإلكتروني للمطعم
+    const enableOnlinePayment = restaurantSettingsRows[0]?.enableOnlinePayment ?? true;
+    // إذا كان الدفع الإلكتروني معطلاً للمطعم، نحذف طريقة الدفع بالفيزا من القائمة
+    const activePaymentMethods = enableOnlinePayment
+        ? allActivePaymentMethods
+        : allActivePaymentMethods.filter((pm) => {
+            const name = pm.name?.toLowerCase() ?? "";
+            const nameAr = pm.nameAr ?? "";
+            // Visa / card payment methods are the online-only ones
+            return name !== "visa" && name !== "card" && nameAr !== "بطاقة";
+        });
     const plan = businessPlans[0];
     if (!plan) {
         throw new BadRequest_1.BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
@@ -1806,7 +1656,8 @@ const getOrderPrerequisites = async (req, res) => {
             addresses: addressesWithDeliveryInfo,
             branches: restaurantBranches,
             zones: zoneFees, // 👈 إرجاع مناطق التوصيل وأسعارها الخاصة بالمطعم
-            paymentMethods: activePaymentMethods,
+            paymentMethods: activePaymentMethods, // visa filtered out when enableOnlinePayment=false
+            enableOnlinePayment, // 👈 هل الدفع الإلكتروني (فيزا) مفعّل لهذا المطعم؟
             reasons: getCancelReasons,
             serviceFee: serviceFee.toFixed(2),
             freeDeliveryOffer: freeDeliveryOfferData,
@@ -1862,13 +1713,6 @@ const cancelOrder = async (req, res) => {
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
         // حسابات المبالغ التي تم دفعها أو خصمها
         const totalAmount = parseFloat(order.totalAmount || "0");
-        const appCommission = parseFloat(order.appCommission || "0");
-        const serviceFee = parseFloat(order.serviceFee || "0");
-        const subtotal = parseFloat(order.subtotal || "0");
-        const deliveryFee = parseFloat(order.deliveryFee || "0");
-        const appDues = appCommission + serviceFee;
-        const restaurantEarning = subtotal + deliveryFee - appCommission;
-        const isCashPayment = order.paymentMethod === "cash_on_delivery" || order.paymentMethod === "cash"; // Assuming ID handling elsewhere or this is resolved
         // إرجاع فلوس المستخدم لو دفع بالمحفظة
         // note: paymentMethod stores UUID, so we check userWalletTransactions to know if it was a wallet payment
         const [walletTx] = await tx.select().from(schema_1.userWalletTransactions).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userWalletTransactions.reference, order.orderNumber), (0, drizzle_orm_1.eq)(schema_1.userWalletTransactions.transactionType, "order_payment"))).limit(1);
@@ -1891,41 +1735,7 @@ const cancelOrder = async (req, res) => {
                 });
             }
         }
-        // إرجاع الفلوس/العمولات من المطعم (حيث أن الإلغاء من المستخدم، المطعم لا يتحمل العمولة)
-        const [restaurantWallet] = await tx.select().from(schema_1.restaurantWallets).where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, order.restaurantId)).limit(1);
-        if (restaurantWallet) {
-            let currentRestBalance = parseFloat(restaurantWallet.balance || "0");
-            let currentCollectedCash = parseFloat(restaurantWallet.collectedCash || "0");
-            let currentTotalEarning = parseFloat(restaurantWallet.totalEarning || "0");
-            if (isCashPayment) {
-                // نلغي خصم العمولة من رصيد المطعم، ونلغي الكاش المحصل
-                currentRestBalance += appDues;
-                currentCollectedCash -= totalAmount;
-            }
-            else {
-                // نلغي الأرباح اللي انضافت للمطعم
-                currentRestBalance -= restaurantEarning;
-            }
-            await tx.update(schema_1.restaurantWallets)
-                .set({
-                balance: currentRestBalance.toString(),
-                collectedCash: currentCollectedCash.toString(),
-                totalEarning: (currentTotalEarning - restaurantEarning).toString()
-            })
-                .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, order.restaurantId));
-            // تسجيل العملية
-            await tx.insert(schema_1.restaurantWalletTransactions).values({
-                id: (0, uuid_1.v4)(),
-                restaurantId: order.restaurantId,
-                type: "order_payment", // Or create a new type "refund"
-                amount: isCashPayment ? `${appDues}` : `-${restaurantEarning}`,
-                balanceBefore: restaurantWallet.balance,
-                balanceAfter: currentRestBalance.toString(),
-                method: order.paymentMethod,
-                reference: order.orderNumber,
-                note: "Refund/Revert due to user cancellation"
-            });
-        }
+        await (0, restaurantWalletService_1.handleCancelledOrder)({ orderId, cancelReasonType: "user", tx });
     });
     // 4. إرسال إشعارات إلغاء الطلب (Type: cancel)
     await (0, notifications_1.sendPushNotification)({

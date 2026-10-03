@@ -32,7 +32,8 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
         "online_order_web",
         "online_order_app",
         "food_aggregator",
-        "my_keeto"
+        "my_keeto",
+        "pos"
     ]).notNull(),
     paymentMethod: (0, mysql_core_1.char)("payment_method", { length: 36 }),
     orderType: (0, mysql_core_1.mysqlEnum)("order_type", ["delivery", "takeaway", "dine_in"]).default("delivery"),
@@ -59,7 +60,8 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "refund"
+        "refund",
+        "failed"
     ]).default("pending"),
     // Duration (in minutes) the restaurant expects to prepare the order
     durationOrderPreparing: (0, mysql_core_1.int)("duration_order_preparing").default(30),
@@ -73,7 +75,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     note: (0, mysql_core_1.text)("note"),
     deliveryManId: (0, mysql_core_1.char)("delivery_man_id", { length: 36 })
         .references(() => delivery_man_1.deliveryMen.id),
-    dailyOrderNumber: (0, mysql_core_1.int)("daily_order_number").default(1),
+    dailyOrderNumber: (0, mysql_core_1.int)("daily_order_number"),
     rating: (0, mysql_core_1.int)("rating"),
     ratingComment: (0, mysql_core_1.text)("rating_comment"),
     // 🟢 2. حفظ لقطة ثابته من بيانات العنوان وقت الأوردر (Address Snapshot)
@@ -83,11 +85,13 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     isDelayEmailSent: (0, mysql_core_1.boolean)("is_delay_email_sent").default(false),
     offerId: (0, mysql_core_1.char)("offer_id", { length: 36 })
         .references(() => schema_1.offers.id, { onDelete: "set null" }),
-    // Unified payment gateway columns (supports both Kashier and Paymob)
-    paymentGateway: (0, mysql_core_1.mysqlEnum)("payment_gateway", ["kashier", "paymob"]),
-    paymentOrderId: (0, mysql_core_1.varchar)("payment_order_id", { length: 150 }), // Kashier sessionId / Paymob orderId
-    paymentTransactionId: (0, mysql_core_1.varchar)("payment_transaction_id", { length: 150 }), // Kashier transactionId / Paymob transactionId
-    paymentStatus: (0, mysql_core_1.mysqlEnum)("payment_status", ["pending_payment", "paid", "payment_failed"]).default("pending_payment"),
+    // Unified payment gateway columns (supports Kashier, Paymob, and Geidea)
+    paymentGateway: (0, mysql_core_1.mysqlEnum)("payment_gateway", ["kashier", "paymob", "geidea"]),
+    paymentGatewayType: (0, mysql_core_1.mysqlEnum)("payment_gateway_type", ["SYSTEM", "CUSTOM"]),
+    paymentOrderId: (0, mysql_core_1.varchar)("payment_order_id", { length: 150 }), // رقم البوابة: Kashier orderId / Paymob order.id / Geidea orderId
+    paymentTransactionId: (0, mysql_core_1.varchar)("payment_transaction_id", { length: 150 }), // رقم العملية: Kashier transactionId / Paymob id / Geidea transactionId
+    paymentStatus: (0, mysql_core_1.mysqlEnum)("payment_status", ["pending_payment", "paid", "payment_failed"]),
+    paymentFailureReason: (0, mysql_core_1.text)("payment_failure_reason"), // سبب آخر فشل لسرعة العرض في تفاصيل الأوردر
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });

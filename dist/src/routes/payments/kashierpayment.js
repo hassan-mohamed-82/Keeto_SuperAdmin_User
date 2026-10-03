@@ -17,4 +17,10 @@ router.post("/session", (0, validation_1.validate)(kashier_validation_1.sessionS
  * @access  Public (Signature Verified)
  */
 router.post("/webhook", (0, validation_1.validate)(kashier_validation_1.webhookSchema), kashierpayment_1.handleKashierWebhook);
+/**
+ * @route   GET /payments/kashier/callback
+ * @desc    User browser redirect after payment completion on Kashier hosted checkout
+ * @access  Public (Redirect only)
+ */
+router.get("/callback", kashierpayment_1.handleKashierRedirect);
 exports.default = router;

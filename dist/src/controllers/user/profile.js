@@ -72,7 +72,7 @@ const getProfile = async (req, res) => {
         .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.zones.cityId, schema_1.cities.id))
         .where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId));
     // 🟢 2.1 Check which addresses are linked to existing orders
-    const orderConditions = [(0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.isNotNull)(schema_1.orders.addressId)];
+    const orderConditions = [(0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.isNotNull)(schema_1.orders.addressId), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")];
     if (restaurantId && restaurantId.trim() !== "") {
         orderConditions.push((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId.trim()));
     }
@@ -87,9 +87,7 @@ const getProfile = async (req, res) => {
         // hasOrders: usedAddressIds.has(addr.id),
     }));
     // 3. Fetch Orders Count (scoped to a restaurant if restaurantId query param is provided)
-    const ordersCountCondition = restaurantId
-        ? (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId))
-        : (0, drizzle_orm_1.eq)(schema_1.orders.userId, userId);
+    const ordersCountCondition = (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"), (0, drizzle_orm_1.ne)(schema_1.orders.paymentStatus, "pending_payment"), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId) : undefined);
     const [ordersCount] = await connection_1.db
         .select({ count: (0, drizzle_orm_1.sql) `COUNT(*)` })
         .from(schema_1.orders)

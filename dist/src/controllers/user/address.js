@@ -132,7 +132,7 @@ const getUserAddresses = async (req, res) => {
             .from(schema_1.addresses)
             .where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId));
         // 2. التحقق من العناوين المرتبطة بطلبات سابقة (isRelatedToOrder)
-        const orderConditions = [(0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.isNotNull)(schema_1.orders.addressId)];
+        const orderConditions = [(0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.isNotNull)(schema_1.orders.addressId), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")];
         if (restaurantId && restaurantId.trim() !== "") {
             orderConditions.push((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId.trim()));
         }
