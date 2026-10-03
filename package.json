@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "main": "dist/src/server.js",
   "scripts": {
-    "dev": " tsx watch src/server.ts",
+    "predev": "npm run swagger",
+    "dev": "tsx watch src/server.ts",
+    "prestart": "npm run swagger",
     "start": "tsx src/server.ts",
-    "build": "tsc",
+    "build": "npm run swagger && tsc",
     "swagger": "tsx src/utils/swagger.ts",
     "generate-db": "npx drizzle-kit generate",
     "dbcreate": "tsx src/models/setup.ts",
