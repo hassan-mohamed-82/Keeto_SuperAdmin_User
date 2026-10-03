@@ -540,6 +540,9 @@ export const createRestaurant = async (req: Request, res: Response) => {
                     title,
                     environment,
                     credentials: encryptedCreds,
+                    percentageValue: credItem.percentageValue !== undefined ? String(parseFloat(credItem.percentageValue || "0").toFixed(2)) : "0.00",
+                    fixedValue: credItem.fixedValue !== undefined ? String(parseFloat(credItem.fixedValue || "0").toFixed(2)) : "0.00",
+                    tax: credItem.tax !== undefined ? String(parseFloat(credItem.tax || "0").toFixed(2)) : "0.00",
                     logoUrl: credItem.logoUrl || null,
                     isActive: isActiveFlag,
                 };
@@ -1093,6 +1096,9 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                         credentials: mergedCreds,
                         updatedAt: new Date(),
                     };
+                    if (credItem.percentageValue !== undefined) updatePayload.percentageValue = String(parseFloat(credItem.percentageValue || "0").toFixed(2));
+                    if (credItem.fixedValue !== undefined) updatePayload.fixedValue = String(parseFloat(credItem.fixedValue || "0").toFixed(2));
+                    if (credItem.tax !== undefined) updatePayload.tax = String(parseFloat(credItem.tax || "0").toFixed(2));
                     if (credItem.logoUrl !== undefined) updatePayload.logoUrl = credItem.logoUrl || null;
                     if (credItem.isActive !== undefined) updatePayload.isActive = Boolean(credItem.isActive);
 
@@ -1112,6 +1118,9 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                         title,
                         environment,
                         credentials: encryptedCreds,
+                        percentageValue: credItem.percentageValue !== undefined ? String(parseFloat(credItem.percentageValue || "0").toFixed(2)) : "0.00",
+                        fixedValue: credItem.fixedValue !== undefined ? String(parseFloat(credItem.fixedValue || "0").toFixed(2)) : "0.00",
+                        tax: credItem.tax !== undefined ? String(parseFloat(credItem.tax || "0").toFixed(2)) : "0.00",
                         logoUrl: credItem.logoUrl || null,
                         isActive: credItem.isActive !== undefined ? Boolean(credItem.isActive) : true,
                     });

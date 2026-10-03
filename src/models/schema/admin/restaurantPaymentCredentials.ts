@@ -5,7 +5,8 @@ import {
     boolean,
     timestamp,
     mysqlEnum,
-    json
+    json,
+    decimal,
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
@@ -61,6 +62,11 @@ export const restaurantPaymentCredentials = mysqlTable("restaurant_payment_crede
 
     // 💡 استخدام Type المخصص هنا لدعم Paymob و Kashier و Geidea
     credentials: json("credentials").$type<PaymentCredentialsData>().notNull(),
+
+    // 💡 إعدادات عمولة الفيزا للبوابة المخصصة (Custom Gateway Commission)
+    percentageValue: decimal("percentage_value", { precision: 10, scale: 2 }).default("0.00"),
+    fixedValue: decimal("fixed_value", { precision: 10, scale: 2 }).default("0.00"),
+    tax: decimal("tax", { precision: 10, scale: 2 }).default("0.00"),
 
     logoUrl: varchar("logo_url", { length: 500 }),
     isActive: boolean("is_active").default(true),

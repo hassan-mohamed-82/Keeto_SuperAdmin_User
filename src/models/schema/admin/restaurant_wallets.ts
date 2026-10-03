@@ -27,6 +27,8 @@ export const restaurantWallets = mysqlTable("restaurant_wallets", {
     totalServiceFees: decimal("total_service_fees", { precision: 10, scale: 2 }).default("0.00"),
     // إجمالي الكوميشن المتراكم (نسبة من قيمة الأوردر)
     totalCommission: decimal("total_commission", { precision: 10, scale: 2 }).default("0.00"),
+    // إجمالي عمولة الفيزا المتراكمة (بوابات الدفع المخصصة)
+    totalVisaCommission: decimal("total_visa_commission", { precision: 10, scale: 2 }).default("0.00"),
     // إجمالي الاشتراكات المسجلة (شهري + ربع سنوي + سنوي)
     totalSubscriptions: decimal("total_subscriptions", { precision: 10, scale: 2 }).default("0.00"),
     // آخر اشتراك شهري مسجل
@@ -70,6 +72,7 @@ export const restaurantWalletTransactions = mysqlTable("restaurant_wallet_transa
     // تفاصيل الرسوم والعمولة الخاصة بهذا الأوردر بالتحديد
     serviceFee: decimal("service_fee", { precision: 10, scale: 2 }).default("0.00"),
     commission: decimal("commission", { precision: 10, scale: 2 }).default("0.00"),
+    visaCommission: decimal("visa_commission", { precision: 10, scale: 2 }).default("0.00"),
     orderAmount: decimal("order_amount", { precision: 10, scale: 2 }).default("0.00"),
 
     note: text("note"),

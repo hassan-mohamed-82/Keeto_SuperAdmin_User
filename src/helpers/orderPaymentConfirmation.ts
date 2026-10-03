@@ -13,6 +13,8 @@ import { v4 as uuidv4 } from "uuid";
 import { getNextDailyOrderNumber } from "./getNextDailyOrderNumber";
 import { sendPushNotification } from "../utils/notifications";
 import { chargePendingServiceFee } from "../services/restaurantWalletService";
+import { calculateVisaCommission } from "../utils/calculateVisaCommission";
+import { getActiveCustomGateway } from "../utils/getActiveCustomGateway";
 
 const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
 
@@ -100,6 +102,23 @@ export async function confirmOrderPayment({
             );
         }
 
+        let resolvedVisaCommission = parseFloat(order.visaCommission as string || "0");
+        if (order.paymentGatewayType === "CUSTOM" && resolvedVisaCommission <= 0) {
+            try {
+                const activeCustom = await getActiveCustomGateway(order.restaurantId);
+                if (activeCustom?.record) {
+                    resolvedVisaCommission = calculateVisaCommission(
+                        order.totalAmount,
+                        activeCustom.record.percentageValue,
+                        activeCustom.record.fixedValue,
+                        activeCustom.record.tax
+                    );
+                }
+            } catch (err) {
+                console.warn("[confirmOrderPayment] Failed to calculate custom gateway visaCommission:", err);
+            }
+        }
+
         // تحديث حالة الأوردر
         await tx
             .update(orders)
@@ -111,6 +130,7 @@ export async function confirmOrderPayment({
                 status: "pending",
                 dailyOrderNumber: assignedDailyOrderNumber,
                 paymentMethod: digitalMethod?.id || order.paymentMethod,
+                visaCommission: resolvedVisaCommission.toFixed(2),
                 paymentFailureReason: null, // تصفير سبب الفشل لأن المحاولة الحالية نجحت
                 updatedAt: now,
             })

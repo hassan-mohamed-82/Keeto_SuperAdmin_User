@@ -36,6 +36,9 @@ export const createPaymentCredentialsSchema = z.object({
     title: z.string().optional(),
     environment: z.enum(["LIVE", "TEST"]).default("LIVE"),
     credentials: credentialsSchema,
+    percentageValue: z.union([z.string(), z.number()]).optional(),
+    fixedValue: z.union([z.string(), z.number()]).optional(),
+    tax: z.union([z.string(), z.number()]).optional(),
     logoUrl: z.string().url().optional().or(z.literal("")),
     isActive: z.boolean().optional().default(true),
 });
@@ -45,6 +48,9 @@ export const updatePaymentCredentialsSchema = z.object({
     title: z.string().optional(),
     environment: z.enum(["LIVE", "TEST"]).optional(),
     credentials: z.record(z.any()).optional(),
+    percentageValue: z.union([z.string(), z.number()]).optional(),
+    fixedValue: z.union([z.string(), z.number()]).optional(),
+    tax: z.union([z.string(), z.number()]).optional(),
     logoUrl: z.string().url().optional().or(z.literal("")),
     isActive: z.boolean().optional(),
 });

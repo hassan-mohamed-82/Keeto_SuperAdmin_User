@@ -43,6 +43,8 @@ import { activeFoodCondition } from "../../helpers/foodConditions";
 import { createOrderPaymentSession } from "../../services/payments/paymentSession.service";
 import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
 import { chargePendingServiceFee, handleCancelledOrder, mapOrderSourceToPlatformType } from "../../services/restaurantWalletService";
+import { calculateVisaCommission } from "../../utils/calculateVisaCommission";
+import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -1149,6 +1151,23 @@ export const checkout = async (req: Request | any, res: Response) => {
         // ↑ throws BadRequest automatically on failure — order not created yet
     }
 
+    let visaCommission = 0;
+    if (isVisaPayment && settings?.paymentGatewayType === "CUSTOM") {
+        try {
+            const activeCustom = await getActiveCustomGateway(restaurantId);
+            if (activeCustom?.record) {
+                visaCommission = calculateVisaCommission(
+                    totalAmount,
+                    activeCustom.record.percentageValue,
+                    activeCustom.record.fixedValue,
+                    activeCustom.record.tax
+                );
+            }
+        } catch (e) {
+            console.warn("[order] Failed to calculate custom gateway visaCommission:", e);
+        }
+    }
+
     // ==========================================
     // 🛡️ 10. Execute Order (Transaction)
     // ==========================================
@@ -1227,6 +1246,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             deliveryFee: deliveryFee.toFixed(2),
             serviceFee: serviceFee.toFixed(2),
             appCommission: appCommission.toFixed(2),
+            visaCommission: visaCommission.toFixed(2),
 
             shippingAddress: shippingAddressSnapshot,
             branchSnapshot: branchSnapshotData,

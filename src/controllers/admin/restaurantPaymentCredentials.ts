@@ -58,7 +58,7 @@ export const createCredentials = async (req: Request, res: Response): Promise<vo
         throw new NotFound("Restaurant not found");
     }
 
-    const { provider, title, environment, credentials, logoUrl, isActive } = req.body;
+    const { provider, title, environment, credentials, percentageValue, fixedValue, tax, logoUrl, isActive } = req.body;
 
     if (!provider || !credentials) {
         throw new BadRequest("Provider and credentials are required");
@@ -91,6 +91,9 @@ export const createCredentials = async (req: Request, res: Response): Promise<vo
         title: title || formattedProvider,
         environment: environment || "LIVE",
         credentials: encryptedCredentials,
+        percentageValue: percentageValue !== undefined ? String(parseFloat(percentageValue || "0").toFixed(2)) : "0.00",
+        fixedValue: fixedValue !== undefined ? String(parseFloat(fixedValue || "0").toFixed(2)) : "0.00",
+        tax: tax !== undefined ? String(parseFloat(tax || "0").toFixed(2)) : "0.00",
         logoUrl: logoUrl || null,
         isActive: isActive !== undefined ? isActive : true,
     });
@@ -154,12 +157,15 @@ export const updateCredential = async (req: Request, res: Response): Promise<voi
         throw new NotFound("Payment credentials record not found");
     }
 
-    const { provider, title, environment, credentials, logoUrl, isActive } = req.body;
+    const { provider, title, environment, credentials, percentageValue, fixedValue, tax, logoUrl, isActive } = req.body;
 
     const updatePayload: Record<string, any> = {};
     if (provider !== undefined) updatePayload.provider = String(provider).toUpperCase() as "PAYMOB" | "KASHIER" | "GEIDEA";
     if (title !== undefined) updatePayload.title = title;
     if (environment !== undefined) updatePayload.environment = environment;
+    if (percentageValue !== undefined) updatePayload.percentageValue = String(parseFloat(percentageValue || "0").toFixed(2));
+    if (fixedValue !== undefined) updatePayload.fixedValue = String(parseFloat(fixedValue || "0").toFixed(2));
+    if (tax !== undefined) updatePayload.tax = String(parseFloat(tax || "0").toFixed(2));
     if (logoUrl !== undefined) updatePayload.logoUrl = logoUrl || null;
     if (isActive !== undefined) updatePayload.isActive = isActive;
     if (credentials !== undefined) {

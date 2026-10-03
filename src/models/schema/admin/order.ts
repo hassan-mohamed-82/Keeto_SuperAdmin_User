@@ -59,6 +59,7 @@ export const orders = mysqlTable("orders", {
     deliveryFee: decimal("delivery_fee", { precision: 10, scale: 2 }).default("0.00"),
     serviceFee: decimal("service_fee", { precision: 10, scale: 2 }).default("0.00"),
     appCommission: decimal("app_commission", { precision: 10, scale: 2 }).default("0.00"),
+    visaCommission: decimal("visa_commission", { precision: 10, scale: 2 }).default("0.00"),
 
     // --- Discount & Coupon Fields ---
     discountId: char("discount_id", { length: 36 })

@@ -26,6 +26,7 @@ async function getWalletTransactionsWithOrderDetails(restaurantId: string, limit
             reference: restaurantWalletTransactions.reference,
             serviceFee: restaurantWalletTransactions.serviceFee,
             commission: restaurantWalletTransactions.commission,
+            visaCommission: restaurantWalletTransactions.visaCommission,
             orderAmount: restaurantWalletTransactions.orderAmount,
             note: restaurantWalletTransactions.note,
             createdAt: restaurantWalletTransactions.createdAt,
@@ -65,6 +66,7 @@ async function getWalletTransactionsWithOrderDetails(restaurantId: string, limit
         reference: r.reference,
         serviceFee: r.serviceFee,
         commission: r.commission,
+        visaCommission: r.visaCommission,
         orderAmount: r.orderAmount,
         note: r.note,
         createdAt: r.createdAt,
@@ -241,6 +243,7 @@ export const getDetailedWallet = async (req: Request, res: Response) => {
             fees: {
                 totalServiceFeesRecorded: w.totalServiceFees,   // إجمالي service fees المسجلة
                 totalCommissionRecorded: w.totalCommission,      // إجمالي الكوميشن المسجل
+                totalVisaCommissionRecorded: (w as any).totalVisaCommission || "0.00", // إجمالي عمولة الفيزا المسجلة
                 totalSubscriptionsRecorded: w.totalSubscriptions, // إجمالي الاشتراكات المسجلة
                 lastMonthlySubscription: w.lastMonthlySubscription,
                 lastQuarterlySubscription: w.lastQuarterlySubscription,
