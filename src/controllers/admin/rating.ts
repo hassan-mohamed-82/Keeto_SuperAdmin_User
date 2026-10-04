@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { restaurantRatings, restaurants, users, orders, ratingRequests } from "../../models/schema";
-import { eq, sql, count, avg, and, isNotNull, desc, gte, lte, SQL } from "drizzle-orm";
+import { eq, sql, count, avg, and, isNotNull, desc, gte, lte, SQL, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -102,7 +102,7 @@ export const getAllRestaurantRatings = async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
     const restaurantId = req.query.restaurantId as string;
-    const rating = req.query.rating as string;
+    const rawRating = req.query.rating;
 
     // Build filter conditions array
     const conditions: SQL[] = [];
@@ -111,16 +111,32 @@ export const getAllRestaurantRatings = async (req: Request, res: Response) => {
         conditions.push(eq(restaurantRatings.restaurantId, restaurantId));
     }
 
-    if (rating) {
-        const ratingNum = Number(rating);
-        if (!isNaN(ratingNum)) {
-            conditions.push(eq(restaurantRatings.rating, ratingNum));
+    // Handle rating filter (supports string "2,3" or array ["2", "3"])
+    if (rawRating) {
+        let ratingNumbers: number[] = [];
+
+        if (Array.isArray(rawRating)) {
+            ratingNumbers = rawRating
+                .flatMap((r) => (typeof r === "string" ? r.split(",") : []))
+                .map(Number)
+                .filter((n) => !isNaN(n));
+        } else if (typeof rawRating === "string") {
+            ratingNumbers = rawRating
+                .split(",")
+                .map(Number)
+                .filter((n) => !isNaN(n));
+        }
+
+        if (ratingNumbers.length === 1) {
+            conditions.push(eq(restaurantRatings.rating, ratingNumbers[0]));
+        } else if (ratingNumbers.length > 1) {
+            conditions.push(inArray(restaurantRatings.rating, ratingNumbers));
         }
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    // 1. Get the total count based on the filters
+    // 1. Get total count based on active filters
     const countQuery = db.select({ count: sql`count(*)` }).from(restaurantRatings);
     if (whereClause) {
         countQuery.where(whereClause);
@@ -129,20 +145,21 @@ export const getAllRestaurantRatings = async (req: Request, res: Response) => {
     const totalRatings = Number(totalRatingsData.count);
     const totalPages = Math.ceil(totalRatings / limit);
 
-    // 2. Build the main query with joins, filters, and pagination
-    const ratingsQuery = db.select({
-        id: restaurantRatings.id,
-        rating: restaurantRatings.rating,
-        comment: restaurantRatings.comment,
-        createdAt: restaurantRatings.createdAt,
-        userName: users.name,
-        userEmail: users.email,
-        userPhoto: users.photo,
-        userPhone: users.phone,
-        userAlternatePhone: users.alternatePhone,
-        restaurantName: restaurants.name,
-        restaurantNameAr: restaurants.nameAr,
-    })
+    // 2. Build main query with joins, filters, and pagination
+    const ratingsQuery = db
+        .select({
+            id: restaurantRatings.id,
+            rating: restaurantRatings.rating,
+            comment: restaurantRatings.comment,
+            createdAt: restaurantRatings.createdAt,
+            userName: users.name,
+            userEmail: users.email,
+            userPhoto: users.photo,
+            userPhone: users.phone,
+            userAlternatePhone: users.alternatePhone,
+            restaurantName: restaurants.name,
+            restaurantNameAr: restaurants.nameAr,
+        })
         .from(restaurantRatings)
         .leftJoin(users, eq(restaurantRatings.userId, users.id))
         .leftJoin(restaurants, eq(restaurantRatings.restaurantId, restaurants.id));
