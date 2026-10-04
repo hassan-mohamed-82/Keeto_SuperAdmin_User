@@ -27,6 +27,7 @@ export const sliders = mysqlTable("sliders", {
     subcategoryId: char("subcategory_id", { length: 36 }).references(() => subcategories.id, { onDelete: "set null" }),
     foodId: char("food_id", { length: 36 }).references(() => food.id, { onDelete: "set null" }),
     discountId: char("discount_id", { length: 36 }).references(() => discounts.id, { onDelete: "set null" }),
+    status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

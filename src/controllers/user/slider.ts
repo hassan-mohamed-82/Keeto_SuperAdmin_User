@@ -4,7 +4,7 @@ import { sliders } from "../../models/schema";
 import { subcategories } from "../../models/schema/admin/subcategory";
 import { food } from "../../models/schema/admin/food";
 import { discounts, discountGroups } from "../../models/schema/admin/discount";
-import { eq } from "drizzle-orm";
+import { eq , and } from "drizzle-orm";
 import { NotFound } from "../../Errors";
 import { SuccessResponse } from "../../utils/response";
 
@@ -92,9 +92,15 @@ export const getSliders = async (req: Request, res: Response) => {
             subcategoryId: sliders.subcategoryId,
             foodId: sliders.foodId,
             discountId: sliders.discountId,
+            status: sliders.status   
         })
         .from(sliders)
-        .where(eq(sliders.restaurantid, resId));
+        .where(
+            and(
+                eq(sliders.restaurantid, resId),
+                eq(sliders.status, "active")
+            )
+        );
 
     // resolve linked entity for each slider
     const result = await Promise.all(
