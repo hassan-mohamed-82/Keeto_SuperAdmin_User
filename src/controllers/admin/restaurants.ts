@@ -59,7 +59,7 @@ const extractRawCredentials = (item: any): Record<string, any> => {
                 .map((k) => creds[k])
                 .join("");
             creds = JSON.parse(reconstructed);
-        } catch {}
+        } catch { }
     }
     if (creds && typeof creds === "object") {
         const cleanCreds: Record<string, any> = {};
@@ -101,7 +101,7 @@ const mergePaymentCredentials = (
                 .map((k) => existing[k])
                 .join("");
             existing = JSON.parse(reconstructed);
-        } catch {}
+        } catch { }
     }
 
     let incoming: Record<string, any> = {};
@@ -163,7 +163,7 @@ const encryptCredFields = (creds: any): Record<string, any> => {
                 .map((k) => parsed[k])
                 .join("");
             parsed = JSON.parse(reconstructed);
-        } catch {}
+        } catch { }
     }
     const enc = parsed && typeof parsed === "object" ? { ...parsed } : {};
     if (enc.apiKey && typeof enc.apiKey === "string" && !enc.apiKey.startsWith("******")) {
@@ -200,7 +200,7 @@ const sanitizePaymentCredentialRecord = (record: any) => {
                 .map((k) => creds[k])
                 .join("");
             creds = JSON.parse(reconstructed);
-        } catch {}
+        } catch { }
     }
     const safeCreds = creds && typeof creds === "object" ? { ...creds } : {};
     if (safeCreds.apiKey) safeCreds.apiKey = "******";
@@ -300,7 +300,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans,
         type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor,
-        callcenterphone, paymentGatewayType, enableOnlinePayment , slug
+        callcenterphone, paymentGatewayType, enableOnlinePayment, slug
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -404,6 +404,21 @@ export const createRestaurant = async (req: Request, res: Response) => {
     const plansToReturn: any[] = []; // 👈 مصفوفة لتجميع الخطط وإرجاعها
     const credentialsToReturn: any[] = []; // 👈 مصفوفة لتجميع بيانات بوابات الدفع وإرجاعها
 
+    const slugify = (s: string) =>
+        s.toLowerCase().trim()
+            .replace(/[^a-z0-9\u0600-\u06FF]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+
+    const finalSlug = slug && clean(slug) ? slugify(clean(slug)) : null;
+
+    if (finalSlug) {
+        const [dup] = await db
+            .select({ id: restaurants.id })
+            .from(restaurants)
+            .where(eq(restaurants.slug, finalSlug))
+            .limit(1);
+        if (dup) throw new BadRequest("Slug already exists");
+    }
     await db.transaction(async (tx) => {
         // 1. إنشاء المطعم
         await tx.insert(restaurants).values({
@@ -425,7 +440,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
             logo: logoUrl || '',
             cover: coverUrl || '',
-            slug: slug || '',
+            slug: finalSlug ,
             lat: lat || '',
             lng: lng || '',
             deliveryRadiusKm: deliveryRadiusKm ? clean(deliveryRadiusKm) : null,
@@ -816,7 +831,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
         type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId,
-        callcenterphone, paymentGatewayType, enableOnlinePayment ,slug
+        callcenterphone, paymentGatewayType, enableOnlinePayment, slug
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
