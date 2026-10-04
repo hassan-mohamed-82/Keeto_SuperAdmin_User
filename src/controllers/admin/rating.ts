@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { restaurantRatings, restaurants, users, orders, ratingRequests } from "../../models/schema";
-import { eq, sql, count, avg, and, isNotNull, desc, gte, lte } from "drizzle-orm";
+import { eq, sql, count, avg, and, isNotNull, desc, gte, lte, SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
@@ -102,20 +102,34 @@ export const getAllRestaurantRatings = async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
     const restaurantId = req.query.restaurantId as string;
+    const rating = req.query.rating as string;
 
-    // Define the filter condition if restaurantId is provided
-    const restaurantFilter = restaurantId ? eq(restaurantRatings.restaurantId, restaurantId) : undefined;
+    // Build filter conditions array
+    const conditions: SQL[] = [];
 
-    // 1. Get the total count based on the filter (essential for correct pagination)
+    if (restaurantId) {
+        conditions.push(eq(restaurantRatings.restaurantId, restaurantId));
+    }
+
+    if (rating) {
+        const ratingNum = Number(rating);
+        if (!isNaN(ratingNum)) {
+            conditions.push(eq(restaurantRatings.rating, ratingNum));
+        }
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    // 1. Get the total count based on the filters
     const countQuery = db.select({ count: sql`count(*)` }).from(restaurantRatings);
-    if (restaurantFilter) {
-        countQuery.where(restaurantFilter);
+    if (whereClause) {
+        countQuery.where(whereClause);
     }
     const [totalRatingsData] = await countQuery;
     const totalRatings = Number(totalRatingsData.count);
     const totalPages = Math.ceil(totalRatings / limit);
 
-    // 2. Build the main query with joins, optional filter, and pagination
+    // 2. Build the main query with joins, filters, and pagination
     const ratingsQuery = db.select({
         id: restaurantRatings.id,
         rating: restaurantRatings.rating,
@@ -124,6 +138,8 @@ export const getAllRestaurantRatings = async (req: Request, res: Response) => {
         userName: users.name,
         userEmail: users.email,
         userPhoto: users.photo,
+        userPhone: users.phone,
+        userAlternatePhone: users.alternatePhone,
         restaurantName: restaurants.name,
         restaurantNameAr: restaurants.nameAr,
     })
@@ -131,8 +147,8 @@ export const getAllRestaurantRatings = async (req: Request, res: Response) => {
         .leftJoin(users, eq(restaurantRatings.userId, users.id))
         .leftJoin(restaurants, eq(restaurantRatings.restaurantId, restaurants.id));
 
-    if (restaurantFilter) {
-        ratingsQuery.where(restaurantFilter);
+    if (whereClause) {
+        ratingsQuery.where(whereClause);
     }
 
     const ratings = await ratingsQuery.limit(limit).offset(offset);
@@ -579,4 +595,4 @@ export const rejectRatingModerationRequest = async (req: Request, res: Response)
             resolvedAt: new Date(),
         },
     });
-};
+};
