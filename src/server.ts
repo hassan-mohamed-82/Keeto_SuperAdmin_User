@@ -11,6 +11,7 @@ import helmet from "helmet";
 import http from "http";
 import { Server } from "socket.io";
 import { connectDB } from './models/connection';
+import { initSocket } from './services/socket/socketService';
 import swaggerUi from 'swagger-ui-express';
 import swaggerFile from './swagger-output.json';
 // import { initAbandonedCartCron } from "./services/abandonedCartCron";
@@ -26,12 +27,8 @@ connectDB();
 
 const httpServer = http.createServer(app);
 
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
+// تهيئة Socket.IO مع غرف التتبع اللحظي ومتابعة المناديب والطلبات
+const io = initSocket(httpServer);
 
 // إعدادات CORS
 app.use(cors({

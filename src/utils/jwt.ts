@@ -106,6 +106,56 @@ export const generateGuestToken = (data: {
 };
 
 // =======================
+// Generate Shipping Company Token
+// =======================
+export const generateShippingCompanyToken = (data: {
+    id: string;
+    name: string;
+    email: string;
+}): string => {
+    return jwt.sign(
+        {
+            id: data.id,
+            name: data.name,
+            role: "shipping_company",
+            type: "shipping_admin",
+            shippingCompanyId: data.id,
+        },
+        JWT_SECRET,
+        { expiresIn: "30d" }
+    );
+};
+
+// =======================
+// Generate Delivery Man Token
+// =======================
+export const generateDeliveryManToken = (data: {
+    id: string;
+    name: string;
+    phone?: string;
+    restaurantId?: string | null;
+    branchId?: string | null;
+    shippingCompanyId?: string | null;
+    deliveryType?: string;
+}): string => {
+    return jwt.sign(
+        {
+            id: data.id,
+            name: data.name,
+            phone: data.phone || null,
+            role: "delivery_man",
+            type: "delivery_man",
+            restaurantId: data.restaurantId || null,
+            branchId: data.branchId || null,
+            shippingCompanyId: data.shippingCompanyId || null,
+            deliveryManId: data.id,
+        },
+        JWT_SECRET,
+        { expiresIn: "30d" }
+    );
+};
+
+// =======================
 // Verify Token
 // =======================
 export const verifyToken = (token: string): TokenPayload => {

@@ -66,5 +66,6 @@ export * from "./schema/admin/orderDelayAlertGroup";
 export * from "./schema/admin/restaurantPaymentCredentials";
 export * from "./schema/admin/paymentTransactions";
 export * from "./schema/admin/adminFcmTokens";
+export * from "./schema/admin/shippingCompany";
 
 

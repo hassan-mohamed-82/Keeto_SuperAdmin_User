@@ -35,6 +35,8 @@ export const authenticated = (
         type: decoded.type as AppUser["type"],
         restaurantId: decoded.restaurantId,
         branchId: decoded.branchId,
+        shippingCompanyId: decoded.shippingCompanyId,
+        deliveryManId: decoded.deliveryManId,
         isGuest: Boolean(decoded.isGuest),
     };
 
@@ -64,6 +66,8 @@ export const optionalAuth = (
                 type: decoded.type as AppUser["type"],
                 restaurantId: decoded.restaurantId,
                 branchId: decoded.branchId,
+                shippingCompanyId: decoded.shippingCompanyId,
+                deliveryManId: decoded.deliveryManId,
                 isGuest: Boolean(decoded.isGuest),
             };
         }

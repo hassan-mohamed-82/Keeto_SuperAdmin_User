@@ -15,6 +15,8 @@ const TOKEN_EXPIRY: Record<Role, SignOptions['expiresIn']> = {
   admin: '7d',
   restaurant_admin: '7d',
   sales: "30d",
+  shipping_company: "30d",
+  delivery_man: "30d",
 };
 
 // ═══════════════════════════════════════════════════════════════

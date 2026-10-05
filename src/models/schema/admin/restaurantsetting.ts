@@ -22,6 +22,7 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   posSection: boolean("pos_section").default(false),
   selfDelivery: boolean("self_delivery").default(false),
   homeDelivery: boolean("home_delivery").default(true),
+  shippingCompanyId: char("shipping_company_id", { length: 36 }),
   takeaway: boolean("takeaway").default(false),
   orderSubscription: boolean("order_subscription").default(false),
   instantOrder: boolean("instant_order").default(false),

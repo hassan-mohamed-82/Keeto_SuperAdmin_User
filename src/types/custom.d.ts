@@ -1,7 +1,7 @@
 // =======================
 // Role System (Updated)
 // =======================
-export type Role = "user" | "admin" | "restaurant_admin" | "sales";
+export type Role = "user" | "admin" | "restaurant_admin" | "sales" | "shipping_company" | "delivery_man";
 
 // =======================
 // App User (Request.user)
@@ -14,10 +14,12 @@ export interface AppUser {
     isGuest?: boolean;
 
     // restaurant system
-    type?: "super_admin" | "admin" | "owner" | "subadmin" | "branch_manager" | "staff";
+    type?: "super_admin" | "admin" | "owner" | "subadmin" | "branch_manager" | "staff" | "shipping_admin" | "delivery_man";
 
     restaurantId?: string | null;
     branchId?: string | null;
+    shippingCompanyId?: string | null;
+    deliveryManId?: string | null;
 }
 
 // =======================
@@ -30,6 +32,8 @@ export interface TokenPayload {
     type?: string;
     restaurantId?: string;
     branchId?: string;
+    shippingCompanyId?: string;
+    deliveryManId?: string;
     isGuest?: boolean;
 }
 

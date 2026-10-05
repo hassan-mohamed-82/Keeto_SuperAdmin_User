@@ -18,6 +18,7 @@ import { branches, coupons, discounts, offers } from "../../schema";
 import { addresses } from "../user/address";
 import { selectReasons } from "./selectReasons";
 import { deliveryMen } from "./delivery_man";
+import { shippingCompanies } from "./shippingCompany";
 
 // ==========================================
 // 1. جدول الطلبات (Orders Table)
@@ -103,6 +104,29 @@ export const orders = mysqlTable("orders", {
 
     deliveryManId: char("delivery_man_id", { length: 36 })
         .references(() => deliveryMen.id),
+    shippingCompanyId: char("shipping_company_id", { length: 36 })
+        .references(() => shippingCompanies.id, { onDelete: "set null" }),
+
+    // حالة الشحن والتوزيع التلقائي
+    shippingStatus: mysqlEnum("shipping_status", [
+        "pending_dispatch",
+        "assigned",
+        "picked_up",
+        "delivered",
+        "manual_required"
+    ]).default("pending_dispatch"),
+
+    // سبب الفشل في التوزيع التلقائي (في حالة تحولها لـ manual_required)
+    shippingFailReason: mysqlEnum("shipping_fail_reason", [
+        "no_company",
+        "company_inactive",
+        "out_of_zone",
+        "no_courier",
+        "max_attempts"
+    ]),
+
+    dispatchAttempts: int("dispatch_attempts").default(0).notNull(),
+
     dailyOrderNumber: int("daily_order_number"),
 
     rating: int("rating"),
