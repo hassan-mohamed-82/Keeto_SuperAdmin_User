@@ -53,7 +53,7 @@ export class GeideaService {
             throw new BadRequest("Geidea apiPassword is missing from credentials.");
         }
 
-        // فك تشفير apiPassword الممرر من DB
+        // Decrypt apiPassword stored in database
         const plainApiPassword = safeDecrypt(credentials.apiPassword);
 
         const baseUrl = this.getBaseUrl(credentials.environment);
@@ -98,8 +98,13 @@ export class GeideaService {
                 );
             }
 
-            // رابط التوجيه الصحيح لصفحة الدفع HPP
-            const sessionUrl = `${this.DEFAULT_HPP_URL}?sessionId=${encodeURIComponent(sessionId)}`;
+            // 1. Prefer returning the sessionUrl directly provided by Geidea API
+            let sessionUrl = data?.sessionUrl || data?.session?.url || data?.hppUrl;
+
+            // 2. Fallback: Format as path parameter (https://www.merchant.geidea.net/hpp/checkout/{sessionId})
+            if (!sessionUrl) {
+                sessionUrl = `${this.DEFAULT_HPP_URL}${sessionId}`;
+            }
 
             return {
                 sessionId,
