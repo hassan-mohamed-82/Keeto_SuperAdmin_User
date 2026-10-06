@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import crypto from "crypto";
 
 vi.mock("axios", () => ({
     default: {
@@ -15,7 +14,7 @@ describe("GeideaService", () => {
         vi.clearAllMocks();
     });
 
-    it("creates a signed v2 hosted payment session", async () => {
+    it("creates a v1 hosted payment session compatible with Geidea's HPP checkout", async () => {
         vi.mocked(axios.post).mockResolvedValue({
             data: {
                 session: { id: "session-123" },
@@ -36,13 +35,11 @@ describe("GeideaService", () => {
         });
 
         expect(axios.post).toHaveBeenCalledWith(
-            "https://api.merchant.geidea.net/payment-intent/api/v2/direct/session",
+            "https://api.merchant.geidea.net/payment-intent/api/v1/direct/session",
             expect.objectContaining({
                 amount: 100,
                 currency: "EGP",
                 merchantReferenceId: "order-123",
-                timestamp: expect.any(String),
-                signature: expect.any(String),
                 customer: expect.objectContaining({
                     firstName: "Customer",
                     phoneNumber: "+201000000000",
@@ -55,16 +52,6 @@ describe("GeideaService", () => {
             })
         );
 
-        const requestPayload = vi.mocked(axios.post).mock.calls[0][1] as {
-            timestamp: string;
-            signature: string;
-        };
-        const expectedSignature = crypto
-            .createHmac("sha256", "api-password")
-            .update(`public-key100.00EGPorder-123${requestPayload.timestamp}`)
-            .digest("base64");
-
-        expect(requestPayload.signature).toBe(expectedSignature);
         expect(session.sessionId).toBe("session-123");
     });
 });
