@@ -2,6 +2,7 @@ import axios from "axios";
 import crypto from "crypto";
 import { BadRequest } from "../../../Errors/BadRequest";
 import { GeideaCredentials } from "../../../models/schema/admin/restaurantPaymentCredentials";
+import { safeDecrypt } from "../../../utils/Safedecrypt";
 
 export interface CreateGeideaSessionInput {
     credentials: GeideaCredentials;
@@ -52,10 +53,13 @@ export class GeideaService {
             throw new BadRequest("Geidea apiPassword is missing from credentials.");
         }
 
+        // فك تشفير apiPassword الممرر من DB
+        const plainApiPassword = safeDecrypt(credentials.apiPassword);
+
         const baseUrl = this.getBaseUrl(credentials.environment);
         const endpoint = `${baseUrl}/payment-intent/api/v1/direct/session`;
 
-        const authString = `${credentials.publicKey}:${credentials.apiPassword}`;
+        const authString = `${credentials.publicKey}:${plainApiPassword}`;
         const basicAuth = Buffer.from(authString).toString("base64");
         const normalizedCurrency = currency.toUpperCase();
 
@@ -94,6 +98,7 @@ export class GeideaService {
                 );
             }
 
+            // رابط التوجيه الصحيح لصفحة الدفع HPP
             const sessionUrl = `${this.DEFAULT_HPP_URL}?sessionId=${encodeURIComponent(sessionId)}`;
 
             return {
@@ -117,7 +122,29 @@ export class GeideaService {
     }
 
     /**
-     * Verify Geidea Webhook / Callback Signature (if provided by Geidea)
+     * Fetch session details from Geidea API (Backend GET request)
+     * GET /payment-intent/api/v1/direct/session/{sessionId}
+     */
+    static async getSessionDetails(credentials: GeideaCredentials, sessionId: string) {
+        const plainApiPassword = safeDecrypt(credentials.apiPassword);
+        const baseUrl = this.getBaseUrl(credentials.environment);
+        const endpoint = `${baseUrl}/payment-intent/api/v1/direct/session/${sessionId}`;
+
+        const authString = `${credentials.publicKey}:${plainApiPassword}`;
+        const basicAuth = Buffer.from(authString).toString("base64");
+
+        const response = await axios.get(endpoint, {
+            headers: {
+                Authorization: `Basic ${basicAuth}`,
+            },
+            timeout: 15000,
+        });
+
+        return response.data;
+    }
+
+    /**
+     * Verify Geidea Webhook / Callback Signature
      */
     static verifySignature(
         publicKey: string,
@@ -127,10 +154,11 @@ export class GeideaService {
         amount: number | string,
         receivedSignature?: string
     ): boolean {
-        if (!receivedSignature) return true; // if no signature provided, rely on direct verification or Basic Auth
+        if (!receivedSignature) return true;
 
         try {
-            const dataToSign = `${publicKey}${orderId}${status}${amount}${apiPassword}`;
+            const plainApiPassword = safeDecrypt(apiPassword);
+            const dataToSign = `${publicKey}${orderId}${status}${amount}${plainApiPassword}`;
             const computedHash = crypto.createHash("sha256").update(dataToSign).digest("hex");
             return computedHash.toLowerCase() === receivedSignature.toLowerCase();
         } catch (err) {
