@@ -261,18 +261,18 @@ export async function getShippingCompanies(req: Request, res: Response) {
             logo: shippingCompanies.logo,
             status: shippingCompanies.status,
             createdAt: shippingCompanies.createdAt,
-            assignedRestaurantsCount: sql<number>`(
-                SELECT COUNT(*) FROM shipping_company_restaurants scr 
-                WHERE scr.shipping_company_id = ${shippingCompanies.id} AND scr.status = 'active'
-            )`,
-            deliveryMenCount: sql<number>`(
-                SELECT COUNT(*) FROM delivery_men dm 
-                WHERE dm.shipping_company_id = ${shippingCompanies.id} AND dm.is_deleted = 0
-            )`,
-            zonesCount: sql<number>`(
-                SELECT COUNT(*) FROM shipping_zones sz 
-                WHERE sz.shipping_company_id = ${shippingCompanies.id}
-            )`,
+            assignedRestaurantsCount: sql<number>`COALESCE((
+            SELECT COUNT(*) FROM shipping_company_restaurants scr 
+            WHERE scr.shipping_company_id = ${shippingCompanies.id} AND scr.status = 'active'
+        ), 0)`,
+            deliveryMenCount: sql<number>`COALESCE((
+            SELECT COUNT(*) FROM delivery_men dm 
+            WHERE dm.shipping_company_id = ${shippingCompanies.id} AND dm.is_deleted = 0
+        ), 0)`,
+            zonesCount: sql<number>`COALESCE((
+            SELECT COUNT(*) FROM shipping_zones sz 
+            WHERE sz.shipping_company_id = ${shippingCompanies.id}
+        ), 0)`,
         })
         .from(shippingCompanies)
         .where(whereClause)
