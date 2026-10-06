@@ -98,12 +98,12 @@ export class GeideaService {
                 );
             }
 
-            // 1. Prefer returning the sessionUrl directly provided by Geidea API
+            // 1. Prefer returning the sessionUrl directly provided by Geidea API if present
             let sessionUrl = data?.sessionUrl || data?.session?.url || data?.hppUrl;
 
-            // 2. Fallback: Format as path parameter (https://www.merchant.geidea.net/hpp/checkout/{sessionId})
+            // 2. Correct HPP format: https://www.merchant.geidea.net/hpp/checkout/?{sessionId}
             if (!sessionUrl) {
-                sessionUrl = `${this.DEFAULT_HPP_URL}${sessionId}`;
+                sessionUrl = `${this.DEFAULT_HPP_URL}?${sessionId}`;
             }
 
             return {
