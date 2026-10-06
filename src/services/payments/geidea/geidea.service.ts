@@ -137,12 +137,12 @@ export class GeideaService {
 
     /**
      * Fetch session details from Geidea API (Backend GET request)
-     * GET /payment-intent/api/v1/direct/session/{sessionId}
+     * GET /payment-intent/api/v2/direct/session/{sessionId}
      */
     static async getSessionDetails(credentials: GeideaCredentials, sessionId: string) {
         const plainApiPassword = safeDecrypt(credentials.apiPassword);
         const baseUrl = this.getBaseUrl(credentials.environment);
-        const endpoint = `${baseUrl}/payment-intent/api/v1/direct/session/${sessionId}`;
+        const endpoint = `${baseUrl}/payment-intent/api/v2/direct/session/${sessionId}`;
 
         const authString = `${credentials.publicKey}:${plainApiPassword}`;
         const basicAuth = Buffer.from(authString).toString("base64");
