@@ -41,7 +41,7 @@ export class GeideaService {
 
     /**
      * Create Geidea Hosted Payment Session
-     * POST /payment-intent/api/v1/direct/session
+     * POST /payment-intent/api/v2/direct/session
      */
     static async createPaymentSession(input: CreateGeideaSessionInput): Promise<GeideaSessionResponse> {
         const { credentials, orderId, orderNumber, amount, currency = "EGP", customer, language = "ar" } = input;
@@ -57,16 +57,25 @@ export class GeideaService {
         const plainApiPassword = safeDecrypt(credentials.apiPassword);
 
         const baseUrl = this.getBaseUrl(credentials.environment);
-        const endpoint = `${baseUrl}/payment-intent/api/v1/direct/session`;
+        const endpoint = `${baseUrl}/payment-intent/api/v2/direct/session`;
 
         const authString = `${credentials.publicKey}:${plainApiPassword}`;
         const basicAuth = Buffer.from(authString).toString("base64");
         const normalizedCurrency = currency.toUpperCase();
+        const formattedAmount = Number(amount.toFixed(2)).toFixed(2);
+        const timestamp = new Date().toISOString();
+        const signaturePayload = `${credentials.publicKey}${formattedAmount}${normalizedCurrency}${orderId}${timestamp}`;
+        const signature = crypto
+            .createHmac("sha256", plainApiPassword)
+            .update(signaturePayload)
+            .digest("base64");
 
         const payload = {
-            amount: Number(amount.toFixed(2)),
+            amount: Number(formattedAmount),
             currency: normalizedCurrency,
+            timestamp,
             merchantReferenceId: orderId,
+            signature,
             callbackUrl: input.callbackUrl || credentials.callbackUrl,
             returnUrl: input.returnUrl || credentials.returnUrl,
             customer: {
