@@ -40,7 +40,7 @@ export class GeideaService {
 
     /**
      * Create Geidea Hosted Payment Session
-     * POST /payment-intent/api/v1/direct/session
+     * POST /payment-intent/api/v2/direct/session
      */
     static async createPaymentSession(input: CreateGeideaSessionInput): Promise<GeideaSessionResponse> {
         const { credentials, orderId, orderNumber, amount, currency = "EGP", customer, language = "ar" } = input;
@@ -53,21 +53,31 @@ export class GeideaService {
         }
 
         const baseUrl = this.getBaseUrl(credentials.environment);
-        const endpoint = `${baseUrl}/payment-intent/api/v1/direct/session`;
+        const endpoint = `${baseUrl}/payment-intent/api/v2/direct/session`;
 
         const authString = `${credentials.publicKey}:${credentials.apiPassword}`;
         const basicAuth = Buffer.from(authString).toString("base64");
+        const formattedAmount = Number(amount.toFixed(2)).toFixed(2);
+        const normalizedCurrency = currency.toUpperCase();
+        const timestamp = new Date().toISOString();
+        const signatureData = `${credentials.publicKey}${formattedAmount}${normalizedCurrency}${orderId}${timestamp}`;
+        const signature = crypto
+            .createHmac("sha256", credentials.apiPassword)
+            .update(signatureData)
+            .digest("base64");
 
         const payload = {
-            amount: Number(amount.toFixed(2)),
-            currency: currency.toUpperCase(),
+            amount: Number(formattedAmount),
+            currency: normalizedCurrency,
+            timestamp,
             merchantReferenceId: orderId,
+            signature,
             callbackUrl: input.callbackUrl || credentials.callbackUrl,
             returnUrl: input.returnUrl || credentials.returnUrl,
             customer: {
-                name: customer.name || "Customer",
+                firstName: customer.name || "Customer",
                 email: customer.email || "customer@example.com",
-                phone: (customer.phone || "+201000000000").replace(/\s+/g, ""),
+                phoneNumber: (customer.phone || "+201000000000").replace(/\s+/g, ""),
             },
             language: language,
         };
