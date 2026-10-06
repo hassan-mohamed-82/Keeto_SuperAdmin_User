@@ -5,7 +5,9 @@ import {
     restaurantBusinessPlans,
     restaurantSettings,
     orders,
-    paymentMethods
+    paymentMethods,
+    gatewaySwitchLog,
+    notifications,
 } from "../models/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
@@ -26,6 +28,83 @@ export function mapOrderSourceToPlatformType(orderSource: string): PlatformType 
     return "pos";
 }
 
+export async function applyGatewaySwitch(
+    executor: any,
+    {
+        restaurantId,
+        toType,
+        trigger,
+        balanceAtSwitch,
+        adminId,
+    }: {
+        restaurantId: string;
+        toType: "SYSTEM" | "CUSTOM";
+        trigger: "amount" | "day_of_week" | "day_of_month" | "manual";
+        balanceAtSwitch: number | string;
+        adminId?: string | null;
+    }
+): Promise<void> {
+    const [settings] = await executor
+        .select({
+            paymentGatewayType: restaurantSettings.paymentGatewayType,
+            visaSwitchApplied: restaurantSettings.visaSwitchApplied,
+            gatewayAutoSwitchTriggeredAt: restaurantSettings.gatewayAutoSwitchTriggeredAt,
+        })
+        .from(restaurantSettings)
+        .where(eq(restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+
+    const currentType = settings?.paymentGatewayType ?? "SYSTEM";
+    const settingsUpdate: any = {
+        paymentGatewayType: toType,
+        ...(toType === "SYSTEM"
+            ? {
+                visaSwitchApplied: true,
+                gatewayAutoSwitchTriggeredAt: new Date(),
+            }
+            : {
+                visaSwitchApplied: false,
+                gatewayAutoSwitchTriggeredAt: null,
+            }),
+    };
+
+    await executor
+        .update(restaurantSettings)
+        .set(settingsUpdate)
+        .where(eq(restaurantSettings.restaurantId, restaurantId));
+
+    await executor.insert(gatewaySwitchLog).values({
+        id: uuidv4(),
+        restaurantId,
+        fromType: currentType,
+        toType,
+        trigger,
+        balanceAtSwitch: Number(balanceAtSwitch || 0).toFixed(2),
+        adminId: adminId ?? null,
+        createdAt: new Date(),
+    });
+
+    if (toType === "SYSTEM") {
+        await executor.insert(notifications).values({
+            id: uuidv4(),
+            recipientType: "restaurant",
+            recipientId: restaurantId,
+            title: "Payment gateway switched to SYSTEM",
+            body: "Online-payment revenue will now be offset against the outstanding balance.",
+            data: {
+                type: "gateway_switch",
+                restaurantId,
+                fromType: currentType,
+                toType,
+                trigger,
+                balanceAtSwitch: Number(balanceAtSwitch || 0).toFixed(2),
+            },
+            isRead: false,
+            createdAt: new Date(),
+        });
+    }
+}
+
 /**
  * Just-In-Time Visa Switch Helper
  * 
@@ -42,7 +121,6 @@ export async function checkAndApplyVisaSwitch(
     addedServiceFee: number = 0,
     executor: any = db
 ): Promise<void> {
-    // 1. جلب الإعدادات الحالية
     const [settings] = await executor
         .select({
             paymentGatewayType: restaurantSettings.paymentGatewayType,
@@ -51,74 +129,114 @@ export async function checkAndApplyVisaSwitch(
             visaSwitchDayOfWeek: restaurantSettings.visaSwitchDayOfWeek,
             visaSwitchDayOfMonth: restaurantSettings.visaSwitchDayOfMonth,
             visaSwitchApplied: restaurantSettings.visaSwitchApplied,
-            customGatewayAccumulatedFees: restaurantSettings.customGatewayAccumulatedFees,
         })
         .from(restaurantSettings)
         .where(eq(restaurantSettings.restaurantId, restaurantId))
         .limit(1);
 
-    // لا توجد إعدادات أو البوابة مش CUSTOM أو السويتش حصل فعلاً → خروج
     if (!settings) return;
     if (settings.paymentGatewayType !== "CUSTOM") return;
     if (settings.visaSwitchApplied === true) return;
     if (!settings.visaSwitchConditionType || settings.visaSwitchConditionType === "none") return;
 
+    const [wallet] = await executor
+        .select({ balance: restaurantWallets.balance })
+        .from(restaurantWallets)
+        .where(eq(restaurantWallets.restaurantId, restaurantId))
+        .limit(1);
+
+    const walletBalance = parseFloat(String(wallet?.balance ?? "0"));
     let shouldSwitch = false;
+    let trigger: "amount" | "day_of_week" | "day_of_month" = "amount";
 
-    // ========================
-    // شرط المبلغ (amount)
-    // ========================
     if (settings.visaSwitchConditionType === "amount") {
-        const threshold = parseFloat(settings.visaSwitchAmountThreshold as string || "0");
-        const currentAccumulated = parseFloat(settings.customGatewayAccumulatedFees as string || "0");
-        const newAccumulated = roundMoney(currentAccumulated + addedServiceFee);
-
-        // تحديث العداد التراكمي أولاً
-        await executor
-            .update(restaurantSettings)
-            .set({ customGatewayAccumulatedFees: newAccumulated.toFixed(2) })
-            .where(eq(restaurantSettings.restaurantId, restaurantId));
-
-        // فحص هل وصل أو تخطى الـ threshold
-        if (threshold > 0 && newAccumulated >= threshold) {
-            shouldSwitch = true;
-        }
+        const threshold = parseFloat(String(settings.visaSwitchAmountThreshold ?? "0"));
+        const debt = Math.max(0, -walletBalance);
+        shouldSwitch = threshold > 0 && debt >= threshold;
+        trigger = "amount";
     }
 
-    // ========================
-    // شرط يوم الأسبوع (day_of_week)
-    // ========================
     if (settings.visaSwitchConditionType === "day_of_week" && settings.visaSwitchDayOfWeek) {
         const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-        const todayName = dayNames[new Date().getDay()]; // e.g. "saturday"
-        if (todayName === String(settings.visaSwitchDayOfWeek).toLowerCase()) {
+        const todayName = dayNames[new Date().getDay()];
+        if (walletBalance < 0 && todayName === String(settings.visaSwitchDayOfWeek).toLowerCase()) {
             shouldSwitch = true;
+            trigger = "day_of_week";
         }
     }
 
-    // ========================
-    // شرط يوم الشهر (day_of_month)
-    // ========================
     if (settings.visaSwitchConditionType === "day_of_month" && settings.visaSwitchDayOfMonth != null) {
-        const todayDayOfMonth = new Date().getDate(); // 1-31
-        if (todayDayOfMonth === Number(settings.visaSwitchDayOfMonth)) {
+        const todayDayOfMonth = new Date().getDate();
+        if (walletBalance < 0 && todayDayOfMonth === Number(settings.visaSwitchDayOfMonth)) {
             shouldSwitch = true;
+            trigger = "day_of_month";
         }
     }
 
-    // ========================
-    // تنفيذ التحويل الفعلي
-    // ========================
     if (shouldSwitch) {
-        await executor
-            .update(restaurantSettings)
-            .set({
-                paymentGatewayType: "SYSTEM",
-                visaSwitchApplied: true,
-                gatewayAutoSwitchTriggeredAt: new Date(),
-            })
-            .where(eq(restaurantSettings.restaurantId, restaurantId));
+        await applyGatewaySwitch(executor, {
+            restaurantId,
+            toType: "SYSTEM",
+            trigger,
+            balanceAtSwitch: walletBalance,
+        });
     }
+}
+
+export async function chargeGatewayFeeOnRefund(
+    tx: any,
+    order: any,
+    refundAmount?: number,
+    options?: { alreadyCounted?: boolean; note?: string }
+): Promise<void> {
+    const gatewayFee = Math.max(0, Number(refundAmount ?? parseFloat(String(order?.visaCommission ?? "0"))));
+    if (gatewayFee <= 0) return;
+
+    const [existingAdjustment] = await tx
+        .select({ id: restaurantWalletTransactions.id })
+        .from(restaurantWalletTransactions)
+        .where(and(
+            eq(restaurantWalletTransactions.orderId, order.id),
+            eq(restaurantWalletTransactions.type, "adjustment"),
+            eq(restaurantWalletTransactions.method, "gateway_fee_on_refund")
+        ))
+        .limit(1);
+
+    if (existingAdjustment) return;
+
+    const wallet = await getOrCreateWallet(order.restaurantId, tx);
+    const balanceBefore = parseFloat(wallet.balance as string || "0");
+    const currentVisaCommission = parseFloat((wallet as any).totalVisaCommission as string || "0");
+    const balanceAfter = roundMoney(balanceBefore - gatewayFee);
+    const totalVisaCommissionAfter = roundMoney(
+        options?.alreadyCounted ? currentVisaCommission : currentVisaCommission + gatewayFee
+    );
+
+    await tx.update(restaurantWallets)
+        .set({
+            balance: balanceAfter.toFixed(2),
+            totalVisaCommission: totalVisaCommissionAfter.toFixed(2),
+            updatedAt: new Date(),
+        })
+        .where(eq(restaurantWallets.id, wallet.id));
+
+    await tx.insert(restaurantWalletTransactions).values({
+        id: uuidv4(),
+        restaurantId: order.restaurantId,
+        orderId: order.id,
+        type: "adjustment",
+        amount: (-gatewayFee).toFixed(2),
+        balanceBefore: balanceBefore.toFixed(2),
+        balanceAfter: balanceAfter.toFixed(2),
+        method: "gateway_fee_on_refund",
+        reference: order.orderNumber,
+        serviceFee: "0.00",
+        commission: "0.00",
+        visaCommission: gatewayFee.toFixed(2),
+        orderAmount: String(order.totalAmount ?? "0.00"),
+        note: options?.note ?? `Gateway fee charged on refund for SYSTEM visa order #${order.dailyOrderNumber || order.orderNumber}.`,
+        createdAt: new Date(),
+    });
 }
 
 /**
@@ -198,6 +316,154 @@ export async function getOrCreateWallet(restaurantId: string, tx: any) {
     return wallet;
 }
 
+export function shouldNotifyDebtSettled(
+    previousBalance: number,
+    nextBalance: number,
+    settings?: { paymentGatewayType?: "SYSTEM" | "CUSTOM" | null; visaSwitchApplied?: boolean | null }
+): boolean {
+    if (previousBalance >= 0 || nextBalance < 0) return false;
+    if (!settings || settings.paymentGatewayType !== "SYSTEM" || settings.visaSwitchApplied !== true) return false;
+    return true;
+}
+
+export function buildSettlementCounterUpdate(params: {
+    paymentKind: "cash" | "visa_custom" | "visa_system" | "user_wallet";
+    currentBalance: number;
+    currentCollectedCash: number;
+    currentTotalEarning: number;
+    currentTotalServiceFees: number;
+    currentTotalCommission: number;
+    currentTotalVisaCommission: number;
+    subtotal: number;
+    deliveryFee: number;
+    settlementServiceFee: number;
+    appCommission: number;
+    discountAmount: number;
+    orderVisaComm: number;
+    totalAmount: number;
+}) {
+    const {
+        paymentKind,
+        currentBalance,
+        currentCollectedCash,
+        currentTotalEarning,
+        currentTotalServiceFees,
+        currentTotalCommission,
+        currentTotalVisaCommission,
+        subtotal,
+        deliveryFee,
+        settlementServiceFee,
+        appCommission,
+        discountAmount,
+        orderVisaComm,
+        totalAmount,
+    } = params;
+
+    if (paymentKind === "cash") {
+        const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
+        const appDues = roundMoney(appCommission + settlementServiceFee);
+        return {
+            balance: roundMoney(currentBalance - appDues),
+            collectedCash: roundMoney(currentCollectedCash + totalAmount),
+            totalEarning: roundMoney(currentTotalEarning + restaurantEarning),
+            totalServiceFees: roundMoney(currentTotalServiceFees + settlementServiceFee),
+            totalCommission: roundMoney(currentTotalCommission + appCommission),
+            totalVisaCommission: currentTotalVisaCommission,
+        };
+    }
+
+    if (paymentKind === "visa_system" || paymentKind === "user_wallet") {
+        const restaurantCredit = roundMoney(subtotal + deliveryFee - appCommission - discountAmount - orderVisaComm);
+        return {
+            balance: roundMoney(currentBalance + restaurantCredit),
+            collectedCash: currentCollectedCash,
+            totalEarning: roundMoney(currentTotalEarning + restaurantCredit),
+            totalServiceFees: roundMoney(currentTotalServiceFees + settlementServiceFee),
+            totalCommission: roundMoney(currentTotalCommission + appCommission),
+            totalVisaCommission: roundMoney(currentTotalVisaCommission + orderVisaComm),
+        };
+    }
+
+    const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
+    const customDues = roundMoney(appCommission + settlementServiceFee);
+    return {
+        balance: roundMoney(currentBalance - customDues),
+        collectedCash: currentCollectedCash,
+        totalEarning: roundMoney(currentTotalEarning + restaurantEarning),
+        totalServiceFees: roundMoney(currentTotalServiceFees + settlementServiceFee),
+        totalCommission: roundMoney(currentTotalCommission + appCommission),
+        totalVisaCommission: currentTotalVisaCommission,
+    };
+}
+
+export function buildCancellationCounterReversal(params: {
+    paymentKind: "cash" | "visa_custom" | "visa_system" | "user_wallet";
+    currentBalance: number;
+    currentCollectedCash: number;
+    currentTotalEarning: number;
+    currentTotalServiceFees: number;
+    currentTotalCommission: number;
+    currentTotalVisaCommission: number;
+    subtotal: number;
+    deliveryFee: number;
+    settledAmount: number;
+    settledServiceFee: number;
+    settledCommission: number;
+    settledVisaComm: number;
+    totalAmount: number;
+}) {
+    const {
+        paymentKind,
+        currentBalance,
+        currentCollectedCash,
+        currentTotalEarning,
+        currentTotalServiceFees,
+        currentTotalCommission,
+        currentTotalVisaCommission,
+        subtotal,
+        deliveryFee,
+        settledAmount,
+        settledServiceFee,
+        settledCommission,
+        settledVisaComm,
+        totalAmount,
+    } = params;
+
+    const settledRestaurantEarning = roundMoney(subtotal + deliveryFee - settledCommission);
+    let collectedCash = currentCollectedCash;
+    let totalEarning = currentTotalEarning;
+    let totalServiceFees = currentTotalServiceFees;
+    let totalCommission = currentTotalCommission;
+    let totalVisaCommission = currentTotalVisaCommission;
+
+    if (paymentKind === "cash") {
+        collectedCash = Math.max(0, roundMoney(currentCollectedCash - totalAmount));
+        totalEarning = Math.max(0, roundMoney(currentTotalEarning - settledRestaurantEarning));
+        totalServiceFees = Math.max(0, roundMoney(currentTotalServiceFees - settledServiceFee));
+        totalCommission = Math.max(0, roundMoney(currentTotalCommission - settledCommission));
+    } else if (paymentKind === "visa_custom") {
+        totalEarning = Math.max(0, roundMoney(currentTotalEarning - settledRestaurantEarning));
+        totalServiceFees = Math.max(0, roundMoney(currentTotalServiceFees - settledServiceFee));
+        totalCommission = Math.max(0, roundMoney(currentTotalCommission - settledCommission));
+        totalVisaCommission = Math.max(0, roundMoney(currentTotalVisaCommission - settledVisaComm));
+    } else {
+        totalEarning = Math.max(0, roundMoney(currentTotalEarning - settledAmount));
+        totalServiceFees = Math.max(0, roundMoney(currentTotalServiceFees - settledServiceFee));
+        totalCommission = Math.max(0, roundMoney(currentTotalCommission - settledCommission));
+        // SYSTEM and wallet settlements already counted the gateway fee separately on refund,
+        // so this reversal must not subtract it again here.
+    }
+
+    return {
+        balance: roundMoney(currentBalance - settledAmount),
+        collectedCash,
+        totalEarning,
+        totalServiceFees,
+        totalCommission,
+        totalVisaCommission,
+    };
+}
+
 export async function chargePendingServiceFee(
     orderId: string,
     tx: any,
@@ -211,7 +477,7 @@ export async function chargePendingServiceFee(
 
     if (!order) return;
 
-    const { isCash } = await resolvePaymentTypeAndGateway({
+    const { isCash, paymentKind, paymentGatewayType } = await resolvePaymentTypeAndGateway({
         restaurantId: order.restaurantId,
         paymentMethodId: order.paymentMethod,
         paymentGateway: order.paymentGateway,
@@ -220,8 +486,8 @@ export async function chargePendingServiceFee(
     });
 
     if (chargeTiming === "cash_pending") {
-        if (!isCash || order.status !== "pending") return;
-    } else if (isCash || order.paymentStatus !== "paid" || order.paymentGatewayType !== "CUSTOM") {
+        if (paymentKind !== "cash" || order.status !== "pending") return;
+    } else if (paymentKind !== "visa_custom" || order.paymentStatus !== "paid" || paymentGatewayType !== "CUSTOM") {
         return;
     }
 
@@ -271,6 +537,8 @@ export async function chargePendingServiceFee(
             : `Pending-time service fee charged after CUSTOM payment confirmation for #${order.dailyOrderNumber || order.orderNumber}.`,
         createdAt: new Date(),
     });
+
+    await checkAndApplyVisaSwitch(order.restaurantId, serviceFee, tx);
 }
 
 /**
@@ -282,7 +550,12 @@ export async function resolvePaymentTypeAndGateway(params: {
     paymentGateway?: string | null;
     orderGatewayType?: "SYSTEM" | "CUSTOM" | null;
     executor?: any;
-}) {
+}): Promise<{
+    isCash: boolean;
+    paymentGatewayType: "SYSTEM" | "CUSTOM";
+    paymentMethodName: string;
+    paymentKind: "cash" | "visa_custom" | "visa_system" | "user_wallet";
+}> {
     const { restaurantId, paymentMethodId, paymentGateway, orderGatewayType, executor = db } = params;
 
     let isCash = false;
@@ -305,12 +578,20 @@ export async function resolvePaymentTypeAndGateway(params: {
         isCash = true;
     }
 
-    // If explicit paymentGateway was set on order (kashier/paymob/geidea) -> it is digital
     if (paymentGateway) {
         isCash = false;
     }
 
-    // If digital, check whether restaurant uses SYSTEM gateway or CUSTOM gateway
+    const walletLike = paymentMethodName.toLowerCase() === "wallet" || paymentMethodName.toLowerCase() === "my wallet" || paymentMethodName === "محفظتي" || paymentMethodName === "محفظتى";
+    if (walletLike) {
+        return {
+            isCash: false,
+            paymentGatewayType: "SYSTEM",
+            paymentMethodName,
+            paymentKind: "user_wallet" as const,
+        };
+    }
+
     let paymentGatewayType: "SYSTEM" | "CUSTOM" = orderGatewayType || "SYSTEM";
     if (!isCash && !orderGatewayType) {
         const [settings] = await executor
@@ -322,10 +603,13 @@ export async function resolvePaymentTypeAndGateway(params: {
         paymentGatewayType = settings?.paymentGatewayType || "SYSTEM";
     }
 
+    const paymentKind = isCash ? "cash" : paymentGatewayType === "SYSTEM" ? "visa_system" : "visa_custom";
+
     return {
         isCash,
         paymentGatewayType,
         paymentMethodName,
+        paymentKind,
     };
 }
 
@@ -343,7 +627,6 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
     if (!order) return;
     if (order.paymentStatus && order.paymentStatus !== "paid") return;
 
-    // Idempotency check: don't settle the same order twice
     const [existingTx] = await tx
         .select({ id: restaurantWalletTransactions.id })
         .from(restaurantWalletTransactions)
@@ -356,11 +639,9 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
         )
         .limit(1);
 
-    if (existingTx) {
-        return; // Already settled
-    }
+    if (existingTx) return;
 
-    const { isCash, paymentGatewayType } = await resolvePaymentTypeAndGateway({
+    const { isCash, paymentKind, paymentGatewayType } = await resolvePaymentTypeAndGateway({
         restaurantId: order.restaurantId,
         paymentMethodId: order.paymentMethod,
         paymentGateway: order.paymentGateway,
@@ -373,6 +654,8 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
     const serviceFee = parseFloat(order.serviceFee as string || "0");
     const appCommission = parseFloat(order.appCommission as string || "0");
     const totalAmount = parseFloat(order.totalAmount as string || "0");
+    const discountAmount = parseFloat(order.discountAmount as string || "0");
+    const orderVisaComm = parseFloat(order.visaCommission as string || "0");
 
     const [pendingServiceFeeTx] = await tx
         .select({ id: restaurantWalletTransactions.id })
@@ -396,77 +679,83 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
 
     const pendingFeeAlreadyCharged = Boolean(pendingServiceFeeTx) && !serviceFeeRefundTx;
     const settlementServiceFee = pendingFeeAlreadyCharged ? 0 : serviceFee;
-    const appDues = roundMoney(appCommission + settlementServiceFee);
-    const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
 
     const wallet = await getOrCreateWallet(order.restaurantId, tx);
-
     const currentBalance = parseFloat(wallet.balance as string || "0");
     const currentCollectedCash = parseFloat(wallet.collectedCash as string || "0");
     const currentTotalEarning = parseFloat(wallet.totalEarning as string || "0");
+    const currentTotalServiceFees = parseFloat(wallet.totalServiceFees as string || "0");
+    const currentTotalCommission = parseFloat(wallet.totalCommission as string || "0");
+    const currentTotalVisaCommission = parseFloat(wallet.totalVisaCommission as string || "0");
 
-    let newBalance = currentBalance;
-    let newCollectedCash = currentCollectedCash;
-    const newTotalEarning = roundMoney(currentTotalEarning + restaurantEarning);
+    const settlementState = buildSettlementCounterUpdate({
+        paymentKind,
+        currentBalance,
+        currentCollectedCash,
+        currentTotalEarning,
+        currentTotalServiceFees,
+        currentTotalCommission,
+        currentTotalVisaCommission,
+        subtotal,
+        deliveryFee,
+        settlementServiceFee,
+        appCommission,
+        discountAmount,
+        orderVisaComm,
+        totalAmount,
+    });
 
+    const newBalance = settlementState.balance;
+    const newCollectedCash = settlementState.collectedCash;
+    const newTotalEarning = settlementState.totalEarning;
+    const newTotalServiceFees = settlementState.totalServiceFees;
+    const newTotalCommission = settlementState.totalCommission;
+    const newTotalVisaCommission = settlementState.totalVisaCommission;
     let transactionAmount = 0;
+    let effectiveVisaComm = 0;
+    let method: "cash" | "visa_custom" | "visa_system" | "user_wallet" = "cash";
     let transactionNote = "";
 
-    if (isCash) {
-        // CASH PAYMENT:
-        // Restaurant/Courier collected 100% of the money in hand.
-        // Restaurant owes SuperAdmin the app commission & service fee (appDues).
-        // Restaurant balance with SuperAdmin DECREASES by appDues.
-        newCollectedCash = roundMoney(currentCollectedCash + totalAmount);
-        newBalance = roundMoney(currentBalance - appDues);
+    if (paymentKind === "cash") {
+        const appDues = roundMoney(appCommission + settlementServiceFee);
         transactionAmount = -appDues;
-        transactionNote = `Delivered order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; subtotal=${subtotal.toFixed(2)}; delivery=${deliveryFee.toFixed(2)}; commission=${appCommission.toFixed(2)}; serviceFee=${serviceFee.toFixed(2)}; total=${totalAmount.toFixed(2)}; restaurant owes platform=${appDues.toFixed(2)}; cash collected.`;
-    } else if (paymentGatewayType === "SYSTEM") {
-        // DIGITAL PAYMENT (SYSTEM GATEWAY):
-        // SuperAdmin collected 100% of the customer's money in SuperAdmin's payment gateway account.
-        // SuperAdmin OWES the restaurant their net earning (subtotal + deliveryFee - appCommission).
-        // Restaurant balance with SuperAdmin INCREASES by restaurantEarning.
-        newBalance = roundMoney(currentBalance + restaurantEarning);
-        transactionAmount = restaurantEarning;
-        transactionNote = `Delivered order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; subtotal=${subtotal.toFixed(2)}; delivery=${deliveryFee.toFixed(2)}; commission=${appCommission.toFixed(2)}; serviceFee=${serviceFee.toFixed(2)}; total=${totalAmount.toFixed(2)}; payment=SYSTEM; platform owes restaurant=${restaurantEarning.toFixed(2)}.`;
+        method = "cash";
+        transactionNote = `Delivered cash order #${order.dailyOrderNumber || order.orderNumber}; subtotal=${subtotal.toFixed(2)}; delivery=${deliveryFee.toFixed(2)}; commission=${appCommission.toFixed(2)}; serviceFee=${settlementServiceFee.toFixed(2)}; total=${totalAmount.toFixed(2)}; restaurant owes platform=${appDues.toFixed(2)}.`;
+    } else if (paymentKind === "visa_system" || paymentKind === "user_wallet") {
+        const restaurantCredit = roundMoney(subtotal + deliveryFee - appCommission - discountAmount - orderVisaComm);
+        transactionAmount = restaurantCredit;
+        effectiveVisaComm = orderVisaComm;
+        method = (paymentKind === "user_wallet" ? "user_wallet" : "visa_system") as "user_wallet" | "visa_system";
+        transactionNote = `Delivered ${paymentKind === "user_wallet" ? "wallet" : "SYSTEM visa"} order #${order.dailyOrderNumber || order.orderNumber}; subtotal=${subtotal.toFixed(2)}; delivery=${deliveryFee.toFixed(2)}; commission=${appCommission.toFixed(2)}; serviceFee=${settlementServiceFee.toFixed(2)}; visaCommission=${orderVisaComm.toFixed(2)}; discount=${discountAmount.toFixed(2)}; credit=${restaurantCredit.toFixed(2)}.`;
     } else {
-        // DIGITAL PAYMENT (CUSTOM GATEWAY):
-        // Customer paid directly into the restaurant's own payment gateway account.
-        // Restaurant received 100% of the money in their own merchant account.
-        // Restaurant OWES SuperAdmin the commission, service fee, and visa commission.
-        // Restaurant balance with SuperAdmin DECREASES by appDues.
-        const visaCommission = parseFloat(order.visaCommission as string || "0");
-        const customAppDues = roundMoney(appCommission + settlementServiceFee + visaCommission);
-        newBalance = roundMoney(currentBalance - customAppDues);
-        transactionAmount = -customAppDues;
-        transactionNote = `Delivered order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; subtotal=${subtotal.toFixed(2)}; delivery=${deliveryFee.toFixed(2)}; commission=${appCommission.toFixed(2)}; serviceFee=${settlementServiceFee.toFixed(2)}; visaCommission=${visaCommission.toFixed(2)}; total=${totalAmount.toFixed(2)}; payment=CUSTOM; restaurant owes platform=${customAppDues.toFixed(2)}.`;
-        await checkAndApplyVisaSwitch(order.restaurantId, serviceFee, tx);
+        const customDues = roundMoney(appCommission + settlementServiceFee);
+        transactionAmount = -customDues;
+        method = "visa_custom";
+        transactionNote = `Delivered CUSTOM visa order #${order.dailyOrderNumber || order.orderNumber}; subtotal=${subtotal.toFixed(2)}; delivery=${deliveryFee.toFixed(2)}; commission=${appCommission.toFixed(2)}; serviceFee=${settlementServiceFee.toFixed(2)}; total=${totalAmount.toFixed(2)}; restaurant owes platform=${customDues.toFixed(2)}.`;
     }
 
-    const orderVisaComm = parseFloat(order.visaCommission as string || "0");
-    const currentTotalVisaComm = parseFloat((wallet as any).totalVisaCommission as string || "0");
-    const newTotalVisaComm = isCash || paymentGatewayType === "SYSTEM"
-        ? currentTotalVisaComm
-        : roundMoney(currentTotalVisaComm + orderVisaComm);
-
-    // Update restaurant wallet
     await tx
         .update(restaurantWallets)
         .set({
             balance: newBalance.toFixed(2),
             collectedCash: newCollectedCash.toFixed(2),
             totalEarning: newTotalEarning.toFixed(2),
-            totalVisaCommission: newTotalVisaComm.toFixed(2),
-            updatedAt: new Date()
+            totalServiceFees: newTotalServiceFees.toFixed(2),
+            totalCommission: newTotalCommission.toFixed(2),
+            totalVisaCommission: newTotalVisaCommission.toFixed(2),
+            updatedAt: new Date(),
         })
         .where(eq(restaurantWallets.id, wallet.id));
 
-    // Record wallet transaction ONLY when at least one fee/commission is non-zero.
-    // If everything is 0 the wallet balance is unchanged anyway, so we skip the
-    // transaction record to avoid cluttering the ledger with zero-amount rows.
-    const effectiveVisaComm = isCash || paymentGatewayType === "SYSTEM" ? 0 : orderVisaComm;
-    const hasFees = appCommission !== 0 || settlementServiceFee !== 0 || effectiveVisaComm !== 0;
+    if (paymentKind === "cash" || paymentKind === "visa_custom") {
+        await checkAndApplyVisaSwitch(order.restaurantId, settlementServiceFee, tx);
+    }
 
+    if (paymentKind === "visa_system" || paymentKind === "user_wallet") {
+        await notifyDebtSettledToSuperadmin(tx, order.restaurantId, currentBalance, newBalance);
+    }
+
+    const hasFees = appCommission !== 0 || settlementServiceFee !== 0 || effectiveVisaComm !== 0 || (paymentKind === "cash" && totalAmount !== 0);
     if (hasFees) {
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
@@ -476,17 +765,50 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
             amount: transactionAmount.toFixed(2),
             balanceBefore: currentBalance.toFixed(2),
             balanceAfter: newBalance.toFixed(2),
-            method: isCash ? "cash" : `visa_${paymentGatewayType.toLowerCase()}`,
+            method,
             reference: order.orderNumber,
-            // تفاصيل الرسوم الخاصة بهذا الأوردر بالتحديد
             serviceFee: settlementServiceFee.toFixed(2),
             commission: appCommission.toFixed(2),
             visaCommission: effectiveVisaComm.toFixed(2),
             orderAmount: totalAmount.toFixed(2),
             note: transactionNote,
-            createdAt: new Date()
+            createdAt: new Date(),
         });
     }
+}
+
+async function notifyDebtSettledToSuperadmin(
+    tx: any,
+    restaurantId: string,
+    previousBalance: number,
+    nextBalance: number
+): Promise<void> {
+    const [settings] = await tx
+        .select({
+            paymentGatewayType: restaurantSettings.paymentGatewayType,
+            visaSwitchApplied: restaurantSettings.visaSwitchApplied,
+        })
+        .from(restaurantSettings)
+        .where(eq(restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+
+    if (!shouldNotifyDebtSettled(previousBalance, nextBalance, settings)) return;
+
+    await tx.insert(notifications).values({
+        id: uuidv4(),
+        recipientType: "superadmin",
+        recipientId: "superadmin",
+        title: "Debt settled",
+        body: `Restaurant debt has been settled and it can be returned to CUSTOM.`,
+        data: {
+            type: "debt_settled",
+            restaurantId,
+            previousBalance: previousBalance.toFixed(2),
+            nextBalance: nextBalance.toFixed(2),
+        },
+        isRead: false,
+        createdAt: new Date(),
+    });
 }
 
 /**
@@ -508,7 +830,6 @@ export async function handleCancelledOrder(params: {
 
     if (!order) return;
 
-    // Was this order ever settled as "delivered" before?
     const [settledTx] = await tx
         .select()
         .from(restaurantWalletTransactions)
@@ -521,8 +842,6 @@ export async function handleCancelledOrder(params: {
         )
         .limit(1);
 
-    // Was a service fee already charged while the order was pending (cash,
-    // or CUSTOM-gateway once charged on payment confirmation)?
     const [pendingServiceFeeTx] = await tx
         .select()
         .from(restaurantWalletTransactions)
@@ -533,8 +852,6 @@ export async function handleCancelledOrder(params: {
         ))
         .limit(1);
 
-    // Has that pending fee already been refunded once (avoid double refund
-    // if this function somehow runs twice for the same order)?
     const [serviceFeeRefundTx] = await tx
         .select({ id: restaurantWalletTransactions.id })
         .from(restaurantWalletTransactions)
@@ -552,24 +869,16 @@ export async function handleCancelledOrder(params: {
     const totalAmount = parseFloat(order.totalAmount as string || "0");
 
     const pendingFeeAlreadyCharged = Boolean(pendingServiceFeeTx) && !serviceFeeRefundTx;
-    const appDues = roundMoney(appCommission + (pendingFeeAlreadyCharged ? 0 : serviceFee));
-    const restaurantEarning = roundMoney(subtotal + deliveryFee - appCommission);
-
     const wallet = await getOrCreateWallet(order.restaurantId, tx);
     let currentBalance = parseFloat(wallet.balance as string || "0");
     let currentCollectedCash = parseFloat(wallet.collectedCash as string || "0");
     let currentTotalEarning = parseFloat(wallet.totalEarning as string || "0");
     let currentFees = parseFloat((wallet as any).totalServiceFees as string || "0");
-    let currentComm = parseFloat((wallet as any).totalCommission as string || "0");
+    let currentCommission = parseFloat((wallet as any).totalCommission as string || "0");
+    let currentVisaCommission = parseFloat((wallet as any).totalVisaCommission as string || "0");
 
-    // ============================================================
-    // Case 1: Order was already delivered/settled before this
-    // cancellation — reverse the delivery settlement completely,
-    // INCLUDING any pending-time service fee that was charged earlier
-    // and never reversed.
-    // ============================================================
     if (settledTx) {
-        const { isCash, paymentGatewayType } = await resolvePaymentTypeAndGateway({
+        const { paymentKind } = await resolvePaymentTypeAndGateway({
             restaurantId: order.restaurantId,
             paymentMethodId: order.paymentMethod,
             paymentGateway: order.paymentGateway,
@@ -577,37 +886,63 @@ export async function handleCancelledOrder(params: {
             executor: tx,
         });
 
-        // Reverse whatever was actually charged/credited AT settlement time.
+        const settledAmount = parseFloat((settledTx as any).amount as string || "0");
+        const settledServiceFee = parseFloat((settledTx as any).serviceFee as string || "0");
+        const settledCommission = parseFloat((settledTx as any).commission as string || "0");
         const settledVisaComm = parseFloat((settledTx as any).visaCommission as string || "0");
-        const settledDues = roundMoney(appCommission + parseFloat(settledTx.serviceFee as string || "0") + settledVisaComm);
 
-        if (isCash) {
-            currentBalance = roundMoney(currentBalance + settledDues);
-            currentCollectedCash = roundMoney(currentCollectedCash - totalAmount);
-        } else if (paymentGatewayType === "SYSTEM") {
-            currentBalance = roundMoney(currentBalance - restaurantEarning);
-        } else {
-            currentBalance = roundMoney(currentBalance + settledDues);
-        }
-        currentTotalEarning = roundMoney(currentTotalEarning - restaurantEarning);
+        const reversedCounters = buildCancellationCounterReversal({
+            paymentKind,
+            currentBalance,
+            currentCollectedCash,
+            currentTotalEarning,
+            currentTotalServiceFees: currentFees,
+            currentTotalCommission: currentCommission,
+            currentTotalVisaCommission: currentVisaCommission,
+            subtotal,
+            deliveryFee,
+            settledAmount,
+            settledServiceFee,
+            settledCommission,
+            settledVisaComm,
+            totalAmount,
+        });
+
+        currentBalance = reversedCounters.balance;
+        currentCollectedCash = reversedCounters.collectedCash;
+        currentTotalEarning = reversedCounters.totalEarning;
+        currentFees = reversedCounters.totalServiceFees;
+        currentCommission = reversedCounters.totalCommission;
+        currentVisaCommission = reversedCounters.totalVisaCommission;
+
+        const reversalMethod = (
+            paymentKind === "user_wallet"
+                ? "user_wallet"
+                : paymentKind === "cash"
+                    ? "cash"
+                    : paymentKind === "visa_custom"
+                        ? "visa_custom"
+                        : "visa_system"
+        ) as "cash" | "visa_custom" | "visa_system" | "user_wallet";
 
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
             restaurantId: order.restaurantId,
             orderId: order.id,
             type: "adjustment",
-            amount: isCash || paymentGatewayType === "CUSTOM" ? `+${settledDues.toFixed(2)}` : `-${restaurantEarning.toFixed(2)}`,
+            amount: (-settledAmount).toFixed(2),
             balanceBefore: wallet.balance as string,
             balanceAfter: currentBalance.toFixed(2),
-            method: isCash ? "cash" : `visa_${paymentGatewayType.toLowerCase()}`,
+            method: reversalMethod,
             reference: order.orderNumber,
-            note: `Reversal: order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; commission=${appCommission.toFixed(2)}; settlementServiceFee=${parseFloat(settledTx.serviceFee as string || "0").toFixed(2)}; visaCommission=${settledVisaComm.toFixed(2)}; restaurantEarning=${restaurantEarning.toFixed(2)}; cancelledBy=${cancelReasonType}.`,
-            createdAt: new Date()
+            serviceFee: (-settledServiceFee).toFixed(2),
+            commission: (-settledCommission).toFixed(2),
+            visaCommission: (-settledVisaComm).toFixed(2),
+            orderAmount: totalAmount.toFixed(2),
+            note: `Reversal for cancelled delivered order #${order.dailyOrderNumber || order.orderNumber}.`,
+            createdAt: new Date(),
         });
 
-        // FIX: also refund the EARLIER pending-time service fee charge, if
-        // one exists and hasn't been refunded yet — previously this was
-        // silently left un-reversed when a delivered order was cancelled.
         if (pendingFeeAlreadyCharged) {
             const balanceBeforePendingRefund = currentBalance;
             currentBalance = roundMoney(currentBalance + serviceFee);
@@ -626,38 +961,41 @@ export async function handleCancelledOrder(params: {
                 serviceFee: (-serviceFee).toFixed(2),
                 commission: "0.00",
                 orderAmount: totalAmount.toFixed(2),
-                note: `Pending-time service fee refunded as part of delivered-order reversal for #${order.dailyOrderNumber || order.orderNumber}; refunded=${serviceFee.toFixed(2)}.`,
-                createdAt: new Date()
+                note: `Pending service fee refund for cancelled order #${order.dailyOrderNumber || order.orderNumber}.`,
+                createdAt: new Date(),
             });
         }
 
-        const currentVisaComm = parseFloat((wallet as any).totalVisaCommission as string || "0");
-        const newTotalVisaComm = Math.max(0, roundMoney(currentVisaComm - settledVisaComm));
-
-        // Persist the fully-reversed wallet state and stop here — the
-        // settlement reversal above (plus the pending-fee refund if any) is
-        // the correct and COMPLETE adjustment for an order that was already
-        // delivered. Do NOT also apply the "cancelled before delivery"
-        // penalty logic below; that is a separate scenario.
         await tx.update(restaurantWallets)
             .set({
                 balance: currentBalance.toFixed(2),
                 collectedCash: currentCollectedCash.toFixed(2),
                 totalEarning: currentTotalEarning.toFixed(2),
                 totalServiceFees: currentFees.toFixed(2),
-                totalVisaCommission: newTotalVisaComm.toFixed(2),
-                updatedAt: new Date()
+                totalCommission: currentCommission.toFixed(2),
+                totalVisaCommission: currentVisaCommission.toFixed(2),
+                updatedAt: new Date(),
             })
             .where(eq(restaurantWallets.id, wallet.id));
+
+        if (paymentKind === "visa_system" && order.paymentStatus === "paid") {
+            const refundFee = settledVisaComm > 0 ? settledVisaComm : parseFloat(order.visaCommission as string || "0");
+            if (refundFee > 0) {
+                await chargeGatewayFeeOnRefund(tx, order, refundFee, {
+                    alreadyCounted: true,
+                    note: `Gateway fee charged on refund for SYSTEM visa order #${order.dailyOrderNumber || order.orderNumber}.`,
+                });
+            }
+        }
+
+        if (paymentKind === "visa_system" && currentBalance < 0) {
+            await checkAndApplyVisaSwitch(order.restaurantId, 0, tx);
+        }
 
         return;
     }
 
-    // ============================================================
-    // Case 2: Order was cancelled BEFORE delivery/settlement.
-    // Only reached when settledTx is null (order never completed).
-    // ============================================================
-    const { isCash } = await resolvePaymentTypeAndGateway({
+    const { isCash, paymentKind } = await resolvePaymentTypeAndGateway({
         restaurantId: order.restaurantId,
         paymentMethodId: order.paymentMethod,
         paymentGateway: order.paymentGateway,
@@ -665,21 +1003,18 @@ export async function handleCancelledOrder(params: {
         executor: tx,
     });
 
+    const appDues = roundMoney(appCommission + (pendingFeeAlreadyCharged ? 0 : serviceFee));
+
     if (cancelReasonType === "restaurant" && (isCash || order.paymentStatus === "paid")) {
-        // Restaurant cancelled an order that was never delivered: charge
-        // the full appDues as a penalty (minus any serviceFee portion
-        // already charged while pending, so it isn't double-counted).
         const balanceBefore = currentBalance;
         const balanceAfter = roundMoney(currentBalance - appDues);
 
         await tx.update(restaurantWallets)
             .set({
                 balance: balanceAfter.toFixed(2),
-                collectedCash: currentCollectedCash.toFixed(2),
-                totalEarning: currentTotalEarning.toFixed(2),
                 totalServiceFees: roundMoney(currentFees + (pendingFeeAlreadyCharged ? 0 : serviceFee)).toFixed(2),
-                totalCommission: roundMoney(currentComm + appCommission).toFixed(2),
-                updatedAt: new Date()
+                totalCommission: roundMoney(currentCommission + appCommission).toFixed(2),
+                updatedAt: new Date(),
             })
             .where(eq(restaurantWallets.id, wallet.id));
 
@@ -696,47 +1031,60 @@ export async function handleCancelledOrder(params: {
             serviceFee: (pendingFeeAlreadyCharged ? 0 : serviceFee).toFixed(2),
             commission: appCommission.toFixed(2),
             orderAmount: totalAmount.toFixed(2),
-            note: `Cancellation penalty: order #${order.dailyOrderNumber || order.orderNumber}; platform=${mapOrderSourceToPlatformType(order.orderSource)}; cancelledBy=restaurant; commission=${appCommission.toFixed(2)}; serviceFee=${(pendingFeeAlreadyCharged ? 0 : serviceFee).toFixed(2)}; charged=${appDues.toFixed(2)}.`,
-            createdAt: new Date()
+            note: `Restaurant cancellation penalty for order #${order.dailyOrderNumber || order.orderNumber}.`,
+            createdAt: new Date(),
         });
-    } else {
-        // No restaurant penalty applies; refund any pending-time fee already charged.
-        // Refund any service fee that was already charged while pending.
-        if (pendingFeeAlreadyCharged) {
-            const balanceBefore = currentBalance;
-            currentBalance = roundMoney(currentBalance + serviceFee);
 
-            await tx.update(restaurantWallets)
-                .set({
-                    balance: currentBalance.toFixed(2),
-                    collectedCash: currentCollectedCash.toFixed(2),
-                    totalEarning: currentTotalEarning.toFixed(2),
-                    totalServiceFees: roundMoney(currentFees - serviceFee).toFixed(2),
-                    updatedAt: new Date()
-                })
-                .where(eq(restaurantWallets.id, wallet.id));
-
-            await tx.insert(restaurantWalletTransactions).values({
-                id: uuidv4(),
-                restaurantId: order.restaurantId,
-                orderId: order.id,
-                type: "adjustment",
-                amount: serviceFee.toFixed(2),
-                balanceBefore: balanceBefore.toFixed(2),
-                balanceAfter: currentBalance.toFixed(2),
-                method: "user_service_fee_refund",
-                reference: order.orderNumber,
-                serviceFee: (-serviceFee).toFixed(2),
-                commission: "0.00",
-                orderAmount: totalAmount.toFixed(2),
-                note: `Service fee refunded for order #${order.dailyOrderNumber || order.orderNumber}; cancelledBy=${cancelReasonType}; refunded=${serviceFee.toFixed(2)}.`,
-                createdAt: new Date()
-            });
-        } else {
-            // Nothing was ever charged for this order and no fees are owed,
-            // so there is no wallet impact. Skip inserting a zero-amount record.
-            // (The wallet balance is unchanged; no update needed either.)
+        if (paymentKind === "visa_system" && order.paymentStatus === "paid") {
+            const gatewayFee = parseFloat(order.visaCommission as string || "0");
+            if (gatewayFee > 0) {
+                await chargeGatewayFeeOnRefund(tx, order, gatewayFee, {
+                    note: `Gateway fee charged on refund for SYSTEM visa order #${order.dailyOrderNumber || order.orderNumber}.`,
+                });
+            }
         }
+
+        await checkAndApplyVisaSwitch(order.restaurantId, 0, tx);
+        return;
+    }
+
+    if (paymentKind === "visa_system" && order.paymentStatus === "paid") {
+        const gatewayFee = parseFloat(order.visaCommission as string || "0");
+        if (gatewayFee > 0) {
+            await chargeGatewayFeeOnRefund(tx, order, gatewayFee, {
+                note: `Gateway fee charged on refund for SYSTEM visa order #${order.dailyOrderNumber || order.orderNumber}.`,
+            });
+        }
+    }
+
+    if (pendingFeeAlreadyCharged) {
+        const balanceBefore = currentBalance;
+        currentBalance = roundMoney(currentBalance + serviceFee);
+
+        await tx.update(restaurantWallets)
+            .set({
+                balance: currentBalance.toFixed(2),
+                totalServiceFees: roundMoney(currentFees - serviceFee).toFixed(2),
+                updatedAt: new Date(),
+            })
+            .where(eq(restaurantWallets.id, wallet.id));
+
+        await tx.insert(restaurantWalletTransactions).values({
+            id: uuidv4(),
+            restaurantId: order.restaurantId,
+            orderId: order.id,
+            type: "adjustment",
+            amount: serviceFee.toFixed(2),
+            balanceBefore: balanceBefore.toFixed(2),
+            balanceAfter: currentBalance.toFixed(2),
+            method: "user_service_fee_refund",
+            reference: order.orderNumber,
+            serviceFee: (-serviceFee).toFixed(2),
+            commission: "0.00",
+            orderAmount: totalAmount.toFixed(2),
+            note: `Service fee refunded for cancelled order #${order.dailyOrderNumber || order.orderNumber}.`,
+            createdAt: new Date(),
+        });
     }
 }
 
@@ -764,6 +1112,9 @@ export function buildWalletSummary(wallet: typeof restaurantWallets.$inferSelect
         explanationEn = `Restaurant owes SuperAdmin ${Math.abs(balance).toFixed(2)} EGP (App commission & service fees for cash or custom gateway orders).`;
     }
 
+    const debt = Math.max(0, -balance);
+    const canReturnToCustom = balance >= 0;
+
     return {
         id: wallet.id,
         restaurantId: wallet.restaurantId,
@@ -772,6 +1123,8 @@ export function buildWalletSummary(wallet: typeof restaurantWallets.$inferSelect
         pendingWithdraw: pendingWithdraw.toFixed(2),
         totalWithdrawn: totalWithdrawn.toFixed(2),
         totalEarning: totalEarning.toFixed(2),
+        debt: debt.toFixed(2),
+        canReturnToCustom,
         settlementSummary: {
             status: settlementStatus,
             amount: Math.abs(balance).toFixed(2),

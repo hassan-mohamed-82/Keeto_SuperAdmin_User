@@ -7,14 +7,17 @@ import {
     cartItems,
     couponUsages,
     coupons,
+    users,
 } from "../models/schema";
 import { eq, or, like, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { getNextDailyOrderNumber } from "./getNextDailyOrderNumber";
 import { sendPushNotification } from "../utils/notifications";
 import { chargePendingServiceFee } from "../services/restaurantWalletService";
+import { claimPaymentIssueNotification, releasePaymentIssueNotificationClaim } from "../services/orderNotificationCron";
 import { calculateVisaCommission } from "../utils/calculateVisaCommission";
 import { getActiveCustomGateway } from "../utils/getActiveCustomGateway";
+import { getSystemVisaSettings } from "../utils/getSystemVisaSettings";
 
 const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
 
@@ -116,6 +119,20 @@ export async function confirmOrderPayment({
                 }
             } catch (err) {
                 console.warn("[confirmOrderPayment] Failed to calculate custom gateway visaCommission:", err);
+            }
+        }
+
+        if (order.paymentGatewayType === "SYSTEM" && resolvedVisaCommission <= 0) {
+            try {
+                const platformSettings = await getSystemVisaSettings();
+                resolvedVisaCommission = calculateVisaCommission(
+                    order.totalAmount,
+                    platformSettings.percentageValue,
+                    platformSettings.fixedValue,
+                    platformSettings.tax
+                );
+            } catch (err) {
+                console.warn("[confirmOrderPayment] Failed to calculate platform SYSTEM visaCommission:", err);
             }
         }
 
@@ -269,6 +286,53 @@ export async function recordFailedPayment({
             }
         }
     });
+
+    try {
+        const claimed = await claimPaymentIssueNotification(
+            order.id,
+            "payment_failed",
+            "payment_failed"
+        );
+
+        if (!claimed) {
+            console.log(`[RecordFailedPayment]: Order ${order.orderNumber} already claimed or not eligible for payment issue notification.`);
+            return { success: true };
+        }
+
+        const [customer] = await db
+            .select({ name: users.name })
+            .from(users)
+            .where(eq(users.id, order.userId))
+            .limit(1);
+
+        const customerName = customer?.name || "Customer";
+        const issueBodyAr = `فشلت عملية الدفع بالفيزا للطلب رقم ${order.orderNumber} (العميل: ${customerName}). تواصل مع العميل.`;
+        const issueBodyEn = `Card payment failed for order ${order.orderNumber}. Contact the customer.`;
+
+        try {
+            await sendPushNotification({
+                recipientType: "restaurant",
+                recipientId: order.restaurantId,
+                branchId: order.branchId || null,
+                title: "فشل دفع الطلب",
+                body: issueBodyAr,
+                data: {
+                    type: "payment_issue",
+                    issueType: "payment_failed",
+                    orderId: order.id,
+                    orderNumber: order.orderNumber,
+                    restaurantId: order.restaurantId,
+                },
+            });
+
+            console.log(`[RecordFailedPayment]: Order ${order.orderNumber} payment failure notification sent.`);
+        } catch (notificationError) {
+            await releasePaymentIssueNotificationClaim(order.id, "payment_failed");
+            console.error(`[RecordFailedPayment]: Failed to send payment failure notification for order ${order.orderNumber}:`, notificationError);
+        }
+    } catch (error) {
+        console.error(`[RecordFailedPayment]: Failed to process payment failure notification for order ${order.orderNumber}:`, error);
+    }
 
     console.log(`[RecordFailedPayment]: Order ${order.orderNumber} marked as FAILED. Reason: ${failureReason}`);
     return { success: true };

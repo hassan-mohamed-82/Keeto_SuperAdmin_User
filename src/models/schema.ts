@@ -67,5 +67,8 @@ export * from "./schema/admin/restaurantPaymentCredentials";
 export * from "./schema/admin/paymentTransactions";
 export * from "./schema/admin/adminFcmTokens";
 export * from "./schema/admin/shippingCompany";
+// New schemas: platform payment settings & gateway switch audit log
+export * from "./schema/admin/platformPaymentSettings";
+export * from "./schema/admin/gatewaySwitchLog";
 
 

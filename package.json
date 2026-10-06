@@ -16,7 +16,8 @@
     "seed:fresh": "tsx src/seeds/index.ts --fresh",
     "start:prod": "node dist/src/server.js",
     "migrate-log": "node migrate.js",
-    "reset-db": "tsx src/models/reset.ts"
+    "reset-db": "tsx src/models/reset.ts",
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",
@@ -79,6 +80,7 @@
     "swagger-autogen": "^2.23.7",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "vitest": "^3.2.7"
   }
 }

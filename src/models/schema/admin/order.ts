@@ -182,6 +182,8 @@ export const orders = mysqlTable("orders", {
     paymentTransactionId: varchar("payment_transaction_id", { length: 150 }), // رقم العملية: Kashier transactionId / Paymob id / Geidea transactionId
     paymentStatus: mysqlEnum("payment_status", ["pending_payment", "paid", "payment_failed"]),
     paymentFailureReason: text("payment_failure_reason"), // سبب آخر فشل لسرعة العرض في تفاصيل الأوردر
+    paymentIssueNotifiedAt: timestamp("payment_issue_notified_at"),
+    paymentIssueType: varchar("payment_issue_type", { length: 30 }),
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),

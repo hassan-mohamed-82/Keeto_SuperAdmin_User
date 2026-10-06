@@ -21,6 +21,7 @@ import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
 import { saveBase64Image, handleImageUpdate } from "../../utils/handleImages";
 import { encryptSecret } from "../../utils/encryption";
+import { applyGatewaySwitch } from "../../services/restaurantWalletService";
 
 // Helper: Parse payment credentials from request body (accepts array, single object, or JSON string)
 const parsePaymentCredentialsInput = (input: any): any[] => {
@@ -983,6 +984,8 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (cityId !== undefined) restaurantUpdateData.cityId = (cityId && clean(cityId)) ? clean(cityId) : null;
     if (zoneId !== undefined) restaurantUpdateData.zoneId = (zoneId && clean(zoneId)) ? clean(zoneId) : null;
 
+    let warning: string | null = null;
+
     await db.transaction(async (tx) => {
         if (Object.keys(restaurantUpdateData).length > 1) {
             await tx.update(restaurants).set(restaurantUpdateData).where(eq(restaurants.id, id));
@@ -1026,6 +1029,21 @@ export const updateRestaurant = async (req: Request, res: Response) => {
             if (Object.keys(settingsUpdateData).length > 0) {
                 const existingSettings = await tx.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, id)).limit(1);
                 if (existingSettings.length > 0) {
+                    const previousType = existingSettings[0]?.paymentGatewayType ?? "SYSTEM";
+                    if (resolvedPaymentGatewayType && previousType !== resolvedPaymentGatewayType) {
+                        const [walletRecord] = await tx.select({ balance: restaurantWallets.balance }).from(restaurantWallets).where(eq(restaurantWallets.restaurantId, id)).limit(1);
+                        const balance = parseFloat(String(walletRecord?.balance ?? "0"));
+                        warning = resolvedPaymentGatewayType === "CUSTOM" && balance < 0
+                            ? `Restaurant still has outstanding debt of ${Math.abs(balance).toFixed(2)}`
+                            : null;
+                        await applyGatewaySwitch(tx, {
+                            restaurantId: id,
+                            toType: resolvedPaymentGatewayType,
+                            trigger: "manual",
+                            balanceAtSwitch: balance,
+                            adminId: (req as any)?.user?.id ?? null,
+                        });
+                    }
                     await tx.update(restaurantSettings).set(settingsUpdateData).where(eq(restaurantSettings.restaurantId, id));
                 } else {
                     await tx.insert(restaurantSettings).values({ ...settingsUpdateData, restaurantId: id });
@@ -1194,6 +1212,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, {
         message: "Update restaurant, owner account, and plans success",
+        ...(warning ? { warning } : {}),
         ...(resolvedVisaSwitchType !== undefined && {
             data: {
                 visaSwitch: {

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import AdmiRouter from "./admin";
 import authRouter from "./auth";
+import platformPaymentSettingsRouter from "./platformPaymentSettings";
 import RolesRouter from "./roles";
 import CountryRouter from "./country";
 import CityRouter from "./city";
@@ -46,6 +47,7 @@ const router = Router();
 router.use("/auth", authRouter);
 router.use(authenticated, authorizeRoles("superadmin", "admin"));
 router.use("/notifications", NotificationRouter);
+router.use("/platform-payment-settings", platformPaymentSettingsRouter);
 router.use("/report", ReportRouter)
 router.use("/admin", AdmiRouter);
 router.use("/roles", RolesRouter);

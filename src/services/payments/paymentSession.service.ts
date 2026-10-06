@@ -26,6 +26,7 @@ export interface CreateOrderPaymentSessionParams {
 
 export interface PaymentSessionResult {
     gateway: "KASHIER" | "PAYMOB" | "GEIDEA" | "CUSTOM";
+    gatewayType: "SYSTEM" | "CUSTOM";
     type: "redirect";
     sessionId: string;
     sessionUrl: string;
@@ -103,6 +104,7 @@ export async function createOrderPaymentSession(
 
             return {
                 gateway: "KASHIER",
+                gatewayType: "CUSTOM",
                 type: "redirect",
                 sessionId: kashierSession.sessionId,
                 sessionUrl: kashierSession.sessionUrl,
@@ -161,6 +163,7 @@ export async function createOrderPaymentSession(
 
             return {
                 gateway: "PAYMOB",
+                gatewayType: "CUSTOM",
                 type: "redirect",
                 sessionId: paymobSession.sessionId,
                 sessionUrl: paymobSession.sessionUrl,
@@ -209,6 +212,7 @@ export async function createOrderPaymentSession(
 
             return {
                 gateway: "GEIDEA",
+                gatewayType: "CUSTOM",
                 type: "redirect",
                 sessionId: geideaSession.sessionId,
                 sessionUrl: geideaSession.sessionUrl,
@@ -239,6 +243,7 @@ export async function createOrderPaymentSession(
 
         return {
             gateway: "KASHIER",
+            gatewayType: "SYSTEM",
             type: "redirect",
             sessionId: kashierSession.sessionId,
             sessionUrl: kashierSession.sessionUrl,

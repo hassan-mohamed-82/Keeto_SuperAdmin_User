@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '../../models/connection'; // تأكد من مسار الاتصال بقاعدة البيانات
-import { restaurantSettings, restaurantSchedules } from '../../models/schema';
+import { restaurantSettings, restaurantSchedules, restaurantWallets } from '../../models/schema';
 import { eq } from 'drizzle-orm';
 
 // 1. دالة تحديث الإعدادات (بعد التعديل)
@@ -117,10 +117,24 @@ export const getSettingsByRestaurantId = async (req: Request, res: Response): Pr
       settingsResult = newSettings[0];
     }
 
+    const [wallet] = await db
+      .select({ balance: restaurantWallets.balance })
+      .from(restaurantWallets)
+      .where(eq(restaurantWallets.restaurantId, restaurantId))
+      .limit(1);
+
+    const walletBalance = parseFloat(String(wallet?.balance ?? "0"));
+    const debt = Math.max(0, -walletBalance).toFixed(2);
+    const canReturnToCustom = walletBalance >= 0;
+
     res.status(200).json({
       success: true,
       data: {
-        settings: settingsResult,
+        settings: {
+          ...settingsResult,
+          debt,
+          canReturnToCustom,
+        },
         schedules: schedules || []
       }
     });

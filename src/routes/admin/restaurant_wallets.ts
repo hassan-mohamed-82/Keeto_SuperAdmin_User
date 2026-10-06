@@ -7,6 +7,7 @@ import {
     collectCashFromRestaurant,
     getWalletTransactions,
     recordSubscription,
+    getSystemGatewayRestaurants,
 } from "../../controllers/admin/restaurant_wallets";
 import { catchAsync } from "../../utils/catchAsync";
 import { validate } from "../../middlewares/validation";
@@ -20,6 +21,7 @@ import { hasPermission } from "../../middlewares/";
 const router = Router();
 
 router.get("/", hasPermission("RestaurantWallets", "View"), catchAsync(getAllWallets));
+router.get("/system", hasPermission("RestaurantWallets", "View"), catchAsync(getSystemGatewayRestaurants));
 router.get("/restaurant/:restaurantId", hasPermission("RestaurantWallets", "View"), catchAsync(getRestaurantWallet));
 // تفصيل كامل للمحفظة: service fees + commission + الاشتراكات
 router.get("/restaurant/:restaurantId/details", hasPermission("RestaurantWallets", "View"), catchAsync(getDetailedWallet));

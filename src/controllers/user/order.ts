@@ -45,6 +45,7 @@ import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
 import { chargePendingServiceFee, handleCancelledOrder, mapOrderSourceToPlatformType } from "../../services/restaurantWalletService";
 import { calculateVisaCommission } from "../../utils/calculateVisaCommission";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
+import { getSystemVisaSettings } from "../../utils/getSystemVisaSettings";
 
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date: Date) => {
@@ -1151,8 +1152,10 @@ export const checkout = async (req: Request | any, res: Response) => {
         // ↑ throws BadRequest automatically on failure — order not created yet
     }
 
+    const finalPaymentGatewayType = isWalletPayment ? "SYSTEM" : (paymentSessionData?.gatewayType ?? settings?.paymentGatewayType ?? "SYSTEM");
+
     let visaCommission = 0;
-    if (isVisaPayment && settings?.paymentGatewayType === "CUSTOM") {
+    if (isVisaPayment && finalPaymentGatewayType === "CUSTOM") {
         try {
             const activeCustom = await getActiveCustomGateway(restaurantId);
             if (activeCustom?.record) {
@@ -1166,6 +1169,14 @@ export const checkout = async (req: Request | any, res: Response) => {
         } catch (e) {
             console.warn("[order] Failed to calculate custom gateway visaCommission:", e);
         }
+    } else if (isVisaPayment && finalPaymentGatewayType === "SYSTEM") {
+        const systemSettings = await getSystemVisaSettings();
+        visaCommission = calculateVisaCommission(
+            totalAmount,
+            systemSettings.percentageValue,
+            systemSettings.fixedValue,
+            systemSettings.tax
+        );
     }
 
     // ==========================================
@@ -1239,7 +1250,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             addressId: addressId || null,
             orderSource: storedOrderSource,
             paymentMethod,
-            paymentGatewayType: settings?.paymentGatewayType || "SYSTEM",
+            paymentGatewayType: finalPaymentGatewayType,
             paymentStatus: isVisaPayment ? "pending_payment" : "paid",
             orderType: resolvedOrderType,
             subtotal: subtotal.toFixed(2),

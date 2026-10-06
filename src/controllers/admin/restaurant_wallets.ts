@@ -1,12 +1,13 @@
 // controllers/admin/restaurantWallet.controller.ts
 import { Request, Response,NextFunction } from "express";
 import { db } from "../../models/connection";
-import { restaurantWallets, restaurantWalletTransactions, restaurants, restaurantBusinessPlans, orders } from "../../models/schema";
+import { restaurantWallets, restaurantWalletTransactions, restaurants, restaurantBusinessPlans, orders, restaurantSettings } from "../../models/schema";
 import { eq, desc, sum, sql, or, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
+import { checkAndApplyVisaSwitch } from "../../services/restaurantWalletService";
 
 /**
  * دالة مساعدة لجلب حركات المحفظة مربوطة ببيانات الأوردر (dailyOrderNumber, orderNumber, ...)
@@ -97,7 +98,6 @@ export const getAllWallets = async (req: Request, res: Response) => {
             totalServiceFees: restaurantWallets.totalServiceFees,
             totalCommission: restaurantWallets.totalCommission,
             totalSubscriptions: restaurantWallets.totalSubscriptions,
-
             restaurant: {
                 id: restaurants.id,
                 name: restaurants.name,
@@ -106,7 +106,16 @@ export const getAllWallets = async (req: Request, res: Response) => {
         .from(restaurantWallets)
         .leftJoin(restaurants, eq(restaurantWallets.restaurantId, restaurants.id));
 
-    return SuccessResponse(res, { data: wallets });
+    const transformed = wallets.map((wallet) => {
+        const balance = parseFloat(wallet.balance as string || "0");
+        return {
+            ...wallet,
+            debt: Math.max(0, -balance).toFixed(2),
+            canReturnToCustom: balance >= 0,
+        };
+    });
+
+    return SuccessResponse(res, { data: transformed });
 };
 
 // ==========================================
@@ -126,10 +135,73 @@ export const getRestaurantWallet = async (req: Request, res: Response, next: Nex
             throw new NotFound("Wallet not found"); 
         }
 
-        return SuccessResponse(res, { data: wallet[0] });
+        const balance = parseFloat(wallet[0].balance as string || "0");
+        const debt = Math.max(0, -balance);
+        return SuccessResponse(res, {
+            data: {
+                ...wallet[0],
+                debt: debt.toFixed(2),
+                canReturnToCustom: balance >= 0,
+            }
+        });
     } catch (error) {
         next(error);
     }
+};
+
+// ==========================================
+// 2.5. GET RESTAURANTS USING SYSTEM GATEWAY
+// ==========================================
+export const getSystemGatewayRestaurants = async (req: Request, res: Response) => {
+    const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = Math.max(1, parseInt(String(req.query.limit || "20"), 10) || 20);
+    const offset = (page - 1) * limit;
+
+    const [rows, totalResult] = await Promise.all([
+        db
+            .select({
+                restaurantId: restaurants.id,
+                name: restaurants.name,
+                balance: restaurantWallets.balance,
+                gatewayAutoSwitchTriggeredAt: restaurantSettings.gatewayAutoSwitchTriggeredAt,
+            })
+            .from(restaurants)
+            .innerJoin(restaurantWallets, eq(restaurants.id, restaurantWallets.restaurantId))
+            .innerJoin(restaurantSettings, eq(restaurants.id, restaurantSettings.restaurantId))
+            .where(eq(restaurantSettings.paymentGatewayType, "SYSTEM"))
+            .limit(limit)
+            .offset(offset)
+            .orderBy(desc(restaurants.createdAt)),
+        db
+            .select({ count: sql<number>`count(*)`.as("count") })
+            .from(restaurants)
+            .innerJoin(restaurantWallets, eq(restaurants.id, restaurantWallets.restaurantId))
+            .innerJoin(restaurantSettings, eq(restaurants.id, restaurantSettings.restaurantId))
+            .where(eq(restaurantSettings.paymentGatewayType, "SYSTEM"))
+    ]);
+
+    const totalItems = Number(totalResult[0]?.count || 0);
+    const data = rows.map((row) => {
+        const balance = parseFloat(row.balance as string || "0");
+        return {
+            restaurantId: row.restaurantId,
+            name: row.name,
+            balance: row.balance,
+            debt: Math.max(0, -balance).toFixed(2),
+            canReturnToCustom: balance >= 0,
+            gatewayAutoSwitchTriggeredAt: row.gatewayAutoSwitchTriggeredAt,
+        };
+    });
+
+    return SuccessResponse(res, {
+        data,
+        pagination: {
+            page,
+            limit,
+            totalItems,
+            totalPages: Math.ceil(totalItems / limit),
+        },
+    });
 };
 
 // ==========================================
@@ -229,12 +301,14 @@ export const getDetailedWallet = async (req: Request, res: Response) => {
             // ملخص الحساب المالي المباشر
             // ==================
             accountSummary: {
-                status: accountStatus,               // "DUE_ON_RESTAURANT" | "DUE_TO_RESTAURANT" | "SETTLED"
-                description: statusDescription,       // رسالة واضحة بالعربي
-                netAmount: Math.abs(numericBalance).toFixed(2), // المبلغ الصافي المستحق
-                balance: w.balance,                  // رصيد المحفظة الأصلي
-                collectedCash: w.collectedCash,      // الكاش الموجود في يد المطعم
-                totalEarning: w.totalEarning,        // إجمالي أرباح ومبيعات المطعم
+                status: accountStatus,
+                description: statusDescription,
+                netAmount: Math.abs(numericBalance).toFixed(2),
+                balance: w.balance,
+                collectedCash: w.collectedCash,
+                totalEarning: w.totalEarning,
+                debt: Math.max(0, -numericBalance).toFixed(2),
+                canReturnToCustom: numericBalance >= 0,
             },
 
             // ==================
@@ -332,10 +406,10 @@ export const collectCashFromRestaurant = async (req: Request, res: Response) => 
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
             restaurantId,
-            type: "order_payment", // ممكن تغيرها لـ cash_collection لو ضايفها في الـ Enum بتاعك
+            type: "cash_collection",
             amount: collectAmount.toFixed(2),
-            balanceBefore: currentBalance.toFixed(2), // 👈 بنسجل الرصيد القديم
-            balanceAfter: newBalance.toFixed(2),      // 👈 بنسجل الرصيد الجديد
+            balanceBefore: currentBalance.toFixed(2),
+            balanceAfter: newBalance.toFixed(2),
             method: "cash",
             note: "Super admin collected cash (Debt settled)",
         });
@@ -472,6 +546,8 @@ export const recordSubscription = async (req: Request, res: Response) => {
             note: note || `${subscriptionType} subscription charged to wallet (Date: ${effectiveDate})`,
             createdAt: new Date(),
         });
+
+        await checkAndApplyVisaSwitch(restaurantId, 0, tx);
     });
 
     return SuccessResponse(res, { 
@@ -483,4 +559,4 @@ export const recordSubscription = async (req: Request, res: Response) => {
             subscriptionDate: effectiveDate
         }
     });
-};
+};

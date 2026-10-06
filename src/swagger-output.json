@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "http://localhost:3000",
+      "url": "https://Keetobcknd.keeto.org",
       "description": "Main"
     },
     {
@@ -258,6 +258,81 @@
                   },
                   "isRead": {
                     "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/superadmin/platform-payment-settings/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Platform Payment Settings"
+        ]
+      },
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Platform Payment Settings"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "percentageValue": {
+                    "type": "string"
+                  },
+                  "fixedValue": {
+                    "type": "string"
+                  },
+                  "tax": {
+                    "type": "string"
+                  },
+                  "updatedBy": {
+                    "type": "string"
                   }
                 }
               }
@@ -3357,6 +3432,29 @@
                   "shippingCompanyId": {
                     "type": "string"
                   },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
+                  },
                   "dailyOrderNumber": {
                     "type": "integer"
                   },
@@ -3594,6 +3692,29 @@
                   "shippingCompanyId": {
                     "type": "string"
                   },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
+                  },
                   "dailyOrderNumber": {
                     "type": "integer"
                   },
@@ -3830,6 +3951,29 @@
                   },
                   "shippingCompanyId": {
                     "type": "string"
+                  },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
                   },
                   "dailyOrderNumber": {
                     "type": "integer"
@@ -7814,6 +7958,31 @@
         ]
       }
     },
+    "/api/superadmin/wallets/system": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Wallets"
+        ]
+      }
+    },
     "/api/superadmin/wallets/restaurant/{restaurantId}": {
       "get": {
         "description": "",
@@ -10859,19 +11028,38 @@
                   "nameAr": {
                     "type": "string"
                   },
+                  "phone": {
+                    "type": "string"
+                  },
                   "email": {
                     "type": "string"
                   },
                   "password": {
                     "type": "string"
                   },
-                  "phone": {
-                    "type": "string"
-                  },
                   "address": {
                     "type": "string"
                   },
                   "logo": {
+                    "type": "string"
+                  },
+                  "maxSearchRadius": {
+                    "type": "string"
+                  },
+                  "maxActiveOrders": {
+                    "type": "integer"
+                  },
+                  "maxAttempts": {
+                    "type": "integer"
+                  },
+                  "commissionType": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "fixed"
+                    ]
+                  },
+                  "commissionValue": {
                     "type": "string"
                   },
                   "status": {
@@ -10884,9 +11072,9 @@
                 },
                 "required": [
                   "name",
+                  "phone",
                   "email",
-                  "password",
-                  "phone"
+                  "password"
                 ]
               }
             }
@@ -10995,19 +11183,38 @@
                   "nameAr": {
                     "type": "string"
                   },
+                  "phone": {
+                    "type": "string"
+                  },
                   "email": {
                     "type": "string"
                   },
                   "password": {
                     "type": "string"
                   },
-                  "phone": {
-                    "type": "string"
-                  },
                   "address": {
                     "type": "string"
                   },
                   "logo": {
+                    "type": "string"
+                  },
+                  "maxSearchRadius": {
+                    "type": "string"
+                  },
+                  "maxActiveOrders": {
+                    "type": "integer"
+                  },
+                  "maxAttempts": {
+                    "type": "integer"
+                  },
+                  "commissionType": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "fixed"
+                    ]
+                  },
+                  "commissionValue": {
                     "type": "string"
                   },
                   "status": {
@@ -11102,19 +11309,38 @@
                   "nameAr": {
                     "type": "string"
                   },
+                  "phone": {
+                    "type": "string"
+                  },
                   "email": {
                     "type": "string"
                   },
                   "password": {
                     "type": "string"
                   },
-                  "phone": {
-                    "type": "string"
-                  },
                   "address": {
                     "type": "string"
                   },
                   "logo": {
+                    "type": "string"
+                  },
+                  "maxSearchRadius": {
+                    "type": "string"
+                  },
+                  "maxActiveOrders": {
+                    "type": "integer"
+                  },
+                  "maxAttempts": {
+                    "type": "integer"
+                  },
+                  "commissionType": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "fixed"
+                    ]
+                  },
+                  "commissionValue": {
                     "type": "string"
                   },
                   "status": {
@@ -11127,9 +11353,9 @@
                 },
                 "required": [
                   "name",
+                  "phone",
                   "email",
-                  "password",
-                  "phone"
+                  "password"
                 ]
               }
             }
@@ -13252,6 +13478,29 @@
                   "shippingCompanyId": {
                     "type": "string"
                   },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
+                  },
                   "dailyOrderNumber": {
                     "type": "integer"
                   },
@@ -13488,6 +13737,29 @@
                   },
                   "shippingCompanyId": {
                     "type": "string"
+                  },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
                   },
                   "dailyOrderNumber": {
                     "type": "integer"
@@ -13775,6 +14047,29 @@
                   },
                   "shippingCompanyId": {
                     "type": "string"
+                  },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
                   },
                   "dailyOrderNumber": {
                     "type": "integer"
@@ -15753,6 +16048,16 @@
                       "outsource"
                     ]
                   },
+                  "workType": {
+                    "type": "string",
+                    "enum": [
+                      "restaurant_shift",
+                      "outsource"
+                    ]
+                  },
+                  "activeOrdersCount": {
+                    "type": "integer"
+                  },
                   "shiftStatus": {
                     "type": "string",
                     "enum": [
@@ -15882,6 +16187,16 @@
                       "restaurant",
                       "outsource"
                     ]
+                  },
+                  "workType": {
+                    "type": "string",
+                    "enum": [
+                      "restaurant_shift",
+                      "outsource"
+                    ]
+                  },
+                  "activeOrdersCount": {
+                    "type": "integer"
                   },
                   "shiftStatus": {
                     "type": "string",
@@ -16029,6 +16344,16 @@
                       "outsource"
                     ]
                   },
+                  "workType": {
+                    "type": "string",
+                    "enum": [
+                      "restaurant_shift",
+                      "outsource"
+                    ]
+                  },
+                  "activeOrdersCount": {
+                    "type": "integer"
+                  },
                   "shiftStatus": {
                     "type": "string",
                     "enum": [
@@ -16171,6 +16496,16 @@
                       "outsource"
                     ]
                   },
+                  "workType": {
+                    "type": "string",
+                    "enum": [
+                      "restaurant_shift",
+                      "outsource"
+                    ]
+                  },
+                  "activeOrdersCount": {
+                    "type": "integer"
+                  },
                   "shiftStatus": {
                     "type": "string",
                     "enum": [
@@ -16281,6 +16616,16 @@
                       "restaurant",
                       "outsource"
                     ]
+                  },
+                  "workType": {
+                    "type": "string",
+                    "enum": [
+                      "restaurant_shift",
+                      "outsource"
+                    ]
+                  },
+                  "activeOrdersCount": {
+                    "type": "integer"
                   },
                   "shiftStatus": {
                     "type": "string",
@@ -16562,6 +16907,29 @@
                   "shippingCompanyId": {
                     "type": "string"
                   },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
+                  },
                   "dailyOrderNumber": {
                     "type": "integer"
                   },
@@ -16810,6 +17178,29 @@
                   "shippingCompanyId": {
                     "type": "string"
                   },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
+                  },
                   "dailyOrderNumber": {
                     "type": "integer"
                   },
@@ -16902,6 +17293,9 @@
     },
     {
       "name": "Superadmin / Notifications"
+    },
+    {
+      "name": "Superadmin / Platform Payment Settings"
     },
     {
       "name": "Superadmin / Report"
