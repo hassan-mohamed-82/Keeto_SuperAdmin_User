@@ -25,7 +25,7 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   shippingCompanyId: char("shipping_company_id", { length: 36 }),
   takeaway: boolean("takeaway").default(false),
   orderSubscription: boolean("order_subscription").default(false),
-  instantOrder: boolean("instant_order").default(false),
+  instantOrder: boolean("instant_order").default(true),
   halalTagStatus: boolean("halal_tag_status").default(false),
   dineIn: boolean("dine_in").default(false),
   firstColor: varchar("first_color", { length: 20 }),

@@ -40,7 +40,7 @@ export class GeideaService {
 
     /**
      * Create Geidea Hosted Payment Session
-     * POST /payment-intent/api/v1/direct/ecom/create-session
+     * POST /payment-intent/api/v1/direct/session
      */
     static async createPaymentSession(input: CreateGeideaSessionInput): Promise<GeideaSessionResponse> {
         const { credentials, orderId, orderNumber, amount, currency = "EGP", customer, language = "ar" } = input;
@@ -53,7 +53,7 @@ export class GeideaService {
         }
 
         const baseUrl = this.getBaseUrl(credentials.environment);
-        const endpoint = `${baseUrl}/payment-intent/api/v1/direct/ecom/create-session`;
+        const endpoint = `${baseUrl}/payment-intent/api/v1/direct/session`;
 
         const authString = `${credentials.publicKey}:${credentials.apiPassword}`;
         const basicAuth = Buffer.from(authString).toString("base64");
