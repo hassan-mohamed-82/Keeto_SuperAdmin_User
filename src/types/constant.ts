@@ -38,7 +38,7 @@ export const MODULES = [
     "RestaurantOperations",
     "PaymentMethod",
     "Sales",
-    
+    "Notifications"
 ] as const;
 
 export const ACTION_NAMES = ["View", "Add", "Edit", "Delete", "Status"] as const;
