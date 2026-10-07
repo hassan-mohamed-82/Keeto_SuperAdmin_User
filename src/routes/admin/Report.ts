@@ -15,6 +15,6 @@ router.post("/restaurant/invoice", hasPermission("reports", "View"), catchAsync(
 router.put("/invoice/:invoiceId/mark-paid", hasPermission("reports", "Edit"), catchAsync(markInvoiceAsPaid))
 
 router.get("/restaurant-orders", hasPermission("reports", "View"), catchAsync(getRestaurantOrdersReport));
-router.get("/sales", hasPermission("reports", "View"), catchAsync(getSalesReport));
+router.get("/sales", hasPermission("Sales", "View"), catchAsync(getSalesReport));
 
 export default router;
