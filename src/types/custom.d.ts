@@ -62,7 +62,8 @@ export type ModuleName =
     | "restaurants"
     | "orders"
     | "favorites"
-    | "foods";
+    | "foods"
+    | "Sales";
 
 export interface PermissionAction {
     id?: string;
