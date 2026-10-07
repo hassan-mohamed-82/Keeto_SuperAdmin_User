@@ -7,6 +7,7 @@ import {
     cuisines,
     restaurantOperations,
     restaurants,
+    sales,
 } from "../../models/schema";
 import { NotFound } from "../../Errors/NotFound";
 import { SuccessResponse } from "../../utils/response";
@@ -15,6 +16,39 @@ import {
     updateRestaurantOperationParamsSchema,
     updateRestaurantOperationSchema,
 } from "../../validation/admin/restaurantOperations";
+
+const parseCuisineIds = (input: unknown): string[] => {
+    if (!input) return [];
+    if (Array.isArray(input)) {
+        return input.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+    }
+    if (typeof input === "string") {
+        try {
+            const parsed = JSON.parse(input);
+            if (Array.isArray(parsed)) {
+                return parsed.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+            }
+        } catch {
+            const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
+            const matches = input.match(uuidRegex);
+            return matches ? Array.from(new Set(matches)) : [];
+        }
+    }
+    return [];
+};
+
+const parseNotes = (notes: unknown): string[] => {
+    if (Array.isArray(notes)) return notes;
+    if (typeof notes === "string") {
+        try {
+            const parsed = JSON.parse(notes);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    }
+    return [];
+};
 
 export const getRestaurantOperations = async (req: Request, res: Response) => {
     const { search, operationType, status, app, page, limit } =
@@ -50,12 +84,39 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
                     createdAt: restaurantOperations.createdAt,
                     updatedAt: restaurantOperations.updatedAt,
                 },
-                restaurant: restaurants,
-                city: cities,
+                restaurant: {
+                    id: restaurants.id,
+                    name: restaurants.name,
+                    nameAr: restaurants.nameAr,
+                    nameFr: restaurants.nameFr,
+                    logo: restaurants.logo,
+                    cover: restaurants.cover,
+                    type: restaurants.type,
+                    status: restaurants.status,
+                    ownerFirstName: restaurants.ownerFirstName,
+                    ownerLastName: restaurants.ownerLastName,
+                    ownerPhone: restaurants.ownerPhone,
+                    callcenterphone: restaurants.callcenterphone,
+                    orderLink: restaurants.orderLink,
+                    facebookLink: restaurants.facebookLink,
+                    cuisineId: restaurants.cuisineId,
+                },
+                city: {
+                    id: cities.id,
+                    name: cities.name,
+                    nameAr: cities.nameAr,
+                },
+                sales: {
+                    id: sales.id,
+                    name: sales.name,
+                    phone: sales.phone,
+                    email: sales.email,
+                },
             })
             .from(restaurantOperations)
             .innerJoin(restaurants, eq(restaurantOperations.restaurantId, restaurants.id))
             .leftJoin(cities, eq(restaurants.cityId, cities.id))
+            .leftJoin(sales, eq(restaurants.salesId, sales.id))
             .where(whereClause)
             .limit(limit)
             .offset(offset),
@@ -69,23 +130,43 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
     const totalItems = Number(totalRows[0]?.total ?? 0);
     const restaurantIds = rows.map((row) => row.restaurant.id);
     const cuisineIds = [
-        ...new Set(
-            rows.flatMap((row) =>
-                Array.isArray(row.restaurant.cuisineId) ? row.restaurant.cuisineId : []
-            )
-        ),
+        ...new Set(rows.flatMap((row) => parseCuisineIds(row.restaurant.cuisineId))),
     ];
 
     const [branchRows, cuisineRows] = await Promise.all([
         restaurantIds.length > 0
             ? db
-                .select({ branch: branches, city: cities })
+                .select({
+                    branch: {
+                        id: branches.id,
+                        restaurantId: branches.restaurantId,
+                        name: branches.name,
+                        nameAr: branches.nameAr,
+                        phoneNumber: branches.phoneNumber,
+                        address: branches.address,
+                        addressAr: branches.addressAr,
+                        status: branches.status,
+                    },
+                    city: {
+                        id: cities.id,
+                        name: cities.name,
+                        nameAr: cities.nameAr,
+                    },
+                })
                 .from(branches)
                 .leftJoin(cities, eq(branches.cityId, cities.id))
                 .where(inArray(branches.restaurantId, restaurantIds))
             : Promise.resolve([]),
         cuisineIds.length > 0
-            ? db.select().from(cuisines).where(inArray(cuisines.id, cuisineIds))
+            ? db
+                .select({
+                    id: cuisines.id,
+                    name: cuisines.name,
+                    nameAr: cuisines.nameAr,
+                    image: cuisines.Image,
+                })
+                .from(cuisines)
+                .where(inArray(cuisines.id, cuisineIds))
             : Promise.resolve([]),
     ]);
 
@@ -98,25 +179,35 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
     const cuisineMap = new Map(cuisineRows.map((cuisine) => [cuisine.id, cuisine]));
 
     return SuccessResponse(res, {
-        data: rows.map(({ operation, restaurant, city }) => ({
-            ...operation,
-            notes: Array.isArray(operation.notes)
-                ? operation.notes
-                : typeof operation.notes === "string"
-                ? JSON.parse(operation.notes)
-                : [],
-            restaurant: {
-                ...restaurant,
-                city,
-                branches: (branchMap.get(restaurant.id) ?? []).map(({ branch, city: branchCity }) => ({
-                    ...branch,
-                    city: branchCity,
-                })),
-                cuisines: (Array.isArray(restaurant.cuisineId) ? restaurant.cuisineId : [])
-                    .map((cuisineId) => cuisineMap.get(cuisineId))
-                    .filter((cuisine) => cuisine !== undefined),
-            },
-        })),
+        data: rows.map(({ operation, restaurant, city, sales: salesRep }) => {
+            const parsedCuisineIds = parseCuisineIds(restaurant.cuisineId);
+            const { cuisineId: _, ...restRestaurant } = restaurant;
+
+            return {
+                ...operation,
+                notes: parseNotes(operation.notes),
+                restaurant: {
+                    ...restRestaurant,
+                    city: city?.id ? city : null,
+                    sales: salesRep?.id ? salesRep : null,
+                    branches: (branchMap.get(restaurant.id) ?? []).map(
+                        ({ branch, city: branchCity }) => ({
+                            id: branch.id,
+                            name: branch.name,
+                            nameAr: branch.nameAr,
+                            phoneNumber: branch.phoneNumber,
+                            address: branch.address,
+                            addressAr: branch.addressAr,
+                            status: branch.status,
+                            city: branchCity?.id ? branchCity : null,
+                        })
+                    ),
+                    cuisines: parsedCuisineIds
+                        .map((id) => cuisineMap.get(id))
+                        .filter((cuisine): cuisine is NonNullable<typeof cuisine> => Boolean(cuisine)),
+                },
+            };
+        }),
         pagination: {
             page,
             limit,
@@ -176,11 +267,7 @@ export const updateRestaurantOperation = async (req: Request, res: Response) => 
         message: "Restaurant operation updated successfully",
         data: {
             ...updated,
-            notes: Array.isArray(updated?.notes)
-                ? updated.notes
-                : typeof updated?.notes === "string"
-                ? JSON.parse(updated.notes)
-                : [],
+            notes: parseNotes(updated?.notes),
         },
     });
 };

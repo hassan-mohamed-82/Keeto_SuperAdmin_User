@@ -101,10 +101,22 @@ const getSettingsByRestaurantId = async (req, res) => {
             .limit(1);
         settingsResult = newSettings[0];
     }
+    const [wallet] = await connection_1.db
+        .select({ balance: schema_1.restaurantWallets.balance })
+        .from(schema_1.restaurantWallets)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId))
+        .limit(1);
+    const walletBalance = parseFloat(String(wallet?.balance ?? "0"));
+    const debt = Math.max(0, -walletBalance).toFixed(2);
+    const canReturnToCustom = walletBalance >= 0;
     res.status(200).json({
         success: true,
         data: {
-            settings: settingsResult,
+            settings: {
+                ...settingsResult,
+                debt,
+                canReturnToCustom,
+            },
             schedules: schedules || []
         }
     });

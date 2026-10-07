@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "https://Keetobcknd.keeto.org",
+      "url": "http://localhost:3000",
       "description": "Main"
     },
     {
@@ -3507,6 +3507,13 @@
                   },
                   "paymentFailureReason": {
                     "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
+                    "type": "string"
                   }
                 }
               }
@@ -3767,6 +3774,13 @@
                   },
                   "paymentFailureReason": {
                     "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
+                    "type": "string"
                   }
                 }
               }
@@ -4026,6 +4040,13 @@
                     ]
                   },
                   "paymentFailureReason": {
+                    "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
                     "type": "string"
                   }
                 }
@@ -10903,6 +10924,116 @@
         }
       }
     },
+    "/api/superadmin/restaurant-operations/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Restaurant Operations"
+        ]
+      }
+    },
+    "/api/superadmin/restaurant-operations/{restaurantId}": {
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Restaurant Operations"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "restaurantId": {
+                    "type": "string"
+                  },
+                  "operationType": {
+                    "type": "string",
+                    "enum": [
+                      "callcenter",
+                      "branch"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "demo",
+                      "sales",
+                      "data",
+                      "customer support",
+                      "visit",
+                      "start order",
+                      "qr",
+                      "points",
+                      "social media"
+                    ]
+                  },
+                  "app": {
+                    "type": "string",
+                    "enum": [
+                      "on",
+                      "off"
+                    ]
+                  },
+                  "notes": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/superadmin/payment-transactions/": {
       "get": {
         "description": "",
@@ -13553,6 +13684,13 @@
                   },
                   "paymentFailureReason": {
                     "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
+                    "type": "string"
                   }
                 }
               }
@@ -13812,6 +13950,13 @@
                     ]
                   },
                   "paymentFailureReason": {
+                    "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
                     "type": "string"
                   }
                 },
@@ -14122,6 +14267,13 @@
                     ]
                   },
                   "paymentFailureReason": {
+                    "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
                     "type": "string"
                   }
                 },
@@ -16982,6 +17134,13 @@
                   },
                   "paymentFailureReason": {
                     "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -17253,6 +17412,13 @@
                   },
                   "paymentFailureReason": {
                     "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -17398,6 +17564,9 @@
     },
     {
       "name": "Superadmin / Restaurant Payment Credentials"
+    },
+    {
+      "name": "Superadmin / Restaurant Operations"
     },
     {
       "name": "Superadmin / Payment Transactions"

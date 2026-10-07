@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const platformPaymentSettings_1 = require("../../controllers/admin/platformPaymentSettings");
+const catchAsync_1 = require("../../utils/catchAsync");
+const validation_1 = require("../../middlewares/validation");
+const platformPaymentSettings_2 = require("../../validation/admin/platformPaymentSettings");
+const middlewares_1 = require("../../middlewares/");
+const router = (0, express_1.Router)();
+router.get("/", (0, middlewares_1.hasPermission)("PlatformPaymentSettings", "View"), (0, catchAsync_1.catchAsync)(platformPaymentSettings_1.getPlatformPaymentSettings));
+router.put("/", (0, middlewares_1.hasPermission)("PlatformPaymentSettings", "Edit"), (0, validation_1.validate)(platformPaymentSettings_2.updatePlatformPaymentSettingsSchema), (0, catchAsync_1.catchAsync)(platformPaymentSettings_1.updatePlatformPaymentSettings));
+exports.default = router;

@@ -10,6 +10,7 @@ const schema_1 = require("../../schema");
 const address_1 = require("../user/address");
 const selectReasons_1 = require("./selectReasons");
 const delivery_man_1 = require("./delivery_man");
+const shippingCompany_1 = require("./shippingCompany");
 // ==========================================
 // 1. جدول الطلبات (Orders Table)
 // ==========================================
@@ -41,6 +42,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     deliveryFee: (0, mysql_core_1.decimal)("delivery_fee", { precision: 10, scale: 2 }).default("0.00"),
     serviceFee: (0, mysql_core_1.decimal)("service_fee", { precision: 10, scale: 2 }).default("0.00"),
     appCommission: (0, mysql_core_1.decimal)("app_commission", { precision: 10, scale: 2 }).default("0.00"),
+    visaCommission: (0, mysql_core_1.decimal)("visa_commission", { precision: 10, scale: 2 }).default("0.00"),
     // --- Discount & Coupon Fields ---
     discountId: (0, mysql_core_1.char)("discount_id", { length: 36 })
         .references(() => schema_1.discounts.id, { onDelete: "set null" }),
@@ -75,6 +77,25 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     note: (0, mysql_core_1.text)("note"),
     deliveryManId: (0, mysql_core_1.char)("delivery_man_id", { length: 36 })
         .references(() => delivery_man_1.deliveryMen.id),
+    shippingCompanyId: (0, mysql_core_1.char)("shipping_company_id", { length: 36 })
+        .references(() => shippingCompany_1.shippingCompanies.id, { onDelete: "set null" }),
+    // حالة الشحن والتوزيع التلقائي
+    shippingStatus: (0, mysql_core_1.mysqlEnum)("shipping_status", [
+        "pending_dispatch",
+        "assigned",
+        "picked_up",
+        "delivered",
+        "manual_required"
+    ]).default("pending_dispatch"),
+    // سبب الفشل في التوزيع التلقائي (في حالة تحولها لـ manual_required)
+    shippingFailReason: (0, mysql_core_1.mysqlEnum)("shipping_fail_reason", [
+        "no_company",
+        "company_inactive",
+        "out_of_zone",
+        "no_courier",
+        "max_attempts"
+    ]),
+    dispatchAttempts: (0, mysql_core_1.int)("dispatch_attempts").default(0).notNull(),
     dailyOrderNumber: (0, mysql_core_1.int)("daily_order_number"),
     rating: (0, mysql_core_1.int)("rating"),
     ratingComment: (0, mysql_core_1.text)("rating_comment"),
@@ -92,6 +113,8 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     paymentTransactionId: (0, mysql_core_1.varchar)("payment_transaction_id", { length: 150 }), // رقم العملية: Kashier transactionId / Paymob id / Geidea transactionId
     paymentStatus: (0, mysql_core_1.mysqlEnum)("payment_status", ["pending_payment", "paid", "payment_failed"]),
     paymentFailureReason: (0, mysql_core_1.text)("payment_failure_reason"), // سبب آخر فشل لسرعة العرض في تفاصيل الأوردر
+    paymentIssueNotifiedAt: (0, mysql_core_1.timestamp)("payment_issue_notified_at"),
+    paymentIssueType: (0, mysql_core_1.varchar)("payment_issue_type", { length: 30 }),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });

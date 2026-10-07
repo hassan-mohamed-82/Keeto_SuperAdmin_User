@@ -82,3 +82,8 @@ __exportStar(require("./schema/admin/orderDelayAlertGroup"), exports);
 __exportStar(require("./schema/admin/restaurantPaymentCredentials"), exports);
 __exportStar(require("./schema/admin/paymentTransactions"), exports);
 __exportStar(require("./schema/admin/adminFcmTokens"), exports);
+__exportStar(require("./schema/admin/shippingCompany"), exports);
+__exportStar(require("./schema/admin/restaurantOperations"), exports);
+// New schemas: platform payment settings & gateway switch audit log
+__exportStar(require("./schema/admin/platformPaymentSettings"), exports);
+__exportStar(require("./schema/admin/gatewaySwitchLog"), exports);

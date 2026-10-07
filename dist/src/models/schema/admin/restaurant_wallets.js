@@ -26,6 +26,8 @@ exports.restaurantWallets = (0, mysql_core_1.mysqlTable)("restaurant_wallets", {
     totalServiceFees: (0, mysql_core_1.decimal)("total_service_fees", { precision: 10, scale: 2 }).default("0.00"),
     // إجمالي الكوميشن المتراكم (نسبة من قيمة الأوردر)
     totalCommission: (0, mysql_core_1.decimal)("total_commission", { precision: 10, scale: 2 }).default("0.00"),
+    // إجمالي عمولة الفيزا المتراكمة (بوابات الدفع المخصصة)
+    totalVisaCommission: (0, mysql_core_1.decimal)("total_visa_commission", { precision: 10, scale: 2 }).default("0.00"),
     // إجمالي الاشتراكات المسجلة (شهري + ربع سنوي + سنوي)
     totalSubscriptions: (0, mysql_core_1.decimal)("total_subscriptions", { precision: 10, scale: 2 }).default("0.00"),
     // آخر اشتراك شهري مسجل
@@ -60,6 +62,7 @@ exports.restaurantWalletTransactions = (0, mysql_core_1.mysqlTable)("restaurant_
     // تفاصيل الرسوم والعمولة الخاصة بهذا الأوردر بالتحديد
     serviceFee: (0, mysql_core_1.decimal)("service_fee", { precision: 10, scale: 2 }).default("0.00"),
     commission: (0, mysql_core_1.decimal)("commission", { precision: 10, scale: 2 }).default("0.00"),
+    visaCommission: (0, mysql_core_1.decimal)("visa_commission", { precision: 10, scale: 2 }).default("0.00"),
     orderAmount: (0, mysql_core_1.decimal)("order_amount", { precision: 10, scale: 2 }).default("0.00"),
     note: (0, mysql_core_1.text)("note"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),

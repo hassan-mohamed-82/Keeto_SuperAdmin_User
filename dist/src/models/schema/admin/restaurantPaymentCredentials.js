@@ -17,6 +17,10 @@ exports.restaurantPaymentCredentials = (0, mysql_core_1.mysqlTable)("restaurant_
     environment: (0, mysql_core_1.mysqlEnum)("environment", ["LIVE", "TEST"]).default("LIVE"),
     // 💡 استخدام Type المخصص هنا لدعم Paymob و Kashier و Geidea
     credentials: (0, mysql_core_1.json)("credentials").$type().notNull(),
+    // 💡 إعدادات عمولة الفيزا للبوابة المخصصة (Custom Gateway Commission)
+    percentageValue: (0, mysql_core_1.decimal)("percentage_value", { precision: 10, scale: 2 }).default("0.00"),
+    fixedValue: (0, mysql_core_1.decimal)("fixed_value", { precision: 10, scale: 2 }).default("0.00"),
+    tax: (0, mysql_core_1.decimal)("tax", { precision: 10, scale: 2 }).default("0.00"),
     logoUrl: (0, mysql_core_1.varchar)("logo_url", { length: 500 }),
     isActive: (0, mysql_core_1.boolean)("is_active").default(true),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),

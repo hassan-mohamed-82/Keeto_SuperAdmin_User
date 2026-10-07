@@ -19,6 +19,7 @@ exports.sliders = (0, mysql_core_1.mysqlTable)("sliders", {
     subcategoryId: (0, mysql_core_1.char)("subcategory_id", { length: 36 }).references(() => subcategory_1.subcategories.id, { onDelete: "set null" }),
     foodId: (0, mysql_core_1.char)("food_id", { length: 36 }).references(() => food_1.food.id, { onDelete: "set null" }),
     discountId: (0, mysql_core_1.char)("discount_id", { length: 36 }).references(() => discount_1.discounts.id, { onDelete: "set null" }),
+    status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

@@ -8,6 +8,7 @@ const restaurant_wallets_2 = require("../../validation/admin/restaurant_wallets"
 const middlewares_1 = require("../../middlewares/");
 const router = (0, express_1.Router)();
 router.get("/", (0, middlewares_1.hasPermission)("RestaurantWallets", "View"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.getAllWallets));
+router.get("/system", (0, middlewares_1.hasPermission)("RestaurantWallets", "View"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.getSystemGatewayRestaurants));
 router.get("/restaurant/:restaurantId", (0, middlewares_1.hasPermission)("RestaurantWallets", "View"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.getRestaurantWallet));
 // تفصيل كامل للمحفظة: service fees + commission + الاشتراكات
 router.get("/restaurant/:restaurantId/details", (0, middlewares_1.hasPermission)("RestaurantWallets", "View"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.getDetailedWallet));

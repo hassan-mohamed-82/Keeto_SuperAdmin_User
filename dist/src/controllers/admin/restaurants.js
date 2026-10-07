@@ -14,6 +14,7 @@ const bcrypt_1 = __importDefault(require("bcrypt"));
 const uuid_1 = require("uuid");
 const handleImages_1 = require("../../utils/handleImages");
 const encryption_1 = require("../../utils/encryption");
+const restaurantWalletService_1 = require("../../services/restaurantWalletService");
 // Helper: Parse payment credentials from request body (accepts array, single object, or JSON string)
 const parsePaymentCredentialsInput = (input) => {
     if (!input)
@@ -376,6 +377,19 @@ const createRestaurant = async (req, res) => {
     }
     const plansToReturn = []; // 👈 مصفوفة لتجميع الخطط وإرجاعها
     const credentialsToReturn = []; // 👈 مصفوفة لتجميع بيانات بوابات الدفع وإرجاعها
+    const slugify = (s) => s.toLowerCase().trim()
+        .replace(/[^a-z0-9\u0600-\u06FF]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    const finalSlug = slug && clean(slug) ? slugify(clean(slug)) : null;
+    if (finalSlug) {
+        const [dup] = await connection_1.db
+            .select({ id: schema_1.restaurants.id })
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurants.slug, finalSlug))
+            .limit(1);
+        if (dup)
+            throw new BadRequest_1.BadRequest("Slug already exists");
+    }
     await connection_1.db.transaction(async (tx) => {
         // 1. إنشاء المطعم
         await tx.insert(schema_1.restaurants).values({
@@ -395,7 +409,7 @@ const createRestaurant = async (req, res) => {
             callcenterphone: callcenterphone ? clean(callcenterphone) : null,
             logo: logoUrl || '',
             cover: coverUrl || '',
-            slug: slug || '',
+            slug: finalSlug,
             lat: lat || '',
             lng: lng || '',
             deliveryRadiusKm: deliveryRadiusKm ? clean(deliveryRadiusKm) : null,
@@ -505,6 +519,9 @@ const createRestaurant = async (req, res) => {
                     title,
                     environment,
                     credentials: encryptedCreds,
+                    percentageValue: credItem.percentageValue !== undefined ? String(parseFloat(credItem.percentageValue || "0").toFixed(2)) : "0.00",
+                    fixedValue: credItem.fixedValue !== undefined ? String(parseFloat(credItem.fixedValue || "0").toFixed(2)) : "0.00",
+                    tax: credItem.tax !== undefined ? String(parseFloat(credItem.tax || "0").toFixed(2)) : "0.00",
                     logoUrl: credItem.logoUrl || null,
                     isActive: isActiveFlag,
                 };
@@ -913,6 +930,7 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.cityId = (cityId && clean(cityId)) ? clean(cityId) : null;
     if (zoneId !== undefined)
         restaurantUpdateData.zoneId = (zoneId && clean(zoneId)) ? clean(zoneId) : null;
+    let warning = null;
     await connection_1.db.transaction(async (tx) => {
         if (Object.keys(restaurantUpdateData).length > 1) {
             await tx.update(schema_1.restaurants).set(restaurantUpdateData).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id));
@@ -957,6 +975,21 @@ const updateRestaurant = async (req, res) => {
             if (Object.keys(settingsUpdateData).length > 0) {
                 const existingSettings = await tx.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, id)).limit(1);
                 if (existingSettings.length > 0) {
+                    const previousType = existingSettings[0]?.paymentGatewayType ?? "SYSTEM";
+                    if (resolvedPaymentGatewayType && previousType !== resolvedPaymentGatewayType) {
+                        const [walletRecord] = await tx.select({ balance: schema_1.restaurantWallets.balance }).from(schema_1.restaurantWallets).where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, id)).limit(1);
+                        const balance = parseFloat(String(walletRecord?.balance ?? "0"));
+                        warning = resolvedPaymentGatewayType === "CUSTOM" && balance < 0
+                            ? `Restaurant still has outstanding debt of ${Math.abs(balance).toFixed(2)}`
+                            : null;
+                        await (0, restaurantWalletService_1.applyGatewaySwitch)(tx, {
+                            restaurantId: id,
+                            toType: resolvedPaymentGatewayType,
+                            trigger: "manual",
+                            balanceAtSwitch: balance,
+                            adminId: req?.user?.id ?? null,
+                        });
+                    }
                     await tx.update(schema_1.restaurantSettings).set(settingsUpdateData).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, id));
                 }
                 else {
@@ -1029,6 +1062,12 @@ const updateRestaurant = async (req, res) => {
                         credentials: mergedCreds,
                         updatedAt: new Date(),
                     };
+                    if (credItem.percentageValue !== undefined)
+                        updatePayload.percentageValue = String(parseFloat(credItem.percentageValue || "0").toFixed(2));
+                    if (credItem.fixedValue !== undefined)
+                        updatePayload.fixedValue = String(parseFloat(credItem.fixedValue || "0").toFixed(2));
+                    if (credItem.tax !== undefined)
+                        updatePayload.tax = String(parseFloat(credItem.tax || "0").toFixed(2));
                     if (credItem.logoUrl !== undefined)
                         updatePayload.logoUrl = credItem.logoUrl || null;
                     if (credItem.isActive !== undefined)
@@ -1049,6 +1088,9 @@ const updateRestaurant = async (req, res) => {
                         title,
                         environment,
                         credentials: encryptedCreds,
+                        percentageValue: credItem.percentageValue !== undefined ? String(parseFloat(credItem.percentageValue || "0").toFixed(2)) : "0.00",
+                        fixedValue: credItem.fixedValue !== undefined ? String(parseFloat(credItem.fixedValue || "0").toFixed(2)) : "0.00",
+                        tax: credItem.tax !== undefined ? String(parseFloat(credItem.tax || "0").toFixed(2)) : "0.00",
                         logoUrl: credItem.logoUrl || null,
                         isActive: credItem.isActive !== undefined ? Boolean(credItem.isActive) : true,
                     });
@@ -1097,6 +1139,7 @@ const updateRestaurant = async (req, res) => {
     }
     return (0, response_1.SuccessResponse)(res, {
         message: "Update restaurant, owner account, and plans success",
+        ...(warning ? { warning } : {}),
         ...(resolvedVisaSwitchType !== undefined && {
             data: {
                 visaSwitch: {

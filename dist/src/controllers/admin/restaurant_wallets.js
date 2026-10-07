@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.recordSubscription = exports.getWalletTransactions = exports.approveWithdrawal = exports.collectCashFromRestaurant = exports.getDetailedWallet = exports.getRestaurantWallet = exports.getAllWallets = void 0;
+exports.recordSubscription = exports.getWalletTransactions = exports.approveWithdrawal = exports.collectCashFromRestaurant = exports.getDetailedWallet = exports.getSystemGatewayRestaurants = exports.getRestaurantWallet = exports.getAllWallets = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -8,6 +8,7 @@ const uuid_1 = require("uuid");
 const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const NotFound_1 = require("../../Errors/NotFound");
+const restaurantWalletService_1 = require("../../services/restaurantWalletService");
 /**
  * دالة مساعدة لجلب حركات المحفظة مربوطة ببيانات الأوردر (dailyOrderNumber, orderNumber, ...)
  * إذا كان نوع الحركة order_payment
@@ -26,6 +27,7 @@ async function getWalletTransactionsWithOrderDetails(restaurantId, limit) {
         reference: schema_1.restaurantWalletTransactions.reference,
         serviceFee: schema_1.restaurantWalletTransactions.serviceFee,
         commission: schema_1.restaurantWalletTransactions.commission,
+        visaCommission: schema_1.restaurantWalletTransactions.visaCommission,
         orderAmount: schema_1.restaurantWalletTransactions.orderAmount,
         note: schema_1.restaurantWalletTransactions.note,
         createdAt: schema_1.restaurantWalletTransactions.createdAt,
@@ -57,6 +59,7 @@ async function getWalletTransactionsWithOrderDetails(restaurantId, limit) {
         reference: r.reference,
         serviceFee: r.serviceFee,
         commission: r.commission,
+        visaCommission: r.visaCommission,
         orderAmount: r.orderAmount,
         note: r.note,
         createdAt: r.createdAt,
@@ -93,7 +96,15 @@ const getAllWallets = async (req, res) => {
     })
         .from(schema_1.restaurantWallets)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, schema_1.restaurants.id));
-    return (0, response_1.SuccessResponse)(res, { data: wallets });
+    const transformed = wallets.map((wallet) => {
+        const balance = parseFloat(wallet.balance || "0");
+        return {
+            ...wallet,
+            debt: Math.max(0, -balance).toFixed(2),
+            canReturnToCustom: balance >= 0,
+        };
+    });
+    return (0, response_1.SuccessResponse)(res, { data: transformed });
 };
 exports.getAllWallets = getAllWallets;
 // ==========================================
@@ -110,13 +121,73 @@ const getRestaurantWallet = async (req, res, next) => {
         if (!wallet[0]) {
             throw new NotFound_1.NotFound("Wallet not found");
         }
-        return (0, response_1.SuccessResponse)(res, { data: wallet[0] });
+        const balance = parseFloat(wallet[0].balance || "0");
+        const debt = Math.max(0, -balance);
+        return (0, response_1.SuccessResponse)(res, {
+            data: {
+                ...wallet[0],
+                debt: debt.toFixed(2),
+                canReturnToCustom: balance >= 0,
+            }
+        });
     }
     catch (error) {
         next(error);
     }
 };
 exports.getRestaurantWallet = getRestaurantWallet;
+// ==========================================
+// 2.5. GET RESTAURANTS USING SYSTEM GATEWAY
+// ==========================================
+const getSystemGatewayRestaurants = async (req, res) => {
+    const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = Math.max(1, parseInt(String(req.query.limit || "20"), 10) || 20);
+    const offset = (page - 1) * limit;
+    const [rows, totalResult] = await Promise.all([
+        connection_1.db
+            .select({
+            restaurantId: schema_1.restaurants.id,
+            name: schema_1.restaurants.name,
+            balance: schema_1.restaurantWallets.balance,
+            gatewayAutoSwitchTriggeredAt: schema_1.restaurantSettings.gatewayAutoSwitchTriggeredAt,
+        })
+            .from(schema_1.restaurants)
+            .innerJoin(schema_1.restaurantWallets, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantWallets.restaurantId))
+            .innerJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantSettings.restaurantId))
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.paymentGatewayType, "SYSTEM"))
+            .limit(limit)
+            .offset(offset)
+            .orderBy((0, drizzle_orm_1.desc)(schema_1.restaurants.createdAt)),
+        connection_1.db
+            .select({ count: (0, drizzle_orm_1.sql) `count(*)`.as("count") })
+            .from(schema_1.restaurants)
+            .innerJoin(schema_1.restaurantWallets, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantWallets.restaurantId))
+            .innerJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantSettings.restaurantId))
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.paymentGatewayType, "SYSTEM"))
+    ]);
+    const totalItems = Number(totalResult[0]?.count || 0);
+    const data = rows.map((row) => {
+        const balance = parseFloat(row.balance || "0");
+        return {
+            restaurantId: row.restaurantId,
+            name: row.name,
+            balance: row.balance,
+            debt: Math.max(0, -balance).toFixed(2),
+            canReturnToCustom: balance >= 0,
+            gatewayAutoSwitchTriggeredAt: row.gatewayAutoSwitchTriggeredAt,
+        };
+    });
+    return (0, response_1.SuccessResponse)(res, {
+        data,
+        pagination: {
+            page,
+            limit,
+            totalItems,
+            totalPages: Math.ceil(totalItems / limit),
+        },
+    });
+};
+exports.getSystemGatewayRestaurants = getSystemGatewayRestaurants;
 // ==========================================
 // 3. GET DETAILED WALLET (تفصيل كامل)
 // ==========================================
@@ -194,12 +265,14 @@ const getDetailedWallet = async (req, res) => {
             // ملخص الحساب المالي المباشر
             // ==================
             accountSummary: {
-                status: accountStatus, // "DUE_ON_RESTAURANT" | "DUE_TO_RESTAURANT" | "SETTLED"
-                description: statusDescription, // رسالة واضحة بالعربي
-                netAmount: Math.abs(numericBalance).toFixed(2), // المبلغ الصافي المستحق
-                balance: w.balance, // رصيد المحفظة الأصلي
-                collectedCash: w.collectedCash, // الكاش الموجود في يد المطعم
-                totalEarning: w.totalEarning, // إجمالي أرباح ومبيعات المطعم
+                status: accountStatus,
+                description: statusDescription,
+                netAmount: Math.abs(numericBalance).toFixed(2),
+                balance: w.balance,
+                collectedCash: w.collectedCash,
+                totalEarning: w.totalEarning,
+                debt: Math.max(0, -numericBalance).toFixed(2),
+                canReturnToCustom: numericBalance >= 0,
             },
             // ==================
             // الرسوم والعمولات المتراكمة (مسجّلة في المحفظة)
@@ -207,6 +280,7 @@ const getDetailedWallet = async (req, res) => {
             fees: {
                 totalServiceFeesRecorded: w.totalServiceFees, // إجمالي service fees المسجلة
                 totalCommissionRecorded: w.totalCommission, // إجمالي الكوميشن المسجل
+                totalVisaCommissionRecorded: w.totalVisaCommission || "0.00", // إجمالي عمولة الفيزا المسجلة
                 totalSubscriptionsRecorded: w.totalSubscriptions, // إجمالي الاشتراكات المسجلة
                 lastMonthlySubscription: w.lastMonthlySubscription,
                 lastQuarterlySubscription: w.lastQuarterlySubscription,
@@ -284,10 +358,10 @@ const collectCashFromRestaurant = async (req, res) => {
         await tx.insert(schema_1.restaurantWalletTransactions).values({
             id: (0, uuid_1.v4)(),
             restaurantId,
-            type: "order_payment", // ممكن تغيرها لـ cash_collection لو ضايفها في الـ Enum بتاعك
+            type: "cash_collection",
             amount: collectAmount.toFixed(2),
-            balanceBefore: currentBalance.toFixed(2), // 👈 بنسجل الرصيد القديم
-            balanceAfter: newBalance.toFixed(2), // 👈 بنسجل الرصيد الجديد
+            balanceBefore: currentBalance.toFixed(2),
+            balanceAfter: newBalance.toFixed(2),
             method: "cash",
             note: "Super admin collected cash (Debt settled)",
         });
@@ -408,6 +482,7 @@ const recordSubscription = async (req, res) => {
             note: note || `${subscriptionType} subscription charged to wallet (Date: ${effectiveDate})`,
             createdAt: new Date(),
         });
+        await (0, restaurantWalletService_1.checkAndApplyVisaSwitch)(restaurantId, 0, tx);
     });
     return (0, response_1.SuccessResponse)(res, {
         message: `${subscriptionType} subscription charged successfully to wallet`,
