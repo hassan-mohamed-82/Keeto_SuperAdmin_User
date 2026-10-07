@@ -51,11 +51,13 @@ const parseNotes = (notes: unknown): string[] => {
 };
 
 export const getRestaurantOperations = async (req: Request, res: Response) => {
-    const { search, operationType, status, app, page, limit } =
+    const { search, restaurantId, restaurantType, operationType, status, app, page, limit } =
         getRestaurantOperationsQuerySchema.parse(req.query);
     const offset = (page - 1) * limit;
     const filters = [];
 
+    if (restaurantId) filters.push(eq(restaurantOperations.restaurantId, restaurantId));
+    if (restaurantType) filters.push(eq(restaurants.type, restaurantType));
     if (operationType) filters.push(eq(restaurantOperations.operationType, operationType));
     if (status) filters.push(eq(restaurantOperations.status, status));
     if (app) filters.push(eq(restaurantOperations.app, app));
@@ -129,9 +131,9 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
 
     const totalItems = Number(totalRows[0]?.total ?? 0);
     const restaurantIds = rows.map((row) => row.restaurant.id);
-    const cuisineIds = [
-        ...new Set(rows.flatMap((row) => parseCuisineIds(row.restaurant.cuisineId))),
-    ];
+    const cuisineIds = Array.from(
+        new Set(rows.flatMap((row) => parseCuisineIds(row.restaurant.cuisineId)))
+    );
 
     const [branchRows, cuisineRows] = await Promise.all([
         restaurantIds.length > 0

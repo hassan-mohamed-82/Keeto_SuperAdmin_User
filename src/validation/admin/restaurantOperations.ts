@@ -12,8 +12,20 @@ export const restaurantOperationStatusSchema = z.enum([
     "social media",
 ]);
 
+export const restaurantTypeSchema = z.enum([
+    "mega",
+    "super",
+    "A",
+    "B",
+    "C",
+    "C-",
+    "test",
+]);
+
 export const getRestaurantOperationsQuerySchema = z.object({
     search: z.string().trim().optional(),
+    restaurantId: z.string().uuid("Invalid Restaurant ID").optional(),
+    restaurantType: restaurantTypeSchema.optional(),
     operationType: z.enum(["callcenter", "branch"]).optional(),
     status: restaurantOperationStatusSchema.optional(),
     app: z.enum(["on", "off"]).optional(),
