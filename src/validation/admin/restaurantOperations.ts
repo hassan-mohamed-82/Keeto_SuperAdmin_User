@@ -33,7 +33,16 @@ export const getRestaurantOperationsQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-const noteSchema = z.string().trim().min(1).max(2000);
+const noteTextSchema = z.string().trim().min(1).max(2000);
+
+// Accepts plain strings (old clients) or objects (new clients that send back the note id)
+const noteSchema = z.union([
+    noteTextSchema,
+    z.object({
+        id: z.string().min(1).optional(),
+        text: noteTextSchema,
+    }),
+]);
 
 export const updateRestaurantOperationParamsSchema = z.object({
     restaurantId: z.string().uuid(),

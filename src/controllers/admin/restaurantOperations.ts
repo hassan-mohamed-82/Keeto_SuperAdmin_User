@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { randomUUID } from "crypto";
 import { and, count, eq, inArray, like, or } from "drizzle-orm";
 import { db } from "../../models/connection";
 import {
@@ -9,6 +10,7 @@ import {
     restaurants,
     sales,
 } from "../../models/schema";
+import type { RestaurantOperationNote as Note } from "../../models/schema";
 import { NotFound } from "../../Errors/NotFound";
 import { SuccessResponse } from "../../utils/response";
 import {
@@ -16,6 +18,8 @@ import {
     updateRestaurantOperationParamsSchema,
     updateRestaurantOperationSchema,
 } from "../../validation/admin/restaurantOperations";
+
+type NoteInput = string | { id?: string; text: string };
 
 const parseCuisineIds = (input: unknown): string[] => {
     if (!input) return [];
@@ -37,17 +41,57 @@ const parseCuisineIds = (input: unknown): string[] => {
     return [];
 };
 
-const parseNotes = (notes: unknown): string[] => {
-    if (Array.isArray(notes)) return notes;
-    if (typeof notes === "string") {
+// Reads saved notes and upgrades old string-only notes.
+// Legacy ids are deterministic (legacy-0, legacy-1, ...) so the id the frontend
+// received on GET still matches when it is sent back on update.
+const parseNotes = (notes: unknown, fallbackDate?: Date | null): Note[] => {
+    let raw: unknown[] = [];
+    if (Array.isArray(notes)) raw = notes;
+    else if (typeof notes === "string") {
         try {
             const parsed = JSON.parse(notes);
-            return Array.isArray(parsed) ? parsed : [];
+            if (Array.isArray(parsed)) raw = parsed;
         } catch {
             return [];
         }
     }
-    return [];
+
+    const fallback = (fallbackDate ?? new Date()).toISOString();
+    return raw
+        .map((n, index): Note | null => {
+            if (typeof n === "string") {
+                return { id: `legacy-${index}`, text: n, createdAt: fallback, updatedAt: fallback };
+            }
+            if (n && typeof n === "object" && typeof (n as any).text === "string") {
+                const o = n as Partial<Note>;
+                return {
+                    id: o.id ?? `legacy-${index}`,
+                    text: o.text!,
+                    createdAt: o.createdAt ?? fallback,
+                    updatedAt: o.updatedAt ?? o.createdAt ?? fallback,
+                };
+            }
+            return null;
+        })
+        .filter((n): n is Note => n !== null);
+};
+
+// Merges incoming notes with saved ones and stamps dates only where something changed
+const mergeNotes = (existing: Note[], incoming: NoteInput[]): Note[] => {
+    const now = new Date().toISOString();
+    const byId = new Map(existing.map((n) => [n.id, n]));
+    const byText = new Map(existing.map((n) => [n.text, n]));
+
+    return incoming.map((item): Note => {
+        const text = typeof item === "string" ? item : item.text;
+        const id = typeof item === "string" ? undefined : item.id;
+
+        const prev = (id ? byId.get(id) : undefined) ?? byText.get(text);
+        if (prev) {
+            return prev.text === text ? prev : { ...prev, text, updatedAt: now };
+        }
+        return { id: id ?? randomUUID(), text, createdAt: now, updatedAt: now };
+    });
 };
 
 export const getRestaurantOperations = async (req: Request, res: Response) => {
@@ -187,7 +231,7 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
 
             return {
                 ...operation,
-                notes: parseNotes(operation.notes),
+                notes: parseNotes(operation.notes, operation.createdAt),
                 restaurant: {
                     ...restRestaurant,
                     city: city?.id ? city : null,
@@ -240,7 +284,9 @@ export const updateRestaurantOperation = async (req: Request, res: Response) => 
         ...(changes.operationType !== undefined && { operationType: changes.operationType }),
         ...(changes.status !== undefined && { status: changes.status }),
         ...(changes.app !== undefined && { app: changes.app }),
-        ...(changes.notes !== undefined && { notes: changes.notes }),
+        ...(changes.notes !== undefined && {
+            notes: mergeNotes(parseNotes(existing?.notes, existing?.createdAt), changes.notes),
+        }),
         updatedAt: new Date(),
     };
 
@@ -255,7 +301,7 @@ export const updateRestaurantOperation = async (req: Request, res: Response) => 
             operationType: changes.operationType ?? "callcenter",
             status: changes.status,
             app: changes.app,
-            notes: changes.notes ?? [],
+            notes: mergeNotes([], changes.notes ?? []),
         });
     }
 
@@ -269,7 +315,7 @@ export const updateRestaurantOperation = async (req: Request, res: Response) => 
         message: "Restaurant operation updated successfully",
         data: {
             ...updated,
-            notes: parseNotes(updated?.notes),
+            notes: parseNotes(updated?.notes, updated?.createdAt),
         },
     });
 };
