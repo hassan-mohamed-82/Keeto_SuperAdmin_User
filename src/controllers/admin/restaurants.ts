@@ -12,6 +12,7 @@ import {
     restaurantSettings,
     cities,
     restaurantPaymentCredentials,
+    restaurantOperations,
 } from "../../models/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -583,6 +584,17 @@ export const createRestaurant = async (req: Request, res: Response) => {
                 }
             }
         }
+
+        // 6.CREATE RESTAURANT
+        await tx.insert(restaurantOperations).values({
+            id:uuidv4(),
+            restaurantId,
+            operationType:"callcenter",
+            status:"demo",
+            app:"on",
+            notes:[],
+        })
+
 
         await adjustSalesRepPoints(tx, salesId ? clean(salesId) : null, pointsToAward);
     });
