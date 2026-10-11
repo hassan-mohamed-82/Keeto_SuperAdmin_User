@@ -71,4 +71,5 @@ export * from "./schema/admin/restaurantOperations";
 // New schemas: platform payment settings & gateway switch audit log
 export * from "./schema/admin/platformPaymentSettings";
 export * from "./schema/admin/gatewaySwitchLog";
+export * from "./schema/admin/firstOrderDiscount";
 

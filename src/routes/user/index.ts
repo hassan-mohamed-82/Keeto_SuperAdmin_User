@@ -23,6 +23,7 @@ import recommendedFoodRouter from "./recommendedFood"
 import policyRouter from "./policyRouter";
 import popupRouter from "./popup";
 import couponRouter from "./coupon";
+import firstOrderDiscountRouter from "./firstOrderDiscount";
 import restaurantGroupsRouter from "./restaurantGroups";
 import bundleRouter from "./bundles";
 import foodRouter from "./food";
@@ -59,4 +60,5 @@ router.use("/favlist", favlistRouter);
 router.use("/notifications", notificationRouter);
 router.use("/points", pointsRouter);
 router.use("/coupon", couponRouter);
+router.use("/first-order-discount", firstOrderDiscountRouter);
 export default router;

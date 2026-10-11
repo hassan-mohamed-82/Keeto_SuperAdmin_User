@@ -18,6 +18,7 @@ import { claimPaymentIssueNotification, releasePaymentIssueNotificationClaim } f
 import { calculateVisaCommission } from "../utils/calculateVisaCommission";
 import { getActiveCustomGateway } from "../utils/getActiveCustomGateway";
 import { getSystemVisaSettings } from "../utils/getSystemVisaSettings";
+import { recordFirstOrderDiscountUsage } from "./firstOrderDiscount.helper";
 
 const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
 
@@ -172,6 +173,18 @@ export async function confirmOrderPayment({
         });
 
         await chargePendingServiceFee(order.id, tx, "custom_paid");
+
+        // تسجيل استخدام خصم الطلبات الأولى للدفع الإلكتروني إذا تم تطبيقه
+        if (order.firstOrderDiscountId) {
+            const discAmount = parseFloat(order.discountAmount as string || "0");
+            await recordFirstOrderDiscountUsage(
+                order.firstOrderDiscountId,
+                order.userId,
+                order.id,
+                discAmount,
+                tx
+            );
+        }
 
         // تفريغ سلة العميل بعد نجاح وتأكيد الدفع الإلكتروني
         await tx.delete(cartItems).where(eq(cartItems.userId, order.userId));

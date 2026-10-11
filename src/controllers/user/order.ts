@@ -39,6 +39,7 @@ import { calculateCurrentStatus } from "./restaurantFeatures";
 import * as turf from "@turf/turf";
 import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
 import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
+import { resolveFirstOrderDiscount, recordFirstOrderDiscountUsage } from "../../helpers/firstOrderDiscount.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
 import { createOrderPaymentSession } from "../../services/payments/paymentSession.service";
 import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
@@ -830,7 +831,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     let orderCouponId: string | null = null;
     let orderDiscountType: "percentage" | "fixed_amount" | null = null;
     let orderDiscountValue: string | null = null;
-    let orderDiscountSource: "food_level" | "restaurant_discount" | "global_discount" | "coupon" | null = null;
+    let orderDiscountSource: "food_level" | "restaurant_discount" | "global_discount" | "coupon" | "first_order_discount" | null = null;
 
     const appliedProduct = resolvedOrderProducts.find(product => product.discountAmount > 0);
     if (appliedProduct?.discountDetails) {
@@ -845,7 +846,43 @@ export const checkout = async (req: Request | any, res: Response) => {
         orderDiscountValue = roundMoney(initialSubtotal - subtotal).toFixed(2);
     }
 
-    // 2️⃣ تطبيق الكوبون وتجميعه مع الخصم (بدون إلغاء بيانات الخصم الأصلي)
+    // 2️⃣ فحص وتطبيق خصم أول طلبات (First Orders Discount) وتطبيق الخصم الأكبر (Maximum Discount)
+    let appliedFirstOrderDiscount: any = null;
+    let firstOrderDiscountAmount = 0;
+    let orderFirstOrderDiscountId: string | null = null;
+
+    // نحسب الخصم الأساسي القائم حالياً (سواء على المنتجات أو العروض)
+    const existingProductDiscountAmount = roundMoney(Math.max(0, initialSubtotal - subtotal));
+
+    // فحص إمكانية تطبيق خصم أول طلبات للمستخدم على هذا المطعم
+    const eligibleFirstOrder = await resolveFirstOrderDiscount(
+        userId,
+        restaurantId,
+        initialSubtotal > 0 ? initialSubtotal : subtotal
+    );
+
+    if (eligibleFirstOrder) {
+        firstOrderDiscountAmount = eligibleFirstOrder.discountAmount;
+        appliedFirstOrderDiscount = eligibleFirstOrder.discount;
+    }
+
+    // مقارنة: إذا كان خصم أول طلبات متاحاً وكان أكبر من الخصومات القائمة على المنتجات
+    // "if it already the product has discount or offer discount or any discount so apply the maximum discount exist"
+    if (appliedFirstOrderDiscount && firstOrderDiscountAmount > existingProductDiscountAmount) {
+        // خصم أول طلبات أكبر -> يتم تطبيق خصم أول طلبات كخصم رئيسي بالأعلى قيمة
+        // إعادة ضبط الخصم ليأخذ الفرق الإضافي ليصبح إجمالي خصم الطلب = firstOrderDiscountAmount
+        const additionalDiscount = roundMoney(firstOrderDiscountAmount - existingProductDiscountAmount);
+        totalDiscount += additionalDiscount;
+        orderFirstOrderDiscountId = appliedFirstOrderDiscount.id;
+        orderDiscountSource = "first_order_discount";
+        orderDiscountType = appliedFirstOrderDiscount.discountType === "percentage" ? "percentage" : "fixed_amount";
+        orderDiscountValue = appliedFirstOrderDiscount.discountValue ? String(appliedFirstOrderDiscount.discountValue) : String(firstOrderDiscountAmount);
+    } else {
+        // الخصم القائم على المنتجات أو العروض مساوي أو أكبر، أو لا يوجد خصم أول طلبات
+        appliedFirstOrderDiscount = null;
+    }
+
+    // 3️⃣ تطبيق الكوبون وتجميعه مع الخصم (بدون إلغاء بيانات الخصم الأصلي)
     if (couponCode) {
         const couponResult = await validateAndCalculateCoupon(
             couponCode,
@@ -864,7 +901,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             // إضافة قيمة خصم الكوبون على المجموع الكلي للخصومات
             totalDiscount += couponDiscountAmount;
 
-            // إذا لم يكن هناك خصم سابق على الأصناف، يتم تعيين الكوبون كمصدر رئيسي للخصم
+            // إذا لم يكن هناك خصم سابق على الأصناف أو أول طلبات، يتم تعيين الكوبون كمصدر رئيسي للخصم
             if (!orderDiscountSource) {
                 orderDiscountSource = "coupon";
                 orderDiscountType = appliedCoupon.discountType === "percentage" ? "percentage" : "fixed_amount";
@@ -1264,6 +1301,7 @@ export const checkout = async (req: Request | any, res: Response) => {
 
             discountId: orderDiscountId,
             couponId: orderCouponId,
+            firstOrderDiscountId: orderFirstOrderDiscountId,
             discountAmount: totalDiscount.toFixed(2),
             discountType: orderDiscountType,
             discountValue: orderDiscountValue,
@@ -1341,6 +1379,17 @@ export const checkout = async (req: Request | any, res: Response) => {
                 .where(eq(coupons.id, appliedCoupon.id));
         }
 
+        // تسجيل استخدام خصم الطلبات الأولى للطلبات المؤكدة كاش أو محفظة
+        if (orderFirstOrderDiscountId && !isVisaPayment) {
+            await recordFirstOrderDiscountUsage(
+                orderFirstOrderDiscountId,
+                userId,
+                orderId,
+                firstOrderDiscountAmount,
+                tx
+            );
+        }
+
         if (appliedDiscountIds.size > 0) {
             for (const dId of appliedDiscountIds) {
                 await tx.update(discounts)
@@ -1415,6 +1464,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             discountDetails: {
                 discountId: orderDiscountId,
                 couponId: orderCouponId,
+                firstOrderDiscountId: orderFirstOrderDiscountId,
                 discountAmount: totalDiscount,
                 discountType: orderDiscountType,
                 discountValue: orderDiscountValue,

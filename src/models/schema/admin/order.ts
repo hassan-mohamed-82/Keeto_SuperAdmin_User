@@ -68,11 +68,13 @@ export const orders = mysqlTable("orders", {
     discountAmount: decimal("discount_amount", { precision: 10, scale: 2 }).default("0.00"),
     discountType: mysqlEnum("discount_type", ["percentage", "fixed_amount"]),
     discountValue: decimal("discount_value", { precision: 10, scale: 2 }),
-    discountSource: mysqlEnum("discount_source", ["food_level", "restaurant_discount", "global_discount", "coupon"]),
+    discountSource: mysqlEnum("discount_source", ["food_level", "restaurant_discount", "global_discount", "coupon", "first_order_discount"]),
 
     couponId: char("coupon_id", { length: 36 })
         .references(() => coupons.id, { onDelete: "set null" }),
     couponCode: varchar("coupon_code", { length: 50 }),
+
+    firstOrderDiscountId: char("first_order_discount_id", { length: 36 }),
     // ---------------------------------
 
     totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
