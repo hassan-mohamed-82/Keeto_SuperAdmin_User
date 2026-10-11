@@ -144,7 +144,7 @@ export async function confirmOrderPayment({
                 paymentGateway: gateway,
                 paymentTransactionId: transactionId || order.paymentTransactionId,
                 paymentOrderId: gatewayOrderId || order.paymentOrderId,
-                status: "pending",
+                status: "accepted",
                 dailyOrderNumber: assignedDailyOrderNumber,
                 paymentMethod: digitalMethod?.id || order.paymentMethod,
                 visaCommission: resolvedVisaCommission.toFixed(2),
