@@ -541,6 +541,15 @@ const createRestaurant = async (req, res) => {
                 }
             }
         }
+        // 6.CREATE RESTAURANT
+        await tx.insert(schema_1.restaurantOperations).values({
+            id: (0, uuid_1.v4)(),
+            restaurantId,
+            operationType: "callcenter",
+            status: "demo",
+            app: "on",
+            notes: [],
+        });
         await adjustSalesRepPoints(tx, salesId ? clean(salesId) : null, pointsToAward);
     });
     for (const cid of parsedCuisines)

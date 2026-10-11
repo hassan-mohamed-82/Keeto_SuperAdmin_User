@@ -96,18 +96,46 @@ const getAllRestaurantRatings = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
     const restaurantId = req.query.restaurantId;
-    // Define the filter condition if restaurantId is provided
-    const restaurantFilter = restaurantId ? (0, drizzle_orm_1.eq)(schema_1.restaurantRatings.restaurantId, restaurantId) : undefined;
-    // 1. Get the total count based on the filter (essential for correct pagination)
+    const rawRating = req.query.rating;
+    // Build filter conditions array
+    const conditions = [];
+    if (restaurantId) {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.restaurantRatings.restaurantId, restaurantId));
+    }
+    // Handle rating filter (supports string "2,3" or array ["2", "3"])
+    if (rawRating) {
+        let ratingNumbers = [];
+        if (Array.isArray(rawRating)) {
+            ratingNumbers = rawRating
+                .flatMap((r) => (typeof r === "string" ? r.split(",") : []))
+                .map(Number)
+                .filter((n) => !isNaN(n));
+        }
+        else if (typeof rawRating === "string") {
+            ratingNumbers = rawRating
+                .split(",")
+                .map(Number)
+                .filter((n) => !isNaN(n));
+        }
+        if (ratingNumbers.length === 1) {
+            conditions.push((0, drizzle_orm_1.eq)(schema_1.restaurantRatings.rating, ratingNumbers[0]));
+        }
+        else if (ratingNumbers.length > 1) {
+            conditions.push((0, drizzle_orm_1.inArray)(schema_1.restaurantRatings.rating, ratingNumbers));
+        }
+    }
+    const whereClause = conditions.length > 0 ? (0, drizzle_orm_1.and)(...conditions) : undefined;
+    // 1. Get total count based on active filters
     const countQuery = connection_1.db.select({ count: (0, drizzle_orm_1.sql) `count(*)` }).from(schema_1.restaurantRatings);
-    if (restaurantFilter) {
-        countQuery.where(restaurantFilter);
+    if (whereClause) {
+        countQuery.where(whereClause);
     }
     const [totalRatingsData] = await countQuery;
     const totalRatings = Number(totalRatingsData.count);
     const totalPages = Math.ceil(totalRatings / limit);
-    // 2. Build the main query with joins, optional filter, and pagination
-    const ratingsQuery = connection_1.db.select({
+    // 2. Build main query with joins, filters, and pagination
+    const ratingsQuery = connection_1.db
+        .select({
         id: schema_1.restaurantRatings.id,
         rating: schema_1.restaurantRatings.rating,
         comment: schema_1.restaurantRatings.comment,
@@ -115,14 +143,16 @@ const getAllRestaurantRatings = async (req, res) => {
         userName: schema_1.users.name,
         userEmail: schema_1.users.email,
         userPhoto: schema_1.users.photo,
+        userPhone: schema_1.users.phone,
+        userAlternatePhone: schema_1.users.alternatePhone,
         restaurantName: schema_1.restaurants.name,
         restaurantNameAr: schema_1.restaurants.nameAr,
     })
         .from(schema_1.restaurantRatings)
         .leftJoin(schema_1.users, (0, drizzle_orm_1.eq)(schema_1.restaurantRatings.userId, schema_1.users.id))
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantRatings.restaurantId, schema_1.restaurants.id));
-    if (restaurantFilter) {
-        ratingsQuery.where(restaurantFilter);
+    if (whereClause) {
+        ratingsQuery.where(whereClause);
     }
     const ratings = await ratingsQuery.limit(limit).offset(offset);
     return (0, response_1.SuccessResponse)(res, {

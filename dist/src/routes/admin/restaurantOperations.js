@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const restaurantOperations_1 = require("../../controllers/admin/restaurantOperations");
+const validation_1 = require("../../middlewares/validation");
+const middlewares_1 = require("../../middlewares/");
+const restaurantOperations_2 = require("../../validation/admin/restaurantOperations");
+const catchAsync_1 = require("../../utils/catchAsync");
+const router = (0, express_1.Router)();
+router.get("/", (0, middlewares_1.hasPermission)("RestaurantOperations", "View"), (0, validation_1.validate)(restaurantOperations_2.getRestaurantOperationsQuerySchema, "query"), (0, catchAsync_1.catchAsync)(restaurantOperations_1.getRestaurantOperations));
+router.put("/:restaurantId", (0, middlewares_1.hasPermission)("RestaurantOperations", "Edit"), (0, validation_1.validate)(restaurantOperations_2.updateRestaurantOperationParamsSchema, "params"), (0, validation_1.validate)(restaurantOperations_2.updateRestaurantOperationSchema), (0, catchAsync_1.catchAsync)(restaurantOperations_1.updateRestaurantOperation));
+exports.default = router;

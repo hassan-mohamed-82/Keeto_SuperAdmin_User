@@ -893,13 +893,26 @@ const getCart = async (req, res) => {
         const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= now;
         const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= now;
         if (startOk && endOk) {
-            const minAmount = parseFloat(freeDeliveryOffer.minOrderAmount || "0");
-            const isEligible = finalSubtotal >= minAmount;
-            freeDeliveryInfo = {
-                isEligible,
-                minOrderAmount: minAmount,
-                remainingAmount: isEligible ? 0 : parseFloat((minAmount - finalSubtotal).toFixed(2)),
-            };
+            let userLimitOk = true;
+            if (userId && freeDeliveryOffer.maxOrdersPerUser && freeDeliveryOffer.maxOrdersPerUser > 0) {
+                const [userOrdersRow] = await connection_1.db
+                    .select({ cnt: (0, drizzle_orm_1.sql) `count(*)` })
+                    .from(schema_1.orders)
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.sql) `${schema_1.orders.status} NOT IN ('cancelled', 'failed')`));
+                const userOrderCount = Number(userOrdersRow?.cnt ?? 0);
+                if (userOrderCount >= freeDeliveryOffer.maxOrdersPerUser) {
+                    userLimitOk = false;
+                }
+            }
+            if (userLimitOk) {
+                const minAmount = parseFloat(freeDeliveryOffer.minOrderAmount || "0");
+                const isEligible = finalSubtotal >= minAmount;
+                freeDeliveryInfo = {
+                    isEligible,
+                    minOrderAmount: minAmount,
+                    remainingAmount: isEligible ? 0 : parseFloat((minAmount - finalSubtotal).toFixed(2)),
+                };
+            }
         }
     }
     return (0, response_1.SuccessResponse)(res, {

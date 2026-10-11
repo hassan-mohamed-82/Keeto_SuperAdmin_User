@@ -208,9 +208,9 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
             });
         }
     }
-    // 4. Calculate discounts through the shared product resolver.
-    const productsWithDiscounts = await (0, discount_service_1.formatProductsWithDiscounts)(rawMenu, restaurantId);
-    return productsWithDiscounts.map((row) => {
+    // 4. Apply Food Pricing Overrides (Branch & Channel Pricing) before calculating discounts
+    // so discounts are applied to the effective price rather than the original un-overridden food price.
+    const menuWithEffectivePrices = rawMenu.map((row) => {
         const foodId = row.foodId || row.id;
         let effectiveFoodPrice = Number(row.price);
         if (foodOverridesMap.has(foodId)) {
@@ -219,6 +219,15 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
                 effectiveFoodPrice = (0, pricing_overrides_1.parsePrice)(bestFoodOverride.price);
             }
         }
+        return {
+            ...row,
+            price: effectiveFoodPrice,
+        };
+    });
+    const productsWithDiscounts = await (0, discount_service_1.formatProductsWithDiscounts)(menuWithEffectivePrices, restaurantId);
+    return productsWithDiscounts.map((row) => {
+        const foodId = row.foodId || row.id;
+        const effectiveFoodPrice = Number(row.price);
         const calculatedDiscountPrice = row.finalPrice;
         const discountNote = row.discountNote;
         // Parse Addons IDs

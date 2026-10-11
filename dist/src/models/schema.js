@@ -87,3 +87,4 @@ __exportStar(require("./schema/admin/restaurantOperations"), exports);
 // New schemas: platform payment settings & gateway switch audit log
 __exportStar(require("./schema/admin/platformPaymentSettings"), exports);
 __exportStar(require("./schema/admin/gatewaySwitchLog"), exports);
+__exportStar(require("./schema/admin/firstOrderDiscount"), exports);

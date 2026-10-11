@@ -38,7 +38,10 @@ exports.MODULES = [
     "restaurantPaymentCredentials",
     "shippingCompany",
     "PlatformPaymentSettings",
-    "RestaurantOperations"
+    "RestaurantOperations",
+    "PaymentMethod",
+    "Sales",
+    "Notifications"
 ];
 exports.ACTION_NAMES = ["View", "Add", "Edit", "Delete", "Status"];
 exports.BASE64_IMAGE_REGEX = /^data:image\/(jpeg|jpg|png|gif|webp);base64,/;

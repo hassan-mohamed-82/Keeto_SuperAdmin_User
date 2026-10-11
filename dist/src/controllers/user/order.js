@@ -16,10 +16,14 @@ const userBlockCheck_1 = require("../../utils/userBlockCheck");
 const restaurantFeatures_1 = require("./restaurantFeatures");
 const pricing_helper_1 = require("../../helpers/pricing.helper");
 const coupon_helper_1 = require("../../helpers/coupon.helper");
+const firstOrderDiscount_helper_1 = require("../../helpers/firstOrderDiscount.helper");
 const foodConditions_1 = require("../../helpers/foodConditions");
 const paymentSession_service_1 = require("../../services/payments/paymentSession.service");
 const getNextDailyOrderNumber_1 = require("../../helpers/getNextDailyOrderNumber");
 const restaurantWalletService_1 = require("../../services/restaurantWalletService");
+const calculateVisaCommission_1 = require("../../utils/calculateVisaCommission");
+const getActiveCustomGateway_1 = require("../../utils/getActiveCustomGateway");
+const getSystemVisaSettings_1 = require("../../utils/getSystemVisaSettings");
 // 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
 const formatToEgyptTime = (date) => {
     return new Intl.DateTimeFormat("ar-EG", {
@@ -705,7 +709,35 @@ const checkout = async (req, res) => {
         orderDiscountSource = "food_level";
         orderDiscountValue = roundMoney(initialSubtotal - subtotal).toFixed(2);
     }
-    // 2️⃣ تطبيق الكوبون وتجميعه مع الخصم (بدون إلغاء بيانات الخصم الأصلي)
+    // 2️⃣ فحص وتطبيق خصم أول طلبات (First Orders Discount) وتطبيق الخصم الأكبر (Maximum Discount)
+    let appliedFirstOrderDiscount = null;
+    let firstOrderDiscountAmount = 0;
+    let orderFirstOrderDiscountId = null;
+    // نحسب الخصم الأساسي القائم حالياً (سواء على المنتجات أو العروض)
+    const existingProductDiscountAmount = roundMoney(Math.max(0, initialSubtotal - subtotal));
+    // فحص إمكانية تطبيق خصم أول طلبات للمستخدم على هذا المطعم
+    const eligibleFirstOrder = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, restaurantId, initialSubtotal > 0 ? initialSubtotal : subtotal);
+    if (eligibleFirstOrder) {
+        firstOrderDiscountAmount = eligibleFirstOrder.discountAmount;
+        appliedFirstOrderDiscount = eligibleFirstOrder.discount;
+    }
+    // مقارنة: إذا كان خصم أول طلبات متاحاً وكان أكبر من الخصومات القائمة على المنتجات
+    // "if it already the product has discount or offer discount or any discount so apply the maximum discount exist"
+    if (appliedFirstOrderDiscount && firstOrderDiscountAmount > existingProductDiscountAmount) {
+        // خصم أول طلبات أكبر -> يتم تطبيق خصم أول طلبات كخصم رئيسي بالأعلى قيمة
+        // إعادة ضبط الخصم ليأخذ الفرق الإضافي ليصبح إجمالي خصم الطلب = firstOrderDiscountAmount
+        const additionalDiscount = roundMoney(firstOrderDiscountAmount - existingProductDiscountAmount);
+        totalDiscount += additionalDiscount;
+        orderFirstOrderDiscountId = appliedFirstOrderDiscount.id;
+        orderDiscountSource = "first_order_discount";
+        orderDiscountType = appliedFirstOrderDiscount.discountType === "percentage" ? "percentage" : "fixed_amount";
+        orderDiscountValue = appliedFirstOrderDiscount.discountValue ? String(appliedFirstOrderDiscount.discountValue) : String(firstOrderDiscountAmount);
+    }
+    else {
+        // الخصم القائم على المنتجات أو العروض مساوي أو أكبر، أو لا يوجد خصم أول طلبات
+        appliedFirstOrderDiscount = null;
+    }
+    // 3️⃣ تطبيق الكوبون وتجميعه مع الخصم (بدون إلغاء بيانات الخصم الأصلي)
     if (couponCode) {
         const couponResult = await (0, coupon_helper_1.validateAndCalculateCoupon)(couponCode, userId, restaurantId, subtotal, 0);
         appliedCoupon = couponResult.coupon;
@@ -715,7 +747,7 @@ const checkout = async (req, res) => {
             orderCouponId = appliedCoupon.id || null;
             // إضافة قيمة خصم الكوبون على المجموع الكلي للخصومات
             totalDiscount += couponDiscountAmount;
-            // إذا لم يكن هناك خصم سابق على الأصناف، يتم تعيين الكوبون كمصدر رئيسي للخصم
+            // إذا لم يكن هناك خصم سابق على الأصناف أو أول طلبات، يتم تعيين الكوبون كمصدر رئيسي للخصم
             if (!orderDiscountSource) {
                 orderDiscountSource = "coupon";
                 orderDiscountType = appliedCoupon.discountType === "percentage" ? "percentage" : "fixed_amount";
@@ -907,7 +939,19 @@ const checkout = async (req, res) => {
             const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= nowForOffer;
             const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= nowForOffer;
             const minAmountOk = !freeDeliveryOffer.minOrderAmount || subtotal >= parseFloat(freeDeliveryOffer.minOrderAmount);
-            if (startOk && endOk && minAmountOk) {
+            // Check maxOrdersPerUser: count completed orders user has at this restaurant
+            let userLimitOk = true;
+            if (freeDeliveryOffer.maxOrdersPerUser && freeDeliveryOffer.maxOrdersPerUser > 0) {
+                const [userOrdersRow] = await connection_1.db
+                    .select({ cnt: (0, drizzle_orm_1.sql) `count(*)` })
+                    .from(schema_1.orders)
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.sql) `${schema_1.orders.status} NOT IN ('cancelled', 'failed')`));
+                const userOrderCount = Number(userOrdersRow?.cnt ?? 0);
+                if (userOrderCount >= freeDeliveryOffer.maxOrdersPerUser) {
+                    userLimitOk = false;
+                }
+            }
+            if (startOk && endOk && minAmountOk && userLimitOk) {
                 deliveryFee = 0;
                 isFreeDelivery = true;
             }
@@ -942,6 +986,23 @@ const checkout = async (req, res) => {
             },
         });
         // ↑ throws BadRequest automatically on failure — order not created yet
+    }
+    const finalPaymentGatewayType = isWalletPayment ? "SYSTEM" : (paymentSessionData?.gatewayType ?? settings?.paymentGatewayType ?? "SYSTEM");
+    let visaCommission = 0;
+    if (isVisaPayment && finalPaymentGatewayType === "CUSTOM") {
+        try {
+            const activeCustom = await (0, getActiveCustomGateway_1.getActiveCustomGateway)(restaurantId);
+            if (activeCustom?.record) {
+                visaCommission = (0, calculateVisaCommission_1.calculateVisaCommission)(totalAmount, activeCustom.record.percentageValue, activeCustom.record.fixedValue, activeCustom.record.tax);
+            }
+        }
+        catch (e) {
+            console.warn("[order] Failed to calculate custom gateway visaCommission:", e);
+        }
+    }
+    else if (isVisaPayment && finalPaymentGatewayType === "SYSTEM") {
+        const systemSettings = await (0, getSystemVisaSettings_1.getSystemVisaSettings)();
+        visaCommission = (0, calculateVisaCommission_1.calculateVisaCommission)(totalAmount, systemSettings.percentageValue, systemSettings.fixedValue, systemSettings.tax);
     }
     // ==========================================
     // 🛡️ 10. Execute Order (Transaction)
@@ -1006,17 +1067,19 @@ const checkout = async (req, res) => {
             addressId: addressId || null,
             orderSource: storedOrderSource,
             paymentMethod,
-            paymentGatewayType: settings?.paymentGatewayType || "SYSTEM",
+            paymentGatewayType: finalPaymentGatewayType,
             paymentStatus: isVisaPayment ? "pending_payment" : "paid",
             orderType: resolvedOrderType,
             subtotal: subtotal.toFixed(2),
             deliveryFee: deliveryFee.toFixed(2),
             serviceFee: serviceFee.toFixed(2),
             appCommission: appCommission.toFixed(2),
+            visaCommission: visaCommission.toFixed(2),
             shippingAddress: shippingAddressSnapshot,
             branchSnapshot: branchSnapshotData,
             discountId: orderDiscountId,
             couponId: orderCouponId,
+            firstOrderDiscountId: orderFirstOrderDiscountId,
             discountAmount: totalDiscount.toFixed(2),
             discountType: orderDiscountType,
             discountValue: orderDiscountValue,
@@ -1083,6 +1146,10 @@ const checkout = async (req, res) => {
             await tx.update(schema_1.coupons)
                 .set({ usedCount: (0, drizzle_orm_1.sql) `used_count + 1` })
                 .where((0, drizzle_orm_1.eq)(schema_1.coupons.id, appliedCoupon.id));
+        }
+        // تسجيل استخدام خصم الطلبات الأولى للطلبات المؤكدة كاش أو محفظة
+        if (orderFirstOrderDiscountId && !isVisaPayment) {
+            await (0, firstOrderDiscount_helper_1.recordFirstOrderDiscountUsage)(orderFirstOrderDiscountId, userId, orderId, firstOrderDiscountAmount, tx);
         }
         if (appliedDiscountIds.size > 0) {
             for (const dId of appliedDiscountIds) {
@@ -1153,6 +1220,7 @@ const checkout = async (req, res) => {
             discountDetails: {
                 discountId: orderDiscountId,
                 couponId: orderCouponId,
+                firstOrderDiscountId: orderFirstOrderDiscountId,
                 discountAmount: totalDiscount,
                 discountType: orderDiscountType,
                 discountValue: orderDiscountValue,

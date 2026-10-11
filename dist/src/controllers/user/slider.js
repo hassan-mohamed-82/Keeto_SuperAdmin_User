@@ -83,9 +83,10 @@ const getSliders = async (req, res) => {
         subcategoryId: schema_1.sliders.subcategoryId,
         foodId: schema_1.sliders.foodId,
         discountId: schema_1.sliders.discountId,
+        status: schema_1.sliders.status
     })
         .from(schema_1.sliders)
-        .where((0, drizzle_orm_1.eq)(schema_1.sliders.restaurantid, resId));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.sliders.restaurantid, resId), (0, drizzle_orm_1.eq)(schema_1.sliders.status, "active")));
     // resolve linked entity for each slider
     const result = await Promise.all(rows.map(async (s) => {
         const linkData = await resolveLinkData(s.linkType ?? null, s.subcategoryId ?? null, s.foodId ?? null, s.discountId ?? null);

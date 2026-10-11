@@ -3372,13 +3372,17 @@
                       "food_level",
                       "restaurant_discount",
                       "global_discount",
-                      "coupon"
+                      "coupon",
+                      "first_order_discount"
                     ]
                   },
                   "couponId": {
                     "type": "string"
                   },
                   "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
                     "type": "string"
                   },
                   "totalAmount": {
@@ -3639,13 +3643,17 @@
                       "food_level",
                       "restaurant_discount",
                       "global_discount",
-                      "coupon"
+                      "coupon",
+                      "first_order_discount"
                     ]
                   },
                   "couponId": {
                     "type": "string"
                   },
                   "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
                     "type": "string"
                   },
                   "totalAmount": {
@@ -3906,13 +3914,17 @@
                       "food_level",
                       "restaurant_discount",
                       "global_discount",
-                      "coupon"
+                      "coupon",
+                      "first_order_discount"
                     ]
                   },
                   "couponId": {
                     "type": "string"
                   },
                   "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
                     "type": "string"
                   },
                   "totalAmount": {
@@ -13549,13 +13561,17 @@
                       "food_level",
                       "restaurant_discount",
                       "global_discount",
-                      "coupon"
+                      "coupon",
+                      "first_order_discount"
                     ]
                   },
                   "couponId": {
                     "type": "string"
                   },
                   "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
                     "type": "string"
                   },
                   "totalAmount": {
@@ -13816,13 +13832,17 @@
                       "food_level",
                       "restaurant_discount",
                       "global_discount",
-                      "coupon"
+                      "coupon",
+                      "first_order_discount"
                     ]
                   },
                   "couponId": {
                     "type": "string"
                   },
                   "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
                     "type": "string"
                   },
                   "totalAmount": {
@@ -14133,13 +14153,17 @@
                       "food_level",
                       "restaurant_discount",
                       "global_discount",
-                      "coupon"
+                      "coupon",
+                      "first_order_discount"
                     ]
                   },
                   "couponId": {
                     "type": "string"
                   },
                   "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
                     "type": "string"
                   },
                   "totalAmount": {
@@ -15184,6 +15208,59 @@
         },
         "tags": [
           "User / Coupon"
+        ]
+      }
+    },
+    "/api/user/first-order-discount/check": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "User / First Order Discount"
+        ]
+      }
+    },
+    "/api/user/first-order-discount/available": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "User / First Order Discount"
         ]
       }
     },
@@ -16999,13 +17076,17 @@
                       "food_level",
                       "restaurant_discount",
                       "global_discount",
-                      "coupon"
+                      "coupon",
+                      "first_order_discount"
                     ]
                   },
                   "couponId": {
                     "type": "string"
                   },
                   "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
                     "type": "string"
                   },
                   "totalAmount": {
@@ -17277,13 +17358,17 @@
                       "food_level",
                       "restaurant_discount",
                       "global_discount",
-                      "coupon"
+                      "coupon",
+                      "first_order_discount"
                     ]
                   },
                   "couponId": {
                     "type": "string"
                   },
                   "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
                     "type": "string"
                   },
                   "totalAmount": {
@@ -17651,6 +17736,9 @@
     },
     {
       "name": "User / Coupon"
+    },
+    {
+      "name": "User / First Order Discount"
     },
     {
       "name": "Payments / Kashier"

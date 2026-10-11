@@ -34,6 +34,9 @@ exports.createPaymentCredentialsSchema = zod_1.z.object({
     title: zod_1.z.string().optional(),
     environment: zod_1.z.enum(["LIVE", "TEST"]).default("LIVE"),
     credentials: credentialsSchema,
+    percentageValue: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).optional(),
+    fixedValue: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).optional(),
+    tax: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).optional(),
     logoUrl: zod_1.z.string().url().optional().or(zod_1.z.literal("")),
     isActive: zod_1.z.boolean().optional().default(true),
 });
@@ -42,6 +45,9 @@ exports.updatePaymentCredentialsSchema = zod_1.z.object({
     title: zod_1.z.string().optional(),
     environment: zod_1.z.enum(["LIVE", "TEST"]).optional(),
     credentials: zod_1.z.record(zod_1.z.any()).optional(),
+    percentageValue: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).optional(),
+    fixedValue: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).optional(),
+    tax: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).optional(),
     logoUrl: zod_1.z.string().url().optional().or(zod_1.z.literal("")),
     isActive: zod_1.z.boolean().optional(),
 });

@@ -150,6 +150,7 @@ export async function confirmOrderPayment({
                 paymentMethod: digitalMethod?.id || order.paymentMethod,
                 visaCommission: resolvedVisaCommission.toFixed(2),
                 paymentFailureReason: null, // تصفير سبب الفشل لأن المحاولة الحالية نجحت
+                createdAt: now,
                 updatedAt: now,
             })
             .where(eq(orders.id, order.id));

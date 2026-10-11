@@ -9,6 +9,11 @@ const uuid_1 = require("uuid");
 const getNextDailyOrderNumber_1 = require("./getNextDailyOrderNumber");
 const notifications_1 = require("../utils/notifications");
 const restaurantWalletService_1 = require("../services/restaurantWalletService");
+const orderNotificationCron_1 = require("../services/orderNotificationCron");
+const calculateVisaCommission_1 = require("../utils/calculateVisaCommission");
+const getActiveCustomGateway_1 = require("../utils/getActiveCustomGateway");
+const getSystemVisaSettings_1 = require("../utils/getSystemVisaSettings");
+const firstOrderDiscount_helper_1 = require("./firstOrderDiscount.helper");
 const roundMoney = (amount) => Math.round(amount * 100) / 100;
 /**
  * دالة مركزية لتأكيد نجاح عملية الدفع الإلكتروني (Paymob / Kashier / Geidea)
@@ -52,6 +57,27 @@ async function confirmOrderPayment({ orderId, gateway, transactionId, gatewayOrd
         if (!assignedDailyOrderNumber) {
             assignedDailyOrderNumber = await (0, getNextDailyOrderNumber_1.getNextDailyOrderNumber)(tx, order.restaurantId, settings, now);
         }
+        let resolvedVisaCommission = parseFloat(order.visaCommission || "0");
+        if (order.paymentGatewayType === "CUSTOM" && resolvedVisaCommission <= 0) {
+            try {
+                const activeCustom = await (0, getActiveCustomGateway_1.getActiveCustomGateway)(order.restaurantId);
+                if (activeCustom?.record) {
+                    resolvedVisaCommission = (0, calculateVisaCommission_1.calculateVisaCommission)(order.totalAmount, activeCustom.record.percentageValue, activeCustom.record.fixedValue, activeCustom.record.tax);
+                }
+            }
+            catch (err) {
+                console.warn("[confirmOrderPayment] Failed to calculate custom gateway visaCommission:", err);
+            }
+        }
+        if (order.paymentGatewayType === "SYSTEM" && resolvedVisaCommission <= 0) {
+            try {
+                const platformSettings = await (0, getSystemVisaSettings_1.getSystemVisaSettings)();
+                resolvedVisaCommission = (0, calculateVisaCommission_1.calculateVisaCommission)(order.totalAmount, platformSettings.percentageValue, platformSettings.fixedValue, platformSettings.tax);
+            }
+            catch (err) {
+                console.warn("[confirmOrderPayment] Failed to calculate platform SYSTEM visaCommission:", err);
+            }
+        }
         // تحديث حالة الأوردر
         await tx
             .update(schema_1.orders)
@@ -60,10 +86,12 @@ async function confirmOrderPayment({ orderId, gateway, transactionId, gatewayOrd
             paymentGateway: gateway,
             paymentTransactionId: transactionId || order.paymentTransactionId,
             paymentOrderId: gatewayOrderId || order.paymentOrderId,
-            status: "pending",
+            status: "accepted",
             dailyOrderNumber: assignedDailyOrderNumber,
             paymentMethod: digitalMethod?.id || order.paymentMethod,
+            visaCommission: resolvedVisaCommission.toFixed(2),
             paymentFailureReason: null, // تصفير سبب الفشل لأن المحاولة الحالية نجحت
+            createdAt: now,
             updatedAt: now,
         })
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, order.id));
@@ -85,6 +113,11 @@ async function confirmOrderPayment({ orderId, gateway, transactionId, gatewayOrd
             createdAt: now,
         });
         await (0, restaurantWalletService_1.chargePendingServiceFee)(order.id, tx, "custom_paid");
+        // تسجيل استخدام خصم الطلبات الأولى للدفع الإلكتروني إذا تم تطبيقه
+        if (order.firstOrderDiscountId) {
+            const discAmount = parseFloat(order.discountAmount || "0");
+            await (0, firstOrderDiscount_helper_1.recordFirstOrderDiscountUsage)(order.firstOrderDiscountId, order.userId, order.id, discAmount, tx);
+        }
         // تفريغ سلة العميل بعد نجاح وتأكيد الدفع الإلكتروني
         await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, order.userId));
     });
@@ -181,6 +214,45 @@ async function recordFailedPayment({ orderId, gateway, transactionId, gatewayOrd
             }
         }
     });
+    try {
+        const claimed = await (0, orderNotificationCron_1.claimPaymentIssueNotification)(order.id, "payment_failed", "payment_failed");
+        if (!claimed) {
+            console.log(`[RecordFailedPayment]: Order ${order.orderNumber} already claimed or not eligible for payment issue notification.`);
+            return { success: true };
+        }
+        const [customer] = await connection_1.db
+            .select({ name: schema_1.users.name })
+            .from(schema_1.users)
+            .where((0, drizzle_orm_1.eq)(schema_1.users.id, order.userId))
+            .limit(1);
+        const customerName = customer?.name || "Customer";
+        const issueBodyAr = `فشلت عملية الدفع بالفيزا للطلب رقم ${order.orderNumber} (العميل: ${customerName}). تواصل مع العميل.`;
+        const issueBodyEn = `Card payment failed for order ${order.orderNumber}. Contact the customer.`;
+        try {
+            await (0, notifications_1.sendPushNotification)({
+                recipientType: "restaurant",
+                recipientId: order.restaurantId,
+                branchId: order.branchId || null,
+                title: "فشل دفع الطلب",
+                body: issueBodyAr,
+                data: {
+                    type: "payment_issue",
+                    issueType: "payment_failed",
+                    orderId: order.id,
+                    orderNumber: order.orderNumber,
+                    restaurantId: order.restaurantId,
+                },
+            });
+            console.log(`[RecordFailedPayment]: Order ${order.orderNumber} payment failure notification sent.`);
+        }
+        catch (notificationError) {
+            await (0, orderNotificationCron_1.releasePaymentIssueNotificationClaim)(order.id, "payment_failed");
+            console.error(`[RecordFailedPayment]: Failed to send payment failure notification for order ${order.orderNumber}:`, notificationError);
+        }
+    }
+    catch (error) {
+        console.error(`[RecordFailedPayment]: Failed to process payment failure notification for order ${order.orderNumber}:`, error);
+    }
     console.log(`[RecordFailedPayment]: Order ${order.orderNumber} marked as FAILED. Reason: ${failureReason}`);
     return { success: true };
 }

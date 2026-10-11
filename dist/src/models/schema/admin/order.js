@@ -49,10 +49,11 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     discountAmount: (0, mysql_core_1.decimal)("discount_amount", { precision: 10, scale: 2 }).default("0.00"),
     discountType: (0, mysql_core_1.mysqlEnum)("discount_type", ["percentage", "fixed_amount"]),
     discountValue: (0, mysql_core_1.decimal)("discount_value", { precision: 10, scale: 2 }),
-    discountSource: (0, mysql_core_1.mysqlEnum)("discount_source", ["food_level", "restaurant_discount", "global_discount", "coupon"]),
+    discountSource: (0, mysql_core_1.mysqlEnum)("discount_source", ["food_level", "restaurant_discount", "global_discount", "coupon", "first_order_discount"]),
     couponId: (0, mysql_core_1.char)("coupon_id", { length: 36 })
         .references(() => schema_1.coupons.id, { onDelete: "set null" }),
     couponCode: (0, mysql_core_1.varchar)("coupon_code", { length: 50 }),
+    firstOrderDiscountId: (0, mysql_core_1.char)("first_order_discount_id", { length: 36 }),
     // ---------------------------------
     totalAmount: (0, mysql_core_1.decimal)("total_amount", { precision: 10, scale: 2 }).notNull(),
     status: (0, mysql_core_1.mysqlEnum)("status", [

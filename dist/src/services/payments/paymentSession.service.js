@@ -62,6 +62,7 @@ async function createOrderPaymentSession(params) {
             });
             return {
                 gateway: "KASHIER",
+                gatewayType: "CUSTOM",
                 type: "redirect",
                 sessionId: kashierSession.sessionId,
                 sessionUrl: kashierSession.sessionUrl,
@@ -115,6 +116,7 @@ async function createOrderPaymentSession(params) {
                 .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
             return {
                 gateway: "PAYMOB",
+                gatewayType: "CUSTOM",
                 type: "redirect",
                 sessionId: paymobSession.sessionId,
                 sessionUrl: paymobSession.sessionUrl,
@@ -160,6 +162,7 @@ async function createOrderPaymentSession(params) {
                 .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
             return {
                 gateway: "GEIDEA",
+                gatewayType: "CUSTOM",
                 type: "redirect",
                 sessionId: geideaSession.sessionId,
                 sessionUrl: geideaSession.sessionUrl,
@@ -186,6 +189,7 @@ async function createOrderPaymentSession(params) {
         });
         return {
             gateway: "KASHIER",
+            gatewayType: "SYSTEM",
             type: "redirect",
             sessionId: kashierSession.sessionId,
             sessionUrl: kashierSession.sessionUrl,

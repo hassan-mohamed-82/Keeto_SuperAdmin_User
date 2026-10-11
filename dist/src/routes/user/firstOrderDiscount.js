@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const catchAsync_1 = require("../../utils/catchAsync");
+const firstOrderDiscount_1 = require("../../controllers/user/firstOrderDiscount");
+const validation_1 = require("../../middlewares/validation");
+const firstOrderDiscount_2 = require("../../validation/user/firstOrderDiscount");
+const router = (0, express_1.Router)();
+router.get("/check", (0, validation_1.validate)(firstOrderDiscount_2.checkFirstOrderDiscountQuerySchema, "query"), (0, catchAsync_1.catchAsync)(firstOrderDiscount_1.checkFirstOrderDiscount));
+router.get("/available", (0, catchAsync_1.catchAsync)(firstOrderDiscount_1.getAvailableFirstOrderDiscounts));
+exports.default = router;

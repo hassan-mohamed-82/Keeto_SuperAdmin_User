@@ -16,6 +16,8 @@ exports.freeDeliveryOffers = (0, mysql_core_1.mysqlTable)("free_delivery_offers"
     minOrderAmount: (0, mysql_core_1.decimal)("min_order_amount", { precision: 10, scale: 2 })
         .default("0.00")
         .notNull(),
+    // Maximum number of orders a user can take with free delivery (null = unlimited)
+    maxOrdersPerUser: (0, mysql_core_1.int)("max_orders_per_user"),
     startDate: (0, mysql_core_1.timestamp)("start_date"),
     endDate: (0, mysql_core_1.timestamp)("end_date"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),

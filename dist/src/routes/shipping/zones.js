@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const zones_1 = require("../../controllers/shipping/zones");
+const catchAsync_1 = require("../../utils/catchAsync");
+const validation_1 = require("../../middlewares/validation");
+const zone_1 = require("../../validation/shipping/zone");
+const authenticated_1 = require("../../middlewares/authenticated");
+const router = (0, express_1.Router)();
+router.use(authenticated_1.authenticated);
+router.post("/", (0, validation_1.validate)(zone_1.createShippingZoneSchema), (0, catchAsync_1.catchAsync)(zones_1.createZone));
+router.get("/", (0, catchAsync_1.catchAsync)(zones_1.getZones));
+router.get("/:id", (0, catchAsync_1.catchAsync)(zones_1.getZoneById));
+router.put("/:id", (0, validation_1.validate)(zone_1.updateShippingZoneSchema), (0, catchAsync_1.catchAsync)(zones_1.updateZone));
+router.delete("/:id", (0, catchAsync_1.catchAsync)(zones_1.deleteZone));
+exports.default = router;

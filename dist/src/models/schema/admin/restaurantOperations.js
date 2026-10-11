@@ -25,6 +25,7 @@ exports.restaurantOperations = (0, mysql_core_1.mysqlTable)("restaurant_operatio
         "social media",
     ]),
     app: (0, mysql_core_1.mysqlEnum)("app", ["on", "off"]),
+    // Old rows may still contain plain strings; they are upgraded on read/write.
     notes: (0, mysql_core_1.json)("notes").$type().notNull().default([]),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
