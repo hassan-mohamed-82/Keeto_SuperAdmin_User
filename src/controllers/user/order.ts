@@ -1148,7 +1148,26 @@ export const checkout = async (req: Request | any, res: Response) => {
             const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= nowForOffer;
             const minAmountOk = !freeDeliveryOffer.minOrderAmount || subtotal >= parseFloat(freeDeliveryOffer.minOrderAmount as string);
 
-            if (startOk && endOk && minAmountOk) {
+            // Check maxOrdersPerUser: count completed orders user has at this restaurant
+            let userLimitOk = true;
+            if (freeDeliveryOffer.maxOrdersPerUser && freeDeliveryOffer.maxOrdersPerUser > 0) {
+                const [userOrdersRow] = await db
+                    .select({ cnt: sql<number>`count(*)` })
+                    .from(orders)
+                    .where(
+                        and(
+                            eq(orders.userId, userId),
+                            eq(orders.restaurantId, restaurantId),
+                            sql`${orders.status} NOT IN ('cancelled', 'failed')`
+                        )
+                    );
+                const userOrderCount = Number(userOrdersRow?.cnt ?? 0);
+                if (userOrderCount >= freeDeliveryOffer.maxOrdersPerUser) {
+                    userLimitOk = false;
+                }
+            }
+
+            if (startOk && endOk && minAmountOk && userLimitOk) {
                 deliveryFee = 0;
                 isFreeDelivery = true;
             }

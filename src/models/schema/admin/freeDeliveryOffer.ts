@@ -3,7 +3,8 @@ import {
     char,
     decimal,
     timestamp,
-    mysqlEnum
+    mysqlEnum,
+    int
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
@@ -23,6 +24,9 @@ export const freeDeliveryOffers = mysqlTable("free_delivery_offers", {
     minOrderAmount: decimal("min_order_amount", { precision: 10, scale: 2 })
         .default("0.00")
         .notNull(),
+
+    // Maximum number of orders a user can take with free delivery (null = unlimited)
+    maxOrdersPerUser: int("max_orders_per_user"),
 
     startDate: timestamp("start_date"),
     endDate: timestamp("end_date"),

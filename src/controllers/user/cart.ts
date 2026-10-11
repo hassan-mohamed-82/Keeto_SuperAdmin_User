@@ -40,9 +40,10 @@ import {
     branchSubcategories,
     offers,
     offerFoods,
+    orders,
 } from "../../models/schema";
 
-import { eq, and, inArray, isNull } from "drizzle-orm";
+import { eq, and, inArray, isNull, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
@@ -1030,13 +1031,33 @@ export const getCart = async (req: Request | any, res: Response) => {
         const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= now;
         const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= now;
         if (startOk && endOk) {
-            const minAmount = parseFloat(freeDeliveryOffer.minOrderAmount as string || "0");
-            const isEligible = finalSubtotal >= minAmount;
-            freeDeliveryInfo = {
-                isEligible,
-                minOrderAmount: minAmount,
-                remainingAmount: isEligible ? 0 : parseFloat((minAmount - finalSubtotal).toFixed(2)),
-            };
+            let userLimitOk = true;
+            if (userId && freeDeliveryOffer.maxOrdersPerUser && freeDeliveryOffer.maxOrdersPerUser > 0) {
+                const [userOrdersRow] = await db
+                    .select({ cnt: sql<number>`count(*)` })
+                    .from(orders)
+                    .where(
+                        and(
+                            eq(orders.userId, userId),
+                            eq(orders.restaurantId, restaurantId!),
+                            sql`${orders.status} NOT IN ('cancelled', 'failed')`
+                        )
+                    );
+                const userOrderCount = Number(userOrdersRow?.cnt ?? 0);
+                if (userOrderCount >= freeDeliveryOffer.maxOrdersPerUser) {
+                    userLimitOk = false;
+                }
+            }
+
+            if (userLimitOk) {
+                const minAmount = parseFloat(freeDeliveryOffer.minOrderAmount as string || "0");
+                const isEligible = finalSubtotal >= minAmount;
+                freeDeliveryInfo = {
+                    isEligible,
+                    minOrderAmount: minAmount,
+                    remainingAmount: isEligible ? 0 : parseFloat((minAmount - finalSubtotal).toFixed(2)),
+                };
+            }
         }
     }
 
