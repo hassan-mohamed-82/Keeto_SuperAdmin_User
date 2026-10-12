@@ -644,6 +644,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         cover: restaurants.cover,
         slug: restaurants.slug,
         status: restaurants.status,
+        isBusy: restaurantSettings.isBusy,
         type: restaurants.type, // 👈 استرجاع النوع
         salesId: restaurants.salesId, // 👈 استرجاع المندوب
         ownerposition: restaurants.ownerposition, // 👈 استرجاع منصب المالك
@@ -716,6 +717,8 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             cover: r.cover,
             slug: r.slug,
             status: r.status,
+            isBusy: Boolean(r.isBusy),
+            busyStatus: r.isBusy ? "busy" : "available",
             type: r.type,
             salesId: r.salesId,
             ownerposition: r.ownerposition,
@@ -974,6 +977,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (taxExpireDate !== undefined) restaurantUpdateData.taxExpireDate = taxExpireDate;
     if (taxCertificate !== undefined) restaurantUpdateData.taxCertificate = taxCertificate;
     if (status) restaurantUpdateData.status = status;
+    const isBusyInput = req.body.isBusy !== undefined ? req.body.isBusy : req.body.busy;
     if (likes !== undefined) restaurantUpdateData.likes = Number(likes);
     if (facebookLink !== undefined) restaurantUpdateData.facebookLink = (facebookLink === "" || facebookLink === null) ? null : facebookLink.trim();
     if (orderLink !== undefined) restaurantUpdateData.orderLink = (orderLink === "" || orderLink === null) ? null : orderLink.trim();
@@ -1011,9 +1015,10 @@ export const updateRestaurant = async (req: Request, res: Response) => {
             firstColor !== undefined || secondColor !== undefined ||
             firstTextColor !== undefined || secondTextColor !== undefined ||
             resolvedPaymentGatewayType !== undefined || resolvedEnableOnlinePayment !== undefined ||
-            resolvedVisaSwitchType !== undefined
+            resolvedVisaSwitchType !== undefined || isBusyInput !== undefined
         ) {
             const settingsUpdateData: any = {};
+            if (isBusyInput !== undefined) settingsUpdateData.isBusy = isBusyInput === true || isBusyInput === "true" || isBusyInput === "busy";
             if (firstColor !== undefined) settingsUpdateData.firstColor = (firstColor === "" || firstColor === null) ? null : clean(firstColor);
             if (secondColor !== undefined) settingsUpdateData.secondColor = (secondColor === "" || secondColor === null) ? null : clean(secondColor);
             if (firstTextColor !== undefined) settingsUpdateData.firstTextColor = (firstTextColor === "" || firstTextColor === null) ? null : clean(firstTextColor);

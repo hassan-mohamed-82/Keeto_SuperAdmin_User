@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { restaurants, favorites, userAddHome, restaurantSchedules, restaurantSettings, branches, cities, zones } from "../../models/schema"; 
-import { eq, like, or, and, sql, getTableColumns } from "drizzle-orm";
+import { eq, like, or, and, sql, getTableColumns, isNull } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound, BadRequest, UnauthorizedError } from "../../Errors";
 
@@ -12,6 +12,8 @@ const cleanRestaurantResult = (row: any) => {
         ...safe,
         isFavorite: !!row.isFavorite,
         isAddHome: !!row.isAddHome,
+        isBusy: !!row.isBusy,
+        busyStatus: row.isBusy ? "busy" : "available",
     };
 };
 
@@ -31,7 +33,8 @@ export const searchRestaurants = async (req: Request, res: Response) => {
     .select({
         ...getTableColumns(restaurants),
         isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
-        isAddHome: sql<boolean>`CASE WHEN ${userAddHome.id} IS NOT NULL THEN true ELSE false END`.as('isAddHome')
+        isAddHome: sql<boolean>`CASE WHEN ${userAddHome.id} IS NOT NULL THEN true ELSE false END`.as('isAddHome'),
+        isBusy: sql<boolean>`CASE WHEN ${restaurantSettings.isBusy} = true THEN true ELSE false END`.as('isBusy')
     })
     .from(restaurants)
     .leftJoin(
@@ -48,13 +51,20 @@ export const searchRestaurants = async (req: Request, res: Response) => {
                 eq(userAddHome.userId, userId)
             )
         )
-        .where(
+    .leftJoin(
+        restaurantSettings,
+        eq(restaurantSettings.restaurantId, restaurants.id)
+    )
+    .where(
+        and(
+            eq(restaurants.status, "active"),
             or(
                 like(restaurants.name, searchTerm),
                 like(restaurants.nameAr, searchTerm),
                 like(restaurants.nameFr, searchTerm)
             )
-        );
+        )
+    );
     return SuccessResponse(res, { message: "Search results", data: results.map(cleanRestaurantResult) });
 }; 
 
@@ -81,7 +91,7 @@ export const toggleAddHome = async (req: Request, res: Response) => {
         throw new NotFound("Restaurant not found");
     }
 
-    if (addhome) {
+    if (addhome) {     
         // Insert into userAddHome if not exists
         const existing = await db
             .select()
@@ -123,7 +133,8 @@ export const getHomeRestaurants = async (req: Request, res: Response) => {
         .select({
             ...getTableColumns(restaurants),
             isFavorite: sql<boolean>`CASE WHEN ${favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
-            isAddHome: sql<boolean>`true`.as('isAddHome')
+            isAddHome: sql<boolean>`true`.as('isAddHome'),
+            isBusy: sql<boolean>`CASE WHEN ${restaurantSettings.isBusy} = true THEN true ELSE false END`.as('isBusy')
         })
         .from(userAddHome)
         .innerJoin(restaurants, eq(userAddHome.restaurantId, restaurants.id))
@@ -133,6 +144,10 @@ export const getHomeRestaurants = async (req: Request, res: Response) => {
                 eq(favorites.restaurantId, restaurants.id),
                 eq(favorites.userId, userId)
             )
+        )
+        .leftJoin(
+            restaurantSettings,
+            eq(restaurantSettings.restaurantId, restaurants.id)
         )
         .where(eq(userAddHome.userId, userId));
 
@@ -167,7 +182,8 @@ export const getResturantSchedules = async (req: Request, res: Response) => {
         .limit(1);
 
     // 3. حساب الحالة الحالية للمطعم بتوقيت القاهرة
-    const status = calculateCurrentStatus(settings, schedules);
+    const isBusy = Boolean(settings?.isBusy);
+    const status = calculateCurrentStatus(settings, schedules, isBusy);
 
     // 4. إرجاع كل البيانات للفرونت إند جاهزة
     return SuccessResponse(res, { 
@@ -177,6 +193,8 @@ export const getResturantSchedules = async (req: Request, res: Response) => {
             canDeliveryNow: status.canDeliveryNow,
             canTakeawayNow: status.canTakeawayNow,
             canDineInNow: status.canDineInNow,
+            isBusy,
+            busyStatus: isBusy ? "busy" : "available",
             reason: status.reason,
             // settings: settings || null,
             // schedules: schedules
@@ -187,13 +205,23 @@ export const getResturantSchedules = async (req: Request, res: Response) => {
 // =========================================================================
 // 🛠️ الفانكشن الذكية لحساب حالة المطعم (تستخدم للـ API وللـ Validation)
 // =========================================================================
-export function calculateCurrentStatus(settings: any, schedules: any[]) {
+export function calculateCurrentStatus(settings: any, schedules: any[], isBusy?: boolean) {
+    if (isBusy) {
+        return { 
+            isOpenNow: false, 
+            canDeliveryNow: false, 
+            canTakeawayNow: false, 
+            canDineInNow: false, 
+            reason: "Restaurant is currently busy and not accepting orders" 
+        };
+    }
+
     // 🛑 1. الحماية الافتراضية (Secure by Default): لو مفيش إعدادات، المطعم مقفول
     const defaultStatus = { 
         isOpenNow: false, 
         canDeliveryNow: false, 
         canTakeawayNow: false, 
-        canDineInNow: false,
+        canDineInNow: false, 
         reason: "Restaurant configurations are incomplete" 
     };
     if (!settings) return defaultStatus;
@@ -204,7 +232,7 @@ export function calculateCurrentStatus(settings: any, schedules: any[]) {
             isOpenNow: false, 
             canDeliveryNow: false, 
             canTakeawayNow: false, 
-            canDineInNow: false,
+            canDineInNow: false, 
             reason: "Restaurant is temporarily not accepting orders due to high volume" 
         };
     }

@@ -52,6 +52,7 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   isSameTimeEveryDay: boolean("is_same_time_every_day").default(false),
 
   isTemporarilyClosed: boolean("is_temporarily_closed").default(false),
+  isBusy: boolean("is_busy").default(false),
 
   repeatNotification: boolean("repeat_notification").default(false),
   repeatNotificationDuration: int("repeat_notification_duration").default(20),

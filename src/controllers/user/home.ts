@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory, subcategories, branchSubcategories, branches } from "../../models/schema";
+import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory, subcategories, branchSubcategories, branches, restaurantSettings } from "../../models/schema";
 import { eq, and, like, or, sql, isNull, isNotNull, inArray } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
@@ -67,7 +67,11 @@ export const getHomeScreen = async (req: Request, res: Response) => {
         addressFr: restaurants.addressFr,
         minDeliveryTime: restaurants.minDeliveryTime,
         callcenterphone: restaurants.callcenterphone,
-    }).from(restaurants).where(eq(restaurants.status, "active"));
+        isBusy: sql<boolean>`CASE WHEN ${restaurantSettings.isBusy} = true THEN true ELSE false END`.as('isBusy'),
+    })
+    .from(restaurants)
+    .leftJoin(restaurantSettings, eq(restaurantSettings.restaurantId, restaurants.id))
+    .where(eq(restaurants.status, "active"));
 
     const popularRestaurants = restaurantsData.map(r => ({
         ...r,
@@ -104,10 +108,14 @@ export const getRestaurantsByCuisine = async (req: Request, res: Response) => {
         addressFr: restaurants.addressFr,
         minDeliveryTime: restaurants.minDeliveryTime,
         callcenterphone: restaurants.callcenterphone,
-    }).from(restaurants)
-        .where(and(
-            sql`JSON_CONTAINS(${restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`
-        ));
+        isBusy: sql<boolean>`CASE WHEN ${restaurantSettings.isBusy} = true THEN true ELSE false END`.as('isBusy'),
+    })
+    .from(restaurants)
+    .leftJoin(restaurantSettings, eq(restaurantSettings.restaurantId, restaurants.id))
+    .where(and(
+        eq(restaurants.status, "active"),
+        sql`JSON_CONTAINS(${restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`
+    ));
 
     const result = data.map(r => ({
         ...r,
@@ -279,9 +287,18 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
         throw new Error("Restaurant not found");
     }
 
+    const [settings] = await db
+        .select({ isBusy: restaurantSettings.isBusy })
+        .from(restaurantSettings)
+        .where(eq(restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+
+    const isBusy = Boolean(settings?.isBusy);
     const restaurantWithFav = {
         ...restaurantInfo,
         isFavorite: userId ? favoriteRestaurantIds.has(restaurantId) : false,
+        isBusy,
+        busyStatus: isBusy ? "busy" : "available",
     };
 
     // 3. Fetch Active Foods and Categories
