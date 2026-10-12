@@ -53,6 +53,7 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
 
   isTemporarilyClosed: boolean("is_temporarily_closed").default(false),
   isBusy: boolean("is_busy").default(false),
+  cashEnabled: boolean("cash_enabled").default(true),
 
   repeatNotification: boolean("repeat_notification").default(false),
   repeatNotificationDuration: int("repeat_notification_duration").default(20),

@@ -398,6 +398,11 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (resolvedOrderType === "delivery" && !status.canDeliveryNow) throw new BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) throw new BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
 
+    // 🛡️ Cash payment guard: reject CASH orders if the restaurant has disabled cash
+    if (isCashPayment && settings?.cashEnabled === false) {
+        throw new BadRequest("Cash payment is not accepted by this restaurant. Please choose a different payment method.");
+    }
+
     let defaultPreparingDuration: number;
     if (resolvedOrderType === "takeaway") {
         defaultPreparingDuration = settings?.maxTakeAwayTime ?? 25;
@@ -1973,25 +1978,35 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                 )
             )
             .limit(1),
-        // 🛡️ جلب إعدادات المطعم لمعرفة هل الدفع الإلكتروني مفعّل أم لا
-        db.select({ enableOnlinePayment: restaurantSettings.enableOnlinePayment })
+        // 🛡️ جلب إعدادات المطعم لمعرفة هل الدفع الإلكتروني و الكاش مفعلين أم لا
+        db.select({ enableOnlinePayment: restaurantSettings.enableOnlinePayment, cashEnabled: restaurantSettings.cashEnabled })
             .from(restaurantSettings)
             .where(eq(restaurantSettings.restaurantId, restaurantId))
             .limit(1)
     ]);
 
-    // 🛡️ تحقق من إعداد الدفع الإلكتروني للمطعم
+    // 🛡️ تحقق من إعداد الدفع الإلكتروني والكاش للمطعم
     const enableOnlinePayment = restaurantSettingsRows[0]?.enableOnlinePayment ?? true;
+    const cashEnabled = restaurantSettingsRows[0]?.cashEnabled ?? true;
 
     // إذا كان الدفع الإلكتروني معطلاً للمطعم، نحذف طريقة الدفع بالفيزا من القائمة
-    const activePaymentMethods = enableOnlinePayment
-        ? allActivePaymentMethods
-        : allActivePaymentMethods.filter((pm) => {
-            const name = pm.name?.toLowerCase() ?? "";
-            const nameAr = pm.nameAr ?? "";
-            // Visa / card payment methods are the online-only ones
-            return name !== "visa" && name !== "card" && nameAr !== "بطاقة";
-          });
+    // إذا كان الكاش معطلاً للمطعم، نحذف طريقة الكاش من القائمة
+    const activePaymentMethods = allActivePaymentMethods.filter((pm) => {
+        const name = pm.name?.toLowerCase() ?? "";
+        const nameAr = pm.nameAr ?? "";
+
+        // Remove Visa/card if online payment is disabled
+        if (!enableOnlinePayment && (name === "visa" || name === "card" || nameAr === "بطاقة")) {
+            return false;
+        }
+
+        // Remove cash if cash is disabled
+        if (!cashEnabled && (name === "cash" || name === "cash_on_delivery" || nameAr === "الدفع عند الاستلام")) {
+            return false;
+        }
+
+        return true;
+    });
 
     const plan = businessPlans[0];
     if (!plan) {
