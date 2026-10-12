@@ -29,8 +29,8 @@ router.post("/assign-existing", validate(assignExistingDeliveryManSchema), catch
 router.get("/", catchAsync(getDeliveryMen));
 router.get("/:id", catchAsync(getDeliveryManById));
 router.put("/:id", validate(updateDeliveryManSchema), catchAsync(updateDeliveryMan));
-router.patch("/:id/shift", validate(toggleDeliveryShiftSchema), catchAsync(toggleShift));
-router.patch("/:id/location", validate(updateDeliveryLocationSchema), catchAsync(updateLocation));
+router.put("/:id/shift", validate(toggleDeliveryShiftSchema), catchAsync(toggleShift));
+router.put("/:id/location", validate(updateDeliveryLocationSchema), catchAsync(updateLocation));
 router.delete("/:id", catchAsync(unassignOrDeleteDeliveryMan));
 
 export default router;

@@ -3,7 +3,7 @@ import { db } from "../../models/connection";
 import { shippingCompanies } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { BadRequest, UnauthorizedError, NotFound } from "../../Errors";
+import { UnauthorizedError, NotFound } from "../../Errors";
 import bcrypt from "bcrypt";
 import { generateShippingCompanyToken } from "../../utils/jwt";
 
