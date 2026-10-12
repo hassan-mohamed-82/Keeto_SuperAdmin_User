@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { deliveryMen, shippingCompanies } from "../../models/schema";
+import { deliveryMen, shippingCompanies, restaurants, branches } from "../../models/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
@@ -211,8 +211,31 @@ export async function getDeliveryManById(req: Request, res: Response) {
             currentLng: deliveryMen.currentLng,
             lastLocationUpdate: deliveryMen.lastLocationUpdate,
             createdAt: deliveryMen.createdAt,
+            shippingCompany: {
+                id: shippingCompanies.id,
+                name: shippingCompanies.name,
+                nameAr: shippingCompanies.nameAr,
+                logo: shippingCompanies.logo,
+                phone: shippingCompanies.phone,
+                email: shippingCompanies.email,
+                address: shippingCompanies.address,
+            },
+            restaurant: {
+                id: restaurants.id,
+                name: restaurants.name,
+                nameAr: restaurants.nameAr,
+                logo: restaurants.logo,
+            },
+            branch: {
+                id: branches.id,
+                name: branches.name,
+                nameAr: branches.nameAr,
+            },
         })
         .from(deliveryMen)
+        .innerJoin(shippingCompanies, eq(deliveryMen.shippingCompanyId, shippingCompanies.id))
+        .innerJoin(restaurants, eq(deliveryMen.restaurantId, restaurants.id))
+        .innerJoin(branches, eq(deliveryMen.branchId, branches.id))
         .where(
             and(
                 eq(deliveryMen.id, id),
