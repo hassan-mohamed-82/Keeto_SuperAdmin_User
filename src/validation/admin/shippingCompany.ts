@@ -23,6 +23,11 @@ export const createShippingCompanySchema = z.object({
     address: z.string().optional(),
     logo: z.string().max(500).optional(),
     status: z.enum(["active", "inactive"]).optional().default("active"),
+    maxSearchRadius: z.number().int().min(1).max(50).default(10),
+    maxActiveOrders: z.number().int().min(1).max(10).default(3),
+    maxAttempts: z.number().int().min(1).max(10).default(3),
+    commissionType: z.enum(["percentage", "fixed"]).default("percentage"),
+    commissionValue: z.number().min(0).default(0),
     restaurantIds: restaurantIdsValidator,
 });
 
@@ -35,6 +40,11 @@ export const updateShippingCompanySchema = z.object({
     address: z.string().optional(),
     logo: z.string().max(500).optional(),
     status: z.enum(["active", "inactive"]).optional(),
+    maxSearchRadius: z.number().int().min(1).max(50).optional(),
+    maxActiveOrders: z.number().int().min(1).max(10).optional(),
+    maxAttempts: z.number().int().min(1).max(10).optional(),
+    commissionType: z.enum(["percentage", "fixed"]).optional(),
+    commissionValue: z.number().min(0).optional(),
     restaurantIds: restaurantIdsValidator,
 });
 

@@ -1,17 +1,64 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { deliveryMen, shippingCompanies, restaurants, branches } from "../../models/schema";
-import { eq, and, sql } from "drizzle-orm";
+import {
+    deliveryMen,
+    shippingCompanies,
+    restaurants,
+    branches,
+    deliveryManZones,
+    deliveryManShifts,
+    shippingZones,
+    restaurantSettings,
+} from "../../models/schema";
+import { eq, and, sql, inArray, isNull } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
+import { BadRequest, NotFound, UnauthorizedError, ConflictError } from "../../Errors";
 import bcrypt from "bcrypt";
 import { notifyShippingCompany } from "../../services/socket/socketService";
+import { removeCourierFromRedis } from "../../services/shipping/dispatchEngine";
+import { catchAsync } from "../../utils/catchAsync";
+
+// =========================================================================
+// 0. عرض المناديب الأحرار المتاحين للربط بشركة الشحن (Available Free Couriers)
+// =========================================================================
+export const getAvailableCouriers = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
+
+    if (!companyId) {
+        throw new UnauthorizedError("Unauthorized access");
+    }
+
+    // Must be NOT linked to any shipping company, NOT linked to any restaurant, active, and not deleted
+    const availableCouriers = await db
+        .select({
+            id: deliveryMen.id,
+            name: deliveryMen.name,
+            phone: deliveryMen.phone,
+            email: deliveryMen.email,
+            image: deliveryMen.image,
+            createdAt: deliveryMen.createdAt,
+        })
+        .from(deliveryMen)
+        .where(
+            and(
+                isNull(deliveryMen.shippingCompanyId),
+                isNull(deliveryMen.restaurantId),
+                eq(deliveryMen.isActive, true),
+                eq(deliveryMen.isDeleted, false)
+            )
+        );
+
+    return SuccessResponse(res, {
+        message: "Available couriers retrieved successfully",
+        data: availableCouriers,
+    });
+});
 
 // =========================================================================
 // 1. إنشاء مندوب توصيل جديد تابع لشركة الشحن (Create Outsource Delivery Man)
 // =========================================================================
-export async function createDeliveryMan(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+export const createDeliveryMan = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
@@ -23,20 +70,21 @@ export async function createDeliveryMan(req: Request, res: Response) {
         email,
         password,
         image,
-        deliveryType = "outsource",
-        shiftStatus = "inactive",
-        branchId,
+        workType = "outsource",
+        allZones = true,
+        zoneIds,
         restaurantId,
+        branchId,
     } = req.body;
 
-    // فحص رقم الهاتف أو البريد
-    const existing = await db
+    // فحص رقم الهاتف
+    const [existing] = await db
         .select({ id: deliveryMen.id })
         .from(deliveryMen)
         .where(eq(deliveryMen.phone, phone))
         .limit(1);
 
-    if (existing.length > 0) {
+    if (existing) {
         throw new BadRequest("Phone number is already registered for another delivery man");
     }
 
@@ -45,87 +93,133 @@ export async function createDeliveryMan(req: Request, res: Response) {
         hashedPassword = await bcrypt.hash(password, 10);
     }
 
-    const [insertResult] = await db.insert(deliveryMen).values({
-        shippingCompanyId: companyId,
-        restaurantId: restaurantId || null,
-        branchId: branchId || null,
-        name,
-        phone,
-        email,
-        password: hashedPassword,
-        image,
-        deliveryType,
-        shiftStatus,
-        isOnline: false,
-        isAvailable: true,
-        isActive: true,
+    let createdId = "";
+
+    await db.transaction(async (tx) => {
+        // Always deliveryType = 'outsource' per D4
+        const [insertResult] = await tx.insert(deliveryMen).values({
+            shippingCompanyId: companyId,
+            restaurantId: restaurantId || null,
+            branchId: branchId || null,
+            name,
+            phone,
+            email,
+            password: hashedPassword,
+            image,
+            deliveryType: "outsource",
+            workType,
+            allZones: Boolean(allZones),
+            shiftStatus: "inactive",
+            isOnline: false,
+            isAvailable: true,
+            isActive: true,
+        });
+
+        const [created] = await tx
+            .select({ id: deliveryMen.id })
+            .from(deliveryMen)
+            .where(eq(deliveryMen.phone, phone))
+            .limit(1);
+
+        createdId = created.id;
+
+        // If not allZones, attach specific zones
+        if (!allZones && Array.isArray(zoneIds) && zoneIds.length > 0) {
+            for (const zId of zoneIds) {
+                await tx.insert(deliveryManZones).values({
+                    deliveryManId: createdId,
+                    zoneId: zId,
+                });
+            }
+        }
     });
 
-    const newDeliveryMan = await db
-        .select({
-            id: deliveryMen.id,
-            name: deliveryMen.name,
-            phone: deliveryMen.phone,
-            email: deliveryMen.email,
-            image: deliveryMen.image,
-            deliveryType: deliveryMen.deliveryType,
-            shiftStatus: deliveryMen.shiftStatus,
-            isOnline: deliveryMen.isOnline,
-            isAvailable: deliveryMen.isAvailable,
-            isActive: deliveryMen.isActive,
-            shippingCompanyId: deliveryMen.shippingCompanyId,
-            createdAt: deliveryMen.createdAt,
-        })
+    const [newDeliveryMan] = await db
+        .select()
         .from(deliveryMen)
-        .where(eq(deliveryMen.phone, phone))
+        .where(eq(deliveryMen.id, createdId))
         .limit(1);
+
+    const { password: _, ...dmData } = newDeliveryMan;
 
     return SuccessResponse(res, {
         message: "Delivery man created and assigned to shipping company successfully",
-        data: newDeliveryMan[0],
+        data: dmData,
     }, 201);
-}
+});
 
 // =========================================================================
-// 2. إسناد مندوب توصيل حالي لشركة الشحن (Assign Existing Delivery Man)
+// 2. إسناد مندوب توصيل حالي لشركة الشحن (Assign Existing FREE Delivery Man)
 // =========================================================================
-export async function assignExistingDeliveryMan(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
-    const { deliveryManId, deliveryType = "outsource" } = req.body;
+export const assignExistingDeliveryMan = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
+    const { deliveryManId, workType = "outsource", allZones = true, zoneIds } = req.body;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
     }
 
-    const dm = await db
-        .select({ id: deliveryMen.id, name: deliveryMen.name })
+    const [dm] = await db
+        .select()
         .from(deliveryMen)
         .where(eq(deliveryMen.id, deliveryManId))
         .limit(1);
 
-    if (dm.length === 0) {
+    if (!dm) {
         throw new NotFound("Delivery man not found");
     }
 
-    await db
-        .update(deliveryMen)
-        .set({
-            shippingCompanyId: companyId,
-            deliveryType,
-        })
-        .where(eq(deliveryMen.id, deliveryManId));
+    // Security check: Must be active and not deleted
+    if (dm.isDeleted || !dm.isActive) {
+        throw new BadRequest("Cannot assign an inactive or deleted courier");
+    }
+
+    // Security check: Cannot take a restaurant-owned courier
+    if (dm.restaurantId) {
+        throw new BadRequest("Cannot assign a delivery man who is assigned to a restaurant");
+    }
+
+    // Security check: Cannot take a courier assigned to another company
+    if (dm.shippingCompanyId && dm.shippingCompanyId !== companyId) {
+        throw new BadRequest("Courier is already assigned to another shipping company");
+    }
+
+    await db.transaction(async (tx) => {
+        await tx
+            .update(deliveryMen)
+            .set({
+                shippingCompanyId: companyId,
+                deliveryType: "outsource",
+                workType,
+                allZones: Boolean(allZones),
+            })
+            .where(eq(deliveryMen.id, deliveryManId));
+
+        if (!allZones && Array.isArray(zoneIds) && zoneIds.length > 0) {
+            await tx
+                .delete(deliveryManZones)
+                .where(eq(deliveryManZones.deliveryManId, deliveryManId));
+
+            for (const zId of zoneIds) {
+                await tx.insert(deliveryManZones).values({
+                    deliveryManId,
+                    zoneId: zId,
+                });
+            }
+        }
+    });
 
     return SuccessResponse(res, {
-        message: `Delivery man ${dm[0].name} has been assigned to shipping company successfully`,
+        message: `Delivery man ${dm.name} has been assigned to shipping company successfully`,
     });
-}
+});
 
 // =========================================================================
 // 3. عرض قائمة مناديب التوصيل التابعين لشركة الشحن (Get Delivery Men)
 // =========================================================================
-export async function getDeliveryMen(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
-    const { shiftStatus, isOnline, isAvailable, search, deliveryType } = req.query;
+export const getDeliveryMen = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
+    const { shiftStatus, isOnline, isAvailable, search, workType } = req.query;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
@@ -140,8 +234,8 @@ export async function getDeliveryMen(req: Request, res: Response) {
         conditions.push(eq(deliveryMen.shiftStatus, shiftStatus as "active" | "inactive"));
     }
 
-    if (deliveryType) {
-        conditions.push(eq(deliveryMen.deliveryType, deliveryType as "restaurant" | "outsource"));
+    if (workType) {
+        conditions.push(eq(deliveryMen.workType, workType as "restaurant_shift" | "outsource"));
     }
 
     if (isOnline !== undefined) {
@@ -165,7 +259,9 @@ export async function getDeliveryMen(req: Request, res: Response) {
             phone: deliveryMen.phone,
             email: deliveryMen.email,
             image: deliveryMen.image,
-            deliveryType: deliveryMen.deliveryType,
+            workType: deliveryMen.workType,
+            allZones: deliveryMen.allZones,
+            activeOrdersCount: deliveryMen.activeOrdersCount,
             shiftStatus: deliveryMen.shiftStatus,
             isOnline: deliveryMen.isOnline,
             isAvailable: deliveryMen.isAvailable,
@@ -182,102 +278,98 @@ export async function getDeliveryMen(req: Request, res: Response) {
         message: "Delivery men retrieved successfully",
         data: list,
     });
-}
+});
 
 // =========================================================================
 // 4. تفاصيل مندوب توصيل محدد
 // =========================================================================
-export async function getDeliveryManById(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+export const getDeliveryManById = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
     const { id } = req.params;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
     }
 
-    const dm = await db
-        .select({
-            id: deliveryMen.id,
-            name: deliveryMen.name,
-            phone: deliveryMen.phone,
-            email: deliveryMen.email,
-            image: deliveryMen.image,
-            deliveryType: deliveryMen.deliveryType,
-            shiftStatus: deliveryMen.shiftStatus,
-            isOnline: deliveryMen.isOnline,
-            isAvailable: deliveryMen.isAvailable,
-            isActive: deliveryMen.isActive,
-            currentLat: deliveryMen.currentLat,
-            currentLng: deliveryMen.currentLng,
-            lastLocationUpdate: deliveryMen.lastLocationUpdate,
-            createdAt: deliveryMen.createdAt,
-            shippingCompany: {
-                id: shippingCompanies.id,
-                name: shippingCompanies.name,
-                nameAr: shippingCompanies.nameAr,
-                logo: shippingCompanies.logo,
-                phone: shippingCompanies.phone,
-                email: shippingCompanies.email,
-                address: shippingCompanies.address,
-            },
-            restaurant: {
-                id: restaurants.id,
-                name: restaurants.name,
-                nameAr: restaurants.nameAr,
-                logo: restaurants.logo,
-            },
-            branch: {
-                id: branches.id,
-                name: branches.name,
-                nameAr: branches.nameAr,
-            },
-        })
+    const [dm] = await db
+        .select()
         .from(deliveryMen)
-        .innerJoin(shippingCompanies, eq(deliveryMen.shippingCompanyId, shippingCompanies.id))
-        .innerJoin(restaurants, eq(deliveryMen.restaurantId, restaurants.id))
-        .innerJoin(branches, eq(deliveryMen.branchId, branches.id))
         .where(
             and(
                 eq(deliveryMen.id, id),
-                eq(deliveryMen.shippingCompanyId, companyId)
+                eq(deliveryMen.shippingCompanyId, companyId),
+                eq(deliveryMen.isDeleted, false)
             )
         )
         .limit(1);
 
-    if (dm.length === 0) {
+    if (!dm) {
         throw new NotFound("Delivery man not found or not assigned to this company");
     }
 
+    // Zones
+    const zones = await db
+        .select({
+            id: shippingZones.id,
+            name: shippingZones.name,
+            nameAr: shippingZones.nameAr,
+        })
+        .from(deliveryManZones)
+        .innerJoin(shippingZones, eq(deliveryManZones.zoneId, shippingZones.id))
+        .where(eq(deliveryManZones.deliveryManId, id));
+
+    // Shifts
+    const shifts = await db
+        .select({
+            id: deliveryManShifts.id,
+            restaurantId: deliveryManShifts.restaurantId,
+            restaurantName: restaurants.name,
+            dayOfWeek: deliveryManShifts.dayOfWeek,
+            from: deliveryManShifts.from,
+            to: deliveryManShifts.to,
+            status: deliveryManShifts.status,
+        })
+        .from(deliveryManShifts)
+        .innerJoin(restaurants, eq(deliveryManShifts.restaurantId, restaurants.id))
+        .where(eq(deliveryManShifts.deliveryManId, id));
+
+    const { password: _, ...dmData } = dm;
+
     return SuccessResponse(res, {
         message: "Delivery man details retrieved successfully",
-        data: dm[0],
+        data: {
+            ...dmData,
+            zones,
+            shifts,
+        },
     });
-}
+});
 
 // =========================================================================
 // 5. تعديل بيانات المندوب (Update Delivery Man)
 // =========================================================================
-export async function updateDeliveryMan(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+export const updateDeliveryMan = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
     const { id } = req.params;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
     }
 
-    const dm = await db
+    const [dm] = await db
         .select({ id: deliveryMen.id })
         .from(deliveryMen)
         .where(
             and(
                 eq(deliveryMen.id, id),
-                eq(deliveryMen.shippingCompanyId, companyId)
+                eq(deliveryMen.shippingCompanyId, companyId),
+                eq(deliveryMen.isDeleted, false)
             )
         )
         .limit(1);
 
-    if (dm.length === 0) {
-        throw new NotFound("Delivery man not found");
+    if (!dm) {
+        throw new NotFound("Delivery man not found or does not belong to your company");
     }
 
     const {
@@ -286,24 +378,57 @@ export async function updateDeliveryMan(req: Request, res: Response) {
         email,
         password,
         image,
-        deliveryType,
+        workType,
+        allZones,
         shiftStatus,
-        isOnline,
-        isAvailable,
         isActive,
         branchId,
         restaurantId,
     } = req.body;
+
+    // Validate restaurant belongs to this company if specified
+    if (restaurantId) {
+        const [rest] = await db
+            .select({ id: restaurantSettings.id })
+            .from(restaurantSettings)
+            .where(
+                and(
+                    eq(restaurantSettings.restaurantId, restaurantId),
+                    eq(restaurantSettings.shippingCompanyId, companyId)
+                )
+            )
+            .limit(1);
+
+        if (!rest) {
+            throw new BadRequest("Specified restaurant does not belong to your shipping company");
+        }
+
+        if (branchId) {
+            const [br] = await db
+                .select({ id: branches.id })
+                .from(branches)
+                .where(
+                    and(
+                        eq(branches.id, branchId),
+                        eq(branches.restaurantId, restaurantId)
+                    )
+                )
+                .limit(1);
+
+            if (!br) {
+                throw new BadRequest("Specified branch does not belong to the selected restaurant");
+            }
+        }
+    }
 
     const updateData: any = {};
     if (name !== undefined) updateData.name = name;
     if (phone !== undefined) updateData.phone = phone;
     if (email !== undefined) updateData.email = email;
     if (image !== undefined) updateData.image = image;
-    if (deliveryType !== undefined) updateData.deliveryType = deliveryType;
+    if (workType !== undefined) updateData.workType = workType;
+    if (allZones !== undefined) updateData.allZones = allZones;
     if (shiftStatus !== undefined) updateData.shiftStatus = shiftStatus;
-    if (isOnline !== undefined) updateData.isOnline = isOnline;
-    if (isAvailable !== undefined) updateData.isAvailable = isAvailable;
     if (isActive !== undefined) updateData.isActive = isActive;
     if (branchId !== undefined) updateData.branchId = branchId;
     if (restaurantId !== undefined) updateData.restaurantId = restaurantId;
@@ -320,97 +445,251 @@ export async function updateDeliveryMan(req: Request, res: Response) {
     return SuccessResponse(res, {
         message: "Delivery man updated successfully",
     });
-}
+});
 
 // =========================================================================
-// 6. تبديل شفت المندوب (Toggle Shift Status - active / inactive)
+// 6. Zones Management: GET /:id/zones and PUT /:id/zones (Phase 5)
 // =========================================================================
-export async function toggleShift(req: Request, res: Response) {
-    const { id } = req.params;
-    const { shiftStatus } = req.body;
-
-    const dm = await db
-        .select({ id: deliveryMen.id, shippingCompanyId: deliveryMen.shippingCompanyId })
-        .from(deliveryMen)
-        .where(eq(deliveryMen.id, id))
-        .limit(1);
-
-    if (dm.length === 0) {
-        throw new NotFound("Delivery man not found");
-    }
-
-    await db
-        .update(deliveryMen)
-        .set({ shiftStatus })
-        .where(eq(deliveryMen.id, id));
-
-    if (dm[0].shippingCompanyId) {
-        notifyShippingCompany(dm[0].shippingCompanyId, "delivery:shift_changed", {
-            deliveryManId: id,
-            shiftStatus,
-        });
-    }
-
-    return SuccessResponse(res, {
-        message: `Shift status updated to ${shiftStatus}`,
-    });
-}
-
-// =========================================================================
-// 7. تحديث إحداثيات موقع المندوب عبر الـ HTTP (كبديل إضافي بجانب WebSocket)
-// =========================================================================
-export async function updateLocation(req: Request, res: Response) {
-    const { id } = req.params;
-    const { lat, lng } = req.body;
-
-    const dm = await db
-        .select({ id: deliveryMen.id, shippingCompanyId: deliveryMen.shippingCompanyId })
-        .from(deliveryMen)
-        .where(eq(deliveryMen.id, id))
-        .limit(1);
-
-    if (dm.length === 0) {
-        throw new NotFound("Delivery man not found");
-    }
-
-    const now = new Date();
-
-    await db
-        .update(deliveryMen)
-        .set({
-            currentLat: String(lat),
-            currentLng: String(lng),
-            lastLocationUpdate: now,
-        })
-        .where(eq(deliveryMen.id, id));
-
-    if (dm[0].shippingCompanyId) {
-        notifyShippingCompany(dm[0].shippingCompanyId, "delivery:location_changed", {
-            deliveryManId: id,
-            lat: String(lat),
-            lng: String(lng),
-            updatedAt: now,
-        });
-    }
-
-    return SuccessResponse(res, {
-        message: "Delivery man location updated successfully",
-    });
-}
-
-// =========================================================================
-// 8. فك ربط أو حذف مندوب التوصيل
-// =========================================================================
-export async function unassignOrDeleteDeliveryMan(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+export const getCourierZones = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
     const { id } = req.params;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
     }
 
-    const dm = await db
+    const [dm] = await db
+        .select({ id: deliveryMen.id, allZones: deliveryMen.allZones })
+        .from(deliveryMen)
+        .where(
+            and(
+                eq(deliveryMen.id, id),
+                eq(deliveryMen.shippingCompanyId, companyId),
+                eq(deliveryMen.isDeleted, false)
+            )
+        )
+        .limit(1);
+
+    if (!dm) {
+        throw new NotFound("Courier not found or does not belong to your company");
+    }
+
+    const zones = await db
+        .select({
+            id: shippingZones.id,
+            name: shippingZones.name,
+            nameAr: shippingZones.nameAr,
+            status: shippingZones.status,
+        })
+        .from(deliveryManZones)
+        .innerJoin(shippingZones, eq(deliveryManZones.zoneId, shippingZones.id))
+        .where(eq(deliveryManZones.deliveryManId, id));
+
+    return SuccessResponse(res, {
+        message: "Courier zones retrieved successfully",
+        data: {
+            allZones: dm.allZones,
+            zones,
+        },
+    });
+});
+
+export const updateCourierZones = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
+    const { id } = req.params;
+    const { allZones = false, zoneIds = [] } = req.body;
+
+    if (!companyId) {
+        throw new UnauthorizedError("Unauthorized access");
+    }
+
+    const [dm] = await db
         .select({ id: deliveryMen.id })
+        .from(deliveryMen)
+        .where(
+            and(
+                eq(deliveryMen.id, id),
+                eq(deliveryMen.shippingCompanyId, companyId),
+                eq(deliveryMen.isDeleted, false)
+            )
+        )
+        .limit(1);
+
+    if (!dm) {
+        throw new NotFound("Courier not found or does not belong to your company");
+    }
+
+    // Verify all zoneIds belong to this shipping company
+    if (zoneIds.length > 0) {
+        const companyZones = await db
+            .select({ id: shippingZones.id })
+            .from(shippingZones)
+            .where(
+                and(
+                    eq(shippingZones.shippingCompanyId, companyId),
+                    inArray(shippingZones.id, zoneIds)
+                )
+            );
+
+        if (companyZones.length !== zoneIds.length) {
+            throw new BadRequest("One or more zone IDs do not belong to this company");
+        }
+    }
+
+    await db.transaction(async (tx) => {
+        await tx
+            .update(deliveryMen)
+            .set({ allZones: Boolean(allZones) })
+            .where(eq(deliveryMen.id, id));
+
+        await tx
+            .delete(deliveryManZones)
+            .where(eq(deliveryManZones.deliveryManId, id));
+
+        if (!allZones && zoneIds.length > 0) {
+            for (const zId of zoneIds) {
+                await tx.insert(deliveryManZones).values({
+                    deliveryManId: id,
+                    zoneId: zId,
+                });
+            }
+        }
+    });
+
+    return SuccessResponse(res, {
+        message: "Courier zones updated successfully",
+    });
+});
+
+// =========================================================================
+// 7. Shifts Management: GET /:id/shifts and PUT /:id/shifts (Phase 5)
+// =========================================================================
+export const getCourierShifts = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
+    const { id } = req.params;
+
+    if (!companyId) {
+        throw new UnauthorizedError("Unauthorized access");
+    }
+
+    const [dm] = await db
+        .select({ id: deliveryMen.id, workType: deliveryMen.workType })
+        .from(deliveryMen)
+        .where(
+            and(
+                eq(deliveryMen.id, id),
+                eq(deliveryMen.shippingCompanyId, companyId),
+                eq(deliveryMen.isDeleted, false)
+            )
+        )
+        .limit(1);
+
+    if (!dm) {
+        throw new NotFound("Courier not found or does not belong to your company");
+    }
+
+    const shifts = await db
+        .select({
+            id: deliveryManShifts.id,
+            restaurantId: deliveryManShifts.restaurantId,
+            restaurantName: restaurants.name,
+            dayOfWeek: deliveryManShifts.dayOfWeek,
+            from: deliveryManShifts.from,
+            to: deliveryManShifts.to,
+            status: deliveryManShifts.status,
+        })
+        .from(deliveryManShifts)
+        .innerJoin(restaurants, eq(deliveryManShifts.restaurantId, restaurants.id))
+        .where(eq(deliveryManShifts.deliveryManId, id));
+
+    return SuccessResponse(res, {
+        message: "Courier shifts retrieved successfully",
+        data: shifts,
+    });
+});
+
+export const updateCourierShifts = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
+    const { id } = req.params;
+    const { shifts = [] } = req.body;
+
+    if (!companyId) {
+        throw new UnauthorizedError("Unauthorized access");
+    }
+
+    const [dm] = await db
+        .select({ id: deliveryMen.id, workType: deliveryMen.workType })
+        .from(deliveryMen)
+        .where(
+            and(
+                eq(deliveryMen.id, id),
+                eq(deliveryMen.shippingCompanyId, companyId),
+                eq(deliveryMen.isDeleted, false)
+            )
+        )
+        .limit(1);
+
+    if (!dm) {
+        throw new NotFound("Courier not found or does not belong to your company");
+    }
+
+    // Verify all restaurants are linked to this shipping company
+    const restaurantIds = [...new Set(shifts.map((s: any) => s.restaurantId))] as string[];
+    if (restaurantIds.length > 0) {
+        const linked = await db
+            .select({ restaurantId: restaurantSettings.restaurantId })
+            .from(restaurantSettings)
+            .where(
+                and(
+                    eq(restaurantSettings.shippingCompanyId, companyId),
+                    inArray(restaurantSettings.restaurantId, restaurantIds)
+                )
+            );
+
+        if (linked.length !== restaurantIds.length) {
+            throw new BadRequest("One or more restaurants are not assigned to your shipping company");
+        }
+    }
+
+    await db.transaction(async (tx) => {
+        // Replace shifts
+        await tx
+            .delete(deliveryManShifts)
+            .where(eq(deliveryManShifts.deliveryManId, id));
+
+        for (const s of shifts) {
+            await tx.insert(deliveryManShifts).values({
+                deliveryManId: id,
+                restaurantId: s.restaurantId,
+                dayOfWeek: s.dayOfWeek,
+                from: s.from,
+                to: s.to,
+                status: s.status || "active",
+            });
+        }
+    });
+
+    return SuccessResponse(res, {
+        message: "Courier shifts updated successfully",
+    });
+});
+
+// =========================================================================
+// 8. فك ربط مندوب التوصيل من شركة الشحن (Unassign Delivery Man)
+// =========================================================================
+export const unassignOrDeleteDeliveryMan = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
+    const { id } = req.params;
+
+    if (!companyId) {
+        throw new UnauthorizedError("Unauthorized access");
+    }
+
+    const [dm] = await db
+        .select({
+            id: deliveryMen.id,
+            activeOrdersCount: deliveryMen.activeOrdersCount,
+        })
         .from(deliveryMen)
         .where(
             and(
@@ -420,21 +699,39 @@ export async function unassignOrDeleteDeliveryMan(req: Request, res: Response) {
         )
         .limit(1);
 
-    if (dm.length === 0) {
+    if (!dm) {
         throw new NotFound("Delivery man not found or not assigned to this company");
     }
 
-    // فك الربط بشركة الشحن
-    await db
-        .update(deliveryMen)
-        .set({
-            shippingCompanyId: null,
-            shiftStatus: "inactive",
-            isOnline: false,
-        })
-        .where(eq(deliveryMen.id, id));
+    // Security check: cannot unassign a courier with active orders!
+    if (dm.activeOrdersCount > 0) {
+        throw new BadRequest(`Cannot unassign courier while they have ${dm.activeOrdersCount} active orders. Complete or reassign them first.`);
+    }
+
+    // Remove from Redis GEO & alive key
+    await removeCourierFromRedis(id);
+
+    // Clean up shifts, zones, and unlink
+    await db.transaction(async (tx) => {
+        await tx
+            .delete(deliveryManZones)
+            .where(eq(deliveryManZones.deliveryManId, id));
+
+        await tx
+            .delete(deliveryManShifts)
+            .where(eq(deliveryManShifts.deliveryManId, id));
+
+        await tx
+            .update(deliveryMen)
+            .set({
+                shippingCompanyId: null,
+                shiftStatus: "inactive",
+                isOnline: false,
+            })
+            .where(eq(deliveryMen.id, id));
+    });
 
     return SuccessResponse(res, {
         message: "Delivery man unassigned from shipping company successfully",
     });
-}
+});

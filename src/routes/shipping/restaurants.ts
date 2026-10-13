@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { getAssignedRestaurants, getRestaurantBranches } from "../../controllers/shipping/restaurants";
-import { catchAsync } from "../../utils/catchAsync";
 import { authenticated } from "../../middlewares/authenticated";
+import { requireShippingCompany } from "../../middlewares/shippingAuth";
 
 const router = Router();
 
-router.use(authenticated);
+router.use(authenticated, requireShippingCompany());
 
-router.get("/", catchAsync(getAssignedRestaurants));
-router.get("/:restaurantId/branches", catchAsync(getRestaurantBranches));
+router.get("/", getAssignedRestaurants);
+router.get("/:restaurantId/branches", getRestaurantBranches);
 
 export default router;

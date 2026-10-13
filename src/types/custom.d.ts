@@ -20,6 +20,11 @@ export interface AppUser {
     branchId?: string | null;
     shippingCompanyId?: string | null;
     deliveryManId?: string | null;
+
+    // Phase 2: Shipping company & courier fields
+    companyRole?: "admin" | "dispatcher" | "viewer" | null;
+    workType?: "restaurant_shift" | "outsource" | null;
+    tokenVersion?: number;
 }
 
 // =======================
@@ -28,6 +33,8 @@ export interface AppUser {
 export interface TokenPayload {
     id: string;
     name?: string;
+    email?: string;
+    phone?: string;
     role: Role;
     type?: string;
     restaurantId?: string;
@@ -35,6 +42,9 @@ export interface TokenPayload {
     shippingCompanyId?: string;
     deliveryManId?: string;
     isGuest?: boolean;
+    companyRole?: "admin" | "dispatcher" | "viewer";
+    workType?: "restaurant_shift" | "outsource";
+    tokenVersion?: number;
 }
 
 // =======================

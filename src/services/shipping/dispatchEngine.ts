@@ -2,79 +2,242 @@ import { db } from "../../models/connection";
 import {
     orders,
     restaurants,
-    restaurantSettings,
     branches,
+    restaurantSettings,
     shippingCompanies,
-    shippingCompanyRestaurants,
     shippingZones,
     deliveryMen,
     deliveryManShifts,
     deliveryManZones,
     dispatchAssignments,
-    users,
+    addresses,
 } from "../../models/schema";
-import { eq, and, sql, inArray, isNotNull } from "drizzle-orm";
-import * as turf from "@turf/turf";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import redisClient from "../../config/redis";
+import * as turf from "@turf/turf";
 import {
     notifyDeliveryMan,
     notifyShippingCompany,
+    notifyRestaurant,
+    notifyAdmins,
     notifyOrderTracking,
 } from "../socket/socketService";
+import { SOCKET_EVENTS } from "../socket/socketEvents";
 
 export interface DispatchResult {
     success: boolean;
     orderId: string;
     shippingStatus: "assigned" | "manual_required";
-    reason?: "no_company" | "company_inactive" | "out_of_zone" | "no_courier" | "max_attempts";
+    reason?: "no_company" | "company_inactive" | "out_of_zone" | "no_courier" | "max_attempts" | "no_coordinates";
     deliveryMan?: {
         id: string;
         name: string;
         phone: string;
         distanceKm: number;
     };
-    message: string;
+    message?: string;
 }
 
-/**
- * 1. Redis Courier Location Tracking Helpers
- */
+// -------------------------------------------------------------
+// Redis Key Patterns & Helpers
+// -------------------------------------------------------------
+export const REDIS_GEO_KEY = "couriers:geo";
+export const REDIS_ALIVE_KEY_PREFIX = "courier:alive:";
+
 export async function updateCourierRedisLocation(
     courierId: string,
     lat: number,
-    lng: number,
-    companyId?: string
-) {
+    lng: number
+): Promise<void> {
     try {
-        // A) حفظ الموقع الجغرافي في Redis GEO
-        await redisClient.geoadd("couriers:geo", lng, lat, courierId);
-
-        // B) مفتاح Alive بـ TTL 60 ثانية للتأكد من اتصال المندوب وحداثة موقعه
-        await redisClient.set(`courier:alive:${courierId}`, "1", "EX", 60);
-
-        if (companyId) {
-            await redisClient.set(`courier:company:${courierId}`, companyId, "EX", 300);
-        }
-    } catch (err: any) {
-        console.warn("⚠️ Redis GEO update warning:", err.message);
+        await redisClient.geoadd(REDIS_GEO_KEY, lng, lat, courierId);
+        await redisClient.set(`${REDIS_ALIVE_KEY_PREFIX}${courierId}`, "1", "EX", 60);
+    } catch (err) {
+        console.error("Redis geoadd/alive error for courier:", courierId, err);
     }
 }
 
-export async function removeCourierFromRedis(courierId: string) {
+export async function removeCourierFromRedis(courierId: string): Promise<void> {
     try {
-        await redisClient.zrem("couriers:geo", courierId);
-        await redisClient.del(`courier:alive:${courierId}`);
-    } catch (err: any) {
-        console.warn("⚠️ Redis remove warning:", err.message);
+        await redisClient.zrem(REDIS_GEO_KEY, courierId);
+        await redisClient.del(`${REDIS_ALIVE_KEY_PREFIX}${courierId}`);
+    } catch (err) {
+        console.error("Redis zrem error for courier:", courierId, err);
     }
+}
+
+// Phase 6: Release courier on delivered / cancelled / manual unassign
+export async function releaseCourierForOrder(orderId: string, courierId: string): Promise<void> {
+    try {
+        await db
+            .update(deliveryMen)
+            .set({
+                activeOrdersCount: sql`GREATEST(0, ${deliveryMen.activeOrdersCount} - 1)`,
+            })
+            .where(eq(deliveryMen.id, courierId));
+    } catch (err) {
+        console.error("Error releasing courier orders count:", err);
+    }
+}
+
+// Timezone-aware hour/minute formatter (D7)
+function getLocalDayAndTime(timeZone: string = process.env.APP_TIMEZONE || "Africa/Cairo") {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        weekday: "short",
+        hour12: false,
+    });
+
+    const parts = formatter.formatToParts(now);
+    const partMap = new Map(parts.map((p) => [p.type, p.value]));
+
+    const hour = parseInt(partMap.get("hour") || "0", 10);
+    const minute = parseInt(partMap.get("minute") || "0", 10);
+    const second = parseInt(partMap.get("second") || "0", 10);
+    const timeMinutes = hour * 60 + minute;
+    const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+
+    const weekdayShort = partMap.get("weekday");
+    const dayMap: Record<string, number> = {
+        Sun: 0,
+        Mon: 1,
+        Tue: 2,
+        Wed: 3,
+        Thu: 4,
+        Fri: 5,
+        Sat: 6,
+    };
+    const dayOfWeek = weekdayShort && dayMap[weekdayShort] !== undefined ? dayMap[weekdayShort] : now.getDay();
+
+    return { dayOfWeek, timeStr, timeMinutes };
+}
+
+// D7: Check shift including overnight shifts (from > to)
+function isTimeInShift(shiftFrom: string, shiftTo: string, currentMinutes: number): boolean {
+    const parseTime = (t: string) => {
+        const [h, m] = t.split(":").map(Number);
+        return h * 60 + (m || 0);
+    };
+
+    const fromMin = parseTime(shiftFrom);
+    const toMin = parseTime(shiftTo);
+
+    if (fromMin <= toMin) {
+        return currentMinutes >= fromMin && currentMinutes <= toMin;
+    }
+    // Overnight shift: e.g. 22:00 to 06:00
+    return currentMinutes >= fromMin || currentMinutes <= toMin;
+}
+
+// -------------------------------------------------------------
+// Shared Assign Function (Step 8 Atomic Assign)
+// -------------------------------------------------------------
+export async function assignCourierToOrder(
+    orderId: string,
+    courierId: string,
+    companyId: string,
+    attemptNumber: number = 1
+): Promise<{ success: boolean; courier?: any }> {
+    return await db.transaction(async (tx) => {
+        // Fetch courier with row lock to check activeOrdersCount vs maxActiveOrders
+        const [courier] = await tx
+            .select()
+            .from(deliveryMen)
+            .where(eq(deliveryMen.id, courierId))
+            .limit(1);
+
+        if (!courier || courier.isDeleted || !courier.isActive) {
+            return { success: false };
+        }
+
+        const [company] = await tx
+            .select({ maxActiveOrders: shippingCompanies.maxActiveOrders })
+            .from(shippingCompanies)
+            .where(eq(shippingCompanies.id, companyId))
+            .limit(1);
+
+        const maxActive = company?.maxActiveOrders ?? 3;
+        if (courier.activeOrdersCount >= maxActive) {
+            return { success: false };
+        }
+
+        // Update order
+        await tx
+            .update(orders)
+            .set({
+                shippingCompanyId: companyId,
+                deliveryManId: courierId,
+                shippingStatus: "assigned",
+                shippingFailReason: null,
+                dispatchAttempts: attemptNumber,
+                shippingAssignedAt: new Date(),
+                updatedAt: new Date(),
+            })
+            .where(eq(orders.id, orderId));
+
+        // Increment activeOrdersCount atomically
+        await tx
+            .update(deliveryMen)
+            .set({
+                activeOrdersCount: sql`${deliveryMen.activeOrdersCount} + 1`,
+            })
+            .where(eq(deliveryMen.id, courierId));
+
+        // Insert assignment audit log
+        await tx.insert(dispatchAssignments).values({
+            orderId,
+            shippingCompanyId: companyId,
+            deliveryManId: courierId,
+            attemptNumber,
+            status: "active",
+        });
+
+        return { success: true, courier };
+    });
 }
 
 /**
- * 2. المحرك الرئيسي لتوزيع الطلبات (dispatchOrder)
+ * Main Auto-Dispatch Engine
  */
 export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
+    // Acquire Redis mutex lock per order to prevent concurrent dispatches
+    const lockKey = `lock:dispatch:${orderId}`;
+    let lockAcquired = false;
+
+    try {
+        const lockRes = await redisClient.set(lockKey, "1", "EX", 15, "NX");
+        lockAcquired = lockRes === "OK";
+    } catch {
+        // Continue if Redis fails
+    }
+
+    if (!lockAcquired) {
+        return {
+            success: false,
+            orderId,
+            shippingStatus: "manual_required",
+            message: "Dispatch already running for this order",
+        };
+    }
+
+    try {
+        return await executeDispatch(orderId);
+    } finally {
+        try {
+            await redisClient.del(lockKey);
+        } catch {
+            // Ignore unlock errors
+        }
+    }
+}
+
+async function executeDispatch(orderId: string): Promise<DispatchResult> {
     // -------------------------------------------------------------
-    // جلب بيانات الأوردر والفرع والمطعم وإعدادات الشحن
+    // Fetch order, restaurant, branch, and settings
     // -------------------------------------------------------------
     const [orderData] = await db
         .select({
@@ -97,32 +260,9 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
     const { order, restaurant, branch, settings } = orderData;
 
     // -------------------------------------------------------------
-    // الخطوة 1: فحص هل المطعم مرتبط بشركة شحن؟ (restaurantSettings.shippingCompanyId أو shippingCompanyRestaurants)
+    // Step 1: Restaurant linked to a company? (D3: restaurantSettings.shippingCompanyId only)
     // -------------------------------------------------------------
-    let companyId = settings?.shippingCompanyId || order.shippingCompanyId;
-
-    if (!companyId) {
-        const assigned = await db
-            .select({ shippingCompanyId: shippingCompanyRestaurants.shippingCompanyId })
-            .from(shippingCompanyRestaurants)
-            .where(
-                and(
-                    eq(shippingCompanyRestaurants.restaurantId, order.restaurantId),
-                    eq(shippingCompanyRestaurants.status, "active")
-                )
-            )
-            .limit(1);
-
-        if (assigned.length > 0) {
-            companyId = assigned[0].shippingCompanyId;
-
-            // مزامنة إعدادات المطعم تلقائياً
-            await db
-                .update(restaurantSettings)
-                .set({ shippingCompanyId: companyId })
-                .where(eq(restaurantSettings.restaurantId, order.restaurantId));
-        }
-    }
+    const companyId = settings?.shippingCompanyId || order.shippingCompanyId;
 
     if (!companyId) {
         await db
@@ -134,11 +274,17 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             })
             .where(eq(orders.id, orderId));
 
-        notifyShippingCompany("superadmin", "order:manual_required", {
+        notifyRestaurant(order.restaurantId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
             orderId,
             orderNumber: order.orderNumber,
             reason: "no_company",
-            restaurantId: order.restaurantId,
+            message: "No shipping company is linked to restaurant",
+        });
+
+        notifyAdmins(SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
+            orderId,
+            orderNumber: order.orderNumber,
+            reason: "no_company",
         });
 
         return {
@@ -146,12 +292,12 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             orderId,
             shippingStatus: "manual_required",
             reason: "no_company",
-            message: "Restaurant has no shipping company assigned",
+            message: "Restaurant is not linked to any shipping company",
         };
     }
 
     // -------------------------------------------------------------
-    // الخطوة 2: فحص هل شركة الشحن نشطة؟ (company.status === 'active')
+    // Step 2: Company active?
     // -------------------------------------------------------------
     const [company] = await db
         .select()
@@ -170,7 +316,13 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             })
             .where(eq(orders.id, orderId));
 
-        notifyShippingCompany(companyId, "order:manual_required", {
+        notifyShippingCompany(companyId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
+            orderId,
+            orderNumber: order.orderNumber,
+            reason: "company_inactive",
+        });
+
+        notifyAdmins(SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
             orderId,
             orderNumber: order.orderNumber,
             reason: "company_inactive",
@@ -186,20 +338,20 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
     }
 
     // -------------------------------------------------------------
-    // الخطوة 3: التحقق من عنوان العميل ومناطق الشركة (Point-in-Polygon)
+    // Step 3: Customer point inside a company zone?
     // -------------------------------------------------------------
     const shippingAddress = order.shippingAddress as any;
     let customerLat = shippingAddress?.lat ? parseFloat(shippingAddress.lat) : NaN;
     let customerLng = shippingAddress?.lng ? parseFloat(shippingAddress.lng) : NaN;
 
     if (isNaN(customerLat) || isNaN(customerLng)) {
-        // Fallback: جلب إحداثيات العنوان من جدول addresses إن كان addressId موجود
         if (order.addressId) {
             const [addr] = await db
-                .select({ lat: sql`lat`, lng: sql`lng` })
-                .from(sql`addresses`)
-                .where(eq(sql`id`, order.addressId))
-                .limit(1) as any;
+                .select({ lat: addresses.lat, lng: addresses.lng })
+                .from(addresses)
+                .where(eq(addresses.id, order.addressId))
+                .limit(1);
+
             if (addr?.lat && addr?.lng) {
                 customerLat = parseFloat(addr.lat);
                 customerLng = parseFloat(addr.lng);
@@ -213,16 +365,35 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             .set({
                 shippingCompanyId: companyId,
                 shippingStatus: "manual_required",
-                shippingFailReason: "out_of_zone",
+                shippingFailReason: "no_coordinates",
                 updatedAt: new Date(),
             })
             .where(eq(orders.id, orderId));
+
+        notifyShippingCompany(companyId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
+            orderId,
+            orderNumber: order.orderNumber,
+            reason: "no_coordinates",
+            message: "Customer delivery coordinates are missing",
+        });
+
+        notifyRestaurant(order.restaurantId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
+            orderId,
+            orderNumber: order.orderNumber,
+            reason: "no_coordinates",
+        });
+
+        notifyAdmins(SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
+            orderId,
+            orderNumber: order.orderNumber,
+            reason: "no_coordinates",
+        });
 
         return {
             success: false,
             orderId,
             shippingStatus: "manual_required",
-            reason: "out_of_zone",
+            reason: "no_coordinates",
             message: "Customer delivery coordinates are missing or invalid",
         };
     }
@@ -241,24 +412,24 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
     let matchedZoneId: string | null = null;
 
     for (const zone of companyZones) {
-        if (zone.coordinates && Array.isArray(zone.coordinates) && zone.coordinates.length >= 3) {
-            try {
-                // تحويل النقاط إلى مضلع مغلق لـ Turf
-                const ring = zone.coordinates.map((c: any) => [c.lng, c.lat]);
-                if (
-                    ring[0][0] !== ring[ring.length - 1][0] ||
-                    ring[0][1] !== ring[ring.length - 1][1]
-                ) {
-                    ring.push(ring[0]); // إغلاق المضلع
-                }
-                const poly = turf.polygon([ring]);
-                if (turf.booleanPointInPolygon(customerPoint, poly)) {
-                    matchedZoneId = zone.id;
-                    break;
-                }
-            } catch (err) {
-                // تجاوز الخطأ في صياغة البوليجون
+        const coords = zone.coordinates as Array<{ lat: number; lng: number }> | null;
+        if (!coords || coords.length < 3) continue;
+
+        try {
+            const polygonCoords = coords.map((c) => [c.lng, c.lat]);
+            const first = polygonCoords[0];
+            const last = polygonCoords[polygonCoords.length - 1];
+            if (first[0] !== last[0] || first[1] !== last[1]) {
+                polygonCoords.push(first);
             }
+
+            const poly = turf.polygon([polygonCoords]);
+            if (turf.booleanPointInPolygon(customerPoint, poly)) {
+                matchedZoneId = zone.id;
+                break;
+            }
+        } catch {
+            // Ignore malformed polygon
         }
     }
 
@@ -273,11 +444,23 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             })
             .where(eq(orders.id, orderId));
 
-        notifyShippingCompany(companyId, "order:manual_required", {
+        notifyShippingCompany(companyId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
             orderId,
             orderNumber: order.orderNumber,
             reason: "out_of_zone",
-            message: "Customer address is out of company delivery zones",
+            message: "Customer location is outside all company zones",
+        });
+
+        notifyRestaurant(order.restaurantId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
+            orderId,
+            orderNumber: order.orderNumber,
+            reason: "out_of_zone",
+        });
+
+        notifyAdmins(SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
+            orderId,
+            orderNumber: order.orderNumber,
+            reason: "out_of_zone",
         });
 
         return {
@@ -285,15 +468,17 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             orderId,
             shippingStatus: "manual_required",
             reason: "out_of_zone",
-            message: "Customer delivery address is outside all shipping company zones",
+            message: "Customer address does not fall inside any active company zone",
         };
     }
 
     // -------------------------------------------------------------
-    // الخطوة 4: فحص عدد محاولات التوزيع السابقة < maxAttempts
+    // Step 4: Attempts < maxAttempts?
     // -------------------------------------------------------------
+    const maxAttempts = company.maxAttempts ?? 3;
     const currentAttempts = order.dispatchAttempts || 0;
-    if (currentAttempts >= company.maxAttempts) {
+
+    if (currentAttempts >= maxAttempts) {
         await db
             .update(orders)
             .set({
@@ -304,11 +489,11 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             })
             .where(eq(orders.id, orderId));
 
-        notifyShippingCompany(companyId, "order:manual_required", {
+        notifyShippingCompany(companyId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
             orderId,
             orderNumber: order.orderNumber,
             reason: "max_attempts",
-            attempts: currentAttempts,
+            message: `Reached maximum dispatch attempts (${maxAttempts})`,
         });
 
         return {
@@ -316,61 +501,71 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             orderId,
             shippingStatus: "manual_required",
             reason: "max_attempts",
-            message: `Order reached max dispatch attempts (${company.maxAttempts})`,
+            message: `Order reached max dispatch attempts limit of ${maxAttempts}`,
         };
     }
 
     // -------------------------------------------------------------
-    // الخطوة 5: إحداثيات الفرع والبحث الجغرافي (Redis GEOSEARCH)
+    // Step 5: Redis GEOSEARCH couriers within maxSearchRadius of BRANCH
     // -------------------------------------------------------------
-    let branchLat = branch?.lat ? parseFloat(branch.lat) : NaN;
-    let branchLng = branch?.lng ? parseFloat(branch.lng) : NaN;
-    if (isNaN(branchLat) || isNaN(branchLng)) {
-        if (restaurant?.lat && restaurant?.lng) {
-            branchLat = parseFloat(restaurant.lat);
-            branchLng = parseFloat(restaurant.lng);
-        }
-    }
+    const branchLat = branch?.lat ? parseFloat(branch.lat) : NaN;
+    const branchLng = branch?.lng ? parseFloat(branch.lng) : NaN;
 
     if (isNaN(branchLat) || isNaN(branchLng)) {
-        throw new Error("Restaurant / Branch GPS coordinates are missing");
+        await db
+            .update(orders)
+            .set({
+                shippingCompanyId: companyId,
+                shippingStatus: "manual_required",
+                shippingFailReason: "no_coordinates",
+                updatedAt: new Date(),
+            })
+            .where(eq(orders.id, orderId));
+
+        return {
+            success: false,
+            orderId,
+            shippingStatus: "manual_required",
+            reason: "no_coordinates",
+            message: "Restaurant branch coordinates are missing or invalid",
+        };
     }
 
-    const maxRadiusKm = parseFloat(company.maxSearchRadius as string) || 10;
-    let nearbyCourierIdsWithDist: Map<string, number> = new Map();
+    const maxRadiusKm = parseFloat(String(company.maxSearchRadius ?? 10));
+    const nearbyCourierIdsWithDist = new Map<string, number>();
 
-    // محاولة استخدام Redis GEOSEARCH
     try {
-        const redisResults: any = await redisClient.call(
-            "GEOSEARCH",
-            "couriers:geo",
+        const rawResults = (await (redisClient as any).geosearch(
+            REDIS_GEO_KEY,
             "FROMLONLAT",
             branchLng,
             branchLat,
             "BYRADIUS",
             maxRadiusKm,
-            "KM",
-            "ASC",
-            "WITHDIST"
-        );
+            "km",
+            "WITHDIST",
+            "ASC"
+        )) as Array<[string, string]>;
 
-        if (Array.isArray(redisResults)) {
-            for (const item of redisResults) {
-                if (Array.isArray(item)) {
-                    const courierId = String(item[0]);
-                    const distKm = parseFloat(item[1]);
-                    nearbyCourierIdsWithDist.set(courierId, distKm);
+        if (Array.isArray(rawResults)) {
+            for (const item of rawResults) {
+                if (Array.isArray(item) && item.length >= 2) {
+                    const cId = item[0];
+                    const dist = parseFloat(item[1]);
+                    if (!isNaN(dist)) {
+                        nearbyCourierIdsWithDist.set(cId, dist);
+                    }
                 }
             }
         }
-    } catch (err: any) {
-        console.warn("⚠️ Redis GEOSEARCH fallback to MySQL/Turf:", err.message);
+    } catch (err) {
+        console.warn("Redis GEOSEARCH failed, falling back to MySQL coordinates:", err);
     }
 
     // -------------------------------------------------------------
-    // الخطوة 6: فلترة المناديب المؤهلين (MySQL Filtering)
+    // Step 6: Filter couriers (MySQL)
     // -------------------------------------------------------------
-    // جلب المناديب الذين رفضوا هذا الطلب مسبقاً لاستثنائهم
+    // Couriers who previously rejected this order
     const previousRejections = await db
         .select({ deliveryManId: dispatchAssignments.deliveryManId })
         .from(dispatchAssignments)
@@ -382,7 +577,7 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
         );
     const rejectedCourierIds = new Set(previousRejections.map((r) => r.deliveryManId));
 
-    // جلب جميع مناديب الشركة النشطين
+    // Couriers of this company with activeOrdersCount < maxActiveOrders
     const couriers = await db
         .select()
         .from(deliveryMen)
@@ -396,95 +591,128 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             )
         );
 
-    const now = new Date();
-    const currentDayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday ...
-    const currentTimeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:00`;
+    if (couriers.length === 0) {
+        await db
+            .update(orders)
+            .set({
+                shippingCompanyId: companyId,
+                shippingStatus: "manual_required",
+                shippingFailReason: "no_courier",
+                dispatchAttempts: currentAttempts + 1,
+                updatedAt: new Date(),
+            })
+            .where(eq(orders.id, orderId));
 
-    // فحص شفتات ومناطق المناديب
+        notifyShippingCompany(companyId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
+            orderId,
+            orderNumber: order.orderNumber,
+            reason: "no_courier",
+            message: "No online couriers found for shipping company",
+        });
+
+        return {
+            success: false,
+            orderId,
+            shippingStatus: "manual_required",
+            reason: "no_courier",
+            message: "No available online couriers found",
+        };
+    }
+
+    // Batch query zones and shifts to prevent N+1 queries (Phase 6 requirement)
+    const courierIds = couriers.map((c) => c.id);
+
+    const [allCourierZones, allCourierShifts] = await Promise.all([
+        db
+            .select({
+                deliveryManId: deliveryManZones.deliveryManId,
+                zoneId: deliveryManZones.zoneId,
+            })
+            .from(deliveryManZones)
+            .where(inArray(deliveryManZones.deliveryManId, courierIds)),
+        db
+            .select()
+            .from(deliveryManShifts)
+            .where(
+                and(
+                    inArray(deliveryManShifts.deliveryManId, courierIds),
+                    eq(deliveryManShifts.status, "active")
+                )
+            ),
+    ]);
+
+    const courierZonesMap = new Map<string, Set<string>>();
+    for (const z of allCourierZones) {
+        if (!courierZonesMap.has(z.deliveryManId)) {
+            courierZonesMap.set(z.deliveryManId, new Set());
+        }
+        courierZonesMap.get(z.deliveryManId)!.add(z.zoneId);
+    }
+
+    const courierShiftsMap = new Map<string, typeof allCourierShifts>();
+    for (const s of allCourierShifts) {
+        if (!courierShiftsMap.has(s.deliveryManId)) {
+            courierShiftsMap.set(s.deliveryManId, []);
+        }
+        courierShiftsMap.get(s.deliveryManId)!.push(s);
+    }
+
+    const { dayOfWeek, timeMinutes } = getLocalDayAndTime();
+    const branchPoint = turf.point([branchLng, branchLat]);
     const eligibleCouriers: Array<{
         courier: typeof couriers[0];
         distanceKm: number;
     }> = [];
 
-    const branchPoint = turf.point([branchLng, branchLat]);
-
     for (const c of couriers) {
-        // استبعاد من رفض الأوردر مسبقاً
+        // Did not reject this order
         if (rejectedCourierIds.has(c.id)) {
             continue;
         }
 
-        // فحص مفتاح Redis Alive (إن أمكن)
+        // Alive key check (must have fresh heartbeat in Redis)
         try {
-            const isAlive = await redisClient.get(`courier:alive:${c.id}`);
-            if (isAlive === null && nearbyCourierIdsWithDist.size > 0 && !c.currentLat) {
-                continue; // منقطع الاتصال
+            const isAlive = await redisClient.get(`${REDIS_ALIVE_KEY_PREFIX}${c.id}`);
+            if (!isAlive) {
+                // Couriers without an alive key are stale / disconnected
+                continue;
             }
         } catch {
-            // تخطي في حال تعطل Redis
+            // Redis error fallback: continue
         }
 
-        // فحص هل المندوب مسند للـ Zone الخاصة بالعنوان
-        const courierZones = await db
-            .select({ zoneId: deliveryManZones.zoneId })
-            .from(deliveryManZones)
-            .where(
-                and(
-                    eq(deliveryManZones.deliveryManId, c.id),
-                    eq(deliveryManZones.zoneId, matchedZoneId)
-                )
-            )
-            .limit(1);
-
-        if (courierZones.length === 0) {
-            // لو لم يتم تحديد مناطق خاصة للمندوب -> هل يعمل في كل المناطق؟
-            // شرط المستخدم: "zones اللي بيشتغل فيها"
-            const anyCourierZones = await db
-                .select({ id: deliveryManZones.id })
-                .from(deliveryManZones)
-                .where(eq(deliveryManZones.deliveryManId, c.id))
-                .limit(1);
-
-            // لو عنده مناطق محددة ولكنه ليس في منطقة الأوردر -> يتم استبعاده
-            if (anyCourierZones.length > 0) {
+        // Zone check: allZones === true OR has zone in delivery_man_zones (D5)
+        if (!c.allZones) {
+            const zonesSet = courierZonesMap.get(c.id);
+            if (!zonesSet || !zonesSet.has(matchedZoneId)) {
                 continue;
             }
         }
 
-        // فحص workType
+        // workType check: outsource OR (restaurant_shift for this restaurant AND inside shift window)
         if (c.workType === "restaurant_shift") {
-            // يجب أن يكون خادماً لنفس المطعم وضمن وقت الشيفت الحالي
-            const validShift = await db
-                .select()
-                .from(deliveryManShifts)
-                .where(
-                    and(
-                        eq(deliveryManShifts.deliveryManId, c.id),
-                        eq(deliveryManShifts.restaurantId, order.restaurantId),
-                        eq(deliveryManShifts.dayOfWeek, currentDayOfWeek),
-                        eq(deliveryManShifts.status, "active"),
-                        sql`${deliveryManShifts.from} <= ${currentTimeStr}`,
-                        sql`${deliveryManShifts.to} >= ${currentTimeStr}`
-                    )
-                )
-                .limit(1);
+            const shifts = courierShiftsMap.get(c.id) || [];
+            const activeShift = shifts.find(
+                (s) =>
+                    s.restaurantId === order.restaurantId &&
+                    s.dayOfWeek === dayOfWeek &&
+                    isTimeInShift(s.from, s.to, timeMinutes)
+            );
 
-            if (validShift.length === 0) {
-                continue; // ليس في وقت شيفت هذا المطعم
+            if (!activeShift) {
+                continue;
             }
         }
 
-        // حساب المسافة
+        // Distance calculation
         let distanceKm = nearbyCourierIdsWithDist.get(c.id);
-        if (distanceKm === undefined) {
-            if (c.currentLat && c.currentLng) {
-                const cLat = parseFloat(c.currentLat);
-                const cLng = parseFloat(c.currentLng);
-                if (!isNaN(cLat) && !isNaN(cLng)) {
-                    distanceKm = turf.distance(branchPoint, turf.point([cLng, cLat]), {
-                        units: "kilometers",
-                    });
-                }
+        if (distanceKm === undefined && c.currentLat && c.currentLng) {
+            const cLat = parseFloat(c.currentLat);
+            const cLng = parseFloat(c.currentLng);
+            if (!isNaN(cLat) && !isNaN(cLng)) {
+                distanceKm = turf.distance(branchPoint, turf.point([cLng, cLat]), {
+                    units: "kilometers",
+                });
             }
         }
 
@@ -496,9 +724,6 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
         }
     }
 
-    // -------------------------------------------------------------
-    // الخطوة 7: الترتيب (الأقل أوردرات نشطة أولاً، ثم الأقرب مسافة)
-    // -------------------------------------------------------------
     if (eligibleCouriers.length === 0) {
         await db
             .update(orders)
@@ -511,11 +736,11 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
             })
             .where(eq(orders.id, orderId));
 
-        notifyShippingCompany(companyId, "order:manual_required", {
+        notifyShippingCompany(companyId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
             orderId,
             orderNumber: order.orderNumber,
             reason: "no_courier",
-            message: "No available couriers in shift/zone right now",
+            message: "No available couriers match shift/zone/distance criteria",
         });
 
         return {
@@ -527,77 +752,90 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
         };
     }
 
+    // -------------------------------------------------------------
+    // Step 7: Sort order per Decision D1
+    // D1: distanceKm ASC, tie-break activeOrdersCount ASC (closest first!)
+    // -------------------------------------------------------------
     eligibleCouriers.sort((a, b) => {
-        // 1. الأقل أوردرات نشطة
-        if (a.courier.activeOrdersCount !== b.courier.activeOrdersCount) {
-            return a.courier.activeOrdersCount - b.courier.activeOrdersCount;
+        if (a.distanceKm !== b.distanceKm) {
+            return a.distanceKm - b.distanceKm;
         }
-        // 2. الأقرب لموقع الفرع
-        return a.distanceKm - b.distanceKm;
+        return a.courier.activeOrdersCount - b.courier.activeOrdersCount;
     });
 
-    const chosen = eligibleCouriers[0];
+    // -------------------------------------------------------------
+    // Step 8: Atomic Assignment (try candidates in sorted order)
+    // -------------------------------------------------------------
     const newAttemptNumber = currentAttempts + 1;
+    let assignedCourier: any = null;
+    let assignedDistance = 0;
 
-    // -------------------------------------------------------------
-    // الخطوة 8: إسناد الطلب وتسجيل العملية وتحديث العدادات
-    // -------------------------------------------------------------
-    await db.transaction(async (tx) => {
-        // تحديث الطلب
-        await tx
+    for (const candidate of eligibleCouriers) {
+        const assignRes = await assignCourierToOrder(
+            orderId,
+            candidate.courier.id,
+            companyId,
+            newAttemptNumber
+        );
+
+        if (assignRes.success) {
+            assignedCourier = assignRes.courier;
+            assignedDistance = candidate.distanceKm;
+            break;
+        }
+    }
+
+    if (!assignedCourier) {
+        await db
             .update(orders)
             .set({
                 shippingCompanyId: companyId,
-                deliveryManId: chosen.courier.id,
-                shippingStatus: "assigned",
-                shippingFailReason: null,
+                shippingStatus: "manual_required",
+                shippingFailReason: "no_courier",
                 dispatchAttempts: newAttemptNumber,
                 updatedAt: new Date(),
             })
             .where(eq(orders.id, orderId));
 
-        // زيادة عداد الأوردرات النشطة للمندوب
-        await tx
-            .update(deliveryMen)
-            .set({
-                activeOrdersCount: sql`${deliveryMen.activeOrdersCount} + 1`,
-            })
-            .where(eq(deliveryMen.id, chosen.courier.id));
-
-        // تسجيل في سجل الـ assignments / offers
-        await tx.insert(dispatchAssignments).values({
+        notifyShippingCompany(companyId, SOCKET_EVENTS.ORDER_MANUAL_REQUIRED, {
             orderId,
-            shippingCompanyId: companyId,
-            deliveryManId: chosen.courier.id,
-            attemptNumber: newAttemptNumber,
-            status: "active",
+            orderNumber: order.orderNumber,
+            reason: "no_courier",
         });
-    });
+
+        return {
+            success: false,
+            orderId,
+            shippingStatus: "manual_required",
+            reason: "no_courier",
+            message: "All couriers became busy during atomic assignment",
+        };
+    }
 
     // -------------------------------------------------------------
-    // إرسال تنبيهات لحظية عبر Socket.IO
+    // Send Real-time Socket.IO Notifications
     // -------------------------------------------------------------
-    notifyDeliveryMan(chosen.courier.id, "order:assigned", {
+    notifyDeliveryMan(assignedCourier.id, SOCKET_EVENTS.COURIER_ASSIGNED, {
         orderId,
         orderNumber: order.orderNumber,
         restaurantName: restaurant?.name,
         branchName: branch?.name,
         branchAddress: branch?.address,
-        distanceKm: chosen.distanceKm,
+        distanceKm: assignedDistance,
     });
 
-    notifyShippingCompany(companyId, "order:assigned", {
+    notifyShippingCompany(companyId, SOCKET_EVENTS.ORDER_ASSIGNED, {
         orderId,
         orderNumber: order.orderNumber,
-        deliveryManId: chosen.courier.id,
-        deliveryManName: chosen.courier.name,
-        distanceKm: chosen.distanceKm,
+        deliveryManId: assignedCourier.id,
+        deliveryManName: assignedCourier.name,
+        distanceKm: assignedDistance,
     });
 
-    notifyOrderTracking(orderId, "order:courier_assigned", {
-        deliveryManId: chosen.courier.id,
-        deliveryManName: chosen.courier.name,
-        deliveryManPhone: chosen.courier.phone,
+    notifyOrderTracking(orderId, SOCKET_EVENTS.ORDER_COURIER_ASSIGNED, {
+        deliveryManId: assignedCourier.id,
+        deliveryManName: assignedCourier.name,
+        deliveryManPhone: assignedCourier.phone,
     });
 
     return {
@@ -605,76 +843,82 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
         orderId,
         shippingStatus: "assigned",
         deliveryMan: {
-            id: chosen.courier.id,
-            name: chosen.courier.name,
-            phone: chosen.courier.phone,
-            distanceKm: chosen.distanceKm,
+            id: assignedCourier.id,
+            name: assignedCourier.name,
+            phone: assignedCourier.phone,
+            distanceKm: assignedDistance,
         },
-        message: `Order successfully assigned to courier ${chosen.courier.name}`,
+        message: `Order successfully assigned to courier ${assignedCourier.name}`,
     };
 }
 
 /**
- * 3. دالة رفض المندوب للطلب مع السبب الإجباري وإعادة التوزيع التلقائي
+ * Courier Reject with mandatory reason and re-dispatch
  */
 export async function rejectOrderByCourier(
     orderId: string,
     courierId: string,
     rejectReason: string
-) {
+): Promise<DispatchResult> {
     if (!rejectReason || rejectReason.trim() === "") {
         throw new Error("Reject reason is mandatory");
     }
 
-    // التحقق من تعيين الطلب لهذا المندوب
-    const [order] = await db
-        .select()
-        .from(orders)
-        .where(
-            and(
-                eq(orders.id, orderId),
-                eq(orders.deliveryManId, courierId)
+    // Must be transactional and only valid if shippingStatus is assigned
+    await db.transaction(async (tx) => {
+        const [order] = await tx
+            .select()
+            .from(orders)
+            .where(
+                and(
+                    eq(orders.id, orderId),
+                    eq(orders.deliveryManId, courierId)
+                )
             )
-        )
-        .limit(1);
+            .limit(1);
 
-    if (!order) {
-        throw new Error("Order not found or not currently assigned to this courier");
-    }
+        if (!order) {
+            throw new Error("Order not found or not currently assigned to this courier");
+        }
 
-    // 1. تحديث سجل الـ assignment إلى rejected مع تسجيل السبب
-    await db
-        .update(dispatchAssignments)
-        .set({
-            status: "rejected",
-            rejectReason: rejectReason.trim(),
-            respondedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(dispatchAssignments.orderId, orderId),
-                eq(dispatchAssignments.deliveryManId, courierId),
-                eq(dispatchAssignments.status, "active")
-            )
-        );
+        if (order.shippingStatus !== "assigned") {
+            throw new Error(`Cannot reject order in shippingStatus "${order.shippingStatus}"`);
+        }
 
-    // 2. إنقاص عداد الأوردرات النشطة للمندوب
-    await db
-        .update(deliveryMen)
-        .set({
-            activeOrdersCount: sql`GREATEST(0, ${deliveryMen.activeOrdersCount} - 1)`,
-        })
-        .where(eq(deliveryMen.id, courierId));
+        // 1. Update assignment to rejected
+        await tx
+            .update(dispatchAssignments)
+            .set({
+                status: "rejected",
+                rejectReason: rejectReason.trim(),
+                respondedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(dispatchAssignments.orderId, orderId),
+                    eq(dispatchAssignments.deliveryManId, courierId),
+                    eq(dispatchAssignments.status, "active")
+                )
+            );
 
-    // 3. تصفير مندوب الأوردر مؤقتاً تمهيداً للإسناد التالي
-    await db
-        .update(orders)
-        .set({
-            deliveryManId: null,
-            shippingStatus: "pending_dispatch",
-        })
-        .where(eq(orders.id, orderId));
+        // 2. Decrement active orders count
+        await tx
+            .update(deliveryMen)
+            .set({
+                activeOrdersCount: sql`GREATEST(0, ${deliveryMen.activeOrdersCount} - 1)`,
+            })
+            .where(eq(deliveryMen.id, courierId));
 
-    // 4. استدعاء خوارزمية التوزيع مجدداً للمندوب التالي
+        // 3. Reset order deliveryManId
+        await tx
+            .update(orders)
+            .set({
+                deliveryManId: null,
+                shippingStatus: "pending_dispatch",
+            })
+            .where(eq(orders.id, orderId));
+    });
+
+    // Re-dispatch excluding this courier
     return await dispatchOrder(orderId);
 }

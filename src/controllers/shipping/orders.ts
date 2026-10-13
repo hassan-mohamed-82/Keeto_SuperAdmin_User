@@ -6,20 +6,23 @@ import {
     restaurants,
     branches,
     deliveryMen,
-    shippingCompanyRestaurants,
+    dispatchAssignments,
     food,
 } from "../../models/schema";
-import { eq, and, inArray, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
-import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
-import { autoAssignOrderToClosestDeliveryMan } from "../../services/shipping/dispatchService";
+import { BadRequest, NotFound, UnauthorizedError, ForbiddenError } from "../../Errors";
+import { dispatchOrder, assignCourierToOrder, rejectOrderByCourier, releaseCourierForOrder } from "../../services/shipping/dispatchEngine";
 import { notifyDeliveryMan, notifyShippingCompany, notifyOrderTracking } from "../../services/socket/socketService";
+import { SOCKET_EVENTS } from "../../services/socket/socketEvents";
+import { catchAsync } from "../../utils/catchAsync";
+import { settleDeliveredOrder } from "../../services/restaurantWalletService";
 
 // =========================================================================
-// 1. عرض طلبات المطاعم التابعة لشركة الشحن (Get Shipping Company Orders)
+// 1. عرض طلبات شركة الشحن (Get Orders Filtered by orders.shippingCompanyId)
 // =========================================================================
-export async function getOrders(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+export const getOrders = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
@@ -29,6 +32,7 @@ export async function getOrders(req: Request, res: Response) {
         restaurantId,
         branchId,
         status,
+        shippingStatus,
         deliveryManId,
         page = "1",
         limit = "20",
@@ -40,40 +44,12 @@ export async function getOrders(req: Request, res: Response) {
     const limitNum = parseInt(limit as string, 10) || 20;
     const offset = (pageNum - 1) * limitNum;
 
-    // جلب المطاعم المسندة لهذه الشركة أولاً
-    const assignedRestaurants = await db
-        .select({ restaurantId: shippingCompanyRestaurants.restaurantId })
-        .from(shippingCompanyRestaurants)
-        .where(
-            and(
-                eq(shippingCompanyRestaurants.shippingCompanyId, companyId),
-                eq(shippingCompanyRestaurants.status, "active")
-            )
-        );
-
-    const restaurantIds = assignedRestaurants.map((r) => r.restaurantId);
-
-    if (restaurantIds.length === 0) {
-        return SuccessResponse(res, {
-            message: "No restaurants assigned to this shipping company",
-            data: [],
-            pagination: {
-                page: pageNum,
-                limit: limitNum,
-                total: 0,
-                totalPages: 0,
-            },
-        });
-    }
-
+    // Direct filter on orders.shippingCompanyId (Phase 8 requirement)
     const conditions = [
-        inArray(orders.restaurantId, restaurantIds),
+        eq(orders.shippingCompanyId, companyId),
     ];
 
     if (restaurantId && typeof restaurantId === "string") {
-        if (!restaurantIds.includes(restaurantId)) {
-            throw new UnauthorizedError("Restaurant not assigned to this shipping company");
-        }
         conditions.push(eq(orders.restaurantId, restaurantId));
     }
 
@@ -83,6 +59,10 @@ export async function getOrders(req: Request, res: Response) {
 
     if (status && typeof status === "string") {
         conditions.push(eq(orders.status, status as any));
+    }
+
+    if (shippingStatus && typeof shippingStatus === "string") {
+        conditions.push(eq(orders.shippingStatus, shippingStatus as any));
     }
 
     if (deliveryManId && typeof deliveryManId === "string") {
@@ -111,12 +91,18 @@ export async function getOrders(req: Request, res: Response) {
             branchAddress: branches.address,
             orderType: orders.orderType,
             status: orders.status,
+            shippingStatus: orders.shippingStatus,
+            shippingFailReason: orders.shippingFailReason,
+            dispatchAttempts: orders.dispatchAttempts,
             totalAmount: orders.totalAmount,
             deliveryFee: orders.deliveryFee,
             shippingAddress: orders.shippingAddress,
             deliveryManId: orders.deliveryManId,
             deliveryManName: deliveryMen.name,
             deliveryManPhone: deliveryMen.phone,
+            shippingAssignedAt: orders.shippingAssignedAt,
+            pickedUpAt: orders.pickedUpAt,
+            deliveredAt: orders.deliveredAt,
             createdAt: orders.createdAt,
         })
         .from(orders)
@@ -143,13 +129,13 @@ export async function getOrders(req: Request, res: Response) {
             totalPages: Math.ceil(Number(totalResult?.count || 0) / limitNum),
         },
     });
-}
+});
 
 // =========================================================================
 // 2. تفاصيل أوردر محدد (Get Order Details)
 // =========================================================================
-export async function getOrderDetails(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+export const getOrderDetails = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
     const { id } = req.params;
 
     if (!companyId) {
@@ -167,33 +153,20 @@ export async function getOrderDetails(req: Request, res: Response) {
         .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
         .leftJoin(branches, eq(orders.branchId, branches.id))
         .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
-        .where(eq(orders.id, id))
-        .limit(1);
-
-    if (orderData.length === 0) {
-        throw new NotFound("Order not found");
-    }
-
-    const { order, restaurant, branch, deliveryMan } = orderData[0];
-
-    // التأكد من أن المطعم مسند لشركة الشحن
-    const isAssigned = await db
-        .select({ id: shippingCompanyRestaurants.id })
-        .from(shippingCompanyRestaurants)
         .where(
             and(
-                eq(shippingCompanyRestaurants.shippingCompanyId, companyId),
-                eq(shippingCompanyRestaurants.restaurantId, order.restaurantId),
-                eq(shippingCompanyRestaurants.status, "active")
+                eq(orders.id, id),
+                eq(orders.shippingCompanyId, companyId)
             )
         )
         .limit(1);
 
-    if (isAssigned.length === 0) {
-        throw new UnauthorizedError("You are not authorized to view orders for this restaurant");
+    if (orderData.length === 0) {
+        throw new NotFound("Order not found or does not belong to your shipping company");
     }
 
-    // جلب أصناف الأوردر
+    const { order, restaurant, branch, deliveryMan } = orderData[0];
+
     const items = await db
         .select({
             id: orderItems.id,
@@ -231,13 +204,13 @@ export async function getOrderDetails(req: Request, res: Response) {
             items,
         },
     });
-}
+});
 
 // =========================================================================
-// 3. إسناد مندوب توصيل يدوي للأوردر (Manual Assign Delivery Man)
+// 3. إسناد مندوب توصيل يدوي للأوردر (Manual Assign by Company Dispatcher)
 // =========================================================================
-export async function manualAssignDeliveryMan(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+export const manualAssignDeliveryMan = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
     const { id } = req.params; // orderId
     const { deliveryManId } = req.body;
 
@@ -245,104 +218,252 @@ export async function manualAssignDeliveryMan(req: Request, res: Response) {
         throw new UnauthorizedError("Unauthorized access");
     }
 
-    const orderData = await db
-        .select({
-            id: orders.id,
-            orderNumber: orders.orderNumber,
-            restaurantId: orders.restaurantId,
-        })
-        .from(orders)
-        .where(eq(orders.id, id))
-        .limit(1);
-
-    if (orderData.length === 0) {
-        throw new NotFound("Order not found");
-    }
-
-    // التحقق من صلاحية شركة الشحن على هذا المطعم
-    const isAssigned = await db
-        .select({ id: shippingCompanyRestaurants.id })
-        .from(shippingCompanyRestaurants)
-        .where(
-            and(
-                eq(shippingCompanyRestaurants.shippingCompanyId, companyId),
-                eq(shippingCompanyRestaurants.restaurantId, orderData[0].restaurantId),
-                eq(shippingCompanyRestaurants.status, "active")
-            )
-        )
-        .limit(1);
-
-    if (isAssigned.length === 0) {
-        throw new UnauthorizedError("You are not authorized to assign delivery man for this order");
-    }
-
-    // التحقق من المندوب
-    const dm = await db
+    const [order] = await db
         .select()
-        .from(deliveryMen)
+        .from(orders)
         .where(
             and(
-                eq(deliveryMen.id, deliveryManId),
-                eq(deliveryMen.shippingCompanyId, companyId),
-                eq(deliveryMen.isActive, true),
-                eq(deliveryMen.isDeleted, false)
+                eq(orders.id, id),
+                eq(orders.shippingCompanyId, companyId)
             )
         )
         .limit(1);
 
-    if (dm.length === 0) {
-        throw new BadRequest("Delivery man is not assigned to your company or is inactive");
+    if (!order) {
+        throw new NotFound("Order not found or does not belong to your shipping company");
     }
 
-    await db
-        .update(orders)
-        .set({
-            deliveryManId,
-            shippingCompanyId: companyId,
-        })
-        .where(eq(orders.id, id));
+    // Assign atomically via shared assign engine
+    const assignRes = await assignCourierToOrder(id, deliveryManId, companyId, (order.dispatchAttempts || 0) + 1);
 
-    // إرسال تنبيه للمندوب والمتابعة
-    notifyDeliveryMan(deliveryManId, "order:assigned", {
+    if (!assignRes.success) {
+        throw new BadRequest("Courier is not available or has reached max active orders");
+    }
+
+    const dm = assignRes.courier;
+
+    notifyDeliveryMan(deliveryManId, SOCKET_EVENTS.COURIER_ASSIGNED, {
         orderId: id,
-        orderNumber: orderData[0].orderNumber,
-        assignedBy: "shipping_company",
+        orderNumber: order.orderNumber,
+        assignedBy: "shipping_company_manual",
     });
 
-    notifyOrderTracking(id, "order:delivery_assigned", {
-        deliveryManId: dm[0].id,
-        deliveryManName: dm[0].name,
-        deliveryManPhone: dm[0].phone,
+    notifyOrderTracking(id, SOCKET_EVENTS.ORDER_COURIER_ASSIGNED, {
+        deliveryManId: dm.id,
+        deliveryManName: dm.name,
+        deliveryManPhone: dm.phone,
     });
 
     return SuccessResponse(res, {
-        message: `Order assigned to delivery man ${dm[0].name} successfully`,
+        message: `Order assigned to delivery man ${dm.name} successfully`,
     });
-}
+});
 
 // =========================================================================
-// 4. الإسناد التلقائي لأقرب مندوب حسب الموقع الجغرافي للفرع (Auto-Assign to Closest Delivery Man)
+// 4. إعادة التوزيع التلقائي (Re-Dispatch by Company Dispatcher)
 // =========================================================================
-export async function autoAssignOrder(req: Request, res: Response) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+export const autoAssignOrder = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
     const { id } = req.params; // orderId
-    const { maxRadiusKm } = req.body;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
     }
 
-    const result = await autoAssignOrderToClosestDeliveryMan(id, {
-        maxRadiusKm,
-        shippingCompanyId: companyId,
-    });
+    const [order] = await db
+        .select()
+        .from(orders)
+        .where(
+            and(
+                eq(orders.id, id),
+                eq(orders.shippingCompanyId, companyId)
+            )
+        )
+        .limit(1);
 
-    if (!result.assigned) {
-        throw new BadRequest(result.reason || "Could not auto-assign delivery man");
+    if (!order) {
+        throw new NotFound("Order not found or does not belong to your company");
     }
 
+    const result = await dispatchOrder(id);
+
     return SuccessResponse(res, {
-        message: `Order successfully auto-assigned to closest delivery man: ${result.deliveryMan?.name}`,
+        message: result.message || "Dispatch run completed",
         data: result,
     });
-}
+});
+
+// =========================================================================
+// 5. Courier Endpoint: Picked Up (POST /api/delivery/orders/:id/picked-up)
+// =========================================================================
+export const markOrderPickedUp = catchAsync(async (req: Request, res: Response) => {
+    const courierId = req.user?.deliveryManId || req.user?.id;
+    const { id } = req.params;
+
+    if (!courierId) {
+        throw new UnauthorizedError("Unauthorized courier");
+    }
+
+    const [order] = await db
+        .select()
+        .from(orders)
+        .where(
+            and(
+                eq(orders.id, id),
+                eq(orders.deliveryManId, courierId)
+            )
+        )
+        .limit(1);
+
+    if (!order) {
+        throw new NotFound("Order not found or not assigned to you");
+    }
+
+    if (order.shippingStatus !== "assigned") {
+        throw new BadRequest(`Cannot mark picked up from shipping status "${order.shippingStatus}"`);
+    }
+
+    const now = new Date();
+
+    await db
+        .update(orders)
+        .set({
+            shippingStatus: "picked_up",
+            pickedUpAt: now,
+            status: "out_for_delivery",
+            updatedAt: now,
+        })
+        .where(eq(orders.id, id));
+
+    if (order.shippingCompanyId) {
+        notifyShippingCompany(order.shippingCompanyId, SOCKET_EVENTS.ORDER_STATUS_CHANGED, {
+            orderId: id,
+            shippingStatus: "picked_up",
+            updatedAt: now,
+        });
+    }
+
+    notifyOrderTracking(id, SOCKET_EVENTS.ORDER_PICKED_UP, {
+        orderId: id,
+        courierId,
+        pickedUpAt: now,
+    });
+
+    return SuccessResponse(res, {
+        message: "Order marked as picked up successfully",
+    });
+});
+
+// =========================================================================
+// 6. Courier Endpoint: Delivered (POST /api/delivery/orders/:id/delivered)
+// =========================================================================
+export const markOrderDelivered = catchAsync(async (req: Request, res: Response) => {
+    const courierId = req.user?.deliveryManId || req.user?.id;
+    const { id } = req.params;
+
+    if (!courierId) {
+        throw new UnauthorizedError("Unauthorized courier");
+    }
+
+    const [order] = await db
+        .select()
+        .from(orders)
+        .where(
+            and(
+                eq(orders.id, id),
+                eq(orders.deliveryManId, courierId)
+            )
+        )
+        .limit(1);
+
+    if (!order) {
+        throw new NotFound("Order not found or not assigned to you");
+    }
+
+    if (order.shippingStatus !== "picked_up" && order.shippingStatus !== "assigned") {
+        throw new BadRequest(`Cannot mark delivered from shipping status "${order.shippingStatus}"`);
+    }
+
+    const now = new Date();
+
+    await db.transaction(async (tx) => {
+        // 1. Update order status and timestamp
+        await tx
+            .update(orders)
+            .set({
+                shippingStatus: "delivered",
+                status: "delivered",
+                deliveredAt: now,
+                updatedAt: now,
+            })
+            .where(eq(orders.id, id));
+
+        // 2. Decrement courier activeOrdersCount
+        await tx
+            .update(deliveryMen)
+            .set({
+                activeOrdersCount: sql`GREATEST(0, ${deliveryMen.activeOrdersCount} - 1)`,
+            })
+            .where(eq(deliveryMen.id, courierId));
+
+        // 3. Mark assignment completed
+        await tx
+            .update(dispatchAssignments)
+            .set({
+                status: "completed",
+                respondedAt: now,
+            })
+            .where(
+                and(
+                    eq(dispatchAssignments.orderId, id),
+                    eq(dispatchAssignments.deliveryManId, courierId),
+                    eq(dispatchAssignments.status, "active")
+                )
+            );
+
+        // 4. Settle restaurant earnings via shared service
+        await settleDeliveredOrder(id, tx);
+    });
+
+    if (order.shippingCompanyId) {
+        notifyShippingCompany(order.shippingCompanyId, SOCKET_EVENTS.ORDER_STATUS_CHANGED, {
+            orderId: id,
+            shippingStatus: "delivered",
+            updatedAt: now,
+        });
+    }
+
+    notifyOrderTracking(id, SOCKET_EVENTS.ORDER_DELIVERED, {
+        orderId: id,
+        courierId,
+        deliveredAt: now,
+    });
+
+    return SuccessResponse(res, {
+        message: "Order marked as delivered successfully",
+    });
+});
+
+// =========================================================================
+// 7. Courier Endpoint: Reject Order (POST /api/delivery/orders/:id/reject)
+// =========================================================================
+export const rejectOrderCourierEndpoint = catchAsync(async (req: Request, res: Response) => {
+    const courierId = req.user?.deliveryManId || req.user?.id;
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!courierId) {
+        throw new UnauthorizedError("Unauthorized courier");
+    }
+
+    if (!reason || reason.trim() === "") {
+        throw new BadRequest("Reject reason is mandatory");
+    }
+
+    const result = await rejectOrderByCourier(id, courierId, reason);
+
+    return SuccessResponse(res, {
+        message: "Order rejected and re-dispatch initiated",
+        data: result,
+    });
+});

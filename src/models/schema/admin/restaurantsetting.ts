@@ -10,6 +10,7 @@ import {
   json,
   timestamp
 } from "drizzle-orm/mysql-core";
+import { shippingCompanies } from "./shippingCompany";
 
 // 1. جدول الإعدادات العامة
 export const restaurantSettings = mysqlTable("restaurant_settings", {
@@ -22,7 +23,8 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   posSection: boolean("pos_section").default(false),
   selfDelivery: boolean("self_delivery").default(false),
   homeDelivery: boolean("home_delivery").default(true),
-  shippingCompanyId: char("shipping_company_id", { length: 36 }),
+  shippingCompanyId: char("shipping_company_id", { length: 36 })
+    .references(() => shippingCompanies.id, { onDelete: "set null" }),
   takeaway: boolean("takeaway").default(false),
   orderSubscription: boolean("order_subscription").default(false),
   instantOrder: boolean("instant_order").default(true),

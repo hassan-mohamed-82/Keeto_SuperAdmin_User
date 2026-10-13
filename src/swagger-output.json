@@ -3453,7 +3453,8 @@
                       "company_inactive",
                       "out_of_zone",
                       "no_courier",
-                      "max_attempts"
+                      "max_attempts",
+                      "no_coordinates"
                     ]
                   },
                   "dispatchAttempts": {
@@ -3518,6 +3519,18 @@
                   },
                   "paymentIssueType": {
                     "type": "string"
+                  },
+                  "shippingAssignedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pickedUpAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deliveredAt": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 }
               }
@@ -3724,7 +3737,8 @@
                       "company_inactive",
                       "out_of_zone",
                       "no_courier",
-                      "max_attempts"
+                      "max_attempts",
+                      "no_coordinates"
                     ]
                   },
                   "dispatchAttempts": {
@@ -3789,6 +3803,18 @@
                   },
                   "paymentIssueType": {
                     "type": "string"
+                  },
+                  "shippingAssignedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pickedUpAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deliveredAt": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 }
               }
@@ -3995,7 +4021,8 @@
                       "company_inactive",
                       "out_of_zone",
                       "no_courier",
-                      "max_attempts"
+                      "max_attempts",
+                      "no_coordinates"
                     ]
                   },
                   "dispatchAttempts": {
@@ -4060,6 +4087,18 @@
                   },
                   "paymentIssueType": {
                     "type": "string"
+                  },
+                  "shippingAssignedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pickedUpAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deliveredAt": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 }
               }
@@ -13642,7 +13681,8 @@
                       "company_inactive",
                       "out_of_zone",
                       "no_courier",
-                      "max_attempts"
+                      "max_attempts",
+                      "no_coordinates"
                     ]
                   },
                   "dispatchAttempts": {
@@ -13707,6 +13747,18 @@
                   },
                   "paymentIssueType": {
                     "type": "string"
+                  },
+                  "shippingAssignedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pickedUpAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deliveredAt": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 }
               }
@@ -13913,7 +13965,8 @@
                       "company_inactive",
                       "out_of_zone",
                       "no_courier",
-                      "max_attempts"
+                      "max_attempts",
+                      "no_coordinates"
                     ]
                   },
                   "dispatchAttempts": {
@@ -13978,6 +14031,18 @@
                   },
                   "paymentIssueType": {
                     "type": "string"
+                  },
+                  "shippingAssignedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pickedUpAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deliveredAt": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 },
                 "required": [
@@ -14234,7 +14299,8 @@
                       "company_inactive",
                       "out_of_zone",
                       "no_courier",
-                      "max_attempts"
+                      "max_attempts",
+                      "no_coordinates"
                     ]
                   },
                   "dispatchAttempts": {
@@ -14299,6 +14365,18 @@
                   },
                   "paymentIssueType": {
                     "type": "string"
+                  },
+                  "shippingAssignedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pickedUpAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deliveredAt": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 },
                 "required": [
@@ -15815,22 +15893,27 @@
             "description": "Service Unavailable"
           }
         },
-        "tags": [
-          "Shipping / Auth"
-        ],
-        "security": [],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true
-              },
-              "example": {}
+                "properties": {
+                  "email": {
+                    "example": "any"
+                  },
+                  "password": {
+                    "example": "any"
+                  }
+                }
+              }
             }
           }
-        }
+        },
+        "tags": [
+          "Shipping / Auth"
+        ],
+        "security": []
       }
     },
     "/api/shipping/auth/profile": {
@@ -15857,8 +15940,59 @@
           "Shipping / Auth"
         ],
         "security": []
+      }
+    },
+    "/api/shipping/auth/me": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Shipping / Auth"
+        ],
+        "security": []
+      }
+    },
+    "/api/shipping/users/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Shipping / Users"
+        ]
       },
-      "put": {
+      "post": {
         "description": "",
         "parameters": [
           {
@@ -15880,22 +16014,131 @@
             "description": "Service Unavailable"
           }
         },
-        "tags": [
-          "Shipping / Auth"
-        ],
-        "security": [],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true
-              },
-              "example": {}
+                "properties": {
+                  "name": {
+                    "example": "any"
+                  },
+                  "email": {
+                    "example": "any"
+                  },
+                  "password": {
+                    "example": "any"
+                  },
+                  "phone": {
+                    "example": "any"
+                  },
+                  "role": {
+                    "example": "any"
+                  }
+                }
+              }
             }
           }
-        }
+        },
+        "tags": [
+          "Shipping / Users"
+        ]
+      }
+    },
+    "/api/shipping/users/{id}": {
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "example": "any"
+                  },
+                  "email": {
+                    "example": "any"
+                  },
+                  "password": {
+                    "example": "any"
+                  },
+                  "phone": {
+                    "example": "any"
+                  },
+                  "role": {
+                    "example": "any"
+                  },
+                  "status": {
+                    "example": "any"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Shipping / Users"
+        ]
+      },
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Shipping / Users"
+        ]
       }
     },
     "/api/shipping/restaurants/": {
@@ -15957,6 +16200,29 @@
       }
     },
     "/api/shipping/zones/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Shipping / Zones"
+        ]
+      },
       "post": {
         "description": "",
         "parameters": [
@@ -15979,83 +16245,36 @@
             "description": "Service Unavailable"
           }
         },
-        "tags": [
-          "Shipping / Zones"
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "nameAr": {
-                    "type": "string"
-                  },
-                  "nameFr": {
-                    "type": "string"
-                  },
-                  "displayName": {
-                    "type": "string"
-                  },
-                  "displayNameAr": {
-                    "type": "string"
-                  },
-                  "displayNameFr": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "coordinates": {
-                    "type": "object"
+                    "example": "any"
                   },
                   "coverageAreaRadiusKm": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "deliveryFee": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "minOrderAmount": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "status": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "inactive"
-                    ]
-                  },
-                  "cityId": {
-                    "type": "string"
+                    "example": "any"
                   }
-                },
-                "required": [
-                  "name",
-                  "displayName"
-                ]
+                }
               }
             }
-          }
-        }
-      },
-      "get": {
-        "description": "",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "401": {
-            "description": "Unauthorized"
-          },
-          "503": {
-            "description": "Service Unavailable"
           }
         },
         "tags": [
@@ -16125,61 +16344,41 @@
             "description": "Service Unavailable"
           }
         },
-        "tags": [
-          "Shipping / Zones"
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "nameAr": {
-                    "type": "string"
-                  },
-                  "nameFr": {
-                    "type": "string"
-                  },
-                  "displayName": {
-                    "type": "string"
-                  },
-                  "displayNameAr": {
-                    "type": "string"
-                  },
-                  "displayNameFr": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "coordinates": {
-                    "type": "object"
+                    "example": "any"
                   },
                   "coverageAreaRadiusKm": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "deliveryFee": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "minOrderAmount": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "status": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "inactive"
-                    ]
-                  },
-                  "cityId": {
-                    "type": "string"
+                    "example": "any"
                   }
                 }
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Shipping / Zones"
+        ]
       },
       "delete": {
         "description": "",
@@ -16214,7 +16413,7 @@
       }
     },
     "/api/shipping/delivery-men/": {
-      "post": {
+      "get": {
         "description": "",
         "parameters": [
           {
@@ -16223,118 +16422,38 @@
             "schema": {
               "type": "string"
             }
-          }
-        ],
-        "responses": {
-          "400": {
-            "description": "Bad Request"
           },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "503": {
-            "description": "Service Unavailable"
-          }
-        },
-        "tags": [
-          "Shipping / Delivery Men"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "restaurantId": {
-                    "type": "string"
-                  },
-                  "shippingCompanyId": {
-                    "type": "string"
-                  },
-                  "branchId": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "phone": {
-                    "type": "string"
-                  },
-                  "email": {
-                    "type": "string"
-                  },
-                  "password": {
-                    "type": "string"
-                  },
-                  "image": {
-                    "type": "string"
-                  },
-                  "deliveryType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant",
-                      "outsource"
-                    ]
-                  },
-                  "workType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant_shift",
-                      "outsource"
-                    ]
-                  },
-                  "activeOrdersCount": {
-                    "type": "integer"
-                  },
-                  "shiftStatus": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "inactive"
-                    ]
-                  },
-                  "isOnline": {
-                    "type": "boolean"
-                  },
-                  "isAvailable": {
-                    "type": "boolean"
-                  },
-                  "currentLat": {
-                    "type": "string"
-                  },
-                  "currentLng": {
-                    "type": "string"
-                  },
-                  "lastLocationUpdate": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "fcmToken": {
-                    "type": "string"
-                  },
-                  "isActive": {
-                    "type": "boolean"
-                  },
-                  "isDeleted": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "name",
-                  "phone"
-                ]
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "description": "",
-        "parameters": [
           {
-            "name": "authorization",
-            "in": "header",
+            "name": "shiftStatus",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "isOnline",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "isAvailable",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workType",
+            "in": "query",
             "schema": {
               "type": "string"
             }
@@ -16351,9 +16470,7 @@
         "tags": [
           "Shipping / Delivery Men"
         ]
-      }
-    },
-    "/api/shipping/delivery-men/assign-existing": {
+      },
       "post": {
         "description": "",
         "parameters": [
@@ -16376,98 +16493,50 @@
             "description": "Service Unavailable"
           }
         },
-        "tags": [
-          "Shipping / Delivery Men"
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "restaurantId": {
-                    "type": "string"
-                  },
-                  "shippingCompanyId": {
-                    "type": "string"
-                  },
-                  "branchId": {
-                    "type": "string"
-                  },
                   "name": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "phone": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "email": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "password": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "image": {
-                    "type": "string"
-                  },
-                  "deliveryType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant",
-                      "outsource"
-                    ]
+                    "example": "any"
                   },
                   "workType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant_shift",
-                      "outsource"
-                    ]
+                    "example": "any"
                   },
-                  "activeOrdersCount": {
-                    "type": "integer"
+                  "allZones": {
+                    "example": "any"
                   },
-                  "shiftStatus": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "inactive"
-                    ]
+                  "zoneIds": {
+                    "example": "any"
                   },
-                  "isOnline": {
-                    "type": "boolean"
+                  "restaurantId": {
+                    "example": "any"
                   },
-                  "isAvailable": {
-                    "type": "boolean"
-                  },
-                  "currentLat": {
-                    "type": "string"
-                  },
-                  "currentLng": {
-                    "type": "string"
-                  },
-                  "lastLocationUpdate": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "fcmToken": {
-                    "type": "string"
-                  },
-                  "isActive": {
-                    "type": "boolean"
-                  },
-                  "isDeleted": {
-                    "type": "boolean"
+                  "branchId": {
+                    "example": "any"
                   }
-                },
-                "required": [
-                  "name",
-                  "phone"
-                ]
+                }
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Shipping / Delivery Men"
+        ]
       }
     },
     "/api/shipping/delivery-men/{id}": {
@@ -16532,94 +16601,56 @@
             "description": "Service Unavailable"
           }
         },
-        "tags": [
-          "Shipping / Delivery Men"
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "restaurantId": {
-                    "type": "string"
-                  },
-                  "shippingCompanyId": {
-                    "type": "string"
-                  },
-                  "branchId": {
-                    "type": "string"
-                  },
                   "name": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "phone": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "email": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "password": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "image": {
-                    "type": "string"
-                  },
-                  "deliveryType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant",
-                      "outsource"
-                    ]
+                    "example": "any"
                   },
                   "workType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant_shift",
-                      "outsource"
-                    ]
+                    "example": "any"
                   },
-                  "activeOrdersCount": {
-                    "type": "integer"
+                  "allZones": {
+                    "example": "any"
                   },
                   "shiftStatus": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "inactive"
-                    ]
+                    "example": "any"
                   },
                   "isOnline": {
-                    "type": "boolean"
-                  },
-                  "isAvailable": {
-                    "type": "boolean"
-                  },
-                  "currentLat": {
-                    "type": "string"
-                  },
-                  "currentLng": {
-                    "type": "string"
-                  },
-                  "lastLocationUpdate": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "fcmToken": {
-                    "type": "string"
+                    "example": "any"
                   },
                   "isActive": {
-                    "type": "boolean"
+                    "example": "any"
                   },
-                  "isDeleted": {
-                    "type": "boolean"
+                  "branchId": {
+                    "example": "any"
+                  },
+                  "restaurantId": {
+                    "example": "any"
                   }
                 }
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Shipping / Delivery Men"
+        ]
       },
       "delete": {
         "description": "",
@@ -16653,8 +16684,39 @@
         ]
       }
     },
-    "/api/shipping/delivery-men/{id}/shift": {
-      "patch": {
+    "/api/shipping/delivery-men/{id}/zones": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Shipping / Delivery Men"
+        ]
+      },
+      "put": {
         "description": "",
         "parameters": [
           {
@@ -16684,98 +16746,61 @@
             "description": "Service Unavailable"
           }
         },
-        "tags": [
-          "Shipping / Delivery Men"
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "restaurantId": {
-                    "type": "string"
+                  "allZones": {
+                    "example": "any"
                   },
-                  "shippingCompanyId": {
-                    "type": "string"
-                  },
-                  "branchId": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "phone": {
-                    "type": "string"
-                  },
-                  "email": {
-                    "type": "string"
-                  },
-                  "password": {
-                    "type": "string"
-                  },
-                  "image": {
-                    "type": "string"
-                  },
-                  "deliveryType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant",
-                      "outsource"
-                    ]
-                  },
-                  "workType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant_shift",
-                      "outsource"
-                    ]
-                  },
-                  "activeOrdersCount": {
-                    "type": "integer"
-                  },
-                  "shiftStatus": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "inactive"
-                    ]
-                  },
-                  "isOnline": {
-                    "type": "boolean"
-                  },
-                  "isAvailable": {
-                    "type": "boolean"
-                  },
-                  "currentLat": {
-                    "type": "string"
-                  },
-                  "currentLng": {
-                    "type": "string"
-                  },
-                  "lastLocationUpdate": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "fcmToken": {
-                    "type": "string"
-                  },
-                  "isActive": {
-                    "type": "boolean"
-                  },
-                  "isDeleted": {
-                    "type": "boolean"
+                  "zoneIds": {
+                    "example": "any"
                   }
                 }
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Shipping / Delivery Men"
+        ]
       }
     },
-    "/api/shipping/delivery-men/{id}/location": {
-      "patch": {
+    "/api/shipping/delivery-men/{id}/shifts": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Shipping / Delivery Men"
+        ]
+      },
+      "put": {
         "description": "",
         "parameters": [
           {
@@ -16805,94 +16830,74 @@
             "description": "Service Unavailable"
           }
         },
-        "tags": [
-          "Shipping / Delivery Men"
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "restaurantId": {
-                    "type": "string"
-                  },
-                  "shippingCompanyId": {
-                    "type": "string"
-                  },
-                  "branchId": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "phone": {
-                    "type": "string"
-                  },
-                  "email": {
-                    "type": "string"
-                  },
-                  "password": {
-                    "type": "string"
-                  },
-                  "image": {
-                    "type": "string"
-                  },
-                  "deliveryType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant",
-                      "outsource"
-                    ]
-                  },
-                  "workType": {
-                    "type": "string",
-                    "enum": [
-                      "restaurant_shift",
-                      "outsource"
-                    ]
-                  },
-                  "activeOrdersCount": {
-                    "type": "integer"
-                  },
-                  "shiftStatus": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "inactive"
-                    ]
-                  },
-                  "isOnline": {
-                    "type": "boolean"
-                  },
-                  "isAvailable": {
-                    "type": "boolean"
-                  },
-                  "currentLat": {
-                    "type": "string"
-                  },
-                  "currentLng": {
-                    "type": "string"
-                  },
-                  "lastLocationUpdate": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "fcmToken": {
-                    "type": "string"
-                  },
-                  "isActive": {
-                    "type": "boolean"
-                  },
-                  "isDeleted": {
-                    "type": "boolean"
+                  "shifts": {
+                    "example": "any"
                   }
                 }
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Shipping / Delivery Men"
+        ]
+      }
+    },
+    "/api/shipping/delivery-men/assign-existing": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deliveryManId": {
+                    "example": "any"
+                  },
+                  "workType": {
+                    "example": "any"
+                  },
+                  "allZones": {
+                    "example": "any"
+                  },
+                  "zoneIds": {
+                    "example": "any"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Shipping / Delivery Men"
+        ]
       }
     },
     "/api/shipping/orders/": {
@@ -16902,6 +16907,69 @@
           {
             "name": "authorization",
             "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "restaurantId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "branchId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "shippingStatus",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deliveryManId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "toDate",
+            "in": "query",
             "schema": {
               "type": "string"
             }
@@ -16956,7 +17024,7 @@
         ]
       }
     },
-    "/api/shipping/orders/{id}/assign-delivery": {
+    "/api/shipping/orders/{id}/assign": {
       "post": {
         "description": "",
         "parameters": [
@@ -16987,255 +17055,23 @@
             "description": "Service Unavailable"
           }
         },
-        "tags": [
-          "Shipping / Orders"
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "orderNumber": {
-                    "type": "string"
-                  },
-                  "idempotencyKey": {
-                    "type": "string"
-                  },
-                  "userId": {
-                    "type": "string"
-                  },
-                  "restaurantId": {
-                    "type": "string"
-                  },
-                  "branchId": {
-                    "type": "string"
-                  },
-                  "addressId": {
-                    "type": "string"
-                  },
-                  "zoneId": {
-                    "type": "string"
-                  },
-                  "orderSource": {
-                    "type": "string",
-                    "enum": [
-                      "online_order_web",
-                      "online_order_app",
-                      "food_aggregator",
-                      "my_keeto",
-                      "pos"
-                    ]
-                  },
-                  "paymentMethod": {
-                    "type": "string"
-                  },
-                  "orderType": {
-                    "type": "string",
-                    "enum": [
-                      "delivery",
-                      "takeaway",
-                      "dine_in"
-                    ]
-                  },
-                  "subtotal": {
-                    "type": "string"
-                  },
-                  "deliveryFee": {
-                    "type": "string"
-                  },
-                  "serviceFee": {
-                    "type": "string"
-                  },
-                  "appCommission": {
-                    "type": "string"
-                  },
-                  "visaCommission": {
-                    "type": "string"
-                  },
-                  "discountId": {
-                    "type": "string"
-                  },
-                  "discountAmount": {
-                    "type": "string"
-                  },
-                  "discountType": {
-                    "type": "string",
-                    "enum": [
-                      "percentage",
-                      "fixed_amount"
-                    ]
-                  },
-                  "discountValue": {
-                    "type": "string"
-                  },
-                  "discountSource": {
-                    "type": "string",
-                    "enum": [
-                      "food_level",
-                      "restaurant_discount",
-                      "global_discount",
-                      "coupon",
-                      "first_order_discount"
-                    ]
-                  },
-                  "couponId": {
-                    "type": "string"
-                  },
-                  "couponCode": {
-                    "type": "string"
-                  },
-                  "firstOrderDiscountId": {
-                    "type": "string"
-                  },
-                  "totalAmount": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "pending",
-                      "accepted",
-                      "preparing",
-                      "out_for_delivery",
-                      "delivered",
-                      "cancelled",
-                      "refund",
-                      "failed"
-                    ]
-                  },
-                  "durationOrderPreparing": {
-                    "type": "integer"
-                  },
-                  "isPointsRedeemed": {
-                    "type": "boolean"
-                  },
-                  "redeemCode": {
-                    "type": "string"
-                  },
-                  "redeemCodeExpiresAt": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "cancelReasonId": {
-                    "type": "string"
-                  },
-                  "cancelReason": {
-                    "type": "string"
-                  },
-                  "cancelReasonType": {
-                    "type": "string",
-                    "enum": [
-                      "user",
-                      "restaurant"
-                    ]
-                  },
-                  "note": {
-                    "type": "string"
-                  },
                   "deliveryManId": {
-                    "type": "string"
-                  },
-                  "shippingCompanyId": {
-                    "type": "string"
-                  },
-                  "shippingStatus": {
-                    "type": "string",
-                    "enum": [
-                      "pending_dispatch",
-                      "assigned",
-                      "picked_up",
-                      "delivered",
-                      "manual_required"
-                    ]
-                  },
-                  "shippingFailReason": {
-                    "type": "string",
-                    "enum": [
-                      "no_company",
-                      "company_inactive",
-                      "out_of_zone",
-                      "no_courier",
-                      "max_attempts"
-                    ]
-                  },
-                  "dispatchAttempts": {
-                    "type": "integer"
-                  },
-                  "dailyOrderNumber": {
-                    "type": "integer"
-                  },
-                  "rating": {
-                    "type": "integer"
-                  },
-                  "ratingComment": {
-                    "type": "string"
-                  },
-                  "shippingAddress": {
-                    "type": "object"
-                  },
-                  "branchSnapshot": {
-                    "type": "object"
-                  },
-                  "isDelayEmailSent": {
-                    "type": "boolean"
-                  },
-                  "offerId": {
-                    "type": "string"
-                  },
-                  "paymentGateway": {
-                    "type": "string",
-                    "enum": [
-                      "kashier",
-                      "paymob",
-                      "geidea"
-                    ]
-                  },
-                  "paymentGatewayType": {
-                    "type": "string",
-                    "enum": [
-                      "SYSTEM",
-                      "CUSTOM"
-                    ]
-                  },
-                  "paymentOrderId": {
-                    "type": "string"
-                  },
-                  "paymentTransactionId": {
-                    "type": "string"
-                  },
-                  "paymentStatus": {
-                    "type": "string",
-                    "enum": [
-                      "pending_payment",
-                      "paid",
-                      "payment_failed"
-                    ]
-                  },
-                  "paymentFailureReason": {
-                    "type": "string"
-                  },
-                  "paymentIssueNotifiedAt": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "paymentIssueType": {
-                    "type": "string"
+                    "example": "any"
                   }
-                },
-                "required": [
-                  "orderNumber",
-                  "userId",
-                  "restaurantId",
-                  "orderSource",
-                  "subtotal",
-                  "totalAmount"
-                ]
+                }
               }
             }
           }
-        }
+        },
+        "tags": [
+          "Shipping / Orders"
+        ]
       }
     },
     "/api/shipping/orders/{id}/auto-assign": {
@@ -17439,7 +17275,8 @@
                       "company_inactive",
                       "out_of_zone",
                       "no_courier",
-                      "max_attempts"
+                      "max_attempts",
+                      "no_coordinates"
                     ]
                   },
                   "dispatchAttempts": {
@@ -17504,6 +17341,18 @@
                   },
                   "paymentIssueType": {
                     "type": "string"
+                  },
+                  "shippingAssignedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pickedUpAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deliveredAt": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 },
                 "required": [
@@ -17518,6 +17367,802 @@
             }
           }
         }
+      }
+    },
+    "/api/shipping/reports/summary": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "toDate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Shipping / Reports"
+        ]
+      }
+    },
+    "/api/shipping/reports/couriers": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "toDate",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "courierId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Shipping / Reports"
+        ]
+      }
+    },
+    "/api/delivery/auth/login": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "phone": {
+                    "example": "any"
+                  },
+                  "password": {
+                    "example": "any"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Delivery / Auth"
+        ],
+        "security": []
+      }
+    },
+    "/api/delivery/me": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Delivery / Me"
+        ]
+      }
+    },
+    "/api/delivery/orders/{id}/picked-up": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Delivery / Orders"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "orderNumber": {
+                    "type": "string"
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "userId": {
+                    "type": "string"
+                  },
+                  "restaurantId": {
+                    "type": "string"
+                  },
+                  "branchId": {
+                    "type": "string"
+                  },
+                  "addressId": {
+                    "type": "string"
+                  },
+                  "zoneId": {
+                    "type": "string"
+                  },
+                  "orderSource": {
+                    "type": "string",
+                    "enum": [
+                      "online_order_web",
+                      "online_order_app",
+                      "food_aggregator",
+                      "my_keeto",
+                      "pos"
+                    ]
+                  },
+                  "paymentMethod": {
+                    "type": "string"
+                  },
+                  "orderType": {
+                    "type": "string",
+                    "enum": [
+                      "delivery",
+                      "takeaway",
+                      "dine_in"
+                    ]
+                  },
+                  "subtotal": {
+                    "type": "string"
+                  },
+                  "deliveryFee": {
+                    "type": "string"
+                  },
+                  "serviceFee": {
+                    "type": "string"
+                  },
+                  "appCommission": {
+                    "type": "string"
+                  },
+                  "visaCommission": {
+                    "type": "string"
+                  },
+                  "discountId": {
+                    "type": "string"
+                  },
+                  "discountAmount": {
+                    "type": "string"
+                  },
+                  "discountType": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "fixed_amount"
+                    ]
+                  },
+                  "discountValue": {
+                    "type": "string"
+                  },
+                  "discountSource": {
+                    "type": "string",
+                    "enum": [
+                      "food_level",
+                      "restaurant_discount",
+                      "global_discount",
+                      "coupon",
+                      "first_order_discount"
+                    ]
+                  },
+                  "couponId": {
+                    "type": "string"
+                  },
+                  "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
+                    "type": "string"
+                  },
+                  "totalAmount": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "accepted",
+                      "preparing",
+                      "out_for_delivery",
+                      "delivered",
+                      "cancelled",
+                      "refund",
+                      "failed"
+                    ]
+                  },
+                  "durationOrderPreparing": {
+                    "type": "integer"
+                  },
+                  "isPointsRedeemed": {
+                    "type": "boolean"
+                  },
+                  "redeemCode": {
+                    "type": "string"
+                  },
+                  "redeemCodeExpiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "cancelReasonId": {
+                    "type": "string"
+                  },
+                  "cancelReason": {
+                    "type": "string"
+                  },
+                  "cancelReasonType": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "restaurant"
+                    ]
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "deliveryManId": {
+                    "type": "string"
+                  },
+                  "shippingCompanyId": {
+                    "type": "string"
+                  },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts",
+                      "no_coordinates"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
+                  },
+                  "dailyOrderNumber": {
+                    "type": "integer"
+                  },
+                  "rating": {
+                    "type": "integer"
+                  },
+                  "ratingComment": {
+                    "type": "string"
+                  },
+                  "shippingAddress": {
+                    "type": "object"
+                  },
+                  "branchSnapshot": {
+                    "type": "object"
+                  },
+                  "isDelayEmailSent": {
+                    "type": "boolean"
+                  },
+                  "offerId": {
+                    "type": "string"
+                  },
+                  "paymentGateway": {
+                    "type": "string",
+                    "enum": [
+                      "kashier",
+                      "paymob",
+                      "geidea"
+                    ]
+                  },
+                  "paymentGatewayType": {
+                    "type": "string",
+                    "enum": [
+                      "SYSTEM",
+                      "CUSTOM"
+                    ]
+                  },
+                  "paymentOrderId": {
+                    "type": "string"
+                  },
+                  "paymentTransactionId": {
+                    "type": "string"
+                  },
+                  "paymentStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_payment",
+                      "paid",
+                      "payment_failed"
+                    ]
+                  },
+                  "paymentFailureReason": {
+                    "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
+                    "type": "string"
+                  },
+                  "shippingAssignedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pickedUpAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deliveredAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "orderNumber",
+                  "userId",
+                  "restaurantId",
+                  "orderSource",
+                  "subtotal",
+                  "totalAmount"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/delivery/orders/{id}/delivered": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Delivery / Orders"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "orderNumber": {
+                    "type": "string"
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "userId": {
+                    "type": "string"
+                  },
+                  "restaurantId": {
+                    "type": "string"
+                  },
+                  "branchId": {
+                    "type": "string"
+                  },
+                  "addressId": {
+                    "type": "string"
+                  },
+                  "zoneId": {
+                    "type": "string"
+                  },
+                  "orderSource": {
+                    "type": "string",
+                    "enum": [
+                      "online_order_web",
+                      "online_order_app",
+                      "food_aggregator",
+                      "my_keeto",
+                      "pos"
+                    ]
+                  },
+                  "paymentMethod": {
+                    "type": "string"
+                  },
+                  "orderType": {
+                    "type": "string",
+                    "enum": [
+                      "delivery",
+                      "takeaway",
+                      "dine_in"
+                    ]
+                  },
+                  "subtotal": {
+                    "type": "string"
+                  },
+                  "deliveryFee": {
+                    "type": "string"
+                  },
+                  "serviceFee": {
+                    "type": "string"
+                  },
+                  "appCommission": {
+                    "type": "string"
+                  },
+                  "visaCommission": {
+                    "type": "string"
+                  },
+                  "discountId": {
+                    "type": "string"
+                  },
+                  "discountAmount": {
+                    "type": "string"
+                  },
+                  "discountType": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "fixed_amount"
+                    ]
+                  },
+                  "discountValue": {
+                    "type": "string"
+                  },
+                  "discountSource": {
+                    "type": "string",
+                    "enum": [
+                      "food_level",
+                      "restaurant_discount",
+                      "global_discount",
+                      "coupon",
+                      "first_order_discount"
+                    ]
+                  },
+                  "couponId": {
+                    "type": "string"
+                  },
+                  "couponCode": {
+                    "type": "string"
+                  },
+                  "firstOrderDiscountId": {
+                    "type": "string"
+                  },
+                  "totalAmount": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "accepted",
+                      "preparing",
+                      "out_for_delivery",
+                      "delivered",
+                      "cancelled",
+                      "refund",
+                      "failed"
+                    ]
+                  },
+                  "durationOrderPreparing": {
+                    "type": "integer"
+                  },
+                  "isPointsRedeemed": {
+                    "type": "boolean"
+                  },
+                  "redeemCode": {
+                    "type": "string"
+                  },
+                  "redeemCodeExpiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "cancelReasonId": {
+                    "type": "string"
+                  },
+                  "cancelReason": {
+                    "type": "string"
+                  },
+                  "cancelReasonType": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "restaurant"
+                    ]
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "deliveryManId": {
+                    "type": "string"
+                  },
+                  "shippingCompanyId": {
+                    "type": "string"
+                  },
+                  "shippingStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_dispatch",
+                      "assigned",
+                      "picked_up",
+                      "delivered",
+                      "manual_required"
+                    ]
+                  },
+                  "shippingFailReason": {
+                    "type": "string",
+                    "enum": [
+                      "no_company",
+                      "company_inactive",
+                      "out_of_zone",
+                      "no_courier",
+                      "max_attempts",
+                      "no_coordinates"
+                    ]
+                  },
+                  "dispatchAttempts": {
+                    "type": "integer"
+                  },
+                  "dailyOrderNumber": {
+                    "type": "integer"
+                  },
+                  "rating": {
+                    "type": "integer"
+                  },
+                  "ratingComment": {
+                    "type": "string"
+                  },
+                  "shippingAddress": {
+                    "type": "object"
+                  },
+                  "branchSnapshot": {
+                    "type": "object"
+                  },
+                  "isDelayEmailSent": {
+                    "type": "boolean"
+                  },
+                  "offerId": {
+                    "type": "string"
+                  },
+                  "paymentGateway": {
+                    "type": "string",
+                    "enum": [
+                      "kashier",
+                      "paymob",
+                      "geidea"
+                    ]
+                  },
+                  "paymentGatewayType": {
+                    "type": "string",
+                    "enum": [
+                      "SYSTEM",
+                      "CUSTOM"
+                    ]
+                  },
+                  "paymentOrderId": {
+                    "type": "string"
+                  },
+                  "paymentTransactionId": {
+                    "type": "string"
+                  },
+                  "paymentStatus": {
+                    "type": "string",
+                    "enum": [
+                      "pending_payment",
+                      "paid",
+                      "payment_failed"
+                    ]
+                  },
+                  "paymentFailureReason": {
+                    "type": "string"
+                  },
+                  "paymentIssueNotifiedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "paymentIssueType": {
+                    "type": "string"
+                  },
+                  "shippingAssignedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "pickedUpAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deliveredAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "orderNumber",
+                  "userId",
+                  "restaurantId",
+                  "orderSource",
+                  "subtotal",
+                  "totalAmount"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/delivery/orders/{id}/reject": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "example": "any"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Delivery / Orders"
+        ]
       }
     }
   },
@@ -17753,6 +18398,9 @@
       "name": "Shipping / Auth"
     },
     {
+      "name": "Shipping / Users"
+    },
+    {
       "name": "Shipping / Restaurants"
     },
     {
@@ -17763,6 +18411,18 @@
     },
     {
       "name": "Shipping / Orders"
+    },
+    {
+      "name": "Shipping / Reports"
+    },
+    {
+      "name": "Delivery / Auth"
+    },
+    {
+      "name": "Delivery / Me"
+    },
+    {
+      "name": "Delivery / Orders"
     }
   ]
 }

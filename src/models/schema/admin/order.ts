@@ -8,7 +8,8 @@ import {
     text,
     int,
     json,
-    boolean
+    boolean,
+    index
 } from "drizzle-orm/mysql-core";
 import { sql, relations } from "drizzle-orm";
 import { restaurants } from "./restaurants";
@@ -124,7 +125,8 @@ export const orders = mysqlTable("orders", {
         "company_inactive",
         "out_of_zone",
         "no_courier",
-        "max_attempts"
+        "max_attempts",
+        "no_coordinates"
     ]),
 
     dispatchAttempts: int("dispatch_attempts").default(0).notNull(),
@@ -187,9 +189,18 @@ export const orders = mysqlTable("orders", {
     paymentIssueNotifiedAt: timestamp("payment_issue_notified_at"),
     paymentIssueType: varchar("payment_issue_type", { length: 30 }),
 
+    // Phase 1: Shipping timestamps for performance/reports
+    // shippingAssignedAt: timestamp("shipping_assigned_at"),
+    // pickedUpAt: timestamp("picked_up_at"),
+    // deliveredAt: timestamp("delivered_at"),
+
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),
-});
+}
+// , (table) => [
+//     index("idx_orders_shipping_status").on(table.shippingCompanyId, table.shippingStatus),
+// ]
+);
 
 // ==========================================
 // 2. جدول أصناف الأوردر (Order Items Table)

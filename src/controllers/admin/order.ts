@@ -8,6 +8,7 @@ import { sendPushNotification } from "../../utils/notifications";
 import { v4 as uuidv4 } from "uuid";
 import PDFDocument from "pdfkit";
 import { handleCancelledOrder, settleDeliveredOrder } from "../../services/restaurantWalletService";
+import { dispatchOrder, releaseCourierForOrder } from "../../services/shipping/dispatchEngine";
 
 // ==========================================
 // Helper: استنتاج الزون من إحداثيات العنوان
@@ -970,6 +971,21 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
             type: "ORDER_STATUS_UPDATE"
         }
     });
+
+    // D9: Fire-and-forget dispatchOrder when order moves to 'accepted' and orderType is delivery
+    // const orderType = existingOrder.orderType || (existingOrder as any).type;
+    // if (status === "accepted" && orderType === "delivery") {
+    //     dispatchOrder(orderId).catch((err) => {
+    //         console.error(`[dispatchOrder:fire-and-forget] failed for order ${orderId}:`, err);
+    //     });
+    // }
+
+    // // Release courier activeOrdersCount when order completes or cancels
+    // if (["delivered", "cancelled", "refund"].includes(status) && existingOrder.deliveryManId) {
+    //     releaseCourierForOrder(orderId, existingOrder.deliveryManId).catch((err) => {
+    //         console.error(`[releaseCourierForOrder] failed for order ${orderId}:`, err);
+    //     });
+    // }
 
     return SuccessResponse(res, { message: `Order status successfully updated to ${status}` });
 };

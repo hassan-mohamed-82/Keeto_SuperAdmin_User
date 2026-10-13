@@ -106,20 +106,26 @@ export const generateGuestToken = (data: {
 };
 
 // =======================
-// Generate Shipping Company Token
+// Generate Shipping Company Token (User-level per D6)
 // =======================
 export const generateShippingCompanyToken = (data: {
-    id: string;
+    id: string; // shipping_company_users.id
+    shippingCompanyId: string; // shipping_companies.id
     name: string;
     email: string;
+    companyRole?: "admin" | "dispatcher" | "viewer";
+    tokenVersion?: number;
 }): string => {
     return jwt.sign(
         {
             id: data.id,
             name: data.name,
+            email: data.email,
             role: "shipping_company",
             type: "shipping_admin",
-            shippingCompanyId: data.id,
+            shippingCompanyId: data.shippingCompanyId,
+            companyRole: data.companyRole || "admin",
+            tokenVersion: data.tokenVersion ?? 0,
         },
         JWT_SECRET,
         { expiresIn: "30d" }
@@ -133,22 +139,26 @@ export const generateDeliveryManToken = (data: {
     id: string;
     name: string;
     phone?: string;
+    email?: string;
     restaurantId?: string | null;
     branchId?: string | null;
     shippingCompanyId?: string | null;
     deliveryType?: string;
+    workType?: "restaurant_shift" | "outsource";
 }): string => {
     return jwt.sign(
         {
             id: data.id,
             name: data.name,
-            phone: data.phone || null,
+            phone: data.phone || undefined,
+            email: data.email || undefined,
             role: "delivery_man",
             type: "delivery_man",
             restaurantId: data.restaurantId || null,
             branchId: data.branchId || null,
             shippingCompanyId: data.shippingCompanyId || null,
             deliveryManId: data.id,
+            workType: data.workType || "outsource",
         },
         JWT_SECRET,
         { expiresIn: "30d" }

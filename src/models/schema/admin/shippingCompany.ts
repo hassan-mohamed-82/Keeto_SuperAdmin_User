@@ -8,7 +8,8 @@ import {
     decimal,
     json,
     int,
-    time
+    time,
+    unique
 } from "drizzle-orm/mysql-core";
 import { sql, relations } from "drizzle-orm";
 import { restaurants } from "./restaurants";
@@ -53,6 +54,7 @@ export const shippingCompanyUsers = mysqlTable("shipping_company_users", {
     password: varchar("password", { length: 255 }).notNull(),
     phone: varchar("phone", { length: 50 }),
     role: mysqlEnum("role", ["admin", "dispatcher", "viewer"]).default("admin").notNull(),
+    tokenVersion: int("token_version").default(0).notNull(),
     status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
@@ -114,7 +116,9 @@ export const deliveryManShifts = mysqlTable("delivery_man_shifts", {
     status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
-});
+}, (table) => [
+    unique("uq_delivery_man_shifts_slot").on(table.deliveryManId, table.restaurantId, table.dayOfWeek, table.from, table.to),
+]);
 
 // =========================================================================
 // 5. ربط المناديب بمناطق العمل الخاصة بشركة الشحن (Delivery Man Zones)
