@@ -24,6 +24,14 @@ export const checkFirstOrderDiscount = async (req: Request | any, res: Response)
 
     if (!restaurantId) throw new BadRequest("restaurantId is required");
 
+    // First-order discount is only for registered (non-guest) users
+    if (req.user?.isGuest) {
+        return SuccessResponse(res, {
+            message: "First-order discount is not available for guest users.",
+            data: null,
+        });
+    }
+
     // Block check
     await validateUserNotBlocked(userId, restaurantId);
 
@@ -94,6 +102,14 @@ export const getAvailableFirstOrderDiscounts = async (req: Request | any, res: R
     const { restaurantId } = req.query as any;
 
     if (!restaurantId) throw new BadRequest("restaurantId is required");
+
+    // First-order discount is only for registered (non-guest) users
+    if (req.user?.isGuest) {
+        return SuccessResponse(res, {
+            message: "First-order discount is not available for guest users.",
+            data: [],
+        });
+    }
 
     await validateUserNotBlocked(userId, restaurantId);
 

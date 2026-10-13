@@ -25,6 +25,7 @@ import {
     offerFoods,
     restaurantPaymentCredentials,
 } from "../../models/schema";
+// import { releaseCourierForOrder } from "../../services/shipping/dispatchEngine";
 import { eq, and, inArray, sql, desc, gte, ne } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -860,15 +861,18 @@ export const checkout = async (req: Request | any, res: Response) => {
     const existingProductDiscountAmount = roundMoney(Math.max(0, initialSubtotal - subtotal));
 
     // فحص إمكانية تطبيق خصم أول طلبات للمستخدم على هذا المطعم
-    const eligibleFirstOrder = await resolveFirstOrderDiscount(
-        userId,
-        restaurantId,
-        initialSubtotal > 0 ? initialSubtotal : subtotal
-    );
+    // First-order discount is only for registered (non-guest) users
+    if (!isGuestUser) {
+        const eligibleFirstOrder = await resolveFirstOrderDiscount(
+            userId,
+            restaurantId,
+            initialSubtotal > 0 ? initialSubtotal : subtotal
+        );
 
-    if (eligibleFirstOrder) {
-        firstOrderDiscountAmount = eligibleFirstOrder.discountAmount;
-        appliedFirstOrderDiscount = eligibleFirstOrder.discount;
+        if (eligibleFirstOrder) {
+            firstOrderDiscountAmount = eligibleFirstOrder.discountAmount;
+            appliedFirstOrderDiscount = eligibleFirstOrder.discount;
+        }
     }
 
     // مقارنة: إذا كان خصم أول طلبات متاحاً وكان أكبر من الخصومات القائمة على المنتجات
@@ -2198,6 +2202,13 @@ export const cancelOrder = async (req: Request | any, res: Response) => {
             reason: finalReasonText
         }
     });
+
+    // Release courier active orders count if order had courier assigned
+    // if (order.deliveryManId) {
+    //     releaseCourierForOrder(order.id, order.deliveryManId).catch((err) => {
+    //         console.error(`[releaseCourierForOrder:userCancel] failed for order ${order.id}:`, err);
+    //     });
+    // }
 
     return SuccessResponse(res, { message: "Order cancelled successfully" });
 };
