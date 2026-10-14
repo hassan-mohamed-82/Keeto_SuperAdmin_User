@@ -699,7 +699,7 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         const detailedVariations = parsedVariations.map((v: any) => {
             const optDetails = optionsWithParentMap.get(v.optionId);
-            const resolvedPrice = (optDetails?.additionalPrice ?? v.additionalPrice ?? v.price ?? "0.00");
+            const resolvedPrice = (v.additionalPrice ?? optDetails?.additionalPrice ?? v.price ?? "0.00");
 
             return {
                 variationId: optDetails?.variationId ?? v.variationId ?? null,
