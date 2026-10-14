@@ -10,6 +10,7 @@ const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const encryption_1 = require("../../utils/encryption");
 const getActiveCustomGateway_1 = require("../../utils/getActiveCustomGateway");
+const getActivePlatformGateway_1 = require("../../utils/getActivePlatformGateway");
 const orderPaymentConfirmation_1 = require("../../helpers/orderPaymentConfirmation");
 /**
  * Controller: Create Kashier Payment Session
@@ -153,11 +154,18 @@ const handleKashierWebhook = async (req, res) => {
                     }
                 }
             }
+            else {
+                // SYSTEM gateway: look up platform DB credentials (replaces .env lookup)
+                const platformGateway = await (0, getActivePlatformGateway_1.getActivePlatformGateway)();
+                if (platformGateway?.provider === "KASHIER" && platformGateway.credentials?.apiKey) {
+                    customApiKey = platformGateway.credentials.apiKey;
+                }
+            }
         }
     }
     let isValid = (0, kashier_1.verifyKashierWebhookSignature)(webhookData, headerSignature, customApiKey);
     if (!isValid && customApiKey) {
-        // Fallback to platform key in case transaction was processed through platform
+        // Fallback: try without any key (uses .env KASHIER_API_KEY internally)
         isValid = (0, kashier_1.verifyKashierWebhookSignature)(webhookData, headerSignature);
     }
     if (!isValid) {

@@ -597,6 +597,7 @@ const getAllRestaurants = async (req, res) => {
         cover: schema_1.restaurants.cover,
         slug: schema_1.restaurants.slug,
         status: schema_1.restaurants.status,
+        isBusy: schema_1.restaurantSettings.isBusy,
         type: schema_1.restaurants.type, // 👈 استرجاع النوع
         salesId: schema_1.restaurants.salesId, // 👈 استرجاع المندوب
         ownerposition: schema_1.restaurants.ownerposition, // 👈 استرجاع منصب المالك
@@ -661,6 +662,8 @@ const getAllRestaurants = async (req, res) => {
             cover: r.cover,
             slug: r.slug,
             status: r.status,
+            isBusy: Boolean(r.isBusy),
+            busyStatus: r.isBusy ? "busy" : "available",
             type: r.type,
             salesId: r.salesId,
             ownerposition: r.ownerposition,
@@ -910,6 +913,7 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.taxCertificate = taxCertificate;
     if (status)
         restaurantUpdateData.status = status;
+    const isBusyInput = req.body.isBusy !== undefined ? req.body.isBusy : req.body.busy;
     if (likes !== undefined)
         restaurantUpdateData.likes = Number(likes);
     if (facebookLink !== undefined)
@@ -950,8 +954,10 @@ const updateRestaurant = async (req, res) => {
         if (firstColor !== undefined || secondColor !== undefined ||
             firstTextColor !== undefined || secondTextColor !== undefined ||
             resolvedPaymentGatewayType !== undefined || resolvedEnableOnlinePayment !== undefined ||
-            resolvedVisaSwitchType !== undefined) {
+            resolvedVisaSwitchType !== undefined || isBusyInput !== undefined) {
             const settingsUpdateData = {};
+            if (isBusyInput !== undefined)
+                settingsUpdateData.isBusy = isBusyInput === true || isBusyInput === "true" || isBusyInput === "busy";
             if (firstColor !== undefined)
                 settingsUpdateData.firstColor = (firstColor === "" || firstColor === null) ? null : clean(firstColor);
             if (secondColor !== undefined)

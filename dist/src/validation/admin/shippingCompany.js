@@ -22,6 +22,11 @@ exports.createShippingCompanySchema = zod_1.z.object({
     address: zod_1.z.string().optional(),
     logo: zod_1.z.string().max(500).optional(),
     status: zod_1.z.enum(["active", "inactive"]).optional().default("active"),
+    maxSearchRadius: zod_1.z.number().int().min(1).max(50).default(10),
+    maxActiveOrders: zod_1.z.number().int().min(1).max(10).default(3),
+    maxAttempts: zod_1.z.number().int().min(1).max(10).default(3),
+    commissionType: zod_1.z.enum(["percentage", "fixed"]).default("percentage"),
+    commissionValue: zod_1.z.number().min(0).default(0),
     restaurantIds: restaurantIdsValidator,
 });
 exports.updateShippingCompanySchema = zod_1.z.object({
@@ -33,6 +38,11 @@ exports.updateShippingCompanySchema = zod_1.z.object({
     address: zod_1.z.string().optional(),
     logo: zod_1.z.string().max(500).optional(),
     status: zod_1.z.enum(["active", "inactive"]).optional(),
+    maxSearchRadius: zod_1.z.number().int().min(1).max(50).optional(),
+    maxActiveOrders: zod_1.z.number().int().min(1).max(10).optional(),
+    maxAttempts: zod_1.z.number().int().min(1).max(10).optional(),
+    commissionType: zod_1.z.enum(["percentage", "fixed"]).optional(),
+    commissionValue: zod_1.z.number().min(0).optional(),
     restaurantIds: restaurantIdsValidator,
 });
 exports.assignRestaurantsSchema = zod_1.z.object({

@@ -3,14 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getEligibleRestaurants = getEligibleRestaurants;
-exports.createShippingCompany = createShippingCompany;
-exports.getShippingCompanies = getShippingCompanies;
-exports.getShippingCompanyById = getShippingCompanyById;
-exports.updateShippingCompany = updateShippingCompany;
-exports.deleteShippingCompany = deleteShippingCompany;
-exports.assignRestaurantsToCompany = assignRestaurantsToCompany;
-exports.removeRestaurantFromCompany = removeRestaurantFromCompany;
+exports.removeRestaurantFromCompany = exports.assignRestaurantsToCompany = exports.deleteShippingCompany = exports.updateShippingCompany = exports.getShippingCompanyById = exports.getShippingCompanies = exports.createShippingCompany = exports.getEligibleRestaurants = void 0;
+exports.linkRestaurantsToCompany = linkRestaurantsToCompany;
+exports.unlinkRestaurantFromCompany = unlinkRestaurantFromCompany;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -18,10 +13,11 @@ const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const uuid_1 = require("uuid");
+const catchAsync_1 = require("../../utils/catchAsync");
 // =========================================================================
 // Helpers: التحقق من أهلية المطاعم وتحديث الربط
 // =========================================================================
-async function validateEligibleRestaurants(restaurantIds) {
+async function validateEligibleRestaurants(restaurantIds, targetCompanyId) {
     if (!restaurantIds || restaurantIds.length === 0)
         return;
     // التحقق من إعدادات المطاعم المطلوبة (homeDelivery = true & selfDelivery = false)
@@ -30,6 +26,7 @@ async function validateEligibleRestaurants(restaurantIds) {
         restaurantId: schema_1.restaurantSettings.restaurantId,
         homeDelivery: schema_1.restaurantSettings.homeDelivery,
         selfDelivery: schema_1.restaurantSettings.selfDelivery,
+        shippingCompanyId: schema_1.restaurantSettings.shippingCompanyId,
         restaurantName: schema_1.restaurants.name,
     })
         .from(schema_1.restaurantSettings)
@@ -41,58 +38,63 @@ async function validateEligibleRestaurants(restaurantIds) {
         const invalidNames = invalidRestaurants.map((r) => r.restaurantName).join(", ");
         throw new Errors_1.BadRequest(`Cannot assign restaurants [${invalidNames}]. Restaurant settings must satisfy: homeDelivery = true and selfDelivery = false.`);
     }
-    // التحقق لو بعض المطاعم غير موجودة في الـ settings أصلاً أو غير موجودة
+    // Phase 3: فحص المطاعم المرتبطة مسبقاً بشركة شحن أخرى
+    const alreadyLinked = settingsList.filter((item) => item.shippingCompanyId && item.shippingCompanyId !== targetCompanyId);
+    if (alreadyLinked.length > 0) {
+        const names = alreadyLinked.map((r) => r.restaurantName).join(", ");
+        throw new Errors_1.BadRequest(`Restaurants [${names}] are already linked to another shipping company.`);
+    }
+    // التحقق لو بعض المطاعم غير موجودة
     const foundIds = new Set(settingsList.map((item) => item.restaurantId));
     const missingIds = restaurantIds.filter((id) => !foundIds.has(id));
     if (missingIds.length > 0) {
         throw new Errors_1.BadRequest(`Some restaurants have no settings configured or do not exist`);
     }
 }
-async function syncCompanyRestaurants(companyId, restaurantIds) {
-    // جلب المطاعم الحالية المرتبطة بالشركة
-    const currentRelations = await connection_1.db
-        .select({ id: schema_1.shippingCompanyRestaurants.id, restaurantId: schema_1.shippingCompanyRestaurants.restaurantId })
-        .from(schema_1.shippingCompanyRestaurants)
-        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, companyId));
-    const currentMap = new Map(currentRelations.map((r) => [r.restaurantId, r.id]));
-    const targetSet = new Set(restaurantIds);
-    // حذف المطاعم التي لم تعد موجودة في القائمة الجديدة وتصفير shippingCompanyId
-    for (const [restId, relId] of currentMap.entries()) {
-        if (!targetSet.has(restId)) {
-            await connection_1.db
-                .delete(schema_1.shippingCompanyRestaurants)
-                .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.id, relId));
-            await connection_1.db
-                .update(schema_1.restaurantSettings)
-                .set({ shippingCompanyId: null })
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restId), (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, companyId)));
-        }
-    }
-    // إضافة أو تفعيل المطاعم المطلوبة وتحديث shippingCompanyId
+// Transactional link helper (D3)
+async function linkRestaurantsToCompany(companyId, restaurantIds, tx = connection_1.db) {
     for (const restId of restaurantIds) {
-        if (currentMap.has(restId)) {
-            await connection_1.db
+        // 1. Update single source of truth
+        await tx
+            .update(schema_1.restaurantSettings)
+            .set({ shippingCompanyId: companyId })
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restId));
+        // 2. Maintain junction mirror
+        const existing = await tx
+            .select({ id: schema_1.shippingCompanyRestaurants.id })
+            .from(schema_1.shippingCompanyRestaurants)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, companyId), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, restId)))
+            .limit(1);
+        if (existing.length > 0) {
+            await tx
                 .update(schema_1.shippingCompanyRestaurants)
                 .set({ status: "active" })
-                .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.id, currentMap.get(restId)));
+                .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.id, existing[0].id));
         }
         else {
-            await connection_1.db.insert(schema_1.shippingCompanyRestaurants).values({
+            await tx.insert(schema_1.shippingCompanyRestaurants).values({
                 shippingCompanyId: companyId,
                 restaurantId: restId,
                 status: "active",
             });
         }
-        await connection_1.db
-            .update(schema_1.restaurantSettings)
-            .set({ shippingCompanyId: companyId })
-            .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restId));
     }
+}
+// Transactional unlink helper (D3)
+async function unlinkRestaurantFromCompany(companyId, restaurantId, tx = connection_1.db) {
+    await tx
+        .update(schema_1.restaurantSettings)
+        .set({ shippingCompanyId: null })
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, companyId)));
+    await tx
+        .update(schema_1.shippingCompanyRestaurants)
+        .set({ status: "inactive" })
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, companyId), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, restaurantId)));
 }
 // =========================================================================
 // 1. جلب المطاعم المؤهلة للربط بشركة الشحن (homeDelivery = true & selfDelivery = false)
 // =========================================================================
-async function getEligibleRestaurants(req, res) {
+exports.getEligibleRestaurants = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const eligible = await connection_1.db
         .select({
         id: schema_1.restaurants.id,
@@ -103,102 +105,95 @@ async function getEligibleRestaurants(req, res) {
         status: schema_1.restaurants.status,
         homeDelivery: schema_1.restaurantSettings.homeDelivery,
         selfDelivery: schema_1.restaurantSettings.selfDelivery,
+        shippingCompanyId: schema_1.restaurantSettings.shippingCompanyId,
+        linkedCompanyName: schema_1.shippingCompanies.name,
     })
         .from(schema_1.restaurants)
         .innerJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantSettings.restaurantId))
+        .leftJoin(schema_1.shippingCompanies, (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, schema_1.shippingCompanies.id))
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.homeDelivery, true), (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.selfDelivery, false)));
     return (0, response_1.SuccessResponse)(res, {
         message: "Eligible restaurants retrieved successfully",
         data: eligible,
     });
-}
+});
 // =========================================================================
-// 2. إنشاء شركة شحن جديدة (Create Shipping Company) مع إمكانية ربط المطاعم
+// 2. إنشاء شركة شحن جديدة + إنشاء أول مستخدم Admin لها (Transactional & D6)
 // =========================================================================
-async function createShippingCompany(req, res) {
-    const { name, nameAr, email, password, phone, address, logo, status, restaurantIds } = req.body;
-    const existing = await connection_1.db
+exports.createShippingCompany = (0, catchAsync_1.catchAsync)(async (req, res) => {
+    const { name, nameAr, email, password, phone, address, logo, status = "active", maxSearchRadius = 10, maxActiveOrders = 3, maxAttempts = 3, commissionType = "percentage", commissionValue = 0, restaurantIds, } = req.body;
+    // Check duplicate email across both companies and company users
+    const [existingCompany] = await connection_1.db
         .select({ id: schema_1.shippingCompanies.id })
         .from(schema_1.shippingCompanies)
         .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.email, email))
         .limit(1);
-    if (existing.length > 0) {
-        throw new Errors_1.BadRequest("Email is already registered for another shipping company");
+    if (existingCompany) {
+        throw new Errors_1.ConflictError("Email is already registered for another shipping company");
     }
-    // التحقق من أهلية المطاعم إذا تم إرسالها
+    const [existingUser] = await connection_1.db
+        .select({ id: schema_1.shippingCompanyUsers.id })
+        .from(schema_1.shippingCompanyUsers)
+        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyUsers.email, email))
+        .limit(1);
+    if (existingUser) {
+        throw new Errors_1.ConflictError("Email is already registered for a shipping company user");
+    }
+    // Validate restaurants
     if (restaurantIds && Array.isArray(restaurantIds) && restaurantIds.length > 0) {
         await validateEligibleRestaurants(restaurantIds);
     }
     const companyId = (0, uuid_1.v4)();
     const hashedPassword = await bcrypt_1.default.hash(password, 10);
-    await connection_1.db.insert(schema_1.shippingCompanies).values({
-        id: companyId,
-        name,
-        nameAr,
-        email,
-        password: hashedPassword,
-        phone,
-        address,
-        logo,
-        status: status || "active",
-    });
-    // ربط المطاعم المحددة بشركة الشحن وتحديث إعداداتها
-    if (restaurantIds && Array.isArray(restaurantIds) && restaurantIds.length > 0) {
-        for (const restId of restaurantIds) {
-            await connection_1.db.insert(schema_1.shippingCompanyRestaurants).values({
-                shippingCompanyId: companyId,
-                restaurantId: restId,
-                status: "active",
-            });
-            await connection_1.db
-                .update(schema_1.restaurantSettings)
-                .set({ shippingCompanyId: companyId })
-                .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restId));
+    await connection_1.db.transaction(async (tx) => {
+        // 1. Create company with all dispatch settings
+        await tx.insert(schema_1.shippingCompanies).values({
+            id: companyId,
+            name,
+            nameAr,
+            email,
+            password: hashedPassword,
+            phone,
+            address,
+            logo,
+            status,
+            maxSearchRadius,
+            maxActiveOrders,
+            maxAttempts,
+            commissionType,
+            commissionValue: String(commissionValue),
+        });
+        // 2. Create the first admin user in shipping_company_users (D6)
+        await tx.insert(schema_1.shippingCompanyUsers).values({
+            shippingCompanyId: companyId,
+            name: `${name} Admin`,
+            email,
+            password: hashedPassword,
+            phone,
+            role: "admin",
+            status: "active",
+            tokenVersion: 0,
+        });
+        // 3. Link restaurants
+        if (restaurantIds && Array.isArray(restaurantIds) && restaurantIds.length > 0) {
+            await linkRestaurantsToCompany(companyId, restaurantIds, tx);
         }
-    }
-    // جلب الشركة بعد الإضافة
-    const createdCompany = await connection_1.db
-        .select({
-        id: schema_1.shippingCompanies.id,
-        name: schema_1.shippingCompanies.name,
-        nameAr: schema_1.shippingCompanies.nameAr,
-        email: schema_1.shippingCompanies.email,
-        phone: schema_1.shippingCompanies.phone,
-        address: schema_1.shippingCompanies.address,
-        logo: schema_1.shippingCompanies.logo,
-        status: schema_1.shippingCompanies.status,
-        createdAt: schema_1.shippingCompanies.createdAt,
-    })
+    });
+    const [createdCompany] = await connection_1.db
+        .select()
         .from(schema_1.shippingCompanies)
         .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, companyId))
         .limit(1);
-    // جلب المطاعم المسندة
-    const assignedRestaurants = await connection_1.db
-        .select({
-        relationId: schema_1.shippingCompanyRestaurants.id,
-        restaurantId: schema_1.restaurants.id,
-        name: schema_1.restaurants.name,
-        nameAr: schema_1.restaurants.nameAr,
-        logo: schema_1.restaurants.logo,
-        phone: schema_1.restaurants.ownerPhone,
-        status: schema_1.shippingCompanyRestaurants.status,
-        assignedAt: schema_1.shippingCompanyRestaurants.createdAt,
-    })
-        .from(schema_1.shippingCompanyRestaurants)
-        .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, schema_1.restaurants.id))
-        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, companyId));
+    const { password: _, ...companyData } = createdCompany;
     return (0, response_1.SuccessResponse)(res, {
         message: "Shipping company created successfully",
-        data: {
-            ...createdCompany[0],
-            restaurants: assignedRestaurants,
-        },
+        data: companyData,
     }, 201);
-}
+});
 // =========================================================================
 // 3. عرض قائمة شركات الشحن (Get All Shipping Companies)
 // =========================================================================
-async function getShippingCompanies(req, res) {
+exports.getShippingCompanies = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const { search, status, page = "1", limit = "10" } = req.query;
     const pageNum = parseInt(page, 10) || 1;
     const limitNum = parseInt(limit, 10) || 10;
@@ -221,22 +216,28 @@ async function getShippingCompanies(req, res) {
         address: schema_1.shippingCompanies.address,
         logo: schema_1.shippingCompanies.logo,
         status: schema_1.shippingCompanies.status,
+        maxSearchRadius: schema_1.shippingCompanies.maxSearchRadius,
+        maxActiveOrders: schema_1.shippingCompanies.maxActiveOrders,
+        maxAttempts: schema_1.shippingCompanies.maxAttempts,
+        commissionType: schema_1.shippingCompanies.commissionType,
+        commissionValue: schema_1.shippingCompanies.commissionValue,
         createdAt: schema_1.shippingCompanies.createdAt,
         assignedRestaurantsCount: (0, drizzle_orm_1.sql) `COALESCE((
-            SELECT COUNT(*) FROM shipping_company_restaurants scr 
-            WHERE scr.shipping_company_id = ${schema_1.shippingCompanies.id} AND scr.status = 'active'
-        ), 0)`,
+                SELECT COUNT(*) FROM restaurant_settings rs 
+                WHERE rs.shipping_company_id = ${schema_1.shippingCompanies.id}
+            ), 0)`,
         deliveryMenCount: (0, drizzle_orm_1.sql) `COALESCE((
-            SELECT COUNT(*) FROM delivery_men dm 
-            WHERE dm.shipping_company_id = ${schema_1.shippingCompanies.id} AND dm.is_deleted = 0
-        ), 0)`,
+                SELECT COUNT(*) FROM delivery_men dm 
+                WHERE dm.shipping_company_id = ${schema_1.shippingCompanies.id} AND dm.is_deleted = 0
+            ), 0)`,
         zonesCount: (0, drizzle_orm_1.sql) `COALESCE((
-            SELECT COUNT(*) FROM shipping_zones sz 
-            WHERE sz.shipping_company_id = ${schema_1.shippingCompanies.id}
-        ), 0)`,
+                SELECT COUNT(*) FROM shipping_zones sz 
+                WHERE sz.shipping_company_id = ${schema_1.shippingCompanies.id} AND sz.status = 'active'
+            ), 0)`,
     })
         .from(schema_1.shippingCompanies)
         .where(whereClause)
+        .orderBy((0, drizzle_orm_1.desc)(schema_1.shippingCompanies.createdAt))
         .limit(limitNum)
         .offset(offset);
     const [totalCount] = await connection_1.db
@@ -253,52 +254,41 @@ async function getShippingCompanies(req, res) {
             totalPages: Math.ceil(Number(totalCount?.count || 0) / limitNum),
         },
     });
-}
+});
 // =========================================================================
 // 4. عرض تفاصيل شركة شحن محددة (Get Shipping Company By ID)
 // =========================================================================
-async function getShippingCompanyById(req, res) {
+exports.getShippingCompanyById = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const { id } = req.params;
-    const company = await connection_1.db
-        .select({
-        id: schema_1.shippingCompanies.id,
-        name: schema_1.shippingCompanies.name,
-        nameAr: schema_1.shippingCompanies.nameAr,
-        email: schema_1.shippingCompanies.email,
-        phone: schema_1.shippingCompanies.phone,
-        address: schema_1.shippingCompanies.address,
-        logo: schema_1.shippingCompanies.logo,
-        status: schema_1.shippingCompanies.status,
-        createdAt: schema_1.shippingCompanies.createdAt,
-    })
+    const [company] = await connection_1.db
+        .select()
         .from(schema_1.shippingCompanies)
         .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id))
         .limit(1);
-    if (company.length === 0) {
+    if (!company) {
         throw new Errors_1.NotFound("Shipping company not found");
     }
-    // جلب المطاعم المسندة للشركة
+    const { password: _, ...companyData } = company;
+    // Assigned restaurants via single source of truth (restaurantSettings)
     const assignedRestaurants = await connection_1.db
         .select({
-        relationId: schema_1.shippingCompanyRestaurants.id,
         restaurantId: schema_1.restaurants.id,
         name: schema_1.restaurants.name,
         nameAr: schema_1.restaurants.nameAr,
         logo: schema_1.restaurants.logo,
         phone: schema_1.restaurants.ownerPhone,
-        status: schema_1.shippingCompanyRestaurants.status,
-        assignedAt: schema_1.shippingCompanyRestaurants.createdAt,
+        status: schema_1.restaurants.status,
     })
-        .from(schema_1.shippingCompanyRestaurants)
-        .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, schema_1.restaurants.id))
-        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, id));
-    // جلب مناطق الشركة
+        .from(schema_1.restaurantSettings)
+        .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, schema_1.restaurants.id))
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, id));
+    // Zones
     const zones = await connection_1.db
         .select()
-        .from(schema_1.shippingCompanyZones)
-        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyZones.shippingCompanyId, id));
-    // جلب مناديب التوصيل
-    const deliveryMenList = await connection_1.db
+        .from(schema_1.shippingZones)
+        .where((0, drizzle_orm_1.eq)(schema_1.shippingZones.shippingCompanyId, id));
+    // Couriers with deliveryType and allZones (Phase 3 requirements)
+    const couriers = await connection_1.db
         .select({
         id: schema_1.deliveryMen.id,
         name: schema_1.deliveryMen.name,
@@ -306,45 +296,48 @@ async function getShippingCompanyById(req, res) {
         email: schema_1.deliveryMen.email,
         image: schema_1.deliveryMen.image,
         deliveryType: schema_1.deliveryMen.deliveryType,
+        allZones: schema_1.deliveryMen.allZones,
         shiftStatus: schema_1.deliveryMen.shiftStatus,
         isOnline: schema_1.deliveryMen.isOnline,
-        isAvailable: schema_1.deliveryMen.isAvailable,
         isActive: schema_1.deliveryMen.isActive,
+        activeOrdersCount: schema_1.deliveryMen.activeOrdersCount,
+        currentLat: schema_1.deliveryMen.currentLat,
+        currentLng: schema_1.deliveryMen.currentLng,
     })
         .from(schema_1.deliveryMen)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.deliveryMen.shippingCompanyId, id), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.isDeleted, false)));
     return (0, response_1.SuccessResponse)(res, {
         message: "Shipping company details retrieved successfully",
         data: {
-            ...company[0],
+            ...companyData,
             restaurants: assignedRestaurants,
             zones,
-            deliveryMen: deliveryMenList,
+            deliveryMen: couriers,
         },
     });
-}
+});
 // =========================================================================
 // 5. تعديل بيانات شركة الشحن ومطاعمها (Update Shipping Company)
 // =========================================================================
-async function updateShippingCompany(req, res) {
+exports.updateShippingCompany = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const { id } = req.params;
-    const { name, nameAr, email, password, phone, address, logo, status, restaurantIds } = req.body;
-    const company = await connection_1.db
+    const { name, nameAr, email, password, phone, address, logo, status, maxSearchRadius, maxActiveOrders, maxAttempts, commissionType, commissionValue, restaurantIds, } = req.body;
+    const [company] = await connection_1.db
         .select({ id: schema_1.shippingCompanies.id })
         .from(schema_1.shippingCompanies)
         .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id))
         .limit(1);
-    if (company.length === 0) {
+    if (!company) {
         throw new Errors_1.NotFound("Shipping company not found");
     }
     if (email) {
-        const existingEmail = await connection_1.db
+        const [existingEmail] = await connection_1.db
             .select({ id: schema_1.shippingCompanies.id })
             .from(schema_1.shippingCompanies)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.email, email), (0, drizzle_orm_1.sql) `${schema_1.shippingCompanies.id} != ${id}`))
             .limit(1);
-        if (existingEmail.length > 0) {
-            throw new Errors_1.BadRequest("Email is already registered for another shipping company");
+        if (existingEmail) {
+            throw new Errors_1.ConflictError("Email is already registered for another shipping company");
         }
     }
     const updateData = {};
@@ -362,135 +355,126 @@ async function updateShippingCompany(req, res) {
         updateData.logo = logo;
     if (status !== undefined)
         updateData.status = status;
+    if (maxSearchRadius !== undefined)
+        updateData.maxSearchRadius = maxSearchRadius;
+    if (maxActiveOrders !== undefined)
+        updateData.maxActiveOrders = maxActiveOrders;
+    if (maxAttempts !== undefined)
+        updateData.maxAttempts = maxAttempts;
+    if (commissionType !== undefined)
+        updateData.commissionType = commissionType;
+    if (commissionValue !== undefined)
+        updateData.commissionValue = String(commissionValue);
     if (password) {
         updateData.password = await bcrypt_1.default.hash(password, 10);
     }
-    if (Object.keys(updateData).length > 0) {
-        await connection_1.db
-            .update(schema_1.shippingCompanies)
-            .set(updateData)
-            .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id));
-    }
-    // تحديث المطاعم المرتبطة بالشركة إن تم إرسال restaurantIds
     if (restaurantIds !== undefined && Array.isArray(restaurantIds)) {
         if (restaurantIds.length > 0) {
-            await validateEligibleRestaurants(restaurantIds);
+            await validateEligibleRestaurants(restaurantIds, id);
         }
-        await syncCompanyRestaurants(id, restaurantIds);
     }
-    // جلب المطاعم المسندة بعد التعديل
-    const assignedRestaurants = await connection_1.db
-        .select({
-        relationId: schema_1.shippingCompanyRestaurants.id,
-        restaurantId: schema_1.restaurants.id,
-        name: schema_1.restaurants.name,
-        nameAr: schema_1.restaurants.nameAr,
-        logo: schema_1.restaurants.logo,
-        phone: schema_1.restaurants.ownerPhone,
-        status: schema_1.shippingCompanyRestaurants.status,
-        assignedAt: schema_1.shippingCompanyRestaurants.createdAt,
-    })
-        .from(schema_1.shippingCompanyRestaurants)
-        .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, schema_1.restaurants.id))
-        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, id));
+    await connection_1.db.transaction(async (tx) => {
+        if (Object.keys(updateData).length > 0) {
+            await tx
+                .update(schema_1.shippingCompanies)
+                .set(updateData)
+                .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id));
+        }
+        // Sync restaurants
+        if (restaurantIds !== undefined && Array.isArray(restaurantIds)) {
+            // Get currently assigned restaurants
+            const currentList = await tx
+                .select({ restaurantId: schema_1.restaurantSettings.restaurantId })
+                .from(schema_1.restaurantSettings)
+                .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, id));
+            const currentSet = new Set(currentList.map((r) => r.restaurantId));
+            const targetSet = new Set(restaurantIds);
+            // Unlink removed ones
+            for (const restId of currentSet) {
+                if (!targetSet.has(restId)) {
+                    await unlinkRestaurantFromCompany(id, restId, tx);
+                }
+            }
+            // Link new ones
+            const toAdd = restaurantIds.filter((restId) => !currentSet.has(restId));
+            if (toAdd.length > 0) {
+                await linkRestaurantsToCompany(id, toAdd, tx);
+            }
+        }
+    });
     return (0, response_1.SuccessResponse)(res, {
         message: "Shipping company updated successfully",
-        data: {
-            restaurants: assignedRestaurants,
-        },
     });
-}
+});
 // =========================================================================
-// 6. حذف شركة الشحن (Delete Shipping Company)
+// 6. حذف ناعم لشركة الشحن (Soft delete: status='inactive' + unlinks restaurants)
 // =========================================================================
-async function deleteShippingCompany(req, res) {
+exports.deleteShippingCompany = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const { id } = req.params;
-    const company = await connection_1.db
+    const [company] = await connection_1.db
         .select({ id: schema_1.shippingCompanies.id })
         .from(schema_1.shippingCompanies)
         .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id))
         .limit(1);
-    if (company.length === 0) {
+    if (!company) {
         throw new Errors_1.NotFound("Shipping company not found");
     }
-    // تصفير إعدادات المطاعم المرتبطة بهذه الشركة قبل الحذف
-    await connection_1.db
-        .update(schema_1.restaurantSettings)
-        .set({ shippingCompanyId: null })
-        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, id));
-    await connection_1.db.delete(schema_1.shippingCompanies).where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id));
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Shipping company deleted successfully",
-    });
-}
-// =========================================================================
-// 7. ربط مطاعم إضافية بشركة الشحن بعد التحقق من الشرط الإلزامي:
-// (restaurantSettings.homeDelivery = true AND restaurantSettings.selfDelivery = false)
-// =========================================================================
-async function assignRestaurantsToCompany(req, res) {
-    const { id } = req.params; // shippingCompanyId
-    const { restaurantIds } = req.body;
-    const company = await connection_1.db
-        .select({ id: schema_1.shippingCompanies.id })
-        .from(schema_1.shippingCompanies)
-        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id))
-        .limit(1);
-    if (company.length === 0) {
-        throw new Errors_1.NotFound("Shipping company not found");
-    }
-    // التحقق من أهلية المطاعم
-    await validateEligibleRestaurants(restaurantIds);
-    // إضافة المطاعم مع تجنب التكرار وتحديث إعدادات المطعم
-    for (const restId of restaurantIds) {
-        const exists = await connection_1.db
-            .select({ id: schema_1.shippingCompanyRestaurants.id })
-            .from(schema_1.shippingCompanyRestaurants)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, id), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, restId)))
-            .limit(1);
-        if (exists.length > 0) {
-            await connection_1.db
-                .update(schema_1.shippingCompanyRestaurants)
-                .set({ status: "active" })
-                .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.id, exists[0].id));
-        }
-        else {
-            await connection_1.db.insert(schema_1.shippingCompanyRestaurants).values({
-                shippingCompanyId: id,
-                restaurantId: restId,
-                status: "active",
-            });
-        }
-        await connection_1.db
+    await connection_1.db.transaction(async (tx) => {
+        // Soft-delete company
+        await tx
+            .update(schema_1.shippingCompanies)
+            .set({ status: "inactive" })
+            .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id));
+        // Deactivate all its users
+        await tx
+            .update(schema_1.shippingCompanyUsers)
+            .set({ status: "inactive" })
+            .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyUsers.shippingCompanyId, id));
+        // Unlink restaurants
+        await tx
             .update(schema_1.restaurantSettings)
-            .set({ shippingCompanyId: id })
-            .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restId));
+            .set({ shippingCompanyId: null })
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, id));
+        await tx
+            .update(schema_1.shippingCompanyRestaurants)
+            .set({ status: "inactive" })
+            .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, id));
+    });
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Shipping company deactivated and unlinked successfully",
+    });
+});
+// =========================================================================
+// 7. ربط مطاعم إضافية بشركة الشحن
+// =========================================================================
+exports.assignRestaurantsToCompany = (0, catchAsync_1.catchAsync)(async (req, res) => {
+    const { id } = req.params;
+    const { restaurantIds } = req.body;
+    const [company] = await connection_1.db
+        .select({ id: schema_1.shippingCompanies.id })
+        .from(schema_1.shippingCompanies)
+        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id))
+        .limit(1);
+    if (!company) {
+        throw new Errors_1.NotFound("Shipping company not found");
     }
+    await validateEligibleRestaurants(restaurantIds, id);
+    await connection_1.db.transaction(async (tx) => {
+        await linkRestaurantsToCompany(id, restaurantIds, tx);
+    });
     return (0, response_1.SuccessResponse)(res, {
         message: "Restaurants successfully assigned to shipping company",
     });
-}
+});
 // =========================================================================
 // 8. فك ربط مطعم من شركة الشحن
 // =========================================================================
-async function removeRestaurantFromCompany(req, res) {
+exports.removeRestaurantFromCompany = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const { id, restaurantId } = req.params;
-    const relation = await connection_1.db
-        .select({ id: schema_1.shippingCompanyRestaurants.id })
-        .from(schema_1.shippingCompanyRestaurants)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, id), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, restaurantId)))
-        .limit(1);
-    if (relation.length === 0) {
-        throw new Errors_1.NotFound("Restaurant is not assigned to this shipping company");
-    }
-    await connection_1.db
-        .delete(schema_1.shippingCompanyRestaurants)
-        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.id, relation[0].id));
-    // تصفير إعدادات المطعم إذا كان مربوطاً بهذه الشركة
-    await connection_1.db
-        .update(schema_1.restaurantSettings)
-        .set({ shippingCompanyId: null })
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, id)));
+    await connection_1.db.transaction(async (tx) => {
+        await unlinkRestaurantFromCompany(id, restaurantId, tx);
+    });
     return (0, response_1.SuccessResponse)(res, {
         message: "Restaurant removed from shipping company successfully",
     });
-}
+});

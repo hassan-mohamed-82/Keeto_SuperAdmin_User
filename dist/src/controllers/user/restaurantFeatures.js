@@ -14,6 +14,8 @@ const cleanRestaurantResult = (row) => {
         ...safe,
         isFavorite: !!row.isFavorite,
         isAddHome: !!row.isAddHome,
+        isBusy: !!row.isBusy,
+        busyStatus: row.isBusy ? "busy" : "available",
     };
 };
 // 1. Search for restaurants
@@ -30,12 +32,14 @@ const searchRestaurants = async (req, res) => {
         .select({
         ...(0, drizzle_orm_1.getTableColumns)(schema_1.restaurants),
         isFavorite: (0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
-        isAddHome: (0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.userAddHome.id} IS NOT NULL THEN true ELSE false END`.as('isAddHome')
+        isAddHome: (0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.userAddHome.id} IS NOT NULL THEN true ELSE false END`.as('isAddHome'),
+        isBusy: (0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurantSettings.isBusy} = true THEN true ELSE false END`.as('isBusy')
     })
         .from(schema_1.restaurants)
         .leftJoin(schema_1.favorites, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.restaurantId, schema_1.restaurants.id), (0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId)))
         .leftJoin(schema_1.userAddHome, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userAddHome.restaurantId, schema_1.restaurants.id), (0, drizzle_orm_1.eq)(schema_1.userAddHome.userId, userId)))
-        .where((0, drizzle_orm_1.or)((0, drizzle_orm_1.like)(schema_1.restaurants.name, searchTerm), (0, drizzle_orm_1.like)(schema_1.restaurants.nameAr, searchTerm), (0, drizzle_orm_1.like)(schema_1.restaurants.nameFr, searchTerm)));
+        .leftJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, schema_1.restaurants.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"), (0, drizzle_orm_1.or)((0, drizzle_orm_1.like)(schema_1.restaurants.name, searchTerm), (0, drizzle_orm_1.like)(schema_1.restaurants.nameAr, searchTerm), (0, drizzle_orm_1.like)(schema_1.restaurants.nameFr, searchTerm))));
     return (0, response_1.SuccessResponse)(res, { message: "Search results", data: results.map(cleanRestaurantResult) });
 };
 exports.searchRestaurants = searchRestaurants;
@@ -97,11 +101,13 @@ const getHomeRestaurants = async (req, res) => {
         .select({
         ...(0, drizzle_orm_1.getTableColumns)(schema_1.restaurants),
         isFavorite: (0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.favorites.id} IS NOT NULL THEN true ELSE false END`.as('isFavorite'),
-        isAddHome: (0, drizzle_orm_1.sql) `true`.as('isAddHome')
+        isAddHome: (0, drizzle_orm_1.sql) `true`.as('isAddHome'),
+        isBusy: (0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurantSettings.isBusy} = true THEN true ELSE false END`.as('isBusy')
     })
         .from(schema_1.userAddHome)
         .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.userAddHome.restaurantId, schema_1.restaurants.id))
         .leftJoin(schema_1.favorites, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.restaurantId, schema_1.restaurants.id), (0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId)))
+        .leftJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.eq)(schema_1.userAddHome.userId, userId));
     return (0, response_1.SuccessResponse)(res, { message: "Home restaurants fetched successfully", data: results.map(cleanRestaurantResult) });
 };
@@ -129,7 +135,8 @@ const getResturantSchedules = async (req, res) => {
         .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
         .limit(1);
     // 3. حساب الحالة الحالية للمطعم بتوقيت القاهرة
-    const status = calculateCurrentStatus(settings, schedules);
+    const isBusy = Boolean(settings?.isBusy);
+    const status = calculateCurrentStatus(settings, schedules, isBusy);
     // 4. إرجاع كل البيانات للفرونت إند جاهزة
     return (0, response_1.SuccessResponse)(res, {
         message: "Restaurant schedules and current status fetched successfully",
@@ -138,6 +145,8 @@ const getResturantSchedules = async (req, res) => {
             canDeliveryNow: status.canDeliveryNow,
             canTakeawayNow: status.canTakeawayNow,
             canDineInNow: status.canDineInNow,
+            isBusy,
+            busyStatus: isBusy ? "busy" : "available",
             reason: status.reason,
             // settings: settings || null,
             // schedules: schedules
@@ -148,7 +157,16 @@ exports.getResturantSchedules = getResturantSchedules;
 // =========================================================================
 // 🛠️ الفانكشن الذكية لحساب حالة المطعم (تستخدم للـ API وللـ Validation)
 // =========================================================================
-function calculateCurrentStatus(settings, schedules) {
+function calculateCurrentStatus(settings, schedules, isBusy) {
+    if (isBusy) {
+        return {
+            isOpenNow: false,
+            canDeliveryNow: false,
+            canTakeawayNow: false,
+            canDineInNow: false,
+            reason: "Restaurant is currently busy and not accepting orders"
+        };
+    }
     // 🛑 1. الحماية الافتراضية (Secure by Default): لو مفيش إعدادات، المطعم مقفول
     const defaultStatus = {
         isOpenNow: false,

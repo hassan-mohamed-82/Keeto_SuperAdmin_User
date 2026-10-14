@@ -9,6 +9,7 @@ const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const Safedecrypt_1 = require("../../utils/Safedecrypt");
 const getActiveCustomGateway_1 = require("../../utils/getActiveCustomGateway");
+const getActivePlatformGateway_1 = require("../../utils/getActivePlatformGateway");
 const paymentSession_service_1 = require("../../services/payments/paymentSession.service");
 const orderPaymentConfirmation_1 = require("../../helpers/orderPaymentConfirmation");
 /**
@@ -115,7 +116,15 @@ const handlePaymobWebhook = async (req, res) => {
             hmacSecret = (0, Safedecrypt_1.safeDecrypt)(rawHmac);
         }
         else {
-            hmacSecret = process.env.PLATFORM_PAYMOB_HMAC || "";
+            // SYSTEM gateway: look up platform DB credentials first, fall back to .env
+            const platformGateway = await (0, getActivePlatformGateway_1.getActivePlatformGateway)();
+            if (platformGateway?.provider === "PAYMOB" && platformGateway.credentials?.hmac) {
+                hmacSecret = platformGateway.credentials.hmac; // already decrypted by utility
+            }
+            else {
+                // Legacy fallback for backwards-compatibility
+                hmacSecret = process.env.PLATFORM_PAYMOB_HMAC || "";
+            }
         }
         // 3. 🛡️ Strict HMAC Verification: MANDATORY (runs before idempotency check)
         if (!hmacSecret) {
@@ -128,7 +137,7 @@ const handlePaymobWebhook = async (req, res) => {
         }
         let isValid = paymob_service_1.PaymobService.verifyHmac(transactionObj, hmacSecret, receivedHmac);
         if (!isValid && process.env.PLATFORM_PAYMOB_HMAC && hmacSecret !== process.env.PLATFORM_PAYMOB_HMAC) {
-            console.warn("[Paymob Webhook]: Custom HMAC verification failed. Attempting platform HMAC verification fallback.");
+            console.warn("[Paymob Webhook]: HMAC verification failed. Attempting .env HMAC fallback.");
             isValid = paymob_service_1.PaymobService.verifyHmac(transactionObj, process.env.PLATFORM_PAYMOB_HMAC, receivedHmac);
         }
         if (!isValid) {

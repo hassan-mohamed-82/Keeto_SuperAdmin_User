@@ -233,7 +233,6 @@ export const getCourierProfile = catchAsync(async (req: Request, res: Response) 
             email: deliveryMen.email,
             image: deliveryMen.image,
             deliveryType: deliveryMen.deliveryType,
-            deliveryType: deliveryMen.deliveryType,
             allZones: deliveryMen.allZones,
             shiftStatus: deliveryMen.shiftStatus,
             isOnline: deliveryMen.isOnline,

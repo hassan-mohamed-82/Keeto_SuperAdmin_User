@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const reports_1 = require("../../controllers/shipping/reports");
+const authenticated_1 = require("../../middlewares/authenticated");
+const shippingAuth_1 = require("../../middlewares/shippingAuth");
+const validation_1 = require("../../middlewares/validation");
+const report_1 = require("../../validation/shipping/report");
+const router = (0, express_1.Router)();
+router.use(authenticated_1.authenticated, (0, shippingAuth_1.requireShippingCompany)());
+router.get("/summary", (0, validation_1.validate)(report_1.reportsDateRangeSchema), reports_1.getSummaryReport);
+router.get("/couriers", (0, validation_1.validate)(report_1.reportsDateRangeSchema), reports_1.getCourierPerformanceReport);
+exports.default = router;

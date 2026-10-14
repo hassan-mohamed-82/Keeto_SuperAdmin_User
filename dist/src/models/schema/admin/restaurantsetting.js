@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.restaurantSchedules = exports.restaurantSettings = void 0;
 const drizzle_orm_1 = require("drizzle-orm");
 const mysql_core_1 = require("drizzle-orm/mysql-core");
+const shippingCompany_1 = require("./shippingCompany");
 // 1. جدول الإعدادات العامة
 exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings", {
     id: (0, mysql_core_1.int)("id").autoincrement().primaryKey(),
@@ -13,7 +14,8 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     posSection: (0, mysql_core_1.boolean)("pos_section").default(false),
     selfDelivery: (0, mysql_core_1.boolean)("self_delivery").default(false),
     homeDelivery: (0, mysql_core_1.boolean)("home_delivery").default(true),
-    shippingCompanyId: (0, mysql_core_1.char)("shipping_company_id", { length: 36 }),
+    shippingCompanyId: (0, mysql_core_1.char)("shipping_company_id", { length: 36 })
+        .references(() => shippingCompany_1.shippingCompanies.id, { onDelete: "set null" }),
     takeaway: (0, mysql_core_1.boolean)("takeaway").default(false),
     orderSubscription: (0, mysql_core_1.boolean)("order_subscription").default(false),
     instantOrder: (0, mysql_core_1.boolean)("instant_order").default(true),
@@ -36,6 +38,8 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     isAlwaysOpen: (0, mysql_core_1.boolean)("is_always_open").default(false),
     isSameTimeEveryDay: (0, mysql_core_1.boolean)("is_same_time_every_day").default(false),
     isTemporarilyClosed: (0, mysql_core_1.boolean)("is_temporarily_closed").default(false),
+    isBusy: (0, mysql_core_1.boolean)("is_busy").default(false),
+    cashEnabled: (0, mysql_core_1.boolean)("cash_enabled").default(true),
     repeatNotification: (0, mysql_core_1.boolean)("repeat_notification").default(false),
     repeatNotificationDuration: (0, mysql_core_1.int)("repeat_notification_duration").default(20),
     repeatNotificationStatuses: (0, mysql_core_1.json)("repeat_notification_statuses")

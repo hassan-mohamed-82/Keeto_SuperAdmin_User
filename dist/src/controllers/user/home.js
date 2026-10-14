@@ -63,7 +63,11 @@ const getHomeScreen = async (req, res) => {
         addressFr: schema_1.restaurants.addressFr,
         minDeliveryTime: schema_1.restaurants.minDeliveryTime,
         callcenterphone: schema_1.restaurants.callcenterphone,
-    }).from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"));
+        isBusy: (0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurantSettings.isBusy} = true THEN true ELSE false END`.as('isBusy'),
+    })
+        .from(schema_1.restaurants)
+        .leftJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, schema_1.restaurants.id))
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"));
     const popularRestaurants = restaurantsData.map(r => ({
         ...r,
         isFavorite: userId ? favoriteRestaurantIds.has(r.id) : false
@@ -96,8 +100,11 @@ const getRestaurantsByCuisine = async (req, res) => {
         addressFr: schema_1.restaurants.addressFr,
         minDeliveryTime: schema_1.restaurants.minDeliveryTime,
         callcenterphone: schema_1.restaurants.callcenterphone,
-    }).from(schema_1.restaurants)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.sql) `JSON_CONTAINS(${schema_1.restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`));
+        isBusy: (0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurantSettings.isBusy} = true THEN true ELSE false END`.as('isBusy'),
+    })
+        .from(schema_1.restaurants)
+        .leftJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, schema_1.restaurants.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"), (0, drizzle_orm_1.sql) `JSON_CONTAINS(${schema_1.restaurants.cuisineId}, ${JSON.stringify(cuisineId)})`));
     const result = data.map(r => ({
         ...r,
         isFavorite: userId ? favoriteRestaurantIds.has(r.id) : false
@@ -246,9 +253,17 @@ const getRestaurantDetails = async (req, res) => {
     if (!restaurantInfo) {
         throw new Error("Restaurant not found");
     }
+    const [settings] = await connection_1.db
+        .select({ isBusy: schema_1.restaurantSettings.isBusy })
+        .from(schema_1.restaurantSettings)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+    const isBusy = Boolean(settings?.isBusy);
     const restaurantWithFav = {
         ...restaurantInfo,
         isFavorite: userId ? favoriteRestaurantIds.has(restaurantId) : false,
+        isBusy,
+        busyStatus: isBusy ? "busy" : "available",
     };
     // 3. Fetch Active Foods and Categories
     const rawMenu = await connection_1.db

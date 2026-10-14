@@ -39,6 +39,7 @@ const food_helper_1 = require("../../helpers/food.helper");
 const cart_helper_1 = require("../../helpers/cart.helper");
 const pricing_helper_1 = require("../../helpers/pricing.helper");
 const foodConditions_1 = require("../../helpers/foodConditions");
+const firstOrderDiscount_helper_1 = require("../../helpers/firstOrderDiscount.helper");
 /* =========================================
    Helpers
 ========================================= */
@@ -411,6 +412,28 @@ const addToCart = async (req, res) => {
             note: note || null,
         });
     }
+    // ─── First-order discount preview (registered users only) ────────
+    const isGuestUser = Boolean(req.user?.isGuest);
+    let firstOrderDiscount = null;
+    if (!isGuestUser && itemFood?.restaurantid) {
+        const cartSubtotalForFod = unitPrice * (existingSame ? existingSame.quantity + quantity : quantity);
+        const fodResult = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, itemFood.restaurantid, cartSubtotalForFod);
+        if (fodResult) {
+            firstOrderDiscount = {
+                discountId: fodResult.discount.id,
+                name: fodResult.discount.name,
+                nameAr: fodResult.discount.nameAr,
+                nameFr: fodResult.discount.nameFr,
+                discountType: fodResult.discount.discountType,
+                discountValue: parseFloat(fodResult.discount.discountValue),
+                discountAmount: fodResult.discountAmount,
+                maxDiscountAmount: fodResult.discount.maxDiscountAmount
+                    ? parseFloat(fodResult.discount.maxDiscountAmount)
+                    : null,
+                firstOrderCount: fodResult.discount.firstOrderCount,
+            };
+        }
+    }
     return (0, response_1.SuccessResponse)(res, {
         message: "Added to cart successfully",
         data: {
@@ -418,6 +441,7 @@ const addToCart = async (req, res) => {
             totalPrice: unitPrice * quantity,
             resolvedBranchId,
             serviceModule: resolvedServiceModule,
+            firstOrderDiscount,
         },
     });
 };
@@ -915,6 +939,35 @@ const getCart = async (req, res) => {
             }
         }
     }
+    // ─── First-order discount preview (registered users only) ────────────
+    const isGuestUser = Boolean(req.user?.isGuest);
+    let firstOrderDiscount = null;
+    if (!isGuestUser && restaurantId) {
+        const fodResult = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, restaurantId, finalSubtotal);
+        if (fodResult) {
+            firstOrderDiscount = {
+                discountId: fodResult.discount.id,
+                name: fodResult.discount.name,
+                nameAr: fodResult.discount.nameAr,
+                nameFr: fodResult.discount.nameFr,
+                discountType: fodResult.discount.discountType,
+                discountValue: parseFloat(fodResult.discount.discountValue),
+                discountAmount: fodResult.discountAmount,
+                maxDiscountAmount: fodResult.discount.maxDiscountAmount
+                    ? parseFloat(fodResult.discount.maxDiscountAmount)
+                    : null,
+                firstOrderCount: fodResult.discount.firstOrderCount,
+                summary: {
+                    subtotal: parseFloat(finalSubtotal.toFixed(2)),
+                    discountAmount: fodResult.discountAmount,
+                    finalSubtotal: parseFloat(Math.max(0, finalSubtotal - fodResult.discountAmount).toFixed(2)),
+                },
+            };
+            // Reflect first-order discount in the main totals
+            totalDiscountAmount = parseFloat((totalDiscountAmount + fodResult.discountAmount).toFixed(2));
+            finalSubtotal = parseFloat(Math.max(0, finalSubtotal - fodResult.discountAmount).toFixed(2));
+        }
+    }
     return (0, response_1.SuccessResponse)(res, {
         message: "Cart fetched successfully",
         data: {
@@ -927,6 +980,7 @@ const getCart = async (req, res) => {
                 totalDiscount: totalDiscountAmount,
                 subtotal: finalSubtotal,
                 freeDelivery: freeDeliveryInfo,
+                firstOrderDiscount,
             },
         },
     });
@@ -1139,6 +1193,33 @@ const updateCartItem = async (req, res) => {
         ...(note !== undefined ? { note: note || null } : {}),
     })
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.id, cartItemId), (0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId)));
+    // ─── First-order discount preview (registered users only) ────────
+    const isGuestUserUpdate = Boolean(req.user?.isGuest);
+    let firstOrderDiscountUpdate = null;
+    if (!isGuestUserUpdate && cartItem.restaurantId) {
+        // Recompute cart subtotal across all items for this restaurant
+        const allCartForRest = await connection_1.db
+            .select({ totalPrice: schema_1.cartItems.totalPrice })
+            .from(schema_1.cartItems)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId), (0, drizzle_orm_1.eq)(schema_1.cartItems.restaurantId, cartItem.restaurantId)));
+        const cartSubtotalForFod = allCartForRest.reduce((s, i) => s + parseFloat(i.totalPrice || "0"), 0);
+        const fodResult = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, cartItem.restaurantId, cartSubtotalForFod);
+        if (fodResult) {
+            firstOrderDiscountUpdate = {
+                discountId: fodResult.discount.id,
+                name: fodResult.discount.name,
+                nameAr: fodResult.discount.nameAr,
+                nameFr: fodResult.discount.nameFr,
+                discountType: fodResult.discount.discountType,
+                discountValue: parseFloat(fodResult.discount.discountValue),
+                discountAmount: fodResult.discountAmount,
+                maxDiscountAmount: fodResult.discount.maxDiscountAmount
+                    ? parseFloat(fodResult.discount.maxDiscountAmount)
+                    : null,
+                firstOrderCount: fodResult.discount.firstOrderCount,
+            };
+        }
+    }
     return (0, response_1.SuccessResponse)(res, {
         message: "Cart updated successfully",
         data: {
@@ -1146,6 +1227,7 @@ const updateCartItem = async (req, res) => {
             totalPrice: unitPrice * qty,
             resolvedBranchId,
             serviceModule: resolvedServiceModule,
+            firstOrderDiscount: firstOrderDiscountUpdate,
         },
     });
 };

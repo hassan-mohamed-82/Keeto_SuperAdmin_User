@@ -28,6 +28,9 @@ const authenticated = (req, res, next) => {
         branchId: decoded.branchId,
         shippingCompanyId: decoded.shippingCompanyId,
         deliveryManId: decoded.deliveryManId,
+        companyRole: decoded.companyRole,
+        deliveryType: decoded.deliveryType,
+        tokenVersion: decoded.tokenVersion,
         isGuest: Boolean(decoded.isGuest),
     };
     next();

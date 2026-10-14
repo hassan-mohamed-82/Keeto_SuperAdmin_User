@@ -1,14 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAssignedRestaurants = getAssignedRestaurants;
-exports.getRestaurantBranches = getRestaurantBranches;
+exports.getRestaurantBranches = exports.getAssignedRestaurants = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
-async function getAssignedRestaurants(req, res) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+const catchAsync_1 = require("../../utils/catchAsync");
+// D3: Read strictly from restaurantSettings.shippingCompanyId
+exports.getAssignedRestaurants = (0, catchAsync_1.catchAsync)(async (req, res) => {
+    const companyId = req.user?.shippingCompanyId;
     if (!companyId) {
         throw new Errors_1.UnauthorizedError("Unauthorized access");
     }
@@ -26,30 +27,28 @@ async function getAssignedRestaurants(req, res) {
         status: schema_1.restaurants.status,
         homeDelivery: schema_1.restaurantSettings.homeDelivery,
         selfDelivery: schema_1.restaurantSettings.selfDelivery,
-        assignedAt: schema_1.shippingCompanyRestaurants.createdAt,
     })
-        .from(schema_1.shippingCompanyRestaurants)
-        .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, schema_1.restaurants.id))
-        .leftJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantSettings.restaurantId))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, companyId), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.status, "active")));
+        .from(schema_1.restaurantSettings)
+        .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, schema_1.restaurants.id))
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, companyId));
     return (0, response_1.SuccessResponse)(res, {
         message: "Assigned restaurants retrieved successfully",
         data: assigned,
     });
-}
-async function getRestaurantBranches(req, res) {
-    const companyId = req.user?.shippingCompanyId || req.user?.id;
+});
+exports.getRestaurantBranches = (0, catchAsync_1.catchAsync)(async (req, res) => {
+    const companyId = req.user?.shippingCompanyId;
     const { restaurantId } = req.params;
     if (!companyId) {
         throw new Errors_1.UnauthorizedError("Unauthorized access");
     }
-    // التأكد أن المطعم تابع لشركة الشحن
-    const isAssigned = await connection_1.db
-        .select({ id: schema_1.shippingCompanyRestaurants.id })
-        .from(schema_1.shippingCompanyRestaurants)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, companyId), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.status, "active")))
+    // Verify restaurant is linked to this shipping company
+    const [settings] = await connection_1.db
+        .select({ id: schema_1.restaurantSettings.id })
+        .from(schema_1.restaurantSettings)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, companyId)))
         .limit(1);
-    if (isAssigned.length === 0) {
+    if (!settings) {
         throw new Errors_1.UnauthorizedError("Restaurant is not assigned to this shipping company");
     }
     const branchList = await connection_1.db
@@ -60,4 +59,4 @@ async function getRestaurantBranches(req, res) {
         message: "Restaurant branches retrieved successfully",
         data: branchList,
     });
-}
+});

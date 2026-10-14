@@ -23,6 +23,13 @@ const checkFirstOrderDiscount = async (req, res) => {
     const { restaurantId, subtotal: reqSubtotal } = req.query;
     if (!restaurantId)
         throw new BadRequest_1.BadRequest("restaurantId is required");
+    // First-order discount is only for registered (non-guest) users
+    if (req.user?.isGuest) {
+        return (0, response_1.SuccessResponse)(res, {
+            message: "First-order discount is not available for guest users.",
+            data: null,
+        });
+    }
     // Block check
     await (0, userBlockCheck_1.validateUserNotBlocked)(userId, restaurantId);
     // Resolve subtotal from query or cart
@@ -81,6 +88,13 @@ const getAvailableFirstOrderDiscounts = async (req, res) => {
     const { restaurantId } = req.query;
     if (!restaurantId)
         throw new BadRequest_1.BadRequest("restaurantId is required");
+    // First-order discount is only for registered (non-guest) users
+    if (req.user?.isGuest) {
+        return (0, response_1.SuccessResponse)(res, {
+            message: "First-order discount is not available for guest users.",
+            data: [],
+        });
+    }
     await (0, userBlockCheck_1.validateUserNotBlocked)(userId, restaurantId);
     const now = new Date();
     const discounts = await connection_1.db

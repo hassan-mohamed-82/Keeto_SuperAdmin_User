@@ -7,7 +7,7 @@ const restaurants_1 = require("./restaurants");
 const schema_1 = require("../../schema");
 const shippingCompany_1 = require("./shippingCompany");
 exports.deliveryMen = (0, mysql_core_1.mysqlTable)("delivery_men", {
-    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql)`(UUID())`),
+    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     // في حالة كان تابع لمطعم معين
     restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 })
         .references(() => restaurants_1.restaurants.id, { onDelete: "set null" }),
@@ -23,8 +23,8 @@ exports.deliveryMen = (0, mysql_core_1.mysqlTable)("delivery_men", {
     image: (0, mysql_core_1.varchar)("image", { length: 500 }),
     // نوع التوصيل: لمطعم محدد أم لشركة شحن خارجية (outsource)
     deliveryType: (0, mysql_core_1.mysqlEnum)("delivery_type", ["restaurant", "outsource"]).default("restaurant").notNull(),
-    // طبيعة العمل: شيفت لمطعم محدد في أوقات معينة أم outsource عام لشركة الشحن
-    deliveryType: (0, mysql_core_1.mysqlEnum)("work_type", ["restaurant", "outsource"]).default("outsource").notNull(),
+    // D5: هل يخدم كل مناطق الشركة أم مناطق محددة فقط في delivery_man_zones
+    allZones: (0, mysql_core_1.boolean)("all_zones").default(true).notNull(),
     // عدد الطلبات النشطة حالياً عند المندوب
     activeOrdersCount: (0, mysql_core_1.int)("active_orders_count").default(0).notNull(),
     // حالة الشفت (نشط / غير نشط)
@@ -41,4 +41,6 @@ exports.deliveryMen = (0, mysql_core_1.mysqlTable)("delivery_men", {
     isDeleted: (0, mysql_core_1.boolean)("is_deleted").default(false),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
-});
+}, (table) => [
+    (0, mysql_core_1.index)("idx_delivery_men_dispatch").on(table.shippingCompanyId, table.isOnline, table.isActive, table.isDeleted),
+]);

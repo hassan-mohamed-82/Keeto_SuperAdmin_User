@@ -94,7 +94,8 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
         "company_inactive",
         "out_of_zone",
         "no_courier",
-        "max_attempts"
+        "max_attempts",
+        "no_coordinates"
     ]),
     dispatchAttempts: (0, mysql_core_1.int)("dispatch_attempts").default(0).notNull(),
     dailyOrderNumber: (0, mysql_core_1.int)("daily_order_number"),
@@ -116,6 +117,10 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     paymentFailureReason: (0, mysql_core_1.text)("payment_failure_reason"), // سبب آخر فشل لسرعة العرض في تفاصيل الأوردر
     paymentIssueNotifiedAt: (0, mysql_core_1.timestamp)("payment_issue_notified_at"),
     paymentIssueType: (0, mysql_core_1.varchar)("payment_issue_type", { length: 30 }),
+    // Phase 1: Shipping timestamps for performance/reports
+    shippingAssignedAt: (0, mysql_core_1.timestamp)("shipping_assigned_at"),
+    pickedUpAt: (0, mysql_core_1.timestamp)("picked_up_at"),
+    deliveredAt: (0, mysql_core_1.timestamp)("delivered_at"),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });

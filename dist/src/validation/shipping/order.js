@@ -1,12 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.filterShippingOrdersSchema = exports.autoAssignOrderSchema = exports.assignOrderDeliveryManSchema = void 0;
+exports.filterShippingOrdersSchema = exports.rejectOrderSchema = exports.autoAssignOrderSchema = exports.assignOrderDeliveryManSchema = void 0;
 const zod_1 = require("zod");
 exports.assignOrderDeliveryManSchema = zod_1.z.object({
     deliveryManId: zod_1.z.string().uuid("Invalid Delivery Man ID"),
 });
 exports.autoAssignOrderSchema = zod_1.z.object({
     maxRadiusKm: zod_1.z.coerce.number().positive().optional(),
+});
+exports.rejectOrderSchema = zod_1.z.object({
+    reason: zod_1.z.string().min(1, "Reject reason is mandatory").max(500),
 });
 exports.filterShippingOrdersSchema = zod_1.z.object({
     restaurantId: zod_1.z.string().uuid("Invalid Restaurant ID").optional(),
@@ -20,6 +23,13 @@ exports.filterShippingOrdersSchema = zod_1.z.object({
         "cancelled",
         "refund",
         "failed"
+    ]).optional(),
+    shippingStatus: zod_1.z.enum([
+        "pending_dispatch",
+        "assigned",
+        "picked_up",
+        "delivered",
+        "manual_required"
     ]).optional(),
     deliveryManId: zod_1.z.string().uuid("Invalid Delivery Man ID").optional(),
     page: zod_1.z.coerce.number().int().min(1).optional().default(1),

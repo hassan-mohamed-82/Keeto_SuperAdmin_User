@@ -2,10 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const restaurants_1 = require("../../controllers/shipping/restaurants");
-const catchAsync_1 = require("../../utils/catchAsync");
 const authenticated_1 = require("../../middlewares/authenticated");
+const shippingAuth_1 = require("../../middlewares/shippingAuth");
 const router = (0, express_1.Router)();
-router.use(authenticated_1.authenticated);
-router.get("/", (0, catchAsync_1.catchAsync)(restaurants_1.getAssignedRestaurants));
-router.get("/:restaurantId/branches", (0, catchAsync_1.catchAsync)(restaurants_1.getRestaurantBranches));
+router.use(authenticated_1.authenticated, (0, shippingAuth_1.requireShippingCompany)());
+router.get("/", restaurants_1.getAssignedRestaurants);
+router.get("/:restaurantId/branches", restaurants_1.getRestaurantBranches);
 exports.default = router;

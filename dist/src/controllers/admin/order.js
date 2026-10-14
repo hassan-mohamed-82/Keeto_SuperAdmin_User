@@ -863,6 +863,19 @@ const updateOrderStatus = async (req, res) => {
             type: "ORDER_STATUS_UPDATE"
         }
     });
+    // D9: Fire-and-forget dispatchOrder when order moves to 'accepted' and orderType is delivery
+    // const orderType = existingOrder.orderType || (existingOrder as any).type;
+    // if (status === "accepted" && orderType === "delivery") {
+    //     dispatchOrder(orderId).catch((err) => {
+    //         console.error(`[dispatchOrder:fire-and-forget] failed for order ${orderId}:`, err);
+    //     });
+    // }
+    // // Release courier activeOrdersCount when order completes or cancels
+    // if (["delivered", "cancelled", "refund"].includes(status) && existingOrder.deliveryManId) {
+    //     releaseCourierForOrder(orderId, existingOrder.deliveryManId).catch((err) => {
+    //         console.error(`[releaseCourierForOrder] failed for order ${orderId}:`, err);
+    //     });
+    // }
     return (0, response_1.SuccessResponse)(res, { message: `Order status successfully updated to ${status}` });
 };
 exports.updateOrderStatus = updateOrderStatus;

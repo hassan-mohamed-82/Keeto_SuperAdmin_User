@@ -46,6 +46,7 @@ const restaurantPaymentCredentials_1 = __importDefault(require("./restaurantPaym
 const paymentTransactions_1 = __importDefault(require("./paymentTransactions"));
 const restaurantOperations_1 = __importDefault(require("./restaurantOperations"));
 const shippingCompany_1 = __importDefault(require("./shippingCompany"));
+const platformPaymentGateways_1 = __importDefault(require("./platformPaymentGateways"));
 const authenticated_1 = require("../../middlewares/authenticated");
 const authorized_1 = require("../../middlewares/authorized");
 const router = (0, express_1.Router)();
@@ -92,4 +93,5 @@ router.use("/restaurant-payment-credentials", restaurantPaymentCredentials_1.def
 router.use("/restaurant-operations", restaurantOperations_1.default);
 router.use("/payment-transactions", paymentTransactions_1.default);
 router.use("/shipping-companies", shippingCompany_1.default);
+router.use("/platform-gateways", platformPaymentGateways_1.default);
 exports.default = router;

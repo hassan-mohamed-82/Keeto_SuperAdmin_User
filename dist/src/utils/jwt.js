@@ -69,15 +69,18 @@ const generateGuestToken = (data) => {
 };
 exports.generateGuestToken = generateGuestToken;
 // =======================
-// Generate Shipping Company Token
+// Generate Shipping Company Token (User-level per D6)
 // =======================
 const generateShippingCompanyToken = (data) => {
     return jsonwebtoken_1.default.sign({
         id: data.id,
         name: data.name,
+        email: data.email,
         role: "shipping_company",
         type: "shipping_admin",
-        shippingCompanyId: data.id,
+        shippingCompanyId: data.shippingCompanyId,
+        companyRole: data.companyRole || "admin",
+        tokenVersion: data.tokenVersion ?? 0,
     }, JWT_SECRET, { expiresIn: "30d" });
 };
 exports.generateShippingCompanyToken = generateShippingCompanyToken;
@@ -88,13 +91,15 @@ const generateDeliveryManToken = (data) => {
     return jsonwebtoken_1.default.sign({
         id: data.id,
         name: data.name,
-        phone: data.phone || null,
+        phone: data.phone || undefined,
+        email: data.email || undefined,
         role: "delivery_man",
         type: "delivery_man",
         restaurantId: data.restaurantId || null,
         branchId: data.branchId || null,
         shippingCompanyId: data.shippingCompanyId || null,
         deliveryManId: data.id,
+        deliveryType: data.deliveryType || "outsource",
     }, JWT_SECRET, { expiresIn: "30d" });
 };
 exports.generateDeliveryManToken = generateDeliveryManToken;

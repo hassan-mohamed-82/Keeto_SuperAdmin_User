@@ -10,7 +10,7 @@ const order_1 = require("./order");
 // 1. جدول شركات الشحن (Shipping Companies)
 // ==========================================
 exports.shippingCompanies = (0, mysql_core_1.mysqlTable)("shipping_companies", {
-    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql)`(UUID())`),
+    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     name: (0, mysql_core_1.varchar)("name", { length: 255 }).notNull(),
     nameAr: (0, mysql_core_1.varchar)("name_ar", { length: 255 }),
     phone: (0, mysql_core_1.varchar)("phone", { length: 50 }).notNull(),
@@ -32,7 +32,7 @@ exports.shippingCompanies = (0, mysql_core_1.mysqlTable)("shipping_companies", {
 // 2. مستخدمو شركة الشحن لتسجيل الدخول (Shipping Company Users - Login)
 // =========================================================================
 exports.shippingCompanyUsers = (0, mysql_core_1.mysqlTable)("shipping_company_users", {
-    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql)`(UUID())`),
+    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     shippingCompanyId: (0, mysql_core_1.char)("shipping_company_id", { length: 36 })
         .references(() => exports.shippingCompanies.id, { onDelete: "cascade" })
         .notNull(),
@@ -41,6 +41,7 @@ exports.shippingCompanyUsers = (0, mysql_core_1.mysqlTable)("shipping_company_us
     password: (0, mysql_core_1.varchar)("password", { length: 255 }).notNull(),
     phone: (0, mysql_core_1.varchar)("phone", { length: 50 }),
     role: (0, mysql_core_1.mysqlEnum)("role", ["admin", "dispatcher", "viewer"]).default("admin").notNull(),
+    tokenVersion: (0, mysql_core_1.int)("token_version").default(0).notNull(),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active").notNull(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
@@ -49,7 +50,7 @@ exports.shippingCompanyUsers = (0, mysql_core_1.mysqlTable)("shipping_company_us
 // 3. المطاعم التابعة لشركة الشحن (Shipping Company Restaurants)
 // =========================================================================
 exports.shippingCompanyRestaurants = (0, mysql_core_1.mysqlTable)("shipping_company_restaurants", {
-    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql)`(UUID())`),
+    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     shippingCompanyId: (0, mysql_core_1.char)("shipping_company_id", { length: 36 })
         .references(() => exports.shippingCompanies.id, { onDelete: "cascade" })
         .notNull(),
@@ -64,7 +65,7 @@ exports.shippingCompanyRestaurants = (0, mysql_core_1.mysqlTable)("shipping_comp
 // 4. مناطق التغطية الخاصة بشركة الشحن (Shipping Zones with Polygon & Fee)
 // =========================================================================
 exports.shippingZones = (0, mysql_core_1.mysqlTable)("shipping_zones", {
-    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql)`(UUID())`),
+    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     shippingCompanyId: (0, mysql_core_1.char)("shipping_company_id", { length: 36 })
         .references(() => exports.shippingCompanies.id, { onDelete: "cascade" })
         .notNull(),
@@ -85,7 +86,7 @@ exports.shippingCompanyZones = exports.shippingZones;
 // للمناديب من نوع: deliveryType = 'restaurant'
 // =========================================================================
 exports.deliveryManShifts = (0, mysql_core_1.mysqlTable)("delivery_man_shifts", {
-    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql)`(UUID())`),
+    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     deliveryManId: (0, mysql_core_1.char)("delivery_man_id", { length: 36 })
         .references(() => delivery_man_1.deliveryMen.id, { onDelete: "cascade" })
         .notNull(),
@@ -98,12 +99,14 @@ exports.deliveryManShifts = (0, mysql_core_1.mysqlTable)("delivery_man_shifts", 
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active").notNull(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
-});
+}, (table) => [
+    (0, mysql_core_1.unique)("uq_delivery_man_shifts_slot").on(table.deliveryManId, table.restaurantId, table.dayOfWeek, table.from, table.to),
+]);
 // =========================================================================
 // 5. ربط المناديب بمناطق العمل الخاصة بشركة الشحن (Delivery Man Zones)
 // =========================================================================
 exports.deliveryManZones = (0, mysql_core_1.mysqlTable)("delivery_man_zones", {
-    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql)`(UUID())`),
+    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     deliveryManId: (0, mysql_core_1.char)("delivery_man_id", { length: 36 })
         .references(() => delivery_man_1.deliveryMen.id, { onDelete: "cascade" })
         .notNull(),
@@ -116,7 +119,7 @@ exports.deliveryManZones = (0, mysql_core_1.mysqlTable)("delivery_man_zones", {
 // 6. سجل توزيع الطلبات ومحاولات الإسناد (Dispatch Assignments / Offers Audit)
 // =========================================================================
 exports.dispatchAssignments = (0, mysql_core_1.mysqlTable)("dispatch_assignments", {
-    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql)`(UUID())`),
+    id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     orderId: (0, mysql_core_1.char)("order_id", { length: 36 })
         .references(() => order_1.orders.id, { onDelete: "cascade" })
         .notNull(),

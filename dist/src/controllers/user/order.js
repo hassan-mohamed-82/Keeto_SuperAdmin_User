@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.rateOrder = exports.getCancelReasons = exports.cancelOrder = exports.getOrderPrerequisites = exports.getOrderDetails = exports.getOrderHistory = exports.getActiveOrders = exports.checkout = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
+// import { releaseCourierForOrder } from "../../services/shipping/dispatchEngine";
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
@@ -311,6 +312,10 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     if (resolvedOrderType === "takeaway" && !status.canTakeawayNow)
         throw new BadRequest_1.BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
+    // 🛡️ Cash payment guard: reject CASH orders if the restaurant has disabled cash
+    if (isCashPayment && settings?.cashEnabled === false) {
+        throw new BadRequest_1.BadRequest("Cash payment is not accepted by this restaurant. Please choose a different payment method.");
+    }
     let defaultPreparingDuration;
     if (resolvedOrderType === "takeaway") {
         defaultPreparingDuration = settings?.maxTakeAwayTime ?? 25;
@@ -716,10 +721,13 @@ const checkout = async (req, res) => {
     // نحسب الخصم الأساسي القائم حالياً (سواء على المنتجات أو العروض)
     const existingProductDiscountAmount = roundMoney(Math.max(0, initialSubtotal - subtotal));
     // فحص إمكانية تطبيق خصم أول طلبات للمستخدم على هذا المطعم
-    const eligibleFirstOrder = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, restaurantId, initialSubtotal > 0 ? initialSubtotal : subtotal);
-    if (eligibleFirstOrder) {
-        firstOrderDiscountAmount = eligibleFirstOrder.discountAmount;
-        appliedFirstOrderDiscount = eligibleFirstOrder.discount;
+    // First-order discount is only for registered (non-guest) users
+    if (!isGuestUser) {
+        const eligibleFirstOrder = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, restaurantId, initialSubtotal > 0 ? initialSubtotal : subtotal);
+        if (eligibleFirstOrder) {
+            firstOrderDiscountAmount = eligibleFirstOrder.discountAmount;
+            appliedFirstOrderDiscount = eligibleFirstOrder.discount;
+        }
     }
     // مقارنة: إذا كان خصم أول طلبات متاحاً وكان أكبر من الخصومات القائمة على المنتجات
     // "if it already the product has discount or offer discount or any discount so apply the maximum discount exist"
@@ -1638,23 +1646,30 @@ const getOrderPrerequisites = async (req, res) => {
             .from(schema_1.freeDeliveryOffers)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.freeDeliveryOffers.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.freeDeliveryOffers.status, "active")))
             .limit(1),
-        // 🛡️ جلب إعدادات المطعم لمعرفة هل الدفع الإلكتروني مفعّل أم لا
-        connection_1.db.select({ enableOnlinePayment: schema_1.restaurantSettings.enableOnlinePayment })
+        // 🛡️ جلب إعدادات المطعم لمعرفة هل الدفع الإلكتروني و الكاش مفعلين أم لا
+        connection_1.db.select({ enableOnlinePayment: schema_1.restaurantSettings.enableOnlinePayment, cashEnabled: schema_1.restaurantSettings.cashEnabled })
             .from(schema_1.restaurantSettings)
             .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
             .limit(1)
     ]);
-    // 🛡️ تحقق من إعداد الدفع الإلكتروني للمطعم
+    // 🛡️ تحقق من إعداد الدفع الإلكتروني والكاش للمطعم
     const enableOnlinePayment = restaurantSettingsRows[0]?.enableOnlinePayment ?? true;
+    const cashEnabled = restaurantSettingsRows[0]?.cashEnabled ?? true;
     // إذا كان الدفع الإلكتروني معطلاً للمطعم، نحذف طريقة الدفع بالفيزا من القائمة
-    const activePaymentMethods = enableOnlinePayment
-        ? allActivePaymentMethods
-        : allActivePaymentMethods.filter((pm) => {
-            const name = pm.name?.toLowerCase() ?? "";
-            const nameAr = pm.nameAr ?? "";
-            // Visa / card payment methods are the online-only ones
-            return name !== "visa" && name !== "card" && nameAr !== "بطاقة";
-        });
+    // إذا كان الكاش معطلاً للمطعم، نحذف طريقة الكاش من القائمة
+    const activePaymentMethods = allActivePaymentMethods.filter((pm) => {
+        const name = pm.name?.toLowerCase() ?? "";
+        const nameAr = pm.nameAr ?? "";
+        // Remove Visa/card if online payment is disabled
+        if (!enableOnlinePayment && (name === "visa" || name === "card" || nameAr === "بطاقة")) {
+            return false;
+        }
+        // Remove cash if cash is disabled
+        if (!cashEnabled && (name === "cash" || name === "cash_on_delivery" || nameAr === "الدفع عند الاستلام")) {
+            return false;
+        }
+        return true;
+    });
     const plan = businessPlans[0];
     if (!plan) {
         throw new BadRequest_1.BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
@@ -1822,6 +1837,12 @@ const cancelOrder = async (req, res) => {
             reason: finalReasonText
         }
     });
+    // Release courier active orders count if order had courier assigned
+    // if (order.deliveryManId) {
+    //     releaseCourierForOrder(order.id, order.deliveryManId).catch((err) => {
+    //         console.error(`[releaseCourierForOrder:userCancel] failed for order ${order.id}:`, err);
+    //     });
+    // }
     return (0, response_1.SuccessResponse)(res, { message: "Order cancelled successfully" });
 };
 exports.cancelOrder = cancelOrder;
