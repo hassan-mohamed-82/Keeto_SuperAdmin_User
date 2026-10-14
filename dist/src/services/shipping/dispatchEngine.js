@@ -1,22 +1,22 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function (o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
     if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
+        desc = { enumerable: true, get: function () { return m[k]; } };
     }
     Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
+}) : (function (o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
 }));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function (o, v) {
     Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
+}) : function (o, v) {
     o["default"] = v;
 });
 var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
+    var ownKeys = function (o) {
         ownKeys = Object.getOwnPropertyNames || function (o) {
             var ar = [];
             for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
@@ -81,11 +81,11 @@ async function dispatchOrder(orderId) {
     // -------------------------------------------------------------
     const [orderData] = await connection_1.db
         .select({
-        order: schema_1.orders,
-        restaurant: schema_1.restaurants,
-        branch: schema_1.branches,
-        settings: schema_1.restaurantSettings,
-    })
+            order: schema_1.orders,
+            restaurant: schema_1.restaurants,
+            branch: schema_1.branches,
+            settings: schema_1.restaurantSettings,
+        })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
         .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.orders.branchId, schema_1.branches.id))
@@ -119,10 +119,10 @@ async function dispatchOrder(orderId) {
         await connection_1.db
             .update(schema_1.orders)
             .set({
-            shippingStatus: "manual_required",
-            shippingFailReason: "no_company",
-            updatedAt: new Date(),
-        })
+                shippingStatus: "manual_required",
+                shippingFailReason: "no_company",
+                updatedAt: new Date(),
+            })
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
         (0, socketService_1.notifyShippingCompany)("superadmin", "order:manual_required", {
             orderId,
@@ -150,11 +150,11 @@ async function dispatchOrder(orderId) {
         await connection_1.db
             .update(schema_1.orders)
             .set({
-            shippingCompanyId: companyId,
-            shippingStatus: "manual_required",
-            shippingFailReason: "company_inactive",
-            updatedAt: new Date(),
-        })
+                shippingCompanyId: companyId,
+                shippingStatus: "manual_required",
+                shippingFailReason: "company_inactive",
+                updatedAt: new Date(),
+            })
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
         (0, socketService_1.notifyShippingCompany)(companyId, "order:manual_required", {
             orderId,
@@ -179,9 +179,9 @@ async function dispatchOrder(orderId) {
         // Fallback: جلب إحداثيات العنوان من جدول addresses إن كان addressId موجود
         if (order.addressId) {
             const [addr] = await connection_1.db
-                .select({ lat: (0, drizzle_orm_1.sql) `lat`, lng: (0, drizzle_orm_1.sql) `lng` })
-                .from((0, drizzle_orm_1.sql) `addresses`)
-                .where((0, drizzle_orm_1.eq)((0, drizzle_orm_1.sql) `id`, order.addressId))
+                .select({ lat: (0, drizzle_orm_1.sql)`lat`, lng: (0, drizzle_orm_1.sql)`lng` })
+                .from((0, drizzle_orm_1.sql)`addresses`)
+                .where((0, drizzle_orm_1.eq)((0, drizzle_orm_1.sql)`id`, order.addressId))
                 .limit(1);
             if (addr?.lat && addr?.lng) {
                 customerLat = parseFloat(addr.lat);
@@ -193,11 +193,11 @@ async function dispatchOrder(orderId) {
         await connection_1.db
             .update(schema_1.orders)
             .set({
-            shippingCompanyId: companyId,
-            shippingStatus: "manual_required",
-            shippingFailReason: "out_of_zone",
-            updatedAt: new Date(),
-        })
+                shippingCompanyId: companyId,
+                shippingStatus: "manual_required",
+                shippingFailReason: "out_of_zone",
+                updatedAt: new Date(),
+            })
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
         return {
             success: false,
@@ -237,11 +237,11 @@ async function dispatchOrder(orderId) {
         await connection_1.db
             .update(schema_1.orders)
             .set({
-            shippingCompanyId: companyId,
-            shippingStatus: "manual_required",
-            shippingFailReason: "out_of_zone",
-            updatedAt: new Date(),
-        })
+                shippingCompanyId: companyId,
+                shippingStatus: "manual_required",
+                shippingFailReason: "out_of_zone",
+                updatedAt: new Date(),
+            })
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
         (0, socketService_1.notifyShippingCompany)(companyId, "order:manual_required", {
             orderId,
@@ -265,11 +265,11 @@ async function dispatchOrder(orderId) {
         await connection_1.db
             .update(schema_1.orders)
             .set({
-            shippingCompanyId: companyId,
-            shippingStatus: "manual_required",
-            shippingFailReason: "max_attempts",
-            updatedAt: new Date(),
-        })
+                shippingCompanyId: companyId,
+                shippingStatus: "manual_required",
+                shippingFailReason: "max_attempts",
+                updatedAt: new Date(),
+            })
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
         (0, socketService_1.notifyShippingCompany)(companyId, "order:manual_required", {
             orderId,
@@ -330,7 +330,7 @@ async function dispatchOrder(orderId) {
     const couriers = await connection_1.db
         .select()
         .from(schema_1.deliveryMen)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.deliveryMen.shippingCompanyId, companyId), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.isActive, true), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.isDeleted, false), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.isOnline, true), (0, drizzle_orm_1.sql) `${schema_1.deliveryMen.activeOrdersCount} < ${company.maxActiveOrders}`));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.deliveryMen.shippingCompanyId, companyId), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.isActive, true), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.isDeleted, false), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.isOnline, true), (0, drizzle_orm_1.sql)`${schema_1.deliveryMen.activeOrdersCount} < ${company.maxActiveOrders}`));
     const now = new Date();
     const currentDayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday ...
     const currentTimeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:00`;
@@ -371,13 +371,13 @@ async function dispatchOrder(orderId) {
                 continue;
             }
         }
-        // فحص workType
-        if (c.workType === "restaurant_shift") {
+        // فحص deliveryType
+        if (c.deliveryType === "restaurant") {
             // يجب أن يكون خادماً لنفس المطعم وضمن وقت الشيفت الحالي
             const validShift = await connection_1.db
                 .select()
                 .from(schema_1.deliveryManShifts)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.deliveryManShifts.deliveryManId, c.id), (0, drizzle_orm_1.eq)(schema_1.deliveryManShifts.restaurantId, order.restaurantId), (0, drizzle_orm_1.eq)(schema_1.deliveryManShifts.dayOfWeek, currentDayOfWeek), (0, drizzle_orm_1.eq)(schema_1.deliveryManShifts.status, "active"), (0, drizzle_orm_1.sql) `${schema_1.deliveryManShifts.from} <= ${currentTimeStr}`, (0, drizzle_orm_1.sql) `${schema_1.deliveryManShifts.to} >= ${currentTimeStr}`))
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.deliveryManShifts.deliveryManId, c.id), (0, drizzle_orm_1.eq)(schema_1.deliveryManShifts.restaurantId, order.restaurantId), (0, drizzle_orm_1.eq)(schema_1.deliveryManShifts.dayOfWeek, currentDayOfWeek), (0, drizzle_orm_1.eq)(schema_1.deliveryManShifts.status, "active"), (0, drizzle_orm_1.sql)`${schema_1.deliveryManShifts.from} <= ${currentTimeStr}`, (0, drizzle_orm_1.sql)`${schema_1.deliveryManShifts.to} >= ${currentTimeStr}`))
                 .limit(1);
             if (validShift.length === 0) {
                 continue; // ليس في وقت شيفت هذا المطعم
@@ -410,12 +410,12 @@ async function dispatchOrder(orderId) {
         await connection_1.db
             .update(schema_1.orders)
             .set({
-            shippingCompanyId: companyId,
-            shippingStatus: "manual_required",
-            shippingFailReason: "no_courier",
-            dispatchAttempts: currentAttempts + 1,
-            updatedAt: new Date(),
-        })
+                shippingCompanyId: companyId,
+                shippingStatus: "manual_required",
+                shippingFailReason: "no_courier",
+                dispatchAttempts: currentAttempts + 1,
+                updatedAt: new Date(),
+            })
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
         (0, socketService_1.notifyShippingCompany)(companyId, "order:manual_required", {
             orderId,
@@ -449,20 +449,20 @@ async function dispatchOrder(orderId) {
         await tx
             .update(schema_1.orders)
             .set({
-            shippingCompanyId: companyId,
-            deliveryManId: chosen.courier.id,
-            shippingStatus: "assigned",
-            shippingFailReason: null,
-            dispatchAttempts: newAttemptNumber,
-            updatedAt: new Date(),
-        })
+                shippingCompanyId: companyId,
+                deliveryManId: chosen.courier.id,
+                shippingStatus: "assigned",
+                shippingFailReason: null,
+                dispatchAttempts: newAttemptNumber,
+                updatedAt: new Date(),
+            })
             .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
         // زيادة عداد الأوردرات النشطة للمندوب
         await tx
             .update(schema_1.deliveryMen)
             .set({
-            activeOrdersCount: (0, drizzle_orm_1.sql) `${schema_1.deliveryMen.activeOrdersCount} + 1`,
-        })
+                activeOrdersCount: (0, drizzle_orm_1.sql)`${schema_1.deliveryMen.activeOrdersCount} + 1`,
+            })
             .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, chosen.courier.id));
         // تسجيل في سجل الـ assignments / offers
         await tx.insert(schema_1.dispatchAssignments).values({
@@ -529,25 +529,25 @@ async function rejectOrderByCourier(orderId, courierId, rejectReason) {
     await connection_1.db
         .update(schema_1.dispatchAssignments)
         .set({
-        status: "rejected",
-        rejectReason: rejectReason.trim(),
-        respondedAt: new Date(),
-    })
+            status: "rejected",
+            rejectReason: rejectReason.trim(),
+            respondedAt: new Date(),
+        })
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.dispatchAssignments.orderId, orderId), (0, drizzle_orm_1.eq)(schema_1.dispatchAssignments.deliveryManId, courierId), (0, drizzle_orm_1.eq)(schema_1.dispatchAssignments.status, "active")));
     // 2. إنقاص عداد الأوردرات النشطة للمندوب
     await connection_1.db
         .update(schema_1.deliveryMen)
         .set({
-        activeOrdersCount: (0, drizzle_orm_1.sql) `GREATEST(0, ${schema_1.deliveryMen.activeOrdersCount} - 1)`,
-    })
+            activeOrdersCount: (0, drizzle_orm_1.sql)`GREATEST(0, ${schema_1.deliveryMen.activeOrdersCount} - 1)`,
+        })
         .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, courierId));
     // 3. تصفير مندوب الأوردر مؤقتاً تمهيداً للإسناد التالي
     await connection_1.db
         .update(schema_1.orders)
         .set({
-        deliveryManId: null,
-        shippingStatus: "pending_dispatch",
-    })
+            deliveryManId: null,
+            shippingStatus: "pending_dispatch",
+        })
         .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
     // 4. استدعاء خوارزمية التوزيع مجدداً للمندوب التالي
     return await dispatchOrder(orderId);

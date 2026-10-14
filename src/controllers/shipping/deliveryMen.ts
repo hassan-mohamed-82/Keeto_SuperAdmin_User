@@ -70,7 +70,7 @@ export const createDeliveryMan = catchAsync(async (req: Request, res: Response) 
         email,
         password,
         image,
-        workType = "outsource",
+        deliveryType = "outsource",
         allZones = true,
         zoneIds,
         restaurantId,
@@ -107,7 +107,6 @@ export const createDeliveryMan = catchAsync(async (req: Request, res: Response) 
             password: hashedPassword,
             image,
             deliveryType: "outsource",
-            workType,
             allZones: Boolean(allZones),
             shiftStatus: "inactive",
             isOnline: false,
@@ -153,7 +152,7 @@ export const createDeliveryMan = catchAsync(async (req: Request, res: Response) 
 // =========================================================================
 export const assignExistingDeliveryMan = catchAsync(async (req: Request, res: Response) => {
     const companyId = req.user?.shippingCompanyId;
-    const { deliveryManId, workType = "outsource", allZones = true, zoneIds } = req.body;
+    const { deliveryManId, deliveryType = "outsource", allZones = true, zoneIds } = req.body;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
@@ -190,7 +189,6 @@ export const assignExistingDeliveryMan = catchAsync(async (req: Request, res: Re
             .set({
                 shippingCompanyId: companyId,
                 deliveryType: "outsource",
-                workType,
                 allZones: Boolean(allZones),
             })
             .where(eq(deliveryMen.id, deliveryManId));
@@ -219,7 +217,7 @@ export const assignExistingDeliveryMan = catchAsync(async (req: Request, res: Re
 // =========================================================================
 export const getDeliveryMen = catchAsync(async (req: Request, res: Response) => {
     const companyId = req.user?.shippingCompanyId;
-    const { shiftStatus, isOnline, isAvailable, search, workType } = req.query;
+    const { shiftStatus, isOnline, isAvailable, search, deliveryType } = req.query;
 
     if (!companyId) {
         throw new UnauthorizedError("Unauthorized access");
@@ -234,8 +232,8 @@ export const getDeliveryMen = catchAsync(async (req: Request, res: Response) => 
         conditions.push(eq(deliveryMen.shiftStatus, shiftStatus as "active" | "inactive"));
     }
 
-    if (workType) {
-        conditions.push(eq(deliveryMen.workType, workType as "restaurant_shift" | "outsource"));
+    if (deliveryType) {
+        conditions.push(eq(deliveryMen.deliveryType, deliveryType as "restaurant" | "outsource"));
     }
 
     if (isOnline !== undefined) {
@@ -259,7 +257,7 @@ export const getDeliveryMen = catchAsync(async (req: Request, res: Response) => 
             phone: deliveryMen.phone,
             email: deliveryMen.email,
             image: deliveryMen.image,
-            workType: deliveryMen.workType,
+            deliveryType: deliveryMen.deliveryType,
             allZones: deliveryMen.allZones,
             activeOrdersCount: deliveryMen.activeOrdersCount,
             shiftStatus: deliveryMen.shiftStatus,
@@ -378,7 +376,7 @@ export const updateDeliveryMan = catchAsync(async (req: Request, res: Response) 
         email,
         password,
         image,
-        workType,
+        deliveryType,
         allZones,
         shiftStatus,
         isActive,
@@ -426,7 +424,7 @@ export const updateDeliveryMan = catchAsync(async (req: Request, res: Response) 
     if (phone !== undefined) updateData.phone = phone;
     if (email !== undefined) updateData.email = email;
     if (image !== undefined) updateData.image = image;
-    if (workType !== undefined) updateData.workType = workType;
+    if (deliveryType !== undefined) updateData.deliveryType = deliveryType;
     if (allZones !== undefined) updateData.allZones = allZones;
     if (shiftStatus !== undefined) updateData.shiftStatus = shiftStatus;
     if (isActive !== undefined) updateData.isActive = isActive;
@@ -573,7 +571,7 @@ export const getCourierShifts = catchAsync(async (req: Request, res: Response) =
     }
 
     const [dm] = await db
-        .select({ id: deliveryMen.id, workType: deliveryMen.workType })
+        .select({ id: deliveryMen.id, deliveryType: deliveryMen.deliveryType })
         .from(deliveryMen)
         .where(
             and(
@@ -618,7 +616,7 @@ export const updateCourierShifts = catchAsync(async (req: Request, res: Response
     }
 
     const [dm] = await db
-        .select({ id: deliveryMen.id, workType: deliveryMen.workType })
+        .select({ id: deliveryMen.id, deliveryType: deliveryMen.deliveryType })
         .from(deliveryMen)
         .where(
             and(

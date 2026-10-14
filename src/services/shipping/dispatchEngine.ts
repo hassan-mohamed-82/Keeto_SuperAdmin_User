@@ -689,8 +689,8 @@ async function executeDispatch(orderId: string): Promise<DispatchResult> {
             }
         }
 
-        // workType check: outsource OR (restaurant_shift for this restaurant AND inside shift window)
-        if (c.workType === "restaurant_shift") {
+        // deliveryType check: outsource OR (restaurant for this restaurant AND inside shift window)
+        if (c.deliveryType === "restaurant") {
             const shifts = courierShiftsMap.get(c.id) || [];
             const activeShift = shifts.find(
                 (s) =>

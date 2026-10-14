@@ -92,7 +92,7 @@ export const requireDeliveryMan = async (req: Request, res: Response, next: Next
             isActive: deliveryMen.isActive,
             isDeleted: deliveryMen.isDeleted,
             shippingCompanyId: deliveryMen.shippingCompanyId,
-            workType: deliveryMen.workType,
+            deliveryType: deliveryMen.deliveryType,
         })
         .from(deliveryMen)
         .where(eq(deliveryMen.id, courierId))
@@ -104,7 +104,7 @@ export const requireDeliveryMan = async (req: Request, res: Response, next: Next
 
     req.user!.deliveryManId = courier.id;
     req.user!.shippingCompanyId = courier.shippingCompanyId;
-    req.user!.workType = courier.workType;
+    req.user!.deliveryType = courier.deliveryType;
 
     next();
 };

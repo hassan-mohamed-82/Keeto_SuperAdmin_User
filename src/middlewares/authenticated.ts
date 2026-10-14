@@ -38,7 +38,7 @@ export const authenticated = (
         shippingCompanyId: decoded.shippingCompanyId,
         deliveryManId: decoded.deliveryManId,
         companyRole: decoded.companyRole,
-        workType: decoded.workType,
+        deliveryType: decoded.deliveryType,
         tokenVersion: decoded.tokenVersion,
         isGuest: Boolean(decoded.isGuest),
     };

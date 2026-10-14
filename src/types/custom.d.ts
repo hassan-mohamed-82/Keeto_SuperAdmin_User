@@ -23,7 +23,7 @@ export interface AppUser {
 
     // Phase 2: Shipping company & courier fields
     companyRole?: "admin" | "dispatcher" | "viewer" | null;
-    workType?: "restaurant_shift" | "outsource" | null;
+    deliveryType?: "restaurant" | "outsource" | null;
     tokenVersion?: number;
 }
 
@@ -43,7 +43,7 @@ export interface TokenPayload {
     deliveryManId?: string;
     isGuest?: boolean;
     companyRole?: "admin" | "dispatcher" | "viewer";
-    workType?: "restaurant_shift" | "outsource";
+    deliveryType?: "restaurant" | "outsource";
     tokenVersion?: number;
 }
 

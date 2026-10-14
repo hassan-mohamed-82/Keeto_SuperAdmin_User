@@ -6,7 +6,7 @@ export const createDeliveryManSchema = z.object({
     email: z.string().email("Invalid email format").max(255).optional(),
     password: z.string().min(6, "Password must be at least 6 characters").max(255).optional(),
     image: z.string().max(500).optional(),
-    workType: z.enum(["restaurant_shift", "outsource"]).default("outsource"),
+    deliveryType: z.enum(["restaurant", "outsource"]).default("outsource"),
     allZones: z.boolean().default(true),
     zoneIds: z.array(z.string().uuid("Invalid Zone ID")).optional(),
     restaurantId: z.string().uuid("Invalid Restaurant ID").nullable().optional(),
@@ -23,7 +23,7 @@ export const createDeliveryManSchema = z.object({
 
 export const assignExistingDeliveryManSchema = z.object({
     deliveryManId: z.string().uuid("Invalid Delivery Man ID"),
-    workType: z.enum(["restaurant_shift", "outsource"]).default("outsource"),
+    deliveryType: z.enum(["restaurant", "outsource"]).default("outsource"),
     allZones: z.boolean().default(true),
     zoneIds: z.array(z.string().uuid("Invalid Zone ID")).optional(),
 }).refine((data) => {
@@ -42,7 +42,7 @@ export const updateDeliveryManSchema = z.object({
     email: z.string().email("Invalid email format").max(255).optional(),
     password: z.string().min(6).max(255).optional(),
     image: z.string().max(500).optional(),
-    workType: z.enum(["restaurant_shift", "outsource"]).optional(),
+    deliveryType: z.enum(["restaurant", "outsource"]).optional(),
     allZones: z.boolean().optional(),
     shiftStatus: z.enum(["active", "inactive"]).optional(),
     isActive: z.boolean().optional(),

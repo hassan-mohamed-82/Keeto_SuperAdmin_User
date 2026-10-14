@@ -124,7 +124,7 @@ export const getCourierPerformanceReport = catchAsync(async (req: Request, res: 
             id: deliveryMen.id,
             name: deliveryMen.name,
             phone: deliveryMen.phone,
-            workType: deliveryMen.workType,
+            deliveryType: deliveryMen.deliveryType,
             allZones: deliveryMen.allZones,
             isOnline: deliveryMen.isOnline,
             activeOrdersCount: deliveryMen.activeOrdersCount,

@@ -190,17 +190,13 @@ export const orders = mysqlTable("orders", {
     paymentIssueType: varchar("payment_issue_type", { length: 30 }),
 
     // Phase 1: Shipping timestamps for performance/reports
-    // shippingAssignedAt: timestamp("shipping_assigned_at"),
-    // pickedUpAt: timestamp("picked_up_at"),
-    // deliveredAt: timestamp("delivered_at"),
+    shippingAssignedAt: timestamp("shipping_assigned_at"),
+    pickedUpAt: timestamp("picked_up_at"),
+    deliveredAt: timestamp("delivered_at"),
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),
-}
-// , (table) => [
-//     index("idx_orders_shipping_status").on(table.shippingCompanyId, table.shippingStatus),
-// ]
-);
+});
 
 // ==========================================
 // 2. جدول أصناف الأوردر (Order Items Table)

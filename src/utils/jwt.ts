@@ -143,8 +143,7 @@ export const generateDeliveryManToken = (data: {
     restaurantId?: string | null;
     branchId?: string | null;
     shippingCompanyId?: string | null;
-    deliveryType?: string;
-    workType?: "restaurant_shift" | "outsource";
+    deliveryType?: "restaurant" | "outsource";
 }): string => {
     return jwt.sign(
         {
@@ -158,7 +157,7 @@ export const generateDeliveryManToken = (data: {
             branchId: data.branchId || null,
             shippingCompanyId: data.shippingCompanyId || null,
             deliveryManId: data.id,
-            workType: data.workType || "outsource",
+            deliveryType: data.deliveryType || "outsource",
         },
         JWT_SECRET,
         { expiresIn: "30d" }

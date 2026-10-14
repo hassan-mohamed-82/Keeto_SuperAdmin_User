@@ -27,9 +27,6 @@ export const deliveryMen = mysqlTable("delivery_men", {
     // نوع التوصيل: لمطعم محدد أم لشركة شحن خارجية (outsource)
     deliveryType: mysqlEnum("delivery_type", ["restaurant", "outsource"]).default("restaurant").notNull(),
 
-    // طبيعة العمل: شيفت لمطعم محدد في أوقات معينة أم outsource عام لشركة الشحن
-    workType: mysqlEnum("work_type", ["restaurant_shift", "outsource"]).default("outsource").notNull(),
-
     // D5: هل يخدم كل مناطق الشركة أم مناطق محددة فقط في delivery_man_zones
     allZones: boolean("all_zones").default(true).notNull(),
 

@@ -5,7 +5,7 @@ The Shipping Company system manages third-party logistics companies that provide
 - **Restaurant assignment**: `restaurant_settings.shipping_company_id` is the single source of truth.
   - Requirement: Allowed only when `home_delivery = true` AND `self_delivery = false`.
   - `shipping_company_restaurants` acts as an updated mirror table.
-- **Courier type**: `work_type` (`restaurant_shift` | `outsource`). All couriers assigned to shipping companies have `delivery_type = 'outsource'`.
+- **Courier type**: `work_type` (`restaurant` | `outsource`). All couriers assigned to shipping companies have `delivery_type = 'outsource'`.
 - **Courier zones**: Controlled by `all_zones` (boolean). If `true`, the courier services all company zones. If `false`, zones are defined in `delivery_man_zones`.
 - **Authentication**: Users log in via `shipping_company_users` with roles `admin`, `dispatcher`, or `viewer`. Couriers log in via `delivery_men` with phone & password.
 ---
@@ -14,7 +14,7 @@ The Shipping Company system manages third-party logistics companies that provide
 - `GET /` — List shipping companies with counts (zones, couriers, restaurants)
 - `GET /eligible-restaurants` — List restaurants eligible for linking (`homeDelivery=true` and `selfDelivery=false`) with already-linked company indicator
 - `POST /` — Create company (validates dispatch settings, links restaurants transactionally, creates first company admin in `shipping_company_users`)
-- `GET /:id` — Detailed company info with `allZones`, `workType`, zones, and restaurants
+- `GET /:id` — Detailed company info with `allZones`, `deliveryType`, zones, and restaurants
 - `PUT /:id` — Update company data, dispatch settings, and restaurants
 - `DELETE /:id` — Soft-delete company (`status='inactive'`, deactivates company users, unlinks restaurants)
 - `POST /:id/restaurants` — Assign restaurants transactionally (verifies not already linked to another company)
@@ -54,7 +54,7 @@ When a delivery order is moved to `accepted`:
    - Has not rejected this order previously.
    - Alive key is active in Redis.
    - Zone match: `allZones == true` OR courier assigned to matched zone.
-   - Work type match: `outsource` OR (`restaurant_shift` for this restaurant AND current time in shift window considering overnight shifts).
+   - Work type match: `outsource` OR (`restaurant` for this restaurant AND current time in shift window considering overnight shifts).
 7. **Sorting (Decision D1)**:
    - Primary: Distance (`distanceKm ASC`).
    - Tie-break: `activeOrdersCount ASC`.

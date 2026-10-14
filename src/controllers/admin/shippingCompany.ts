@@ -370,7 +370,7 @@ export const getShippingCompanyById = catchAsync(async (req: Request, res: Respo
         .from(shippingZones)
         .where(eq(shippingZones.shippingCompanyId, id));
 
-    // Couriers with workType and allZones (Phase 3 requirements)
+    // Couriers with deliveryType and allZones (Phase 3 requirements)
     const couriers = await db
         .select({
             id: deliveryMen.id,
@@ -378,7 +378,7 @@ export const getShippingCompanyById = catchAsync(async (req: Request, res: Respo
             phone: deliveryMen.phone,
             email: deliveryMen.email,
             image: deliveryMen.image,
-            workType: deliveryMen.workType,
+            deliveryType: deliveryMen.deliveryType,
             allZones: deliveryMen.allZones,
             shiftStatus: deliveryMen.shiftStatus,
             isOnline: deliveryMen.isOnline,

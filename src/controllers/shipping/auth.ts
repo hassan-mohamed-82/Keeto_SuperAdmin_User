@@ -126,7 +126,7 @@ export const courierLogin = catchAsync(async (req: Request, res: Response) => {
         shippingCompanyId: dm.shippingCompanyId,
         restaurantId: dm.restaurantId,
         branchId: dm.branchId,
-        workType: dm.workType,
+        deliveryType: dm.deliveryType,
     });
 
     const { password: _, ...dmData } = dm;
@@ -233,7 +233,7 @@ export const getCourierProfile = catchAsync(async (req: Request, res: Response) 
             email: deliveryMen.email,
             image: deliveryMen.image,
             deliveryType: deliveryMen.deliveryType,
-            workType: deliveryMen.workType,
+            deliveryType: deliveryMen.deliveryType,
             allZones: deliveryMen.allZones,
             shiftStatus: deliveryMen.shiftStatus,
             isOnline: deliveryMen.isOnline,

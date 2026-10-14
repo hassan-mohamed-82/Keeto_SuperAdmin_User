@@ -16452,7 +16452,7 @@
             }
           },
           {
-            "name": "workType",
+            "name": "deliveryType",
             "in": "query",
             "schema": {
               "type": "string"
@@ -16514,7 +16514,7 @@
                   "image": {
                     "example": "any"
                   },
-                  "workType": {
+                  "deliveryType": {
                     "example": "any"
                   },
                   "allZones": {
@@ -16622,7 +16622,7 @@
                   "image": {
                     "example": "any"
                   },
-                  "workType": {
+                  "deliveryType": {
                     "example": "any"
                   },
                   "allZones": {
@@ -16881,7 +16881,7 @@
                   "deliveryManId": {
                     "example": "any"
                   },
-                  "workType": {
+                  "deliveryType": {
                     "example": "any"
                   },
                   "allZones": {

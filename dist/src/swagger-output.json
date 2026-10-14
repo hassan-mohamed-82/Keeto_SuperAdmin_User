@@ -16277,10 +16277,10 @@
                                             "outsource"
                                         ]
                                     },
-                                    "workType": {
+                                    "deliveryType": {
                                         "type": "string",
                                         "enum": [
-                                            "restaurant_shift",
+                                            "restaurant",
                                             "outsource"
                                         ]
                                     },
@@ -16417,10 +16417,10 @@
                                             "outsource"
                                         ]
                                     },
-                                    "workType": {
+                                    "deliveryType": {
                                         "type": "string",
                                         "enum": [
-                                            "restaurant_shift",
+                                            "restaurant",
                                             "outsource"
                                         ]
                                     },
@@ -16573,10 +16573,10 @@
                                             "outsource"
                                         ]
                                     },
-                                    "workType": {
+                                    "deliveryType": {
                                         "type": "string",
                                         "enum": [
-                                            "restaurant_shift",
+                                            "restaurant",
                                             "outsource"
                                         ]
                                     },
@@ -16725,10 +16725,10 @@
                                             "outsource"
                                         ]
                                     },
-                                    "workType": {
+                                    "deliveryType": {
                                         "type": "string",
                                         "enum": [
-                                            "restaurant_shift",
+                                            "restaurant",
                                             "outsource"
                                         ]
                                     },
@@ -16846,10 +16846,10 @@
                                             "outsource"
                                         ]
                                     },
-                                    "workType": {
+                                    "deliveryType": {
                                         "type": "string",
                                         "enum": [
-                                            "restaurant_shift",
+                                            "restaurant",
                                             "outsource"
                                         ]
                                     },
