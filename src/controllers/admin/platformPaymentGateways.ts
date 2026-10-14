@@ -1,7 +1,3 @@
-// src/controllers/admin/platformPaymentGateways.ts
-// Super Admin CRUD for platform-level payment gateways.
-// Keys are stored encrypted in `platform_payment_gateways` table (never in .env).
-
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { platformPaymentGateways } from "../../models/schema";
@@ -9,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
-import { encryptSecret, decryptSecret } from "../../utils/encryption";
+import { encryptSecret } from "../../utils/encryption";
 import { SuccessResponse } from "../../utils/response";
 
 // ─────────────────────────────────────────────────────────
@@ -116,16 +112,24 @@ export const createPlatformGateway = async (req: Request, res: Response): Promis
 
     if (!credentials) throw new BadRequest("credentials are required");
 
-    const rawCreds = typeof credentials === "string" ? JSON.parse(credentials) : credentials;
+    let rawCreds = credentials;
+    if (typeof credentials === "string") {
+        try {
+            rawCreds = JSON.parse(credentials);
+        } catch {
+            throw new BadRequest("Invalid JSON format in credentials");
+        }
+    }
+
     const encryptedCreds = encryptCredentials(rawCreds);
 
     // If this gateway is being set as active, deactivate all others first
     if (isActive) {
         await db
-            .update(platformPaymentGateways)
-            .set({ isActive: false });
+        .update(platformPaymentGateways)
+        .set({ isActive: false });
     }
-
+    
     const newId = uuidv4();
     await db.insert(platformPaymentGateways).values({
         id: newId,
@@ -143,8 +147,7 @@ export const createPlatformGateway = async (req: Request, res: Response): Promis
         .where(eq(platformPaymentGateways.id, newId))
         .limit(1);
 
-    res.status(201).json({
-        success: true,
+    SuccessResponse(res, {
         message: "Platform gateway created successfully",
         data: sanitize(created),
     });
@@ -173,7 +176,11 @@ export const updatePlatformGateway = async (req: Request, res: Response): Promis
     if (logoUrl !== undefined) updatePayload.logoUrl = logoUrl || null;
 
     if (credentials !== undefined) {
-        let incomingCreds = typeof credentials === "string" ? JSON.parse(credentials) : credentials;
+        let incomingCreds = credentials;
+        if (typeof credentials === "string") {
+            try { incomingCreds = JSON.parse(credentials); } catch { incomingCreds = {}; }
+        }
+
         let existingCreds: any = existing.credentials;
         if (typeof existingCreds === "string") {
             try { existingCreds = JSON.parse(existingCreds); } catch { existingCreds = {}; }
@@ -185,8 +192,8 @@ export const updatePlatformGateway = async (req: Request, res: Response): Promis
         if (isActive === true) {
             // Deactivate all other gateways before activating this one
             await db
-                .update(platformPaymentGateways)
-                .set({ isActive: false });
+            .update(platformPaymentGateways)
+            .set({ isActive: false });
         }
         updatePayload.isActive = isActive;
     }
