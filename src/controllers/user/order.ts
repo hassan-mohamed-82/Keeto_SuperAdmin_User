@@ -1316,6 +1316,16 @@ export const checkout = async (req: Request | any, res: Response) => {
             orderSource: storedOrderSource,
             paymentMethod,
             paymentGatewayType: finalPaymentGatewayType,
+            paymentGateway: paymentSessionData?.gateway
+                ? (paymentSessionData.gateway.toLowerCase() as "kashier" | "paymob" | "geidea")
+                : null,
+            paymentOrderId: (
+                paymentSessionData?.paymentOrderId ||
+                paymentSessionData?.paymobOrderId ||
+                paymentSessionData?.geideaOrderId ||
+                paymentSessionData?.sessionId ||
+                null
+            ),
             paymentStatus: isVisaPayment ? "pending_payment" : "paid",
             orderType: resolvedOrderType,
             subtotal: subtotal.toFixed(2),
