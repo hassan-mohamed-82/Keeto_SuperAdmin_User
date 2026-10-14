@@ -72,4 +72,6 @@ export * from "./schema/admin/restaurantOperations";
 export * from "./schema/admin/platformPaymentSettings";
 export * from "./schema/admin/gatewaySwitchLog";
 export * from "./schema/admin/firstOrderDiscount";
+// Platform-level multi-gateway support (credentials stored in DB, managed by Super Admin)
+export * from "./schema/admin/platformPaymentGateways";
 

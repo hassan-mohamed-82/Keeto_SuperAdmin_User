@@ -41,6 +41,7 @@ import restaurantPaymentCredentialsRouter from "./restaurantPaymentCredentials";
 import paymentTransactionsRouter from "./paymentTransactions";
 import restaurantOperationsRouter from "./restaurantOperations";
 import shippingCompaniesRouter from "./shippingCompany";
+import platformPaymentGatewaysRouter from "./platformPaymentGateways";
 import { authenticated } from "../../middlewares/authenticated";
 import { authorizeRoles } from "../../middlewares/authorized";
 const router = Router();
@@ -88,4 +89,5 @@ router.use("/restaurant-payment-credentials", restaurantPaymentCredentialsRouter
 router.use("/restaurant-operations", restaurantOperationsRouter);
 router.use("/payment-transactions", paymentTransactionsRouter);
 router.use("/shipping-companies", shippingCompaniesRouter);
+router.use("/platform-gateways", platformPaymentGatewaysRouter);
 export default router;

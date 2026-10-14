@@ -6,6 +6,7 @@ import { SuccessResponse } from "../../utils/response";
 import { UnauthorizedError, NotFound, BadRequest } from "../../Errors";
 import { catchAsync } from "../../utils/catchAsync";
 import * as turf from "@turf/turf";
+import { v4 as uuidv4 } from "uuid";
 
 // Helper: normalize and close coordinates ring
 function normalizePolygonCoordinates(rawCoords: Array<{ lat: number; lng: number }>): Array<{ lat: number; lng: number }> {
@@ -52,7 +53,9 @@ export const createZone = catchAsync(async (req: Request, res: Response) => {
 
     const normalizedCoordinates = normalizePolygonCoordinates(coordinates);
 
-    const [insertResult] = await db.insert(shippingZones).values({
+    const newId = uuidv4();
+    await db.insert(shippingZones).values({
+        id: newId,
         shippingCompanyId: companyId,
         name,
         nameAr,
@@ -63,21 +66,19 @@ export const createZone = catchAsync(async (req: Request, res: Response) => {
         status: status || "active",
     });
 
-    const [newZone] = await db
-        .select()
-        .from(shippingZones)
-        .where(
-            and(
-                eq(shippingZones.shippingCompanyId, companyId),
-                eq(shippingZones.name, name)
-            )
-        )
-        .orderBy(shippingZones.createdAt)
-        .limit(1);
-
     return SuccessResponse(res, {
         message: "Shipping zone created successfully",
-        data: newZone,
+        data: {
+            id: newId,
+            shippingCompanyId: companyId,
+            name,
+            nameAr,
+            coordinates: normalizedCoordinates,
+            coverageAreaRadiusKm: coverageAreaRadiusKm ? String(coverageAreaRadiusKm) : undefined,
+            deliveryFee: deliveryFee ? String(deliveryFee) : "0.00",
+            minOrderAmount: minOrderAmount ? String(minOrderAmount) : "0.00",
+            status: status || "active",
+        }
     }, 201);
 });
 

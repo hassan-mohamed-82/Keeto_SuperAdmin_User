@@ -7,6 +7,7 @@ import { orders, users, restaurantPaymentCredentials, restaurantSettings, paymen
 import { eq, or, like, and } from "drizzle-orm";
 import { safeDecrypt } from "../../utils/Safedecrypt";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
+import { getActivePlatformGateway } from "../../utils/getActivePlatformGateway";
 import { createOrderPaymentSession } from "../../services/payments/paymentSession.service";
 import { confirmOrderPayment, recordFailedPayment } from "../../helpers/orderPaymentConfirmation";
 
@@ -143,7 +144,14 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
 
             hmacSecret = safeDecrypt(rawHmac);
         } else {
-            hmacSecret = process.env.PLATFORM_PAYMOB_HMAC || "";
+            // SYSTEM gateway: look up platform DB credentials first, fall back to .env
+            const platformGateway = await getActivePlatformGateway();
+            if (platformGateway?.provider === "PAYMOB" && platformGateway.credentials?.hmac) {
+                hmacSecret = platformGateway.credentials.hmac; // already decrypted by utility
+            } else {
+                // Legacy fallback for backwards-compatibility
+                hmacSecret = process.env.PLATFORM_PAYMOB_HMAC || "";
+            }
         }
 
         // 3. 🛡️ Strict HMAC Verification: MANDATORY (runs before idempotency check)
@@ -159,7 +167,7 @@ export const handlePaymobWebhook = async (req: Request, res: Response) => {
 
         let isValid = PaymobService.verifyHmac(transactionObj, hmacSecret, receivedHmac);
         if (!isValid && process.env.PLATFORM_PAYMOB_HMAC && hmacSecret !== process.env.PLATFORM_PAYMOB_HMAC) {
-            console.warn("[Paymob Webhook]: Custom HMAC verification failed. Attempting platform HMAC verification fallback.");
+            console.warn("[Paymob Webhook]: HMAC verification failed. Attempting .env HMAC fallback.");
             isValid = PaymobService.verifyHmac(transactionObj, process.env.PLATFORM_PAYMOB_HMAC, receivedHmac);
         }
 

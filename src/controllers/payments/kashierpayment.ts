@@ -8,6 +8,7 @@ import { orders, users, restaurantSettings, restaurants } from "../../models/sch
 import { eq, or } from "drizzle-orm";
 import { decryptSecret } from "../../utils/encryption";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
+import { getActivePlatformGateway } from "../../utils/getActivePlatformGateway";
 import { confirmOrderPayment, recordFailedPayment } from "../../helpers/orderPaymentConfirmation";
 
 
@@ -179,13 +180,19 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
                         customApiKey = decryptSecret(rawCreds.apiKey);
                     }
                 }
+            } else {
+                // SYSTEM gateway: look up platform DB credentials (replaces .env lookup)
+                const platformGateway = await getActivePlatformGateway();
+                if (platformGateway?.provider === "KASHIER" && platformGateway.credentials?.apiKey) {
+                    customApiKey = platformGateway.credentials.apiKey;
+                }
             }
         }
     }
 
     let isValid = verifyKashierWebhookSignature(webhookData, headerSignature, customApiKey);
     if (!isValid && customApiKey) {
-        // Fallback to platform key in case transaction was processed through platform
+        // Fallback: try without any key (uses .env KASHIER_API_KEY internally)
         isValid = verifyKashierWebhookSignature(webhookData, headerSignature);
     }
 

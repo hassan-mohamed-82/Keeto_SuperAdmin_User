@@ -3,6 +3,7 @@ import { orders, restaurantSettings } from "../../models/schema";
 import { eq } from "drizzle-orm";
 import { BadRequest } from "../../Errors";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
+import { getActivePlatformGateway } from "../../utils/getActivePlatformGateway";
 import { decryptSecret } from "../../utils/encryption";
 import { safeDecrypt } from "../../utils/Safedecrypt";
 import { KashierService } from "./kashier/kashier.service";
@@ -221,34 +222,180 @@ export async function createOrderPaymentSession(
             };
         }
     } else {
-        // SYSTEM gateway -> Kashier (platform's own account)
-        if (preferredGateway && preferredGateway !== "KASHIER") {
+        // ─── SYSTEM gateway: use the platform gateway configured by Super Admin in DB ───
+        // Falls back to .env-based Kashier if no platform gateway has been set up yet
+        // (backwards-compatibility during migration).
+
+        if (preferredGateway && preferredGateway !== "KASHIER" && preferredGateway !== "PAYMOB" && preferredGateway !== "GEIDEA") {
+            throw new BadRequest("Invalid preferred gateway for SYSTEM payment flow.");
+        }
+
+        const platformGateway = await getActivePlatformGateway();
+
+        if (!platformGateway) {
+            // ── Legacy fallback: no DB gateway configured yet → use .env Kashier ──
+            console.warn("[PaymentSession] No active platform gateway in DB. Falling back to .env Kashier config.");
+
+            const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
+            const kashierCallbackUrl = restaurantSlug
+                ? `${backendBaseUrl}/api/payments/kashier/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
+                : `${backendBaseUrl}/api/payments/kashier/callback`;
+
+            const kashierSession = await KashierService.createPaymentSession({
+                orderId,
+                amount: totalAmount,
+                currency: "EGP",
+                customerEmail: userInfo?.email || undefined,
+                merchantRedirect: kashierCallbackUrl,
+            });
+
+            return {
+                gateway: "KASHIER",
+                gatewayType: "SYSTEM",
+                type: "redirect",
+                sessionId: kashierSession.sessionId,
+                sessionUrl: kashierSession.sessionUrl,
+                status: kashierSession.status,
+                expireAt: kashierSession.expireAt,
+            };
+        }
+
+        // ── Use the active platform gateway from DB ──────────────────────────────
+        if (preferredGateway && platformGateway.provider !== preferredGateway) {
             throw new BadRequest(
-                "This restaurant uses the system platform payment gateway (Kashier). Paymob and Geidea are not enabled for this restaurant."
+                `The system platform gateway is configured as ${platformGateway.provider}, not ${preferredGateway}. Contact Super Admin to change the active platform gateway.`
             );
         }
 
         const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");
-        const kashierCallbackUrl = restaurantSlug
-            ? `${backendBaseUrl}/api/payments/kashier/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
-            : `${backendBaseUrl}/api/payments/kashier/callback`;
 
-        const kashierSession = await KashierService.createPaymentSession({
-            orderId,
-            amount: totalAmount,
-            currency: "EGP",
-            customerEmail: userInfo?.email || undefined,
-            merchantRedirect: kashierCallbackUrl,
-        });
+        if (platformGateway.provider === "KASHIER") {
+            const creds = platformGateway.credentials;
+            const kashierCallbackUrl = restaurantSlug
+                ? `${backendBaseUrl}/api/payments/kashier/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
+                : `${backendBaseUrl}/api/payments/kashier/callback`;
 
-        return {
-            gateway: "KASHIER",
-            gatewayType: "SYSTEM",
-            type: "redirect",
-            sessionId: kashierSession.sessionId,
-            sessionUrl: kashierSession.sessionUrl,
-            status: kashierSession.status,
-            expireAt: kashierSession.expireAt,
-        };
+            const kashierSession = await KashierService.createPaymentSession({
+                orderId,
+                amount: totalAmount,
+                currency: "EGP",
+                customerEmail: userInfo?.email || undefined,
+                merchantRedirect: kashierCallbackUrl,
+                credentials: {
+                    mid: creds.mid,
+                    apiKey: creds.apiKey,
+                    secretKey: creds.secretKey,
+                    baseUrl: creds.baseUrl,
+                },
+            });
+
+            return {
+                gateway: "KASHIER",
+                gatewayType: "SYSTEM",
+                type: "redirect",
+                sessionId: kashierSession.sessionId,
+                sessionUrl: kashierSession.sessionUrl,
+                status: kashierSession.status,
+                expireAt: kashierSession.expireAt,
+            };
+        } else if (platformGateway.provider === "PAYMOB") {
+            const creds = platformGateway.credentials;
+            const nameParts = (userInfo?.name || "Customer User").trim().split(" ");
+            const firstName = nameParts[0] || "Customer";
+            const lastName = nameParts.slice(1).join(" ") || "User";
+
+            const paymobCallbackUrl = restaurantSlug
+                ? `${backendBaseUrl}/api/payments/paymob/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
+                : `${backendBaseUrl}/api/payments/paymob/callback`;
+
+            const paymobSession = await PaymobService.createPaymentSession({
+                credentials: {
+                    secretKey: creds.secretKey || "",
+                    publicKey: creds.publicKey || "",
+                    integrationId: creds.integrationId || "",
+                    hmac: creds.hmac || "",
+                    callbackUrl: creds.callbackUrl,
+                    apiKey: creds.apiKey,
+                    iframeId: creds.iframeId,
+                },
+                orderId,
+                orderNumber: orderNumber || orderId,
+                amountCents: Math.round(totalAmount * 100),
+                currency: "EGP",
+                customer: {
+                    firstName,
+                    lastName,
+                    email: userInfo?.email || "customer@example.com",
+                    phone: userInfo?.phone || "+201000000000",
+                },
+                notificationUrl: creds.callbackUrl || `${backendBaseUrl}/api/payments/paymob/webhook`,
+                redirectionUrl: paymobCallbackUrl,
+            });
+
+            await db
+                .update(orders)
+                .set({
+                    paymentOrderId: String(paymobSession.paymobOrderId || paymobSession.sessionId),
+                    paymentGateway: "paymob",
+                    paymentStatus: "pending_payment",
+                })
+                .where(eq(orders.id, orderId));
+
+            return {
+                gateway: "PAYMOB",
+                gatewayType: "SYSTEM",
+                type: "redirect",
+                sessionId: paymobSession.sessionId,
+                sessionUrl: paymobSession.sessionUrl,
+                status: "CREATED",
+                paymobOrderId: String(paymobSession.paymobOrderId),
+            };
+        } else {
+            // GEIDEA
+            const creds = platformGateway.credentials;
+            const geideaCallbackUrl = restaurantSlug
+                ? `${backendBaseUrl}/api/payments/geidea/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
+                : `${backendBaseUrl}/api/payments/geidea/callback`;
+
+            const geideaSession = await GeideaService.createPaymentSession({
+                credentials: {
+                    publicKey: creds.publicKey || "",
+                    apiPassword: creds.apiPassword || "",
+                    environment: creds.environment,
+                    callbackUrl: creds.callbackUrl,
+                    returnUrl: creds.returnUrl,
+                },
+                orderId,
+                orderNumber: orderNumber || orderId,
+                amount: totalAmount,
+                currency: "EGP",
+                customer: {
+                    name: userInfo?.name || "Customer",
+                    email: userInfo?.email || "customer@example.com",
+                    phone: userInfo?.phone || "+201000000000",
+                },
+                callbackUrl: creds.callbackUrl || `${backendBaseUrl}/api/payments/geidea/webhook`,
+                returnUrl: geideaCallbackUrl,
+            });
+
+            await db
+                .update(orders)
+                .set({
+                    paymentOrderId: String(geideaSession.sessionId),
+                    paymentGateway: "geidea",
+                    paymentStatus: "pending_payment",
+                })
+                .where(eq(orders.id, orderId));
+
+            return {
+                gateway: "GEIDEA",
+                gatewayType: "SYSTEM",
+                type: "redirect",
+                sessionId: geideaSession.sessionId,
+                sessionUrl: geideaSession.sessionUrl,
+                status: geideaSession.status,
+                geideaOrderId: geideaSession.sessionId,
+            };
+        }
     }
 }
