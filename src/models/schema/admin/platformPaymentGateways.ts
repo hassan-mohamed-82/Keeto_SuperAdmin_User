@@ -13,6 +13,7 @@ import {
     timestamp,
     mysqlEnum,
     json,
+    text,
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
@@ -69,8 +70,8 @@ export const platformPaymentGateways = mysqlTable("platform_payment_gateways", {
     // AES-256-GCM encrypted credentials stored as JSON
     credentials: json("credentials").$type<PlatformGatewayCredentials>().notNull(),
 
-    // Optional logo URL displayed on dashboard
-    logoUrl: varchar("logo_url", { length: 500 }),
+    // Optional logo image stored as a base64 data URI (e.g. "data:image/png;base64,...")
+    logoUrl: text("logo_url"),
 
     // Only ONE gateway can be active at a time (enforced at application level)
     isActive: boolean("is_active").default(false),

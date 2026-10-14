@@ -44,6 +44,20 @@ function encryptCredentials(raw: Record<string, any>): Record<string, any> {
 }
 
 // ─────────────────────────────────────────────────────────
+// Validate that a logo value is a proper base64 data URI.
+// Plain URLs (http/https) are rejected — only data URIs are accepted.
+// ─────────────────────────────────────────────────────────
+function validateLogoBase64(value: string): void {
+    if (!value) return;
+    const base64DataUriPattern = /^data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/;
+    if (!base64DataUriPattern.test(value)) {
+        throw new BadRequest(
+            "logoUrl must be a valid base64 image data URI (e.g. \"data:image/png;base64,...\"). Plain URLs are not accepted."
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────
 // Merge update credentials — keep existing encrypted values
 // for any field sent as "******" (not changed by the admin).
 // ─────────────────────────────────────────────────────────
@@ -123,6 +137,9 @@ export const createPlatformGateway = async (req: Request, res: Response): Promis
 
     const encryptedCreds = encryptCredentials(rawCreds);
 
+    // Validate logo is base64 (not a URL)
+    if (logoUrl) validateLogoBase64(logoUrl);
+
     // If this gateway is being set as active, deactivate all others first
     if (isActive) {
         await db
@@ -173,7 +190,10 @@ export const updatePlatformGateway = async (req: Request, res: Response): Promis
     if (title !== undefined) updatePayload.title = title;
     if (provider !== undefined) updatePayload.provider = String(provider).toUpperCase();
     if (environment !== undefined) updatePayload.environment = environment;
-    if (logoUrl !== undefined) updatePayload.logoUrl = logoUrl || null;
+    if (logoUrl !== undefined) {
+        if (logoUrl) validateLogoBase64(logoUrl);
+        updatePayload.logoUrl = logoUrl || null;
+    }
 
     if (credentials !== undefined) {
         let incomingCreds = credentials;
