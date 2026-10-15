@@ -35,3 +35,8 @@ export const updateCompanyUserSchema = z.object({
     role: z.enum(["admin", "dispatcher", "viewer"]).optional(),
     status: z.enum(["active", "inactive"]).optional(),
 });
+
+export const toggleCompanyUserStatusSchema = z.object({
+    status: z.enum(["active", "inactive"]).optional(),
+});
+

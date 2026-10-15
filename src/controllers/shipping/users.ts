@@ -39,7 +39,49 @@ export const getCompanyUsers = catchAsync(async (req: Request, res: Response) =>
 });
 
 // =========================================================================
-// 2. Create company user (admin only)
+// 2. Get user by ID
+// =========================================================================
+export const getUserById = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
+    const { id } = req.params;
+
+    if (!companyId) {
+        throw new UnauthorizedError("Unauthorized access");
+    }
+
+    const [user] = await db
+        .select({
+            id: shippingCompanyUsers.id,
+            shippingCompanyId: shippingCompanyUsers.shippingCompanyId,
+            name: shippingCompanyUsers.name,
+            email: shippingCompanyUsers.email,
+            phone: shippingCompanyUsers.phone,
+            role: shippingCompanyUsers.role,
+            status: shippingCompanyUsers.status,
+            createdAt: shippingCompanyUsers.createdAt,
+            updatedAt: shippingCompanyUsers.updatedAt,
+        })
+        .from(shippingCompanyUsers)
+        .where(
+            and(
+                eq(shippingCompanyUsers.id, id),
+                eq(shippingCompanyUsers.shippingCompanyId, companyId)
+            )
+        )
+        .limit(1);
+
+    if(!user){
+        throw new NotFound("User not found");
+    }
+
+    return SuccessResponse(res, {
+        message: "Shipping company user retrieved successfully",
+        data: user,
+    });
+});
+
+// =========================================================================
+// 3. Create company user (admin only)
 // =========================================================================
 export const createCompanyUser = catchAsync(async (req: Request, res: Response) => {
     const companyId = req.user?.shippingCompanyId;
@@ -96,7 +138,7 @@ export const createCompanyUser = catchAsync(async (req: Request, res: Response) 
 });
 
 // =========================================================================
-// 3. Update company user (admin only)
+// 4. Update company user (admin only)
 // =========================================================================
 export const updateCompanyUser = catchAsync(async (req: Request, res: Response) => {
     const companyId = req.user?.shippingCompanyId;
@@ -165,7 +207,7 @@ export const updateCompanyUser = catchAsync(async (req: Request, res: Response) 
 });
 
 // =========================================================================
-// 4. Delete company user (admin only, cannot delete oneself)
+// 5. Delete company user (admin only, cannot delete oneself)
 // =========================================================================
 export const deleteCompanyUser = catchAsync(async (req: Request, res: Response) => {
     const companyId = req.user?.shippingCompanyId;
@@ -203,3 +245,61 @@ export const deleteCompanyUser = catchAsync(async (req: Request, res: Response) 
         message: "User deleted successfully",
     });
 });
+
+// =========================================================================
+// 6. Toggle company user status (admin only, cannot toggle oneself)
+// =========================================================================
+export const toggleCompanyUserStatus = catchAsync(async (req: Request, res: Response) => {
+    const companyId = req.user?.shippingCompanyId;
+    const currentUserId = req.user?.id;
+    const { id } = req.params;
+
+    if (!companyId) {
+        throw new UnauthorizedError("Unauthorized access");
+    }
+
+    if (id === currentUserId) {
+        throw new BadRequest("You cannot change your own status");
+    }
+
+    const [user] = await db
+        .select()
+        .from(shippingCompanyUsers)
+        .where(
+            and(
+                eq(shippingCompanyUsers.id, id),
+                eq(shippingCompanyUsers.shippingCompanyId, companyId)
+            )
+        )
+        .limit(1);
+
+    if (!user) {
+        throw new NotFound("User not found");
+    }
+
+    const { status } = req.body || {};
+    const newStatus = status ? status : (user.status === "active" ? "inactive" : "active");
+
+    const updateData: any = {
+        status: newStatus,
+    };
+
+    // Invalidate tokens when user is deactivated
+    if (newStatus === "inactive") {
+        updateData.tokenVersion = user.tokenVersion + 1;
+    }
+
+    await db
+        .update(shippingCompanyUsers)
+        .set(updateData)
+        .where(eq(shippingCompanyUsers.id, id));
+
+    return SuccessResponse(res, {
+        message: `User status changed to ${newStatus} successfully`,
+        data: {
+            id: user.id,
+            status: newStatus,
+        },
+    });
+});
+
