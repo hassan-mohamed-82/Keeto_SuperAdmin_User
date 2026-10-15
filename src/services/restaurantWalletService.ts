@@ -966,6 +966,34 @@ export async function handleCancelledOrder(params: {
             });
         }
 
+        // إذا كان الإلغاء من طرف المطعم: يتم تطبيق الغرامة / رسوم المنصة على المطعم
+        if (cancelReasonType === "restaurant") {
+            const appDues = roundMoney(appCommission + serviceFee);
+            if (appDues > 0) {
+                const balanceBeforePenalty = currentBalance;
+                currentBalance = roundMoney(currentBalance - appDues);
+                currentFees = roundMoney(currentFees + serviceFee);
+                currentCommission = roundMoney(currentCommission + appCommission);
+
+                await tx.insert(restaurantWalletTransactions).values({
+                    id: uuidv4(),
+                    restaurantId: order.restaurantId,
+                    orderId: order.id,
+                    type: "adjustment",
+                    amount: `-${appDues.toFixed(2)}`,
+                    balanceBefore: balanceBeforePenalty.toFixed(2),
+                    balanceAfter: currentBalance.toFixed(2),
+                    method: "penalty",
+                    reference: order.orderNumber,
+                    serviceFee: serviceFee.toFixed(2),
+                    commission: appCommission.toFixed(2),
+                    orderAmount: totalAmount.toFixed(2),
+                    note: `Restaurant cancellation penalty for order #${order.dailyOrderNumber || order.orderNumber}.`,
+                    createdAt: new Date(),
+                });
+            }
+        }
+
         await tx.update(restaurantWallets)
             .set({
                 balance: currentBalance.toFixed(2),
@@ -978,7 +1006,7 @@ export async function handleCancelledOrder(params: {
             })
             .where(eq(restaurantWallets.id, wallet.id));
 
-        if (paymentKind === "visa_system" && order.paymentStatus === "paid") {
+        if (cancelReasonType === "restaurant" && paymentKind === "visa_system" && order.paymentStatus === "paid") {
             const refundFee = settledVisaComm > 0 ? settledVisaComm : parseFloat(order.visaCommission as string || "0");
             if (refundFee > 0) {
                 await chargeGatewayFeeOnRefund(tx, order, refundFee, {

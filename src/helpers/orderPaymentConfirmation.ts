@@ -13,7 +13,7 @@ import { eq, or, like, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { getNextDailyOrderNumber } from "./getNextDailyOrderNumber";
 import { sendPushNotification } from "../utils/notifications";
-import { chargePendingServiceFee } from "../services/restaurantWalletService";
+import { chargePendingServiceFee, settleDeliveredOrder } from "../services/restaurantWalletService";
 import { claimPaymentIssueNotification, releasePaymentIssueNotificationClaim } from "../services/orderNotificationCron";
 import { calculateVisaCommission } from "../utils/calculateVisaCommission";
 import { getActiveCustomGateway } from "../utils/getActiveCustomGateway";
@@ -173,7 +173,8 @@ export async function confirmOrderPayment({
             createdAt: now,
         });
 
-        await chargePendingServiceFee(order.id, tx, "custom_paid");
+        // تسوية الأوردر في محفظة المطعم فوراً بمجرد تأكيد الدفع الإلكتروني
+        await settleDeliveredOrder(order.id, tx);
 
         // تسجيل استخدام خصم الطلبات الأولى للدفع الإلكتروني إذا تم تطبيقه
         if (order.firstOrderDiscountId) {
