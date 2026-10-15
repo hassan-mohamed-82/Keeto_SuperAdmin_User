@@ -25,10 +25,13 @@ export const getActiveRestaurants = async (req: Request, res: Response) => {
                     eq(restaurants.deliverystatus, "delivered")
                 )
             );
+        
+        const totalRestauants = activeRestaurants.length;
 
         return SuccessResponse(res, {
             message: "Active restaurants fetched successfully",
-            data: activeRestaurants
+            data: activeRestaurants,
+            count: totalRestauants
         });
     } catch (error) {
         console.error("Error fetching active restaurants:", error);
