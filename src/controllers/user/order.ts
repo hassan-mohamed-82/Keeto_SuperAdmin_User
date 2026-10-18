@@ -433,6 +433,39 @@ export const checkout = async (req: Request | any, res: Response) => {
             } catch (err: any) {
                 const storedBranch = userCart.find(c => c.branchId);
                 pricingBranchId = storedBranch?.branchId || null;
+
+                if (!pricingBranchId && settings?.shippingCompanyId) {
+                    const [addr] = await db
+                        .select({ lat: addresses.lat, lng: addresses.lng })
+                        .from(addresses)
+                        .where(eq(addresses.id, addressId))
+                        .limit(1);
+
+                    const cLat = parseFloat(addr?.lat || "0");
+                    const cLng = parseFloat(addr?.lng || "0");
+
+                    const activeBranches = await db
+                        .select({ id: branches.id, lat: branches.lat, lng: branches.lng })
+                        .from(branches)
+                        .where(and(eq(branches.restaurantId, restaurantId), eq(branches.status, "active")));
+
+                    if (activeBranches.length > 0) {
+                        let closest = activeBranches[0];
+                        let minDist = Infinity;
+                        for (const b of activeBranches) {
+                            const bLat = parseFloat(b.lat || "0");
+                            const bLng = parseFloat(b.lng || "0");
+                            if (bLat && bLng && cLat && cLng) {
+                                const dist = calculateDistance(cLat, cLng, bLat, bLng);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    closest = b;
+                                }
+                            }
+                        }
+                        pricingBranchId = closest.id;
+                    }
+                }
             }
         }
     } else {
@@ -949,7 +982,28 @@ export const checkout = async (req: Request | any, res: Response) => {
         targetShippingCompanyId = settings?.shippingCompanyId || null;
         let isCompanyActive = false;
 
-        if (targetShippingCompanyId) {
+        if (!targetShippingCompanyId) {
+            const [junctionLink] = await db
+                .select({
+                    shippingCompanyId: shippingCompanyRestaurants.shippingCompanyId,
+                    shippingCompanyStatus: shippingCompanies.status,
+                })
+                .from(shippingCompanyRestaurants)
+                .innerJoin(shippingCompanies, eq(shippingCompanyRestaurants.shippingCompanyId, shippingCompanies.id))
+                .where(
+                    and(
+                        eq(shippingCompanyRestaurants.restaurantId, restaurantId),
+                        eq(shippingCompanyRestaurants.status, "active"),
+                        eq(shippingCompanies.status, "active")
+                    )
+                )
+                .limit(1);
+
+            if (junctionLink) {
+                targetShippingCompanyId = junctionLink.shippingCompanyId;
+                isCompanyActive = true;
+            }
+        } else {
             const [company] = await db
                 .select({ id: shippingCompanies.id, status: shippingCompanies.status })
                 .from(shippingCompanies)
@@ -1078,6 +1132,45 @@ export const checkout = async (req: Request | any, res: Response) => {
 
             if (!selectedBranch) throw new BadRequest("Selected branch not found or inactive.");
             resolvedBranchId = selectedBranch.id;
+        } else if (targetShippingCompanyId && isCompanyActive) {
+            // 🚚 لأوردرات المطاعم المرتبطة بشركة شحن: نختار أقرب فرع نشط لموقع تسليم العميل
+            const activeBranches = await db.select({
+                id: branches.id,
+                name: branches.name,
+                lat: branches.lat,
+                lng: branches.lng,
+            })
+                .from(branches)
+                .where(
+                    and(
+                        eq(branches.restaurantId, restaurantId),
+                        eq(branches.status, "active")
+                    )
+                );
+
+            if (!activeBranches || activeBranches.length === 0) {
+                throw new BadRequest("No active branch found for this restaurant.");
+            }
+
+            if (activeBranches.length === 1) {
+                resolvedBranchId = activeBranches[0].id;
+            } else {
+                let closestBranch = activeBranches[0];
+                let minDistance = Infinity;
+
+                for (const b of activeBranches) {
+                    const bLat = parseFloat(b.lat as string || "0");
+                    const bLng = parseFloat(b.lng as string || "0");
+                    if (bLat && bLng) {
+                        const dist = calculateDistance(lat, lng, bLat, bLng);
+                        if (dist < minDistance) {
+                            minDistance = dist;
+                            closestBranch = b;
+                        }
+                    }
+                }
+                resolvedBranchId = closestBranch.id;
+            }
         } else {
             const [matchedBranch] = await db.select({ id: branches.id })
                 .from(branches)
