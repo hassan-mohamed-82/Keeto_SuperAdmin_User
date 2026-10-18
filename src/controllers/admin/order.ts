@@ -1,5 +1,5 @@
 import { eq, desc, and, inArray, or, gte, lte, ne } from "drizzle-orm";
-import { addons, foodVariations, addresses, branches, deliveryMen, food, orderItems, orders, paymentMethods, pointsProducts, restaurants, restaurantWallets, restaurantWalletTransactions, restaurantZoneDeliveryFees, selectReasons, userPointsTransactions, userRestaurantPoints, users, userWallets, userWalletTransactions, variationOptions, zones, restaurantSettings } from "../../models/schema";
+import { addons, foodVariations, addresses, branches, deliveryMen, food, orderItems, orders, paymentMethods, pointsProducts, restaurants, restaurantWallets, restaurantWalletTransactions, restaurantZoneDeliveryFees, selectReasons, userPointsTransactions, userRestaurantPoints, users, userWallets, userWalletTransactions, variationOptions, zones, restaurantSettings, shippingCompanies } from "../../models/schema";
 import { SuccessResponse } from "../../utils/response";
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
@@ -973,19 +973,74 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     });
 
     // D9: Fire-and-forget dispatchOrder when order moves to 'accepted' and orderType is delivery
-    // const orderType = existingOrder.orderType || (existingOrder as any).type;
-    // if (status === "accepted" && orderType === "delivery") {
-    //     dispatchOrder(orderId).catch((err) => {
-    //         console.error(`[dispatchOrder:fire-and-forget] failed for order ${orderId}:`, err);
-    //     });
-    // }
+    const orderType = existingOrder.orderType || (existingOrder as any).type;
+    const targetDeliveryManId = existingOrder.deliveryManId;
 
-    // // Release courier activeOrdersCount when order completes or cancels
-    // if (["delivered", "cancelled", "refund"].includes(status) && existingOrder.deliveryManId) {
-    //     releaseCourierForOrder(orderId, existingOrder.deliveryManId).catch((err) => {
-    //         console.error(`[releaseCourierForOrder] failed for order ${orderId}:`, err);
-    //     });
-    // }
+    if (status === "accepted" && orderType === "delivery" && !existingOrder.deliveryManId) {
+        // فحص مسبق: التحقق أولاً هل الأوردر نفسه يحمل shippingCompanyId أو هل المطعم مسجل لديه شركة شحن في الإعدادات
+        let targetShippingCompanyId = existingOrder.shippingCompanyId;
+
+        if (!targetShippingCompanyId && existingOrder.restaurantId) {
+            const [settings] = await db
+                .select({ shippingCompanyId: restaurantSettings.shippingCompanyId })
+                .from(restaurantSettings)
+                .where(eq(restaurantSettings.restaurantId, existingOrder.restaurantId))
+                .limit(1);
+
+            targetShippingCompanyId = settings?.shippingCompanyId || null;
+        }
+
+        // الدخول فقط والبدء بالتوزيع إذا كان للأوردر أو للمطعم شركة شحن
+        if (targetShippingCompanyId) {
+            const [company] = await db
+                .select({
+                    id: shippingCompanies.id,
+                    name: shippingCompanies.name,
+                    status: shippingCompanies.status,
+                })
+                .from(shippingCompanies)
+                .where(eq(shippingCompanies.id, targetShippingCompanyId))
+                .limit(1);
+
+            if (company && company.status === "active") {
+                // ربط شركة الشحن بالأوردر إذا لم تكن مسجلة مسبقاً
+                if (!existingOrder.shippingCompanyId) {
+                    await db
+                        .update(orders)
+                        .set({
+                            shippingCompanyId: targetShippingCompanyId,
+                            shippingStatus: "pending_dispatch",
+                            updatedAt: new Date(),
+                        })
+                        .where(eq(orders.id, orderId));
+                }
+
+                // D9: Fire-and-forget dispatchOrder
+                dispatchOrder(orderId).catch((err) => {
+                    console.error(`[dispatchOrder:fire-and-forget] failed for order ${orderId} (Company: ${company.name}):`, err);
+                });
+            } else {
+                console.warn(`[dispatchOrder] Shipping company ${targetShippingCompanyId} for restaurant ${existingOrder.restaurantId} is inactive or not found`);
+                await db
+                    .update(orders)
+                    .set({
+                        shippingCompanyId: targetShippingCompanyId,
+                        shippingStatus: "manual_required",
+                        shippingFailReason: "company_inactive",
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(orders.id, orderId));
+            }
+        }
+    }
+
+    // Release courier activeOrdersCount when order completes or cancels
+    if (["delivered", "cancelled", "refund"].includes(status) && targetDeliveryManId) {
+        releaseCourierForOrder(orderId, targetDeliveryManId).catch((err) => {
+            console.error(`[releaseCourierForOrder] failed for order ${orderId}:`, err);
+        });
+    }
+
 
     return SuccessResponse(res, { message: `Order status successfully updated to ${status}` });
 };

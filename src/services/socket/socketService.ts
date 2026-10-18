@@ -3,7 +3,7 @@ import { Server, Socket } from "socket.io";
 import { verifyToken } from "../../utils/auth";
 import { db } from "../../models/connection";
 import { deliveryMen, orders, shippingCompanies } from "../../models/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { updateCourierRedisLocation, removeCourierFromRedis, rejectOrderByCourier } from "../shipping/dispatchEngine";
 import { SOCKET_EVENTS } from "./socketEvents";
 
@@ -112,40 +112,55 @@ export const initSocket = (httpServer: HttpServer): Server => {
                     .select({
                         shippingCompanyId: deliveryMen.shippingCompanyId,
                         activeOrdersCount: deliveryMen.activeOrdersCount,
+                        name: deliveryMen.name,
+                        phone: deliveryMen.phone,
                     })
                     .from(deliveryMen)
                     .where(eq(deliveryMen.id, deliveryManId))
                     .limit(1);
 
-                // 2. Broadcast to company dashboard live map
+                // 2. Fetch courier active orders (both assigned and picked_up)
+                const activeOrders = await db
+                    .select({
+                        id: orders.id,
+                        orderNumber: orders.orderNumber,
+                        shippingStatus: orders.shippingStatus,
+                    })
+                    .from(orders)
+                    .where(
+                        and(
+                            eq(orders.deliveryManId, deliveryManId),
+                            inArray(orders.shippingStatus, ["assigned", "picked_up"])
+                        )
+                    );
+
+                // Broadcast to company dashboard live map (includes courier details & active orders)
                 if (dm?.shippingCompanyId) {
                     notifyShippingCompany(dm.shippingCompanyId, SOCKET_EVENTS.DELIVERY_LOCATION_CHANGED, {
                         deliveryManId,
+                        deliveryManName: dm.name || null,
+                        deliveryManPhone: dm.phone || null,
                         lat,
                         lng,
+                        activeOrders: activeOrders.map((o) => ({
+                            orderId: o.id,
+                            orderNumber: o.orderNumber,
+                            shippingStatus: o.shippingStatus,
+                        })),
                         updatedAt: new Date(),
                     });
                 }
 
                 // 3. Broadcast to active assigned orders tracking rooms
-                if (dm && dm.activeOrdersCount > 0) {
-                    const activeOrders = await db
-                        .select({ id: orders.id })
-                        .from(orders)
-                        .where(
-                            and(
-                                eq(orders.deliveryManId, deliveryManId),
-                                eq(orders.shippingStatus, "assigned")
-                            )
-                        );
-
-                    for (const ord of activeOrders) {
-                        notifyOrderTracking(ord.id, SOCKET_EVENTS.ORDER_COURIER_LOCATION, {
-                            deliveryManId,
-                            lat,
-                            lng,
-                        });
-                    }
+                for (const ord of activeOrders) {
+                    notifyOrderTracking(ord.id, SOCKET_EVENTS.ORDER_COURIER_LOCATION, {
+                        orderId: ord.id,
+                        deliveryManId,
+                        deliveryManName: dm?.name || null,
+                        deliveryManPhone: dm?.phone || null,
+                        lat,
+                        lng,
+                    });
                 }
 
                 // 4. Save to MySQL every 30s as backup
