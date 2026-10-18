@@ -36,7 +36,7 @@ router.post("/auth/login", authLimiter, validate(courierLoginSchema), courierLog
 
 router.use(authenticated);
 
-router.get("/", requireShippingCompany(), validate(filterShippingOrdersSchema), getOrders);
+router.get("/", requireShippingCompany(), validate(filterShippingOrdersSchema, "query"), getOrders);
 
 router.get("/me", authenticated, requireDeliveryMan, getCourierProfile);
 
