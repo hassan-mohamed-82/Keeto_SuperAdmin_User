@@ -13,6 +13,7 @@ import {
     addresses,
 } from "../../models/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
+import { v4 as uuidv4 } from "uuid";
 import redisClient from "../../config/redis";
 import * as turf from "@turf/turf";
 import {
@@ -189,6 +190,7 @@ export async function assignCourierToOrder(
 
         // Insert assignment audit log
         await tx.insert(dispatchAssignments).values({
+            id: uuidv4(),
             orderId,
             shippingCompanyId: companyId,
             deliveryManId: courierId,
