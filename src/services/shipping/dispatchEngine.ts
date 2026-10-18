@@ -213,6 +213,7 @@ export async function dispatchOrder(orderId: string): Promise<DispatchResult> {
         lockAcquired = lockRes === "OK";
     } catch {
         // Continue if Redis fails
+        lockAcquired = true;
     }
 
     if (!lockAcquired) {

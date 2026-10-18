@@ -28,11 +28,11 @@ router.get("/", requireShippingCompany(), validate(filterShippingOrdersSchema, "
 // Courier Order lifecycle endpoints (Phase 8)
 router.post("/orders/:id/picked-up", authenticated, requireDeliveryMan, markOrderPickedUp);
 router.post("/orders/:id/delivered", authenticated, requireDeliveryMan, markOrderDelivered);
-router.post("/orders/:id/reject", authenticated, requireDeliveryMan, validate(rejectOrderSchema), rejectOrderCourierEndpoint);
+router.post("/orders/:id/reject", authenticated, requireDeliveryMan, validate(rejectOrderSchema, "body"), rejectOrderCourierEndpoint);
 
 router.get("/:id", requireShippingCompany(), getOrderDetails);
-router.post("/:id/assign", requireShippingCompany("admin", "dispatcher"), validate(assignOrderDeliveryManSchema), manualAssignDeliveryMan);
-router.post("/:id/auto-assign", requireShippingCompany("admin", "dispatcher"), validate(autoAssignOrderSchema), autoAssignOrder);
+router.post("/:id/assign", requireShippingCompany("admin", "dispatcher"), validate(assignOrderDeliveryManSchema, "body"), manualAssignDeliveryMan);
+router.post("/:id/auto-assign", requireShippingCompany("admin", "dispatcher"), validate(autoAssignOrderSchema, "body"), autoAssignOrder);
 
 export default router;
 
