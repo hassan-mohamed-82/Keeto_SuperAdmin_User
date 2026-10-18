@@ -677,11 +677,11 @@ async function executeDispatch(orderId: string): Promise<DispatchResult> {
             continue;
         }
 
-        // Alive key check (must have fresh heartbeat in Redis)
+        // Alive key check (fresh heartbeat in Redis OR online in DB with coordinates)
         try {
             const isAlive = await redisClient.get(`${REDIS_ALIVE_KEY_PREFIX}${c.id}`);
-            if (!isAlive) {
-                // Couriers without an alive key are stale / disconnected
+            if (!isAlive && (!c.isOnline || !c.currentLat || !c.currentLng)) {
+                // Couriers without an alive key or DB location are skipped
                 continue;
             }
         } catch {
