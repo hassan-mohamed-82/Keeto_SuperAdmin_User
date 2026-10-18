@@ -31,24 +31,24 @@ const authLimiter = rateLimit({
 
 const router = Router();
 
-router.use(authenticated);
-
-router.get("/", requireShippingCompany(), validate(filterShippingOrdersSchema), getOrders);
-router.get("/:id", requireShippingCompany(), getOrderDetails);
-router.post("/:id/assign", requireShippingCompany("admin", "dispatcher"), validate(assignOrderDeliveryManSchema), manualAssignDeliveryMan);
-router.post("/:id/auto-assign", requireShippingCompany("admin", "dispatcher"), validate(autoAssignOrderSchema), autoAssignOrder);
-
-
 // Courier Auth
 router.post("/auth/login", authLimiter, validate(courierLoginSchema), courierLogin);
 
-// Courier Me
+router.use(authenticated);
+
+router.get("/", requireShippingCompany(), validate(filterShippingOrdersSchema), getOrders);
+
 router.get("/me", authenticated, requireDeliveryMan, getCourierProfile);
 
 // Courier Order lifecycle endpoints (Phase 8)
 router.post("/orders/:id/picked-up", authenticated, requireDeliveryMan, markOrderPickedUp);
 router.post("/orders/:id/delivered", authenticated, requireDeliveryMan, markOrderDelivered);
 router.post("/orders/:id/reject", authenticated, requireDeliveryMan, validate(rejectOrderSchema), rejectOrderCourierEndpoint);
+
+
+router.get("/:id", requireShippingCompany(), getOrderDetails);
+router.post("/:id/assign", requireShippingCompany("admin", "dispatcher"), validate(assignOrderDeliveryManSchema), manualAssignDeliveryMan);
+router.post("/:id/auto-assign", requireShippingCompany("admin", "dispatcher"), validate(autoAssignOrderSchema), autoAssignOrder);
 
 export default router;
 
