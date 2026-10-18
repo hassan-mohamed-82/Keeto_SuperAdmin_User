@@ -28,14 +28,18 @@ export const initSocket = (httpServer: HttpServer): Server => {
     // -------------------------------------------------------------
     const authMiddleware = (socket: Socket, next: (err?: Error) => void) => {
         try {
-            const token =
+            let rawToken =
                 socket.handshake.auth?.token ||
-                socket.handshake.headers?.authorization?.replace("Bearer ", "") ||
+                socket.handshake.headers?.authorization ||
                 (socket.handshake.query?.token as string);
 
-            if (!token) {
+            if (!rawToken) {
                 return next(new Error("Authentication error: No token provided"));
             }
+
+            const token = typeof rawToken === "string" && rawToken.startsWith("Bearer ")
+                ? rawToken.slice(7).trim()
+                : String(rawToken).trim();
 
             const decoded = verifyToken(token);
             if (!decoded || !decoded.id || !decoded.role) {
