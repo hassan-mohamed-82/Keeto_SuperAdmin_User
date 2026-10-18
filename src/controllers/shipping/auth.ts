@@ -80,66 +80,7 @@ export const login = catchAsync(async (req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 2. Courier login (delivery_man role)
-// =========================================================================
-export const courierLogin = catchAsync(async (req: Request, res: Response) => {
-    const { phone, password } = req.body;
-
-    if (!phone || !password) {
-        throw new BadRequest("Phone and password are required");
-    }
-
-    const dmList = await db
-        .select()
-        .from(deliveryMen)
-        .where(and(eq(deliveryMen.phone, phone), eq(deliveryMen.isDeleted, false)))
-        .limit(1);
-
-    if (dmList.length === 0) {
-        throw new UnauthorizedError("Invalid credentials");
-    }
-
-    const dm = dmList[0];
-
-    if (!dm.password) {
-        throw new UnauthorizedError("Account has no password set. Please contact your company.");
-    }
-
-    const isPasswordValid = await bcrypt.compare(password, dm.password);
-    if (!isPasswordValid) {
-        throw new UnauthorizedError("Invalid credentials");
-    }
-
-    if (!dm.isActive) {
-        throw new UnauthorizedError("Your courier account is inactive.");
-    }
-
-    if (!dm.shippingCompanyId) {
-        throw new UnauthorizedError("Courier is not assigned to a shipping company.");
-    }
-
-    const token = generateDeliveryManToken({
-        id: dm.id,
-        name: dm.name,
-        phone: dm.phone,
-        email: dm.email ?? undefined,
-        shippingCompanyId: dm.shippingCompanyId,
-        restaurantId: dm.restaurantId,
-        branchId: dm.branchId,
-        deliveryType: dm.deliveryType,
-    });
-
-    const { password: _, ...dmData } = dm;
-
-    return SuccessResponse(res, {
-        message: "Courier logged in successfully",
-        token,
-        courier: dmData,
-    });
-});
-
-// =========================================================================
-// 3. Get Company Profile (for shipping company users)
+// 2. Get Company Profile (for shipping company users)
 // =========================================================================
 export const getProfile = catchAsync(async (req: Request, res: Response) => {
     const companyId = req.user?.shippingCompanyId;
@@ -181,7 +122,7 @@ export const getProfile = catchAsync(async (req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 4. Get Current User Profile
+// 3. Get Current User Profile
 // =========================================================================
 export const getMyUserProfile = catchAsync(async (req: Request, res: Response) => {
     const userId = req.user?.id;
@@ -216,48 +157,9 @@ export const getMyUserProfile = catchAsync(async (req: Request, res: Response) =
 });
 
 // =========================================================================
-// 5. Get Courier Profile (delivery_man)
+// 4. Update Company Profile
 // =========================================================================
-export const getCourierProfile = catchAsync(async (req: Request, res: Response) => {
-    const courierId = req.user?.deliveryManId || req.user?.id;
-
-    if (!courierId) {
-        throw new UnauthorizedError("Unauthorized access");
-    }
-
-    const [dm] = await db
-        .select({
-            id: deliveryMen.id,
-            name: deliveryMen.name,
-            phone: deliveryMen.phone,
-            email: deliveryMen.email,
-            image: deliveryMen.image,
-            deliveryType: deliveryMen.deliveryType,
-            allZones: deliveryMen.allZones,
-            shiftStatus: deliveryMen.shiftStatus,
-            isOnline: deliveryMen.isOnline,
-            isAvailable: deliveryMen.isAvailable,
-            activeOrdersCount: deliveryMen.activeOrdersCount,
-            currentLat: deliveryMen.currentLat,
-            currentLng: deliveryMen.currentLng,
-            shippingCompanyId: deliveryMen.shippingCompanyId,
-            createdAt: deliveryMen.createdAt,
-        })
-        .from(deliveryMen)
-        .where(eq(deliveryMen.id, courierId))
-        .limit(1);
-
-    if (!dm) {
-        throw new NotFound("Courier not found");
-    }
-
-    return SuccessResponse(res, {
-        message: "Courier profile retrieved successfully",
-        data: dm,
-    });
-});
-
-export async function updateProfile(req: Request, res: Response) {
+export const updateProfile = catchAsync(async (req: Request, res: Response) => {
     const companyId = req.user?.shippingCompanyId || req.user?.id;
 
     if (!companyId) {
@@ -285,4 +187,4 @@ export async function updateProfile(req: Request, res: Response) {
     return SuccessResponse(res, {
         message: "Profile updated successfully",
     });
-}
+});
