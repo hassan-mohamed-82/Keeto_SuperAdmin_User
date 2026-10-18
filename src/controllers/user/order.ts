@@ -1041,7 +1041,14 @@ export const checkout = async (req: Request | any, res: Response) => {
                 );
 
             for (const sz of companyZones) {
-                const coords = sz.coordinates as any;
+                let coords = sz.coordinates as any;
+                if (typeof coords === "string") {
+                    try {
+                        coords = JSON.parse(coords);
+                    } catch {
+                        coords = [];
+                    }
+                }
                 const isPolygon = Array.isArray(coords) && coords.length >= 3;
                 const feeObj = {
                     id: sz.id,
@@ -2253,7 +2260,14 @@ export const checkout = async (req: Request | any, res: Response) => {
 
             if (companyZones.length > 0) {
                 zoneFees = companyZones.map((sz) => {
-                    const coords = sz.coordinates as any;
+                    let coords = sz.coordinates as any;
+                    if (typeof coords === "string") {
+                        try {
+                            coords = JSON.parse(coords);
+                        } catch {
+                            coords = [];
+                        }
+                    }
                     const isPolygon = Array.isArray(coords) && coords.length >= 3;
                     return {
                         id: sz.id,

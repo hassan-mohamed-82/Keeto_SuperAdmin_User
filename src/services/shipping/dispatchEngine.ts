@@ -412,11 +412,18 @@ async function executeDispatch(orderId: string): Promise<DispatchResult> {
     let matchedZoneId: string | null = null;
 
     for (const zone of companyZones) {
-        const coords = zone.coordinates as Array<{ lat: number; lng: number }> | null;
-        if (!coords || coords.length < 3) continue;
+        let coords = zone.coordinates as any;
+        if (typeof coords === "string") {
+            try {
+                coords = JSON.parse(coords);
+            } catch {
+                coords = null;
+            }
+        }
+        if (!coords || !Array.isArray(coords) || coords.length < 3) continue;
 
         try {
-            const polygonCoords = coords.map((c) => [c.lng, c.lat]);
+            const polygonCoords = coords.map((c: any) => [parseFloat(c.lng), parseFloat(c.lat)]);
             const first = polygonCoords[0];
             const last = polygonCoords[polygonCoords.length - 1];
             if (first[0] !== last[0] || first[1] !== last[1]) {
