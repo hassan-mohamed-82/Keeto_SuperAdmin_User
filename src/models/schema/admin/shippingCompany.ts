@@ -96,8 +96,6 @@ export const shippingZones = mysqlTable("shipping_zones", {
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
-export const shippingCompanyZones = shippingZones;
-
 // =========================================================================
 // 4. شفتات المندوب لخدمة مطعم معين (Delivery Man Shifts)
 // للمناديب من نوع: deliveryType = 'restaurant'
