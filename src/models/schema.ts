@@ -74,4 +74,5 @@ export * from "./schema/admin/gatewaySwitchLog";
 export * from "./schema/admin/firstOrderDiscount";
 // Platform-level multi-gateway support (credentials stored in DB, managed by Super Admin)
 export * from "./schema/admin/platformPaymentGateways";
+export * from "./schema/admin/videos";
 
