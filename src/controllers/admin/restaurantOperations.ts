@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { randomUUID } from "crypto";
-import { and, count, eq, gte, inArray, like, lte, or, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "../../models/connection";
 import {
     branches,
@@ -199,7 +199,11 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
         )
     );
 
-    const orderConditions = [inArray(orders.restaurantId, activeRestaurantIds)];
+    const orderConditions = [
+        inArray(orders.restaurantId, activeRestaurantIds),
+        or(isNull(orders.paymentStatus), ne(orders.paymentStatus, "payment_failed"))!,
+        ne(orders.status, "failed"),
+    ];
     if (startDate) {
         orderConditions.push(gte(orders.createdAt, new Date(startDate)));
     }
