@@ -204,11 +204,19 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
         or(isNull(orders.paymentStatus), ne(orders.paymentStatus, "payment_failed"))!,
         ne(orders.status, "failed"),
     ];
+    // Default to current date if neither startDate nor endDate is provided
+    let start: Date | undefined;
+    let end: Date | undefined;
+
     if (startDate) {
-        orderConditions.push(gte(orders.createdAt, new Date(startDate)));
+        start = new Date(startDate);
+        if (!startDate.includes("T")) {
+            start.setHours(0, 0, 0, 0);
+        }
     }
+
     if (endDate) {
-        const end = new Date(endDate);
+        end = new Date(endDate);
         if (!endDate.includes("T")) {
             end.setHours(23, 59, 59, 999);
         } else if (
@@ -219,6 +227,20 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
         ) {
             end.setHours(23, 59, 59, 999);
         }
+    }
+
+    if (!startDate && !endDate) {
+        start = new Date();
+        start.setHours(0, 0, 0, 0);
+
+        end = new Date();
+        end.setHours(23, 59, 59, 999);
+    }
+
+    if (start) {
+        orderConditions.push(gte(orders.createdAt, start));
+    }
+    if (end) {
         orderConditions.push(lte(orders.createdAt, end));
     }
 
