@@ -20,9 +20,9 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
 export const upload = multer({
     storage: storage,
     fileFilter: fileFilter,
-    limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB limit
-    },
+    // limits: {
+    //     fileSize: 10 * 1024 * 1024, // 10MB limit
+    // },
 });
 
 // Configure disk storage for videos
@@ -55,8 +55,8 @@ const videoFileFilter = (req: Request, file: Express.Multer.File, cb: multer.Fil
 export const uploadVideo = multer({
     storage: videoStorage,
     fileFilter: videoFileFilter,
-    limits: {
-        fileSize: 200 * 1024 * 1024, // 200MB limit
-    },
+    // limits: {
+    //     fileSize: 200 * 1024 * 1024, // 200MB limit
+    // },
 });
 
