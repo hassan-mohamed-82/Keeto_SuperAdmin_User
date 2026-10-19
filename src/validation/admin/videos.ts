@@ -6,7 +6,9 @@ export const createVideoSchema = z.object({
     description: z.string().trim().max(5000).optional().nullable(),
     descriptionAr: z.string().trim().max(5000).optional().nullable(),
     videoUrl: z.string().trim().max(1000).optional(),
+    videoUrlAr: z.string().trim().max(1000).optional().nullable(),
     thumbnailUrl: z.string().trim().max(1000).optional().nullable(),
+    thumbnailUrlAr: z.string().trim().max(1000).optional().nullable(),
     status: z.enum(["active", "inactive"]).optional().default("active"),
 });
 
@@ -16,7 +18,9 @@ export const updateVideoSchema = z.object({
     description: z.string().trim().max(5000).optional().nullable(),
     descriptionAr: z.string().trim().max(5000).optional().nullable(),
     videoUrl: z.string().trim().max(1000).optional(),
+    videoUrlAr: z.string().trim().max(1000).optional().nullable(),
     thumbnailUrl: z.string().trim().max(1000).optional().nullable(),
+    thumbnailUrlAr: z.string().trim().max(1000).optional().nullable(),
     status: z.enum(["active", "inactive"]).optional(),
 });
 

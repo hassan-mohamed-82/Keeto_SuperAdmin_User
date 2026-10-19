@@ -34,38 +34,50 @@ const removeLocalFile = async (fileUrl: string | null | undefined) => {
 
 const extractFileUrls = (req: Request) => {
     let videoUrl: string | undefined = undefined;
+    let videoUrlAr: string | undefined = undefined;
     let thumbnailUrl: string | undefined = undefined;
+    let thumbnailUrlAr: string | undefined = undefined;
 
     // Single file upload (e.g. uploadVideo.single("video"))
     if (req.file) {
         videoUrl = `${req.protocol}://${req.get("host")}/uploads/videos/${req.file.filename}`;
     }
 
-    // Multiple fields upload (e.g. uploadVideo.fields([{ name: "video" }, { name: "thumbnail" }]))
+    // Multiple fields upload (e.g. uploadVideo.fields([...]))
     if (req.files) {
         if (!Array.isArray(req.files)) {
             const videoFile = req.files["video"]?.[0];
+            const videoArFile = req.files["videoAr"]?.[0];
             const thumbFile = req.files["thumbnail"]?.[0];
+            const thumbArFile = req.files["thumbnailAr"]?.[0];
 
             if (videoFile) {
                 videoUrl = `${req.protocol}://${req.get("host")}/uploads/videos/${videoFile.filename}`;
             }
+            if (videoArFile) {
+                videoUrlAr = `${req.protocol}://${req.get("host")}/uploads/videos/${videoArFile.filename}`;
+            }
             if (thumbFile) {
                 thumbnailUrl = `${req.protocol}://${req.get("host")}/uploads/videos/${thumbFile.filename}`;
+            }
+            if (thumbArFile) {
+                thumbnailUrlAr = `${req.protocol}://${req.get("host")}/uploads/videos/${thumbArFile.filename}`;
             }
         }
     }
 
-    return { videoUrl, thumbnailUrl };
+    return { videoUrl, videoUrlAr, thumbnailUrl, thumbnailUrlAr };
 };
 
 // ─── Create Video ───
 export const createVideo = async (req: Request, res: Response) => {
     const body = createVideoSchema.parse(req.body);
-    const { videoUrl: uploadedVideoUrl, thumbnailUrl: uploadedThumbUrl } = extractFileUrls(req);
+    const { videoUrl: uploadedVideoUrl, videoUrlAr: uploadedVideoUrlAr, thumbnailUrl: uploadedThumbUrl, thumbnailUrlAr: uploadedThumbUrlAr } = extractFileUrls(req);
 
     const finalVideoUrl = uploadedVideoUrl || body.videoUrl;
+    const finalVideoUrlAr = uploadedVideoUrlAr || body.videoUrlAr || null;
     const finalThumbUrl = uploadedThumbUrl || body.thumbnailUrl || null;
+    const finalThumbUrlAr = uploadedThumbUrlAr || body.thumbnailUrlAr || null;
 
     if (!finalVideoUrl) {
         throw new BadRequest("Video file or videoUrl is required");
@@ -80,7 +92,9 @@ export const createVideo = async (req: Request, res: Response) => {
         description: body.description ?? null,
         descriptionAr: body.descriptionAr ?? null,
         videoUrl: finalVideoUrl,
+        videoUrlAr: finalVideoUrlAr,
         thumbnailUrl: finalThumbUrl,
+        thumbnailUrlAr: finalThumbUrlAr,
         status: body.status ?? "active",
     });
 
@@ -180,9 +194,9 @@ export const updateVideo = async (req: Request, res: Response) => {
         throw new NotFound("Video not found");
     }
 
-    const { videoUrl: uploadedVideoUrl, thumbnailUrl: uploadedThumbUrl } = extractFileUrls(req);
+    const { videoUrl: uploadedVideoUrl, videoUrlAr: uploadedVideoUrlAr, thumbnailUrl: uploadedThumbUrl, thumbnailUrlAr: uploadedThumbUrlAr } = extractFileUrls(req);
 
-    // If a new video file was uploaded or provided, remove the old one if it was local
+    // ── videoUrl (EN) ──
     let finalVideoUrl = existing.videoUrl;
     if (uploadedVideoUrl) {
         await removeLocalFile(existing.videoUrl);
@@ -194,6 +208,19 @@ export const updateVideo = async (req: Request, res: Response) => {
         finalVideoUrl = body.videoUrl;
     }
 
+    // ── videoUrlAr (AR) ──
+    let finalVideoUrlAr = existing.videoUrlAr;
+    if (uploadedVideoUrlAr) {
+        await removeLocalFile(existing.videoUrlAr);
+        finalVideoUrlAr = uploadedVideoUrlAr;
+    } else if (body.videoUrlAr !== undefined) {
+        if (body.videoUrlAr !== existing.videoUrlAr) {
+            await removeLocalFile(existing.videoUrlAr);
+        }
+        finalVideoUrlAr = body.videoUrlAr;
+    }
+
+    // ── thumbnailUrl (EN) ──
     let finalThumbUrl = existing.thumbnailUrl;
     if (uploadedThumbUrl) {
         await removeLocalFile(existing.thumbnailUrl);
@@ -205,6 +232,18 @@ export const updateVideo = async (req: Request, res: Response) => {
         finalThumbUrl = body.thumbnailUrl;
     }
 
+    // ── thumbnailUrlAr (AR) ──
+    let finalThumbUrlAr = existing.thumbnailUrlAr;
+    if (uploadedThumbUrlAr) {
+        await removeLocalFile(existing.thumbnailUrlAr);
+        finalThumbUrlAr = uploadedThumbUrlAr;
+    } else if (body.thumbnailUrlAr !== undefined) {
+        if (body.thumbnailUrlAr !== existing.thumbnailUrlAr) {
+            await removeLocalFile(existing.thumbnailUrlAr);
+        }
+        finalThumbUrlAr = body.thumbnailUrlAr;
+    }
+
     const updateData: Partial<typeof videos.$inferInsert> = {
         ...(body.title !== undefined && { title: body.title }),
         ...(body.titleAr !== undefined && { titleAr: body.titleAr }),
@@ -212,7 +251,9 @@ export const updateVideo = async (req: Request, res: Response) => {
         ...(body.descriptionAr !== undefined && { descriptionAr: body.descriptionAr }),
         ...(body.status !== undefined && { status: body.status }),
         videoUrl: finalVideoUrl,
+        videoUrlAr: finalVideoUrlAr,
         thumbnailUrl: finalThumbUrl,
+        thumbnailUrlAr: finalThumbUrlAr,
         updatedAt: new Date(),
     };
 
