@@ -22,16 +22,40 @@ export const restaurantTypeSchema = z.enum([
     "test",
 ]);
 
-export const getRestaurantOperationsQuerySchema = z.object({
-    search: z.string().trim().optional(),
-    restaurantId: z.string().uuid("Invalid Restaurant ID").optional(),
-    restaurantType: restaurantTypeSchema.optional(),
-    operationType: z.enum(["callcenter", "branch"]).optional(),
-    status: restaurantOperationStatusSchema.optional(),
-    app: z.enum(["on", "off"]).optional(),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
-});
+export const optionalDateQuerySchema = z
+    .string()
+    .trim()
+    .transform((val) => (val === "" ? undefined : val))
+    .refine((val) => val === undefined || !isNaN(Date.parse(val)), {
+        message: "Invalid date format",
+    })
+    .optional();
+
+export const getRestaurantOperationsQuerySchema = z
+    .object({
+        search: z.string().trim().optional(),
+        restaurantId: z.string().uuid("Invalid Restaurant ID").optional(),
+        restaurantType: restaurantTypeSchema.optional(),
+        operationType: z.enum(["callcenter", "branch"]).optional(),
+        status: restaurantOperationStatusSchema.optional(),
+        startDate: optionalDateQuerySchema,
+        endDate: optionalDateQuerySchema,
+        app: z.enum(["on", "off"]).optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(100).default(20),
+    })
+    .refine(
+        (data) => {
+            if (data.startDate && data.endDate) {
+                return new Date(data.startDate) <= new Date(data.endDate);
+            }
+            return true;
+        },
+        {
+            message: "startDate must be before or equal to endDate",
+            path: ["startDate"],
+        }
+    );
 
 const noteTextSchema = z.string().trim().min(1).max(2000);
 

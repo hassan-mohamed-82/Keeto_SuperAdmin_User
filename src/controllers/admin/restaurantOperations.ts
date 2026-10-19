@@ -1,11 +1,12 @@
 import { Request, Response } from "express";
 import { randomUUID } from "crypto";
-import { and, count, eq, inArray, like, or } from "drizzle-orm";
+import { and, count, eq, gte, inArray, like, lte, or, sql } from "drizzle-orm";
 import { db } from "../../models/connection";
 import {
     branches,
     cities,
     cuisines,
+    orders,
     restaurantOperations,
     restaurants,
     sales,
@@ -95,8 +96,18 @@ const mergeNotes = (existing: Note[], incoming: NoteInput[]): Note[] => {
 };
 
 export const getRestaurantOperations = async (req: Request, res: Response) => {
-    const { search, restaurantId, restaurantType, operationType, status, app, page, limit } =
-        getRestaurantOperationsQuerySchema.parse(req.query);
+    const {
+        search,
+        restaurantId,
+        restaurantType,
+        operationType,
+        status,
+        startDate,
+        endDate,
+        app,
+        page,
+        limit,
+    } = getRestaurantOperationsQuerySchema.parse(req.query);
     const offset = (page - 1) * limit;
     const filters = [];
 
@@ -139,6 +150,7 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
                     cover: restaurants.cover,
                     type: restaurants.type,
                     status: restaurants.status,
+                    operationStatus: restaurants.operationStatus,
                     ownerFirstName: restaurants.ownerFirstName,
                     ownerLastName: restaurants.ownerLastName,
                     ownerPhone: restaurants.ownerPhone,
@@ -179,7 +191,34 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
         new Set(rows.flatMap((row) => parseCuisineIds(row.restaurant.cuisineId)))
     );
 
-    const [branchRows, cuisineRows] = await Promise.all([
+    const activeRestaurantIds = Array.from(
+        new Set(
+            rows
+                .filter((row) => row.restaurant.operationStatus === "active")
+                .map((row) => row.restaurant.id)
+        )
+    );
+
+    const orderConditions = [inArray(orders.restaurantId, activeRestaurantIds)];
+    if (startDate) {
+        orderConditions.push(gte(orders.createdAt, new Date(startDate)));
+    }
+    if (endDate) {
+        const end = new Date(endDate);
+        if (!endDate.includes("T")) {
+            end.setHours(23, 59, 59, 999);
+        } else if (
+            end.getHours() === 0 &&
+            end.getMinutes() === 0 &&
+            end.getSeconds() === 0 &&
+            end.getMilliseconds() === 0
+        ) {
+            end.setHours(23, 59, 59, 999);
+        }
+        orderConditions.push(lte(orders.createdAt, end));
+    }
+
+    const [branchRows, cuisineRows, orderStatsRows] = await Promise.all([
         restaurantIds.length > 0
             ? db
                 .select({
@@ -214,6 +253,17 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
                 .from(cuisines)
                 .where(inArray(cuisines.id, cuisineIds))
             : Promise.resolve([]),
+        activeRestaurantIds.length > 0
+            ? db
+                .select({
+                    restaurantId: orders.restaurantId,
+                    totalOrders: count(orders.id),
+                    canceledOrders: sql<number>`COALESCE(SUM(CASE WHEN ${orders.status} = 'cancelled' THEN 1 ELSE 0 END), 0)`,
+                })
+                .from(orders)
+                .where(and(...orderConditions))
+                .groupBy(orders.restaurantId)
+            : Promise.resolve([]),
     ]);
 
     const branchMap = new Map<string, typeof branchRows>();
@@ -224,16 +274,37 @@ export const getRestaurantOperations = async (req: Request, res: Response) => {
     }
     const cuisineMap = new Map(cuisineRows.map((cuisine) => [cuisine.id, cuisine]));
 
+    const orderStatsMap = new Map<string, { totalOrders: number; canceledOrders: number }>();
+    for (const stat of orderStatsRows) {
+        orderStatsMap.set(stat.restaurantId, {
+            totalOrders: Number(stat.totalOrders || 0),
+            canceledOrders: Number(stat.canceledOrders || 0),
+        });
+    }
+
     return SuccessResponse(res, {
         data: rows.map(({ operation, restaurant, city, sales: salesRep }) => {
             const parsedCuisineIds = parseCuisineIds(restaurant.cuisineId);
             const { cuisineId: _, ...restRestaurant } = restaurant;
+
+            const isOperationActive = restaurant.operationStatus === "active";
+            const stats = isOperationActive
+                ? orderStatsMap.get(restaurant.id) ?? { totalOrders: 0, canceledOrders: 0 }
+                : null;
+
+            const orderMetrics = stats
+                ? {
+                    totalOrders: stats.totalOrders,
+                    canceledOrders: stats.canceledOrders,
+                }
+                : {};
 
             return {
                 ...operation,
                 notes: parseNotes(operation.notes, operation.createdAt),
                 restaurant: {
                     ...restRestaurant,
+                    ...orderMetrics,
                     city: city?.id ? city : null,
                     sales: salesRep?.id ? salesRep : null,
                     branches: (branchMap.get(restaurant.id) ?? []).map(

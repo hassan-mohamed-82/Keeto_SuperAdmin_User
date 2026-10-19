@@ -302,7 +302,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
         tags, taxNumber, taxExpireDate, taxCertificate, email, password, status,
         lat, lng, deliveryRadiusKm, businessPlans,
         type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor,
-        callcenterphone, paymentGatewayType, enableOnlinePayment, slug
+        callcenterphone, paymentGatewayType, enableOnlinePayment, slug, operationStatus
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -434,6 +434,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             cuisineId: parsedCuisines,
             zoneId: zoneId ? clean(zoneId) : null,
             cityId: cityId ? clean(cityId) : null,
+            operationStatus: operationStatus ? clean(operationStatus) : null,
 
             type: restaurantType, // 👈 حفظ نوع المطعم (Default C)
             salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
@@ -644,6 +645,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         cover: restaurants.cover,
         slug: restaurants.slug,
         status: restaurants.status,
+        operationStatus: restaurants.operationStatus,
         isBusy: restaurantSettings.isBusy,
         type: restaurants.type, // 👈 استرجاع النوع
         salesId: restaurants.salesId, // 👈 استرجاع المندوب
@@ -717,6 +719,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             cover: r.cover,
             slug: r.slug,
             status: r.status,
+            operationStatus: r.operationStatus,
             isBusy: Boolean(r.isBusy),
             busyStatus: r.isBusy ? "busy" : "available",
             type: r.type,
@@ -807,6 +810,7 @@ export const getRestaurantById = async (req: Request, res: Response) => {
     const formattedRestaurant = {
         ...row.restaurantObj,
         type: row.restaurantObj.type,
+        operationStatus: row.restaurantObj.operationStatus,
         ownerposition: row.restaurantObj.ownerposition,
         sales: row.salesObj ? { id: row.salesObj.id, name: row.salesObj.name } : null,
         email: row.ownerEmail || null,
@@ -847,7 +851,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
         type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId,
-        callcenterphone, paymentGatewayType, enableOnlinePayment, slug
+        callcenterphone, paymentGatewayType, enableOnlinePayment, slug , operationStatus
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -949,6 +953,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
     if (addressAr) restaurantUpdateData.addressAr = addressAr;
     if (addressFr) restaurantUpdateData.addressFr = addressFr;
     if (parsedCuisines !== undefined) restaurantUpdateData.cuisineId = parsedCuisines;
+    if (operationStatus !== undefined) restaurantUpdateData.operationStatus = operationStatus;
 
     if (lat !== undefined) restaurantUpdateData.lat = lat;
     if (lng !== undefined) restaurantUpdateData.lng = lng;

@@ -55,6 +55,8 @@ export const restaurants = mysqlTable("restaurants", {
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     deliverystatus: mysqlEnum("delivery_status", ["delivered", "not_delivered"]).default("not_delivered"),
 
+    operationStatus: mysqlEnum("operation_status", ["active", "inactive"]).default("inactive"),
+
     appBundleId: varchar("app_bundle_id", { length: 255 }).unique(),
     iosFirebaseProject: varchar("ios_firebase_project", { length: 50 }).notNull().default("primary"),
     androidFirebaseProject: varchar("android_firebase_project", { length: 50 }).notNull().default("primary"),
