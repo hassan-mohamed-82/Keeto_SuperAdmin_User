@@ -10,6 +10,6 @@ const router = Router();
 router.use(authenticated, requireShippingCompany());
 
 router.get("/summary", validate(reportsDateRangeSchema, "query"), getSummaryReport);
-router.get("/couriers", validate(reportsDateRangeSchema, "query"), getCourierPerformanceReport);
+router.get("/courier-performance", validate(reportsDateRangeSchema, "query"), getCourierPerformanceReport);
 
 export default router;

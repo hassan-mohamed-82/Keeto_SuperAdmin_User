@@ -15,6 +15,77 @@ const lastDbWriteTimeMap = new Map<string, number>();
 // Grace period timers upon disconnect (30s grace)
 const disconnectGraceTimers = new Map<string, NodeJS.Timeout>();
 
+// Performance Caches: Cache courier profile & active orders in memory to avoid hammering MySQL
+interface CourierMetaCache {
+    shippingCompanyId: string | null;
+    name: string | null;
+    phone: string | null;
+    cachedAt: number;
+}
+
+interface CourierOrdersCache {
+    orders: { id: string; orderNumber: string | null; shippingStatus: string | null }[];
+    cachedAt: number;
+}
+
+const courierMetaCache = new Map<string, CourierMetaCache>();
+const courierOrdersCache = new Map<string, CourierOrdersCache>();
+
+export const invalidateCourierCache = (deliveryManId: string) => {
+    courierOrdersCache.delete(deliveryManId);
+    courierMetaCache.delete(deliveryManId);
+};
+
+const getCourierMeta = async (deliveryManId: string): Promise<CourierMetaCache> => {
+    const cached = courierMetaCache.get(deliveryManId);
+    const now = Date.now();
+    if (cached && now - cached.cachedAt < 5 * 60 * 1000) {
+        return cached;
+    }
+    const [dm] = await db
+        .select({
+            shippingCompanyId: deliveryMen.shippingCompanyId,
+            name: deliveryMen.name,
+            phone: deliveryMen.phone,
+        })
+        .from(deliveryMen)
+        .where(eq(deliveryMen.id, deliveryManId))
+        .limit(1);
+
+    const meta: CourierMetaCache = {
+        shippingCompanyId: dm?.shippingCompanyId || null,
+        name: dm?.name || null,
+        phone: dm?.phone || null,
+        cachedAt: now,
+    };
+    courierMetaCache.set(deliveryManId, meta);
+    return meta;
+};
+
+const getCourierActiveOrders = async (deliveryManId: string) => {
+    const cached = courierOrdersCache.get(deliveryManId);
+    const now = Date.now();
+    if (cached && now - cached.cachedAt < 15 * 1000) {
+        return cached.orders;
+    }
+    const activeOrders = await db
+        .select({
+            id: orders.id,
+            orderNumber: orders.orderNumber,
+            shippingStatus: orders.shippingStatus,
+        })
+        .from(orders)
+        .where(
+            and(
+                eq(orders.deliveryManId, deliveryManId),
+                inArray(orders.shippingStatus, ["assigned", "picked_up"])
+            )
+        );
+
+    courierOrdersCache.set(deliveryManId, { orders: activeOrders, cachedAt: now });
+    return activeOrders;
+};
+
 export const initSocket = (httpServer: HttpServer): Server => {
     io = new Server(httpServer, {
         cors: {
@@ -81,19 +152,19 @@ export const initSocket = (httpServer: HttpServer): Server => {
         // Event: courier:online
         socket.on(SOCKET_EVENTS.COURIER_ONLINE, async () => {
             try {
+                if (disconnectGraceTimers.has(deliveryManId)) {
+                    clearTimeout(disconnectGraceTimers.get(deliveryManId)!);
+                    disconnectGraceTimers.delete(deliveryManId);
+                }
+
                 await db
                     .update(deliveryMen)
                     .set({ isOnline: true })
                     .where(eq(deliveryMen.id, deliveryManId));
 
-                const [dm] = await db
-                    .select({ shippingCompanyId: deliveryMen.shippingCompanyId })
-                    .from(deliveryMen)
-                    .where(eq(deliveryMen.id, deliveryManId))
-                    .limit(1);
-
-                if (dm?.shippingCompanyId) {
-                    notifyShippingCompany(dm.shippingCompanyId, "courier:status_changed", {
+                const meta = await getCourierMeta(deliveryManId);
+                if (meta.shippingCompanyId) {
+                    notifyShippingCompany(meta.shippingCompanyId, "courier:status_changed", {
                         deliveryManId,
                         isOnline: true,
                     });
@@ -103,7 +174,7 @@ export const initSocket = (httpServer: HttpServer): Server => {
             }
         });
 
-        // Event: courier:location
+        // Event: courier:location (Optimized with In-Memory Caching)
         socket.on(SOCKET_EVENTS.COURIER_LOCATION, async (payload: { lat: number; lng: number }) => {
             try {
                 const { lat, lng } = payload;
@@ -112,38 +183,18 @@ export const initSocket = (httpServer: HttpServer): Server => {
                 // 1. Update Redis GEO & alive key (TTL 60s)
                 await updateCourierRedisLocation(deliveryManId, lat, lng);
 
-                const [dm] = await db
-                    .select({
-                        shippingCompanyId: deliveryMen.shippingCompanyId,
-                        activeOrdersCount: deliveryMen.activeOrdersCount,
-                        name: deliveryMen.name,
-                        phone: deliveryMen.phone,
-                    })
-                    .from(deliveryMen)
-                    .where(eq(deliveryMen.id, deliveryManId))
-                    .limit(1);
-
-                // 2. Fetch courier active orders (both assigned and picked_up)
-                const activeOrders = await db
-                    .select({
-                        id: orders.id,
-                        orderNumber: orders.orderNumber,
-                        shippingStatus: orders.shippingStatus,
-                    })
-                    .from(orders)
-                    .where(
-                        and(
-                            eq(orders.deliveryManId, deliveryManId),
-                            inArray(orders.shippingStatus, ["assigned", "picked_up"])
-                        )
-                    );
+                // 2. Fetch cached profile and active orders (0-1 DB queries instead of 2 on every ping)
+                const [meta, activeOrders] = await Promise.all([
+                    getCourierMeta(deliveryManId),
+                    getCourierActiveOrders(deliveryManId),
+                ]);
 
                 // Broadcast to company dashboard live map (includes courier details & active orders)
-                if (dm?.shippingCompanyId) {
-                    notifyShippingCompany(dm.shippingCompanyId, SOCKET_EVENTS.DELIVERY_LOCATION_CHANGED, {
+                if (meta.shippingCompanyId) {
+                    notifyShippingCompany(meta.shippingCompanyId, SOCKET_EVENTS.DELIVERY_LOCATION_CHANGED, {
                         deliveryManId,
-                        deliveryManName: dm.name || null,
-                        deliveryManPhone: dm.phone || null,
+                        deliveryManName: meta.name || null,
+                        deliveryManPhone: meta.phone || null,
                         lat,
                         lng,
                         activeOrders: activeOrders.map((o) => ({
@@ -160,8 +211,8 @@ export const initSocket = (httpServer: HttpServer): Server => {
                     notifyOrderTracking(ord.id, SOCKET_EVENTS.ORDER_COURIER_LOCATION, {
                         orderId: ord.id,
                         deliveryManId,
-                        deliveryManName: dm?.name || null,
-                        deliveryManPhone: dm?.phone || null,
+                        deliveryManName: meta.name || null,
+                        deliveryManPhone: meta.phone || null,
                         lat,
                         lng,
                     });
@@ -195,34 +246,47 @@ export const initSocket = (httpServer: HttpServer): Server => {
                     return;
                 }
                 const result = await rejectOrderByCourier(orderId, deliveryManId, reason);
+                invalidateCourierCache(deliveryManId);
                 socket.emit("order:reject_ack", { success: true, orderId, result });
             } catch (err: any) {
                 socket.emit("error", { message: err.message });
             }
         });
 
-        // Event: courier:offline / disconnect with 30s grace period
+        // Event: courier:offline / disconnect with 30s grace period & multi-device check
         const handleOffline = () => {
+            // Cancel existing timer if any (prevents double callbacks / race condition)
+            if (disconnectGraceTimers.has(deliveryManId)) {
+                clearTimeout(disconnectGraceTimers.get(deliveryManId)!);
+                disconnectGraceTimers.delete(deliveryManId);
+            }
+
             const timer = setTimeout(async () => {
                 try {
+                    // Check if courier still has other active sockets (multi-device support)
+                    if (io) {
+                        const activeSockets = await io.in(`courier:${deliveryManId}`).fetchSockets();
+                        if (activeSockets.length > 0) {
+                            disconnectGraceTimers.delete(deliveryManId);
+                            return;
+                        }
+                    }
+
                     await removeCourierFromRedis(deliveryManId);
                     await db
                         .update(deliveryMen)
                         .set({ isOnline: false })
                         .where(eq(deliveryMen.id, deliveryManId));
 
-                    const [dm] = await db
-                        .select({ shippingCompanyId: deliveryMen.shippingCompanyId })
-                        .from(deliveryMen)
-                        .where(eq(deliveryMen.id, deliveryManId))
-                        .limit(1);
-
-                    if (dm?.shippingCompanyId) {
-                        notifyShippingCompany(dm.shippingCompanyId, "courier:status_changed", {
+                    const meta = await getCourierMeta(deliveryManId);
+                    if (meta.shippingCompanyId) {
+                        notifyShippingCompany(meta.shippingCompanyId, "courier:status_changed", {
                             deliveryManId,
                             isOnline: false,
                         });
                     }
+
+                    invalidateCourierCache(deliveryManId);
                     disconnectGraceTimers.delete(deliveryManId);
                 } catch (err) {
                     console.error("Error setting courier offline after grace period:", err);
