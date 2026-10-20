@@ -70,6 +70,7 @@ export const restaurantPaymentCredentials = mysqlTable("restaurant_payment_crede
 
     logoUrl: varchar("logo_url", { length: 500 }),
     isActive: boolean("is_active").default(true),
+    isDefault: boolean("is_default").default(false),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

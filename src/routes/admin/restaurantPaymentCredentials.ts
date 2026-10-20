@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import { catchAsync } from "../../utils/catchAsync";
 import { validate } from "../../middlewares/validation";
 import {
@@ -7,11 +7,13 @@ import {
     updateCredential,
     deleteCredential,
     toggleCredential,
+    setDefaultCredential,
 } from "../../controllers/admin/restaurantPaymentCredentials";
 import {
     createPaymentCredentialsSchema,
     updatePaymentCredentialsSchema,
     toggleCredentialSchema,
+    setDefaultCredentialSchema,
 } from "../../validation/admin/restaurantPaymentCredentials";
 import { hasPermission } from "../../middlewares";
 
@@ -48,6 +50,15 @@ router.put(
     hasPermission("restaurantPaymentCredentials", "Status"),
     validate(toggleCredentialSchema),
     catchAsync(toggleCredential)
+);
+
+// PUT /restaurant-payment-credentials/:restaurantId/:credentialId/default
+// Sets a single credential as the default for this restaurant.
+router.put(
+    "/:restaurantId/:credentialId/default",
+    hasPermission("restaurantPaymentCredentials", "Edit"),
+    validate(setDefaultCredentialSchema),
+    catchAsync(setDefaultCredential)
 );
 
 export default router;

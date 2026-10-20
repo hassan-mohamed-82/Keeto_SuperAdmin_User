@@ -1,4 +1,5 @@
 import { db } from "../models/connection";
+import { getDefaultPlatformGateway } from "../utils/getActivePlatformGateway";
 import {
     restaurantWallets,
     restaurantWalletTransactions,
@@ -8,6 +9,8 @@ import {
     paymentMethods,
     gatewaySwitchLog,
     notifications,
+    platformPaymentGateways,
+    restaurantPaymentCredentials,
 } from "../models/schema";
 import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
@@ -85,6 +88,17 @@ export async function applyGatewaySwitch(
     });
 
     if (toType === "SYSTEM") {
+        // Activate the default platform gateway when switching to SYSTEM
+        try {
+            const defaultGateway = await getDefaultPlatformGateway();
+            if (defaultGateway) {
+                await db.update(platformPaymentGateways).set({ isActive: false });
+                await db.update(platformPaymentGateways).set({ isActive: true }).where(eq(platformPaymentGateways.id, defaultGateway.id));
+            }
+        } catch (err) {
+            console.error("[applyGatewaySwitch] Failed to activate default platform gateway:", err);
+        }
+
         await executor.insert(notifications).values({
             id: uuidv4(),
             recipientType: "restaurant",
@@ -135,6 +149,22 @@ export async function checkAndApplyVisaSwitch(
         .limit(1);
 
     if (!settings) return;
+
+    // If currently on SYSTEM (due to visa switch) and the restaurant is now owed money (balance >= 0),
+    // automatically restore CUSTOM and activate the default payment gateway!
+    if (settings.paymentGatewayType === "SYSTEM" && settings.visaSwitchApplied === true) {
+        const [wallet] = await executor
+            .select({ balance: restaurantWallets.balance })
+            .from(restaurantWallets)
+            .where(eq(restaurantWallets.restaurantId, restaurantId))
+            .limit(1);
+        const currentBal = parseFloat(String(wallet?.balance ?? "0"));
+        if (currentBal >= 0) {
+            await restoreCustomGatewayOnDebtSettled(executor, restaurantId, currentBal);
+        }
+        return;
+    }
+
     if (settings.paymentGatewayType !== "CUSTOM") return;
     if (settings.visaSwitchApplied === true) return;
     if (!settings.visaSwitchConditionType || settings.visaSwitchConditionType === "none") return;
@@ -777,6 +807,62 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
     }
 }
 
+/**
+ * Automatically restores a restaurant's payment gateway to CUSTOM and activates
+ * their default payment gateway when the restaurant's debt is settled (balance >= 0).
+ */
+export async function restoreCustomGatewayOnDebtSettled(
+    tx: any,
+    restaurantId: string,
+    balance: number,
+    adminId?: string | null
+): Promise<boolean> {
+    const [settings] = await tx
+        .select({
+            paymentGatewayType: restaurantSettings.paymentGatewayType,
+            visaSwitchApplied: restaurantSettings.visaSwitchApplied,
+        })
+        .from(restaurantSettings)
+        .where(eq(restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+
+    if (!settings) return false;
+    if (settings.paymentGatewayType !== "SYSTEM") return false;
+
+    // Check if there are custom credentials for this restaurant
+    const allCreds = await tx
+        .select()
+        .from(restaurantPaymentCredentials)
+        .where(eq(restaurantPaymentCredentials.restaurantId, restaurantId));
+
+    if (allCreds.length === 0) return false;
+
+    // Identify default credential (fallback to active, then first)
+    const defaultCred = allCreds.find((c: any) => c.isDefault) || allCreds.find((c: any) => c.isActive) || allCreds[0];
+
+    // Activate default credential and deactivate all other credentials
+    await tx
+        .update(restaurantPaymentCredentials)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(restaurantPaymentCredentials.restaurantId, restaurantId));
+
+    await tx
+        .update(restaurantPaymentCredentials)
+        .set({ isActive: true, isDefault: true, updatedAt: new Date() })
+        .where(eq(restaurantPaymentCredentials.id, defaultCred.id));
+
+    // Switch settings back to CUSTOM
+    await applyGatewaySwitch(tx, {
+        restaurantId,
+        toType: "CUSTOM",
+        trigger: "manual",
+        balanceAtSwitch: balance,
+        adminId: adminId ?? null,
+    });
+
+    return true;
+}
+
 async function notifyDebtSettledToSuperadmin(
     tx: any,
     restaurantId: string,
@@ -793,6 +879,9 @@ async function notifyDebtSettledToSuperadmin(
         .limit(1);
 
     if (!shouldNotifyDebtSettled(previousBalance, nextBalance, settings)) return;
+
+    // Automatically switch back to CUSTOM and activate the default gateway
+    await restoreCustomGatewayOnDebtSettled(tx, restaurantId, nextBalance);
 
     await tx.insert(notifications).values({
         id: uuidv4(),

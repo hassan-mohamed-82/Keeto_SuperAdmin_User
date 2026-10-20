@@ -1,11 +1,12 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { restaurantPaymentCredentials, restaurants } from "../../models/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { encryptSecret } from "../../utils/encryption";
+import { SuccessResponse } from "../../utils/response";
 
 // Helper to sanitize credential secrets before sending in response
 const sanitizeCredentialRecord = (record: any) => {
@@ -36,6 +37,8 @@ const sanitizeCredentialRecord = (record: any) => {
     return {
         ...record,
         credentials: safeCreds,
+        isDefault: Boolean(record.isDefault),
+        default: Boolean(record.isDefault),
     };
 };
 
@@ -84,6 +87,39 @@ export const createCredentials = async (req: Request, res: Response): Promise<vo
     const newId = uuidv4();
     const formattedProvider = String(provider).toUpperCase() as "PAYMOB" | "KASHIER" | "GEIDEA";
 
+    // Resolve isDefault — accept both "isDefault", "default", and typo "defualt"
+    const isDefaultInput = req.body.isDefault !== undefined
+        ? req.body.isDefault
+        : req.body.default !== undefined
+        ? req.body.default
+        : req.body.defualt;
+
+    // If this is the first credential for this restaurant, it becomes default automatically
+    const [existingCount] = await db
+        .select({ id: restaurantPaymentCredentials.id })
+        .from(restaurantPaymentCredentials)
+        .where(eq(restaurantPaymentCredentials.restaurantId, restaurantId))
+        .limit(1);
+
+    const resolvedIsDefault = isDefaultInput !== undefined ? Boolean(isDefaultInput) : !existingCount;
+    const resolvedIsActive = isActive !== undefined ? Boolean(isActive) : true;
+
+    // Enforce SINGLE default per restaurant
+    if (resolvedIsDefault) {
+        await db
+            .update(restaurantPaymentCredentials)
+            .set({ isDefault: false })
+            .where(eq(restaurantPaymentCredentials.restaurantId, restaurantId));
+    }
+
+    // Enforce SINGLE active credential per restaurant
+    if (resolvedIsActive) {
+        await db
+            .update(restaurantPaymentCredentials)
+            .set({ isActive: false })
+            .where(eq(restaurantPaymentCredentials.restaurantId, restaurantId));
+    }
+
     await db.insert(restaurantPaymentCredentials).values({
         id: newId,
         restaurantId,
@@ -95,7 +131,8 @@ export const createCredentials = async (req: Request, res: Response): Promise<vo
         fixedValue: fixedValue !== undefined ? String(parseFloat(fixedValue || "0").toFixed(2)) : "0.00",
         tax: tax !== undefined ? String(parseFloat(tax || "0").toFixed(2)) : "0.00",
         logoUrl: logoUrl || null,
-        isActive: isActive !== undefined ? isActive : true,
+        isActive: resolvedIsActive,
+        isDefault: resolvedIsDefault,
     });
 
     const [created] = await db
@@ -167,7 +204,43 @@ export const updateCredential = async (req: Request, res: Response): Promise<voi
     if (fixedValue !== undefined) updatePayload.fixedValue = String(parseFloat(fixedValue || "0").toFixed(2));
     if (tax !== undefined) updatePayload.tax = String(parseFloat(tax || "0").toFixed(2));
     if (logoUrl !== undefined) updatePayload.logoUrl = logoUrl || null;
-    if (isActive !== undefined) updatePayload.isActive = isActive;
+
+    // Enforce SINGLE active credential per restaurant
+    if (isActive !== undefined) {
+        const isAct = Boolean(isActive);
+        if (isAct) {
+            await db
+                .update(restaurantPaymentCredentials)
+                .set({ isActive: false })
+                .where(
+                    and(
+                        eq(restaurantPaymentCredentials.restaurantId, restaurantId),
+                        ne(restaurantPaymentCredentials.id, credentialId)
+                    )
+                );
+        }
+        updatePayload.isActive = isAct;
+    }
+
+    // Handle isDefault — accept both "isDefault", "default", and typo "defualt"
+    const isDefaultInput = req.body.isDefault !== undefined
+        ? req.body.isDefault
+        : req.body.default !== undefined
+        ? req.body.default
+        : req.body.defualt;
+
+    if (isDefaultInput !== undefined) {
+        const isDefaultVal = Boolean(isDefaultInput);
+        if (isDefaultVal) {
+            // Only ONE credential per restaurant can be default at a time
+            await db
+                .update(restaurantPaymentCredentials)
+                .set({ isDefault: false })
+                .where(eq(restaurantPaymentCredentials.restaurantId, restaurantId));
+        }
+        updatePayload.isDefault = isDefaultVal;
+    }
+
     if (credentials !== undefined) {
         let rawCreds = credentials;
         if (typeof rawCreds === "string") {
@@ -241,7 +314,7 @@ export const deleteCredential = async (req: Request, res: Response): Promise<voi
     }
 
     const [existing] = await db
-        .select({ id: restaurantPaymentCredentials.id })
+        .select({ id: restaurantPaymentCredentials.id, isDefault: restaurantPaymentCredentials.isDefault })
         .from(restaurantPaymentCredentials)
         .where(
             and(
@@ -259,6 +332,26 @@ export const deleteCredential = async (req: Request, res: Response): Promise<voi
         .delete(restaurantPaymentCredentials)
         .where(eq(restaurantPaymentCredentials.id, credentialId));
 
+    // If the deleted credential was the default, assign default to the next active credential (if any)
+    if (existing.isDefault) {
+        const [nextActive] = await db
+            .select({ id: restaurantPaymentCredentials.id })
+            .from(restaurantPaymentCredentials)
+            .where(
+                and(
+                    eq(restaurantPaymentCredentials.restaurantId, restaurantId),
+                    eq(restaurantPaymentCredentials.isActive, true)
+                )
+            )
+            .limit(1);
+        if (nextActive) {
+            await db
+                .update(restaurantPaymentCredentials)
+                .set({ isDefault: true })
+                .where(eq(restaurantPaymentCredentials.id, nextActive.id));
+        }
+    }
+
     res.status(200).json({
         success: true,
         message: "Payment credentials deleted successfully",
@@ -267,6 +360,7 @@ export const deleteCredential = async (req: Request, res: Response): Promise<voi
 
 /**
  * 5. Toggle active status of credentials
+ *    Only ONE credential per restaurant can be active at a time.
  */
 export const toggleCredential = async (req: Request, res: Response): Promise<void> => {
     const { restaurantId, credentialId } = req.params;
@@ -278,6 +372,56 @@ export const toggleCredential = async (req: Request, res: Response): Promise<voi
 
     if (typeof isActive !== "boolean") {
         throw new BadRequest("isActive must be a boolean value");
+    }
+
+    const [existing] = await db
+        .select({ id: restaurantPaymentCredentials.id, isDefault: restaurantPaymentCredentials.isDefault })
+        .from(restaurantPaymentCredentials)
+        .where(
+            and(
+                eq(restaurantPaymentCredentials.id, credentialId),
+                eq(restaurantPaymentCredentials.restaurantId, restaurantId)
+            )
+        )
+        .limit(1);
+
+    if (!existing) {
+        throw new NotFound("Payment credentials record not found");
+    }
+
+    // If setting to active, deactivate all other credentials for this restaurant
+    if (isActive === true) {
+        await db
+            .update(restaurantPaymentCredentials)
+            .set({ isActive: false })
+            .where(
+                and(
+                    eq(restaurantPaymentCredentials.restaurantId, restaurantId),
+                    ne(restaurantPaymentCredentials.id, credentialId)
+                )
+            );
+    }
+
+    await db
+        .update(restaurantPaymentCredentials)
+        .set({ isActive })
+        .where(eq(restaurantPaymentCredentials.id, credentialId));
+
+    res.status(200).json({
+        success: true,
+        message: `Payment credentials ${isActive ? "activated" : "deactivated"} successfully`,
+    });
+};
+
+/**
+ * 6. Set a specific credential as the default for a restaurant
+ *    Only ONE credential per restaurant can be default at a time.
+ */
+export const setDefaultCredential = async (req: Request, res: Response): Promise<void> => {
+    const { restaurantId, credentialId } = req.params;
+
+    if (!restaurantId || !credentialId) {
+        throw new BadRequest("Restaurant ID and Credential ID are required");
     }
 
     const [existing] = await db
@@ -295,13 +439,26 @@ export const toggleCredential = async (req: Request, res: Response): Promise<voi
         throw new NotFound("Payment credentials record not found");
     }
 
+    // Remove default from all credentials for this restaurant
     await db
         .update(restaurantPaymentCredentials)
-        .set({ isActive })
+        .set({ isDefault: false })
+        .where(eq(restaurantPaymentCredentials.restaurantId, restaurantId));
+
+    // Set this one as default
+    await db
+        .update(restaurantPaymentCredentials)
+        .set({ isDefault: true })
         .where(eq(restaurantPaymentCredentials.id, credentialId));
 
-    res.status(200).json({
-        success: true,
-        message: `Payment credentials ${isActive ? "activated" : "deactivated"} successfully`,
+    const [updated] = await db
+        .select()
+        .from(restaurantPaymentCredentials)
+        .where(eq(restaurantPaymentCredentials.id, credentialId))
+        .limit(1);
+
+    SuccessResponse(res, {
+        message: "Payment credential set as default successfully. All other credentials for this restaurant have been unset as default.",
+        data: sanitizeCredentialRecord(updated),
     });
 };

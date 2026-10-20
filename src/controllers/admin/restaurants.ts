@@ -212,6 +212,7 @@ const sanitizePaymentCredentialRecord = (record: any) => {
     return {
         ...record,
         credentials: safeCreds,
+        isDefault: Boolean(record.isDefault),
     };
 };
 
@@ -443,7 +444,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
             logo: logoUrl || '',
             cover: coverUrl || '',
-            slug: finalSlug ,
+            slug: finalSlug,
             lat: lat || '',
             lng: lng || '',
             deliveryRadiusKm: deliveryRadiusKm ? clean(deliveryRadiusKm) : null,
@@ -563,6 +564,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
                     tax: credItem.tax !== undefined ? String(parseFloat(credItem.tax || "0").toFixed(2)) : "0.00",
                     logoUrl: credItem.logoUrl || null,
                     isActive: isActiveFlag,
+                    isDefault: (credItem.isDefault !== undefined ? Boolean(credItem.isDefault) : credItem.default !== undefined ? Boolean(credItem.default) : credItem.defualt !== undefined ? Boolean(credItem.defualt) : credentialsToReturn.length === 0),
                 };
                 await tx.insert(restaurantPaymentCredentials).values(newRecord);
                 credentialsToReturn.push(sanitizePaymentCredentialRecord(newRecord));
@@ -588,12 +590,12 @@ export const createRestaurant = async (req: Request, res: Response) => {
 
         // 6.CREATE RESTAURANT
         await tx.insert(restaurantOperations).values({
-            id:uuidv4(),
+            id: uuidv4(),
             restaurantId,
-            operationType:"callcenter",
-            status:"demo",
-            app:"on",
-            notes:[],
+            operationType: "callcenter",
+            status: "demo",
+            app: "on",
+            notes: [],
         })
 
 
@@ -851,7 +853,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
         taxNumber, taxExpireDate, taxCertificate,
         email, password, confirmPassword, status, deliveryRadiusKm,
         type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId,
-        callcenterphone, paymentGatewayType, enableOnlinePayment, slug , operationStatus
+        callcenterphone, paymentGatewayType, enableOnlinePayment, slug, operationStatus
     } = req.body;
 
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
@@ -1156,6 +1158,14 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                     if (credItem.tax !== undefined) updatePayload.tax = String(parseFloat(credItem.tax || "0").toFixed(2));
                     if (credItem.logoUrl !== undefined) updatePayload.logoUrl = credItem.logoUrl || null;
                     if (credItem.isActive !== undefined) updatePayload.isActive = Boolean(credItem.isActive);
+                    const isDefaultInputUpd = credItem.isDefault !== undefined ? credItem.isDefault : credItem.default !== undefined ? credItem.default : credItem.defualt;
+                    if (isDefaultInputUpd !== undefined) {
+                        const isDefaultValUpd = Boolean(isDefaultInputUpd);
+                        if (isDefaultValUpd) {
+                            await tx.update(restaurantPaymentCredentials).set({ isDefault: false }).where(eq(restaurantPaymentCredentials.restaurantId, id));
+                        }
+                        updatePayload.isDefault = isDefaultValUpd;
+                    }
 
                     await tx
                         .update(restaurantPaymentCredentials)
@@ -1178,6 +1188,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
                         tax: credItem.tax !== undefined ? String(parseFloat(credItem.tax || "0").toFixed(2)) : "0.00",
                         logoUrl: credItem.logoUrl || null,
                         isActive: credItem.isActive !== undefined ? Boolean(credItem.isActive) : true,
+                        isDefault: false,
                     });
 
                     savedRecordId = newId;

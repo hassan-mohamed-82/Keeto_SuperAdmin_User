@@ -41,6 +41,7 @@ export const createPaymentCredentialsSchema = z.object({
     tax: z.union([z.string(), z.number()]).optional(),
     logoUrl: z.string().url().optional().or(z.literal("")),
     isActive: z.boolean().optional().default(true),
+    isDefault: z.boolean().optional(),
 });
 
 export const updatePaymentCredentialsSchema = z.object({
@@ -53,6 +54,11 @@ export const updatePaymentCredentialsSchema = z.object({
     tax: z.union([z.string(), z.number()]).optional(),
     logoUrl: z.string().url().optional().or(z.literal("")),
     isActive: z.boolean().optional(),
+    isDefault: z.boolean().optional(),
+});
+
+export const setDefaultCredentialSchema = z.object({
+    // No body needed — credential and restaurant identified by params
 });
 
 export const toggleCredentialSchema = z.object({

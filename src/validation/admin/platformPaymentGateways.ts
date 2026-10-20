@@ -52,6 +52,7 @@ export const createPlatformGatewaySchema = z.object({
     credentials: credentialsSchema,
     logoUrl: z.string().url().optional().or(z.literal("")),
     isActive: z.boolean().optional().default(false),
+    isDefault: z.boolean().optional(),
 });
 
 export const updatePlatformGatewaySchema = z.object({
@@ -61,6 +62,11 @@ export const updatePlatformGatewaySchema = z.object({
     credentials: z.record(z.any()).optional(),
     logoUrl: z.string().url().optional().or(z.literal("")),
     isActive: z.boolean().optional(),
+    isDefault: z.boolean().optional(),
+});
+
+export const setDefaultPlatformGatewaySchema = z.object({
+    // No body needed — the gateway to set as default is identified by URL param
 });
 
 export const activatePlatformGatewaySchema = z.object({

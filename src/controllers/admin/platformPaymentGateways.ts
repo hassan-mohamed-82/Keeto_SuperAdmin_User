@@ -27,7 +27,11 @@ function sanitize(record: any) {
     for (const f of SENSITIVE_FIELDS) {
         if (safe[f]) safe[f] = "******";
     }
-    return { ...record, credentials: safe };
+    return {
+        ...record,
+        credentials: safe,
+        isDefault: Boolean(record.isDefault),
+    };
 }
 
 // ─────────────────────────────────────────────────────────
@@ -143,10 +147,20 @@ export const createPlatformGateway = async (req: Request, res: Response): Promis
     // If this gateway is being set as active, deactivate all others first
     if (isActive) {
         await db
-        .update(platformPaymentGateways)
-        .set({ isActive: false });
+            .update(platformPaymentGateways)
+            .set({ isActive: false });
     }
-    
+
+    const isDefaultInput = req.body.isDefault !== undefined ? req.body.isDefault : (req.body.default !== undefined ? req.body.default : req.body.defualt);
+    let resolvedIsDefault = isDefaultInput !== undefined ? Boolean(isDefaultInput) : false;
+    const existingGateways = await db.select({ id: platformPaymentGateways.id }).from(platformPaymentGateways).limit(1);
+    if (existingGateways.length === 0) {
+        resolvedIsDefault = true;
+    }
+    if (resolvedIsDefault) {
+        await db.update(platformPaymentGateways).set({ isDefault: false });
+    }
+
     const newId = uuidv4();
     await db.insert(platformPaymentGateways).values({
         id: newId,
@@ -156,6 +170,7 @@ export const createPlatformGateway = async (req: Request, res: Response): Promis
         credentials: encryptedCreds,
         logoUrl: logoUrl || null,
         isActive: isActive ?? false,
+        isDefault: resolvedIsDefault,
     });
 
     const [created] = await db
@@ -212,10 +227,18 @@ export const updatePlatformGateway = async (req: Request, res: Response): Promis
         if (isActive === true) {
             // Deactivate all other gateways before activating this one
             await db
-            .update(platformPaymentGateways)
-            .set({ isActive: false });
+                .update(platformPaymentGateways)
+                .set({ isActive: false });
         }
         updatePayload.isActive = isActive;
+    }
+    const isDefaultInput = req.body.isDefault !== undefined ? req.body.isDefault : (req.body.default !== undefined ? req.body.default : req.body.defualt);
+    if (isDefaultInput !== undefined) {
+        const isDefaultVal = Boolean(isDefaultInput);
+        if (isDefaultVal) {
+            await db.update(platformPaymentGateways).set({ isDefault: false });
+        }
+        updatePayload.isDefault = isDefaultVal;
     }
 
     if (Object.keys(updatePayload).length > 0) {
@@ -296,5 +319,41 @@ export const getActivePlatformGateway = async (_req: Request, res: Response): Pr
     SuccessResponse(res, {
         message: row ? "Active platform gateway fetched" : "No active platform gateway configured",
         data: row ? sanitize(row) : null,
+    });
+};
+
+// ═══════════════════════════════════════════════════════════
+// 8. PUT /admin/platform-gateways/:id/default
+//    Sets a gateway as the single default platform gateway.
+// ═══════════════════════════════════════════════════════════
+export const setDefaultPlatformGateway = async (req: Request, res: Response): Promise<void> => {
+    const { id } = req.params;
+
+    const [existing] = await db
+        .select({ id: platformPaymentGateways.id })
+        .from(platformPaymentGateways)
+        .where(eq(platformPaymentGateways.id, id))
+        .limit(1);
+
+    if (!existing) throw new NotFound("Platform gateway not found");
+
+    // Remove default from all gateways first
+    await db.update(platformPaymentGateways).set({ isDefault: false });
+
+    // Mark selected one as default
+    await db
+        .update(platformPaymentGateways)
+        .set({ isDefault: true })
+        .where(eq(platformPaymentGateways.id, id));
+
+    const [updated] = await db
+        .select()
+        .from(platformPaymentGateways)
+        .where(eq(platformPaymentGateways.id, id))
+        .limit(1);
+
+    SuccessResponse(res, {
+        message: "Platform gateway set as default successfully. All other platform gateways have been unset as default.",
+        data: sanitize(updated),
     });
 };

@@ -75,6 +75,7 @@ export const platformPaymentGateways = mysqlTable("platform_payment_gateways", {
 
     // Only ONE gateway can be active at a time (enforced at application level)
     isActive: boolean("is_active").default(false),
+    isDefault: boolean("is_default").default(false),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),

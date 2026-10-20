@@ -13,11 +13,13 @@ import {
     updatePlatformGateway,
     deletePlatformGateway,
     activatePlatformGateway,
+    setDefaultPlatformGateway,
     getActivePlatformGateway,
 } from "../../controllers/admin/platformPaymentGateways";
 import {
     createPlatformGatewaySchema,
     updatePlatformGatewaySchema,
+    setDefaultPlatformGatewaySchema,
 } from "../../validation/admin/platformPaymentGateways";
 
 const router = Router();
@@ -71,6 +73,14 @@ router.put(
     "/:id/activate",
     hasPermission("PlatformPaymentGateways", "Edit"),
     catchAsync(activatePlatformGateway)
+);
+
+// PUT /admin/platform-gateways/:id/default
+router.put(
+    "/:id/default",
+    hasPermission("PlatformPaymentGateways", "Edit"),
+    validate(setDefaultPlatformGatewaySchema),
+    catchAsync(setDefaultPlatformGateway)
 );
 
 export default router;

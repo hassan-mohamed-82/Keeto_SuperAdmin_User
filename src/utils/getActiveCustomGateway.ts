@@ -43,9 +43,11 @@ function ensureParsedCredentials(
 /**
  * Resolves the single active CUSTOM payment provider for a restaurant.
  *
- * Business rule: a restaurant on CUSTOM gateway must have exactly ONE active
- * provider — either their own Kashier account, Paymob account, or Geidea account,
- * never multiple at the same time.
+ * Strict business rule: A restaurant on CUSTOM gateway must have exactly ONE active
+ * credential row at a time. Never multiple at the same time.
+ *
+ * If no credential is explicitly active, it falls back to the restaurant's default
+ * credential (isDefault = true).
  */
 export async function getActiveCustomGateway(restaurantId: string): Promise<ActiveCustomGateway | null> {
     const activeCreds = await db
@@ -58,39 +60,41 @@ export async function getActiveCustomGateway(restaurantId: string): Promise<Acti
             )
         );
 
-    const kashierCreds = activeCreds.filter((c) => c.provider === "KASHIER");
-    const paymobCreds = activeCreds.filter((c) => c.provider === "PAYMOB");
-    const geideaCreds = activeCreds.filter((c) => c.provider === "GEIDEA");
-
-    const activeProviderCount = (kashierCreds.length > 0 ? 1 : 0) +
-        (paymobCreds.length > 0 ? 1 : 0) +
-        (geideaCreds.length > 0 ? 1 : 0);
-
-    if (activeProviderCount === 0) {
-        return null;
-    }
-
-    if (activeProviderCount > 1) {
+    // If more than one credential is active, reject immediately — exactly ONE can be active
+    if (activeCreds.length > 1) {
         throw new BadRequest(
-            `Restaurant ${restaurantId} has multiple active payment providers (Kashier/Paymob/Geidea) at the same time. ` +
-            `Only one custom payment provider may be active per restaurant — this needs to be fixed in restaurant payment settings.`
+            `Restaurant ${restaurantId} has multiple active payment credentials. ` +
+            `Only one payment credential may be active per restaurant at a time — this needs to be fixed in restaurant payment settings.`
         );
     }
 
-    if (kashierCreds.length > 1 || paymobCreds.length > 1 || geideaCreds.length > 1) {
-        throw new BadRequest(
-            `Restaurant ${restaurantId} has multiple active credential rows for the same provider. ` +
-            `Only one active row per provider is allowed — this needs to be fixed in restaurant payment settings.`
-        );
+    // Exactly one active credential found
+    if (activeCreds.length === 1) {
+        const row = activeCreds[0];
+        return {
+            provider: row.provider as "KASHIER" | "PAYMOB" | "GEIDEA",
+            record: ensureParsedCredentials(row),
+        };
     }
 
-    if (kashierCreds.length === 1) {
-        return { provider: "KASHIER", record: ensureParsedCredentials(kashierCreds[0]) };
+    // Fallback: If no credential is active, use the default credential (isDefault = true)
+    const [defaultCred] = await db
+        .select()
+        .from(restaurantPaymentCredentials)
+        .where(
+            and(
+                eq(restaurantPaymentCredentials.restaurantId, restaurantId),
+                eq(restaurantPaymentCredentials.isDefault, true)
+            )
+        )
+        .limit(1);
+
+    if (defaultCred) {
+        return {
+            provider: defaultCred.provider as "KASHIER" | "PAYMOB" | "GEIDEA",
+            record: ensureParsedCredentials(defaultCred),
+        };
     }
 
-    if (paymobCreds.length === 1) {
-        return { provider: "PAYMOB", record: ensureParsedCredentials(paymobCreds[0]) };
-    }
-
-    return { provider: "GEIDEA", record: ensureParsedCredentials(geideaCreds[0]) };
+    return null;
 }

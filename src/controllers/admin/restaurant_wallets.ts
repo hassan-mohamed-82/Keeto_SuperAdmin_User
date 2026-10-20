@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
-import { checkAndApplyVisaSwitch } from "../../services/restaurantWalletService";
+import { checkAndApplyVisaSwitch, restoreCustomGatewayOnDebtSettled } from "../../services/restaurantWalletService";
 
 /**
  * دالة مساعدة لجلب حركات المحفظة مربوطة ببيانات الأوردر (dailyOrderNumber, orderNumber, ...)
@@ -413,6 +413,10 @@ export const collectCashFromRestaurant = async (req: Request, res: Response) => 
             method: "cash",
             note: "Super admin collected cash (Debt settled)",
         });
+
+        if (currentBalance < 0 && newBalance >= 0) {
+            await restoreCustomGatewayOnDebtSettled(tx, restaurantId, newBalance, (req as any).user?.id || (req as any).admin?.id || null);
+        }
     });
 
     return SuccessResponse(res, { message: "Cash collected and balance settled successfully" });
