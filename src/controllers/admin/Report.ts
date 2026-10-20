@@ -1,8 +1,8 @@
 // controllers/admin/FinancialReportController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales, restaurant_users, users, zones, cities, cuisines } from "../../models/schema";
-import { eq, and, desc, gte, lte, inArray, count, sql } from "drizzle-orm";
+import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales, restaurant_users, users, zones, cities, cuisines, restaurantOperations } from "../../models/schema";
+import { eq, and, desc, gte, lte, inArray, count, sql, SQL } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import PDFDocument from "pdfkit";
@@ -806,7 +806,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
 
     const { startDate, endDate, type, restaurantId, cityId, restaurantsWithOrders, restaurantsWithoutOrders } = req.query;
 
-    const orderConditions = [];
+    const orderConditions: SQL[] = [];
     if (startDate) orderConditions.push(gte(orders.createdAt, new Date(startDate as string)));
     if (endDate) {
         const end = new Date(endDate as string);
@@ -817,7 +817,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     const restConditions = [eq(restaurants.status, "active")];
     if (cityId) restConditions.push(eq(restaurants.cityId, cityId as string));
 
-    // 1. Fetch all restaurants
+    // 1. Fetch all active restaurants with their operation status
     const allRestaurantsRaw = await db
         .select({
             restaurant: restaurants,
@@ -828,17 +828,19 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
                 nameAr: cities.nameAr,
                 nameFr: cities.nameFr,
             },
+            operationStatus: restaurantOperations.status,
         })
         .from(restaurants)
         .leftJoin(sales, eq(restaurants.salesId, sales.id))
         .leftJoin(cities, eq(restaurants.cityId, cities.id))
+        .leftJoin(restaurantOperations, eq(restaurantOperations.restaurantId, restaurants.id))
         .where(and(...restConditions));
 
     const allCuisines = await db.select().from(cuisines);
     const cuisineMap = new Map();
     allCuisines.forEach(c => cuisineMap.set(c.id, c));
 
-    const allRestaurants = allRestaurantsRaw.map(r => {
+    const allRestaurantsMapped = allRestaurantsRaw.map(r => {
         let cuisinesData = [];
         try {
             const cuisineIds = typeof r.restaurant.cuisineId === "string"
@@ -861,8 +863,19 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
                 nameAr: r.city.nameAr,
                 nameFr: r.city.nameFr,
             } : null,
+            operationStatus: r.operationStatus ?? null,
         };
     });
+
+    // Separate test/demo restaurants from real restaurants
+    // "test"  → restaurants.type === "test"
+    // "demo"  → restaurantOperations.status === "demo"
+    const testOrDemoRestaurants = allRestaurantsMapped.filter(
+        (r) => r.type === "test" || r.operationStatus === "demo"
+    );
+    const allRestaurants = allRestaurantsMapped.filter(
+        (r) => r.type !== "test" && r.operationStatus !== "demo"
+    );
 
     let totalRestaurants = allRestaurants.length;
     let restaurantsByType: Record<string, number> = {
@@ -872,7 +885,6 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         "B": 0,
         "C": 0,
         "C-": 0,
-        "test": 0
     };
 
     allRestaurants.forEach((r) => {
@@ -884,76 +896,94 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         }
     });
 
-    // 2. Fetch orders within date range — only for active restaurants
+    // Helper to compute order stats for a given list of restaurant ids
+    const computeOrderStats = async (restaurantIds: string[]) => {
+        if (restaurantIds.length === 0) return [];
+        const conditions = [...orderConditions, inArray(orders.restaurantId, restaurantIds)];
+        return db
+            .select({
+                orderId: orders.id,
+                restaurantId: orders.restaurantId,
+                restaurantName: restaurants.name,
+                appCommission: orders.appCommission,
+                status: orders.status,
+                cancelReasonType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
+            })
+            .from(orders)
+            .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+            .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
+            .where(and(...conditions));
+    };
+
+    // 2. Fetch orders for real restaurants
     const activeRestaurantIds = allRestaurants.map((r) => r.id);
+    const ordersData = activeRestaurantIds.length > 0
+        ? await computeOrderStats(activeRestaurantIds)
+        : [];
 
-    const allOrderConditions = [...orderConditions];
-    if (activeRestaurantIds.length > 0) {
-        allOrderConditions.push(inArray(orders.restaurantId, activeRestaurantIds));
-    }
+    // 3. Fetch orders for test/demo restaurants
+    const testDemoIds = testOrDemoRestaurants.map((r) => r.id);
+    const demoOrdersData = testDemoIds.length > 0
+        ? await computeOrderStats(testDemoIds)
+        : [];
 
-    const ordersData = await db
-        .select({
-            orderId: orders.id,
-            restaurantId: orders.restaurantId,
-            restaurantName: restaurants.name,
-            appCommission: orders.appCommission,
-            status: orders.status,
-            cancelReasonType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
-        })
-        .from(orders)
-        .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
-        .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
-        .where(allOrderConditions.length > 0 ? and(...allOrderConditions) : undefined);
+    // ─── Aggregate helper ────────────────────────────────────────────────────
+    const aggregateOrders = (data: typeof ordersData) => {
+        let totalOrders = data.length;
+        let total_commission = 0;
+        let totalValidOrders = 0;
+        let totalCanceledOrders = 0;
+        let totalCanceledByUser = 0;
+        let totalCanceledByRestaurant = 0;
+        const statsByRestaurant: Record<string, { count: number, commission: number, validCount: number, canceledCount: number, canceledByUser: number, canceledByRestaurant: number }> = {};
 
-    let totalOrders = ordersData.length;
-    let total_commission = 0;
-    let totalValidOrders = 0;
-    let totalCanceledOrders = 0;
-    let totalCanceledByUser = 0;
-    let totalCanceledByRestaurant = 0;
+        data.forEach((o) => {
+            const comm = parseFloat(o.appCommission as any) || 0;
+            const isCanceled = o.status === "cancelled";
+            const isCanceledByRestaurant = isCanceled && o.cancelReasonType === "restaurant";
 
-    // Group orders by restaurantId
-    const ordersStatsByRestaurant: Record<string, { count: number, commission: number, validCount: number, canceledCount: number, canceledByUser: number, canceledByRestaurant: number }> = {};
-    ordersData.forEach((o) => {
-        const comm = parseFloat(o.appCommission as any) || 0;
-        const isCanceled = o.status === "cancelled";
-        const isCanceledByRestaurant = isCanceled && o.cancelReasonType === "restaurant";
-
-        // Add commission if valid, or if canceled by restaurant
-        if (!isCanceled || isCanceledByRestaurant) {
-            total_commission += comm;
-        }
-
-        if (isCanceled) {
-            totalCanceledOrders += 1;
-            if (o.cancelReasonType === "user") totalCanceledByUser += 1;
-            else if (o.cancelReasonType === "restaurant") totalCanceledByRestaurant += 1;
-        } else {
-            totalValidOrders += 1;
-        }
-
-        if (o.restaurantId) {
-            if (!ordersStatsByRestaurant[o.restaurantId]) {
-                ordersStatsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
-            }
-            ordersStatsByRestaurant[o.restaurantId].count += 1;
-
-            if (!isCanceled || isCanceledByRestaurant) {
-                ordersStatsByRestaurant[o.restaurantId].commission += comm;
-            }
+            if (!isCanceled || isCanceledByRestaurant) total_commission += comm;
 
             if (isCanceled) {
-                ordersStatsByRestaurant[o.restaurantId].canceledCount += 1;
-                if (o.cancelReasonType === "user") ordersStatsByRestaurant[o.restaurantId].canceledByUser += 1;
-                else if (o.cancelReasonType === "restaurant") ordersStatsByRestaurant[o.restaurantId].canceledByRestaurant += 1;
+                totalCanceledOrders += 1;
+                if (o.cancelReasonType === "user") totalCanceledByUser += 1;
+                else if (o.cancelReasonType === "restaurant") totalCanceledByRestaurant += 1;
             } else {
-                ordersStatsByRestaurant[o.restaurantId].validCount += 1;
+                totalValidOrders += 1;
             }
-        }
-    });
 
-    // 3. Filter restaurants based on 'type' and/or 'restaurantId' if provided
+            if (o.restaurantId) {
+                if (!statsByRestaurant[o.restaurantId]) {
+                    statsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
+                }
+                statsByRestaurant[o.restaurantId].count += 1;
+                if (!isCanceled || isCanceledByRestaurant) statsByRestaurant[o.restaurantId].commission += comm;
+                if (isCanceled) {
+                    statsByRestaurant[o.restaurantId].canceledCount += 1;
+                    if (o.cancelReasonType === "user") statsByRestaurant[o.restaurantId].canceledByUser += 1;
+                    else if (o.cancelReasonType === "restaurant") statsByRestaurant[o.restaurantId].canceledByRestaurant += 1;
+                } else {
+                    statsByRestaurant[o.restaurantId].validCount += 1;
+                }
+            }
+        });
+
+        return { totalOrders, total_commission, totalValidOrders, totalCanceledOrders, totalCanceledByUser, totalCanceledByRestaurant, statsByRestaurant };
+    };
+
+    const {
+        totalOrders,
+        total_commission,
+        totalValidOrders,
+        totalCanceledOrders,
+        totalCanceledByUser,
+        totalCanceledByRestaurant,
+        statsByRestaurant: ordersStatsByRestaurant,
+    } = aggregateOrders(ordersData);
+
+    const demoAgg = aggregateOrders(demoOrdersData);
+
+    // 4. Filter restaurants based on 'type' and/or 'restaurantId' if provided
     let filteredRestaurants = allRestaurants;
     if (type) {
         filteredRestaurants = filteredRestaurants.filter((r) => (r.type || "Unknown") === type);
@@ -962,7 +992,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         filteredRestaurants = filteredRestaurants.filter((r) => r.id === (restaurantId as string));
     }
 
-    // 4. Build with/without orders lists from the full active list (including canceled orders)
+    // 5. Build with/without orders lists from real restaurants only
     const withOrdersList = allRestaurants.filter((r) => {
         const stats = ordersStatsByRestaurant[r.id];
         return stats && stats.count > 0;
@@ -973,12 +1003,10 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
     });
 
     // ─── Signup Users ────────────────────────────────────────────────────────
-    // 1. Total number of users who signed up
     const [{ totalSignupUsers }] = await db
         .select({ totalSignupUsers: count(users.id) })
         .from(users);
 
-    // 2. Number of signup users per restaurant
     const signupPerRestaurantRaw = await db
         .select({
             restaurantId: restaurant_users.restaurantId,
@@ -987,19 +1015,16 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         .from(restaurant_users)
         .groupBy(restaurant_users.restaurantId);
 
-    // Build a quick lookup map: restaurantId -> signupCount
     const signupByRestaurantMap: Record<string, number> = {};
     for (const row of signupPerRestaurantRaw) {
         signupByRestaurantMap[row.restaurantId] = Number(row.signupCount);
     }
 
-    // 5. Map full filtered restaurants to detailed result
+    // 6. Map filtered restaurants to detailed result
     const restaurantDetails = filteredRestaurants.map((r) => {
         const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
-        // If a specific restaurantId is requested, return full restaurant details; otherwise return slim info
-        const restaurantInfo = r
         return {
-            restaurantDetails: restaurantInfo,
+            restaurantDetails: r,
             ordersCount: stats.count,
             validOrders: stats.validCount,
             canceledOrders: stats.canceledCount,
@@ -1014,7 +1039,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         };
     });
 
-    // 6. Decide which list to return in 'restaurants' key
+    // 7. Decide which list to return in 'restaurants' key
     let restaurantsResult: any[];
     if (restaurantsWithOrders === "true") {
         restaurantsResult = withOrdersList.map((r) => ({
@@ -1039,10 +1064,10 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
         }));
     } else {
-        restaurantsResult = restaurantDetails; // already has signupUsersCount
+        restaurantsResult = restaurantDetails;
     }
 
-    // Build flat list of all canceled orders with restaurant name and cancel type
+    // Build flat list of canceled orders with restaurant name and cancel type (real restaurants only)
     const canceledOrdersList = ordersData
         .filter((o) => o.status === "cancelled")
         .map((o) => ({
@@ -1051,6 +1076,38 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             restaurantName: o.restaurantName || "Unknown",
             cancelType: o.cancelReasonType || null,
         }));
+
+    // ─── Percentages ─────────────────────────────────────────────────────────
+    // % عدد الاوردرات بالنسبة لعدد المطاعم (avg orders per restaurant)
+    const ordersPerRestaurantPercent = totalRestaurants > 0
+        ? parseFloat(((totalOrders / totalRestaurants) * 100).toFixed(2))
+        : 0;
+
+    // % الاوردرات المكانسلة من إجمالي الاوردرات
+    const canceledOrdersPercent = totalOrders > 0
+        ? parseFloat(((totalCanceledOrders / totalOrders) * 100).toFixed(2))
+        : 0;
+
+    // % المطاعم الميسينج (بدون اوردرات) من إجمالي المطاعم
+    const missingRestaurantsPercent = totalRestaurants > 0
+        ? parseFloat(((withoutOrdersList.length / totalRestaurants) * 100).toFixed(2))
+        : 0;
+
+    // ─── Demo summary ─────────────────────────────────────────────────────────
+    const demoRestaurantsList = testOrDemoRestaurants.map((r) => ({
+        id: r.id,
+        name: r.name,
+        nameAr: r.nameAr,
+        nameFr: r.nameFr,
+        type: r.type,
+        operationStatus: r.operationStatus,
+        city: r.city || null,
+        ordersCount: demoAgg.statsByRestaurant[r.id]?.count ?? 0,
+        validOrders: demoAgg.statsByRestaurant[r.id]?.validCount ?? 0,
+        canceledOrders: demoAgg.statsByRestaurant[r.id]?.canceledCount ?? 0,
+        total_commission: demoAgg.statsByRestaurant[r.id]?.commission ?? 0,
+        signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
+    }));
 
     const responseData: any = {
         summary: {
@@ -1067,9 +1124,27 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
             total_commission,
             restaurantsByType,
             totalSignupUsers,
+            // ─ Percentages
+            percentages: {
+                // نسبة عدد الأوردرات لعدد المطاعم (كام أوردر لكل مطعم × 100)
+                ordersPerRestaurantPercent,
+                // نسبة الكانسل من إجمالي الأوردرات
+                canceledOrdersPercent,
+                // نسبة المطاعم الميسينج (بدون أوردرات) من إجمالي المطاعم
+                missingRestaurantsPercent,
+            },
         },
         restaurants: restaurantsResult,
         canceledOrders: canceledOrdersList,
+        // ─ Demo / Test summary (مستبعدة من الحسابات الرئيسية)
+        demoSummary: {
+            totalTestDemoRestaurants: testOrDemoRestaurants.length,
+            totalOrders: demoAgg.totalOrders,
+            validOrders: demoAgg.totalValidOrders,
+            canceledOrders: demoAgg.totalCanceledOrders,
+            total_commission: demoAgg.total_commission,
+            restaurants: demoRestaurantsList,
+        },
     };
 
     return SuccessResponse(res, {
