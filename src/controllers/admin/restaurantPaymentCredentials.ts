@@ -1,12 +1,13 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { restaurantPaymentCredentials, restaurants } from "../../models/schema";
+import { restaurantPaymentCredentials, restaurantSettings, restaurantWallets, restaurants } from "../../models/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { encryptSecret } from "../../utils/encryption";
 import { SuccessResponse } from "../../utils/response";
+import { restoreCustomGatewayOnDebtSettled } from "../../services/restaurantWalletService";
 
 // Helper to sanitize credential secrets before sending in response
 const sanitizeCredentialRecord = (record: any) => {
@@ -140,6 +141,44 @@ export const createCredentials = async (req: Request, res: Response): Promise<vo
         .from(restaurantPaymentCredentials)
         .where(eq(restaurantPaymentCredentials.id, newId))
         .limit(1);
+
+    // 👈 لو هذي أول credentials للمطعم (مفيش كانت عنده credentials قبل)
+    // والمطعم حالياً على SYSTEM بدون visa switch سبق تطبيقه
+    // ورصيده إيجابي (>= 0) → حوله لـ CUSTOM تلقائياً
+    if (!existingCount) {
+        try {
+            const [currentSettings] = await db
+                .select({
+                    paymentGatewayType: restaurantSettings.paymentGatewayType,
+                    visaSwitchApplied: restaurantSettings.visaSwitchApplied,
+                    visaSwitchConditionType: restaurantSettings.visaSwitchConditionType,
+                })
+                .from(restaurantSettings)
+                .where(eq(restaurantSettings.restaurantId, restaurantId))
+                .limit(1);
+
+            const isOnSystemWithNoSwitch =
+                currentSettings?.paymentGatewayType === "SYSTEM" &&
+                currentSettings?.visaSwitchApplied !== true;
+
+            if (isOnSystemWithNoSwitch) {
+                const [wallet] = await db
+                    .select({ balance: restaurantWallets.balance })
+                    .from(restaurantWallets)
+                    .where(eq(restaurantWallets.restaurantId, restaurantId))
+                    .limit(1);
+
+                const currentBalance = parseFloat(String(wallet?.balance ?? "0"));
+
+                // لو الرصيد إيجابي → المطعم مش مديون للمنصة، حوله لـ CUSTOM
+                if (currentBalance >= 0) {
+                    await restoreCustomGatewayOnDebtSettled(db, restaurantId, currentBalance);
+                }
+            }
+        } catch (err) {
+            console.error("[createCredentials] Failed to auto-switch to CUSTOM:", err);
+        }
+    }
 
     res.status(201).json({
         success: true,

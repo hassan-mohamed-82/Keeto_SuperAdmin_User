@@ -348,12 +348,6 @@ export const createRestaurant = async (req: Request, res: Response) => {
     const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
     const parsedPaymentCredentials: any[] = parsePaymentCredentialsInput(paymentCredsRaw);
 
-    // 👈 نوع بوابة الدفع (SYSTEM = حساب المنصة، CUSTOM = حساب خاص بالمطعم)
-    const resolvedPaymentGatewayType: "SYSTEM" | "CUSTOM" =
-        paymentGatewayType && String(paymentGatewayType).trim().toUpperCase() === "CUSTOM"
-            ? "CUSTOM"
-            : "SYSTEM";
-
     // 👈 تفعيل/تعطيل الدفع أونلاين (افتراضي: مفعّل)
     const resolvedEnableOnlinePayment =
         enableOnlinePayment === true || enableOnlinePayment === "true" || enableOnlinePayment === undefined
@@ -398,6 +392,17 @@ export const createRestaurant = async (req: Request, res: Response) => {
             throw new BadRequest("visaSwitchDayOfMonth is required and must be between 1 and 31 when visaSwitchConditionType is 'day_of_month'");
         }
     }
+
+    // 👈 نوع بوابة الدفع:
+    // - لو أرسل CUSTOM صراحةً → CUSTOM
+    // - لو عنده credentials وشرط switch محدد → يبدأ بـ CUSTOM تلقائياً (المطعم الجديد رصيده 0 ≥ 0)
+    // - غير ذلك → SYSTEM
+    const resolvedPaymentGatewayType: "SYSTEM" | "CUSTOM" =
+        paymentGatewayType && String(paymentGatewayType).trim().toUpperCase() === "CUSTOM"
+            ? "CUSTOM"
+            : parsedPaymentCredentials.length > 0 && resolvedVisaSwitchType !== "none"
+            ? "CUSTOM"
+            : "SYSTEM";
 
     // 👈 لو النوع CUSTOM لازم يبعت بيانات بوابة دفع واحدة على الأقل
     if (resolvedPaymentGatewayType === "CUSTOM" && parsedPaymentCredentials.length === 0) {
@@ -537,6 +542,9 @@ export const createRestaurant = async (req: Request, res: Response) => {
             visaSwitchDayOfMonth: resolvedVisaSwitchType === "day_of_month"
                 ? parseInt(String(visaSwitchDayOfMonth), 10)
                 : null,
+            // 👈 visaSwitchApplied = false دائماً عند الإنشاء:
+            // لو بدأ بـ CUSTOM → هو الحالة الطبيعية، السويتش لـ SYSTEM لم يُطبَّق بعد
+            // لو بدأ بـ SYSTEM  → مفيش سويتش حصل أصلاً
             visaSwitchApplied: false,
         });
 
