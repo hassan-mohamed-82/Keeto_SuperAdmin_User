@@ -20,9 +20,8 @@ export type FirstOrderDiscountResult = {
  * Eligibility rules (all must pass):
  *  1. discount.status === 'active'
  *  2. within startDate / endDate window
- *  3. global usage (usedCount < maxUsage) not exceeded
- *  4. user's per-usage (usages for this discount < maxUsagePerUser)
- *  5. user's total COMPLETED orders at this restaurant < firstOrderCount
+ *  3. global usage (usedCount < maxUsage) not exceeded (if maxUsage is set)
+ *  4. user's total active/completed orders at this restaurant < firstOrderCount (أول N طلبات للعميل في هذا المطعم)
  *
  * If multiple discounts qualify, we return the one giving the MAXIMUM discount.
  *
@@ -67,48 +66,18 @@ export const resolveFirstOrderDiscount = async (
         );
     const userOrderCount = Number(orderCountRow?.cnt ?? 0);
 
-    // 3. Fetch per-discount usage counts for this user (in one batch)
-    const discountIds = candidates.map(d => d.id);
-
-    const userUsages = discountIds.length > 0
-        ? await db
-            .select({
-                firstOrderDiscountId: firstOrderDiscountUsages.firstOrderDiscountId,
-                usageCount: count(firstOrderDiscountUsages.id),
-            })
-            .from(firstOrderDiscountUsages)
-            .where(
-                and(
-                    eq(firstOrderDiscountUsages.userId, userId),
-                    sql`${firstOrderDiscountUsages.firstOrderDiscountId} IN (${sql.join(
-                        discountIds.map(id => sql`${id}`),
-                        sql`, `
-                    )})`
-                )
-            )
-            .groupBy(firstOrderDiscountUsages.firstOrderDiscountId)
-        : [];
-
-    const userUsageMap = new Map<string, number>(
-        userUsages.map(u => [u.firstOrderDiscountId, Number(u.usageCount)])
-    );
-
-    // 4. Filter to eligible discounts and calculate each discount amount
+    // 3. Filter to eligible discounts and calculate each discount amount
     let bestResult: FirstOrderDiscountResult | null = null;
 
     for (const discount of candidates) {
-        // a) Global usage limit
+        // a) Global campaign usage limit (if set by restaurant)
         if (discount.maxUsage !== null && (discount.usedCount ?? 0) >= discount.maxUsage) continue;
 
-        // b) Per-user usage limit
-        const userUsed = userUsageMap.get(discount.id) ?? 0;
-        if (userUsed >= discount.maxUsagePerUser) continue;
-
-        // c) User's order count must be < firstOrderCount
-        //    (i.e. this is one of their first N orders, NOT already placed)
+        // b) User qualifies as long as their completed/active orders at this restaurant < firstOrderCount
+        // (i.e. this is one of their first N orders at this specific restaurant)
         if (userOrderCount >= discount.firstOrderCount) continue;
 
-        // d) Compute discount amount
+        // c) Compute discount amount
         const value = Math.max(0, Number(discount.discountValue ?? 0));
         let discountAmount = 0;
 
