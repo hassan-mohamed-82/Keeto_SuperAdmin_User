@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { cuisines, categories, restaurants, food, favorites, foodVariations, variationOptions, addons, adonescategory, subcategories, branchSubcategories, branches, restaurantSettings } from "../../models/schema";
 import { eq, and, like, or, sql, isNull, isNotNull, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, UnauthorizedError } from "../../Errors";
 import { getAvailableDiscounts, applyPriorityDiscount } from "../../utils/discount";
@@ -482,6 +483,9 @@ export const getUserFavorites = async (req: Request, res: Response) => {
     const userId = req.user.id;
     const restaurantId = req.query.restaurantId as string | undefined;
 
+    // Alias to get the restaurant that OWNS the favorited food
+    const foodRestaurant = alias(restaurants, "foodRestaurant");
+
     const conditions: any[] = [eq(favorites.userId, userId)];
 
     if (restaurantId) {
@@ -505,7 +509,9 @@ export const getUserFavorites = async (req: Request, res: Response) => {
         },
         food: {
             id: food.id,
-            restaurantId: food.restaurantid, // Added restaurantId to food object
+            restaurantId: food.restaurantid,
+            restaurantName: foodRestaurant.name,
+            restaurantNameAr: foodRestaurant.nameAr,
             name: food.name,
             nameAr: food.nameAr,
             nameFr: food.nameFr,
@@ -519,6 +525,7 @@ export const getUserFavorites = async (req: Request, res: Response) => {
         .from(favorites)
         .leftJoin(restaurants, eq(favorites.restaurantId, restaurants.id))
         .leftJoin(food, and(eq(favorites.foodId, food.id), activeFoodCondition))
+        .leftJoin(foodRestaurant, eq(food.restaurantid, foodRestaurant.id))
         .where(and(...conditions));
 
     // Get unique restaurant IDs from both restaurant favorites and favorited foods
