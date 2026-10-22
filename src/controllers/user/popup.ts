@@ -75,10 +75,19 @@ async function resolveLinkData(
     return null;
 }
 
+const VALID_SOURCES = ["web", "home_web", "home_app", "mykeeto_app"] as const;
+type PopupSource = typeof VALID_SOURCES[number];
+
 // ─── Get All Active Popups (filtered by date and status) ───
 export const getActivePopups = async (req: Request, res: Response) => {
     const now = new Date();
     const { restaurantId } = req.params;
+
+
+    const rawSource = req.query.source as string;
+    const source = VALID_SOURCES.includes(rawSource as PopupSource)
+        ? (rawSource as PopupSource)
+        : null;
 
     const activePopups = await db
         .select({
@@ -107,7 +116,8 @@ export const getActivePopups = async (req: Request, res: Response) => {
                 eq(popup.status, "active"),
                 lte(popup.startDate, now),
                 gte(popup.endDate, now),
-                eq(popup.restaurantId, restaurantId)
+                eq(popup.restaurantId, restaurantId),
+                ...(source ? [eq(popup.type, source)] : [])
             )
         );
 
@@ -148,6 +158,11 @@ export const getActivePopups = async (req: Request, res: Response) => {
 export const getPopupById = async (req: Request, res: Response) => {
     const { restaurantId, id } = req.params;
 
+    const rawSource = req.query.source as string;
+    const source = VALID_SOURCES.includes(rawSource as PopupSource)
+        ? (rawSource as PopupSource)
+        : null;
+
     const rows = await db
         .select({
             id: popup.id,
@@ -174,7 +189,8 @@ export const getPopupById = async (req: Request, res: Response) => {
             and(
                 eq(popup.id, id),
                 eq(popup.status, "active"),
-                eq(popup.restaurantId, restaurantId)
+                eq(popup.restaurantId, restaurantId),
+                ...(source ? [eq(popup.type, source)] : [])
             )
         )
         .limit(1);
