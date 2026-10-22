@@ -789,76 +789,88 @@ export const getCart = async (req: Request | any, res: Response) => {
         const { item, parsedVariations, parsedAddons } = data;
         const originalBasePrice = parseFloat(item.price as string || "0");
         const dbUnitPrice = parseFloat(item.unitPrice as string || "0");
-        const varPrice = dbUnitPrice - originalBasePrice;
+        const fallbackVarPrice = Math.max(0, dbUnitPrice - originalBasePrice);
 
-        const effectiveBranchId = targetBranchId || item.storedBranchId || undefined;
+        // Resolve branch to use for pricing:
+        // 1. targetBranchId (from query branchId or addressId)
+        // 2. storedBranchId (from when item was added to cart)
+        // 3. If restaurant has only 1 active branch, use it
+        let effectiveBranchId = targetBranchId || item.storedBranchId || undefined;
+        if (!effectiveBranchId && activeRestaurantBranches.length === 1) {
+            effectiveBranchId = activeRestaurantBranches[0].id;
+        }
+
         const effectiveServiceModule = (serviceModule || item.storedServiceModule) as ServiceModule | undefined;
 
         let liveUnitPrice: number | null = null;
+        let resolvedBasePrice = originalBasePrice;
+        let resolvedVarPrice = fallbackVarPrice;
         let priceChanged = false;
         let channelAvailable = true;
         const branchPrices: Array<{ branchId: string; branchName: string; branchNameAr: string; unitPrice: number }> = [];
 
-        // 1️⃣ حالة تحديد فرع محدد (Direct Branch Pricing)
-        if (effectiveBranchId && item.foodId) {
+        if (item.foodId) {
+            const optionIds = extractOptionIds(parsedVariations);
+            const addonTotal = parsedAddons.reduce((s: number, a: any) => s + Number(a.price || 0), 0);
+
+            // Determine pricing branch: effective branch, or first branch if multiple exist, or null (for general/channel overrides)
+            const pricingBranch = effectiveBranchId || (activeRestaurantBranches.length > 0 ? activeRestaurantBranches[0].id : null);
+
             try {
-                const optionIds = extractOptionIds(parsedVariations);
                 const livePrice = await calculateCalculatedPrice(
                     item.foodId,
                     optionIds,
-                    effectiveBranchId,
+                    pricingBranch,
                     effectiveServiceModule
                 );
-                const addonTotal = parsedAddons.reduce((s: number, a: any) => s + Number(a.price || 0), 0);
+
+                resolvedBasePrice = livePrice.basePrice;
+                resolvedVarPrice = livePrice.variants.reduce((s, v) => s + Number(v.price || 0), 0) + addonTotal;
                 const computedLivePrice = livePrice.totalUnitPrice + addonTotal;
 
                 liveUnitPrice = computedLivePrice;
                 channelAvailable = livePrice.isAvailable;
                 priceChanged = Math.abs(computedLivePrice - dbUnitPrice) > 0.001;
             } catch {
-                // ✅ FIX: previously silently fell back to the stale price as if
-                // nothing were wrong (e.g. food itself was deleted). Now the item
-                // is explicitly flagged unavailable instead of being served as normal.
                 liveUnitPrice = null;
                 channelAvailable = false;
             }
-        }
-        // 2️⃣ حالة عدم تحديد فرع (Cross-Branch Price Comparison Strategy)
-        else if (!effectiveBranchId && item.foodId && activeRestaurantBranches.length > 0) {
-            const optionIds = extractOptionIds(parsedVariations);
-            const addonTotal = parsedAddons.reduce((s: number, a: any) => s + Number(a.price || 0), 0);
 
-            const branchPriceResults = await Promise.allSettled(
-                activeRestaurantBranches.map(async (b) => {
-                    const bPrice = await calculateCalculatedPrice(
-                        item.foodId!,
-                        optionIds,
-                        b.id,
-                        effectiveServiceModule
-                    );
-                    return { branch: b, bPrice };
-                })
-            );
+            // Cross-Branch Price Comparison (when multiple branches exist)
+            if (activeRestaurantBranches.length > 1) {
+                const branchPriceResults = await Promise.allSettled(
+                    activeRestaurantBranches.map(async (b) => {
+                        const bPrice = await calculateCalculatedPrice(
+                            item.foodId!,
+                            optionIds,
+                            b.id,
+                            effectiveServiceModule
+                        );
+                        return { branch: b, bPrice };
+                    })
+                );
 
-            for (const result of branchPriceResults) {
-                if (result.status === "fulfilled") {
-                    const { branch: b, bPrice } = result.value;
-                    const bComputedUnitPrice = bPrice.totalUnitPrice + addonTotal;
+                for (const result of branchPriceResults) {
+                    if (result.status === "fulfilled") {
+                        const { branch: b, bPrice } = result.value;
+                        const bComputedUnitPrice = bPrice.totalUnitPrice + addonTotal;
 
-                    if (Math.abs(bComputedUnitPrice - dbUnitPrice) > 0.001) {
-                        priceChanged = true;
-                        branchPrices.push({
-                            branchId: b.id,
-                            branchName: b.name,
-                            branchNameAr: b.nameAr || b.name,
-                            unitPrice: bComputedUnitPrice
-                        });
+                        if (Math.abs(bComputedUnitPrice - dbUnitPrice) > 0.001) {
+                            priceChanged = true;
+                            branchPrices.push({
+                                branchId: b.id,
+                                branchName: b.name,
+                                branchNameAr: b.nameAr || b.name,
+                                unitPrice: bComputedUnitPrice
+                            });
+                        }
                     }
                 }
             }
         }
 
-        const currentBasePrice = liveUnitPrice !== null ? (liveUnitPrice - varPrice) : originalBasePrice;
+        const currentBasePrice = resolvedBasePrice;
+        const varPrice = resolvedVarPrice;
         initialSubtotal += (currentBasePrice + varPrice) * item.quantity;
 
         return {
@@ -998,7 +1010,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             restaurantId: item.restaurantId,
             restaurantName: item.restaurantName,
             quantity: item.quantity,
-            price: (originalBasePrice + varPrice).toString(),
+            price: originalUnitPrice.toString(),
             unitPrice: finalUnitPrice,
             originalUnitPrice,
             totalPrice: finalTotalPrice,
