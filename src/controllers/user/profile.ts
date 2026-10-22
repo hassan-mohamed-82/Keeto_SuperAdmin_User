@@ -2,7 +2,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { cities, countries, orders, users, userWallets, zones, userRestaurantPoints, restaurants, addresses } from "../../models/schema";
-import { eq, sql, and, isNotNull, ne } from "drizzle-orm";
+import { eq, sql, and, isNotNull, ne, or, isNull } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import bcrypt from "bcrypt";
@@ -72,7 +72,18 @@ export const getProfile = async (req: Request | any, res: Response) => {
         .where(eq(addresses.userId, userId));
 
     // 🟢 2.1 Check which addresses are linked to existing orders
-    const orderConditions = [eq(orders.userId, userId), isNotNull(orders.addressId), ne(orders.status, "failed")];
+    // Cash orders have paymentStatus = NULL or 'pending_payment'; visa orders have 'paid'
+    // Only 'payment_failed' means a real failed online payment — exclude that
+    const orderConditions = [
+        eq(orders.userId, userId),
+        isNotNull(orders.addressId),
+        ne(orders.status, "failed"),
+        or(
+            isNull(orders.paymentStatus),
+            eq(orders.paymentStatus, "pending_payment"),
+            eq(orders.paymentStatus, "paid"),
+        ),
+    ];
     if (restaurantId && restaurantId.trim() !== "") {
         orderConditions.push(eq(orders.restaurantId, restaurantId.trim()));
     }
@@ -91,10 +102,17 @@ export const getProfile = async (req: Request | any, res: Response) => {
     }));
 
     // 3. Fetch Orders Count (scoped to a restaurant if restaurantId query param is provided)
+    // Cash orders → paymentStatus IS NULL or 'pending_payment'
+    // Visa orders  → paymentStatus = 'paid'
+    // Only 'payment_failed' means a real failed online payment — exclude that
     const ordersCountCondition = and(
         eq(orders.userId, userId),
         ne(orders.status, "failed"),
-        ne(orders.paymentStatus, "pending_payment"),
+        or(
+            isNull(orders.paymentStatus),
+            eq(orders.paymentStatus, "pending_payment"),
+            eq(orders.paymentStatus, "paid"),
+        ),
         restaurantId ? eq(orders.restaurantId, restaurantId) : undefined
     );
 
