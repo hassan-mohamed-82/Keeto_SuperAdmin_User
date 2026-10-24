@@ -1393,46 +1393,47 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
     const { startDate: queryStartDate, endDate: queryEndDate } =
         getPerformanceReportQuerySchema.parse(req.query);
 
-    let start: Date;
-    let end: Date;
+    let start: Date | undefined;
+    let end: Date | undefined;
 
-    if (queryStartDate && queryEndDate) {
+    if (queryStartDate) {
         start = new Date(queryStartDate);
         if (!queryStartDate.includes("T")) start.setHours(0, 0, 0, 0);
+    }
 
+    if (queryEndDate) {
         end = new Date(queryEndDate);
         if (!queryEndDate.includes("T")) end.setHours(23, 59, 59, 999);
-    } else if (queryStartDate && !queryEndDate) {
-        start = new Date(queryStartDate);
-        if (!queryStartDate.includes("T")) start.setHours(0, 0, 0, 0);
-        end = new Date();
-        end.setHours(23, 59, 59, 999);
-    } else {
-        // الافتراضي: الشهر الحالي من أول يوم 00:00:00 إلى نهاية الشهر 23:59:59.999
-        const now = new Date();
-        start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-        end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     }
 
-    // حساب الفترة السابقة للمقارنة
-    const diffMs = end.getTime() - start.getTime();
-    const isFullMonth =
-        start.getDate() === 1 &&
-        new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate() === end.getDate() &&
-        start.getMonth() === end.getMonth();
+    // Previous period for comparison only when both start and end are provided
+    let prevStart: Date | undefined;
+    let prevEnd: Date | undefined;
 
-    let prevStart: Date;
-    let prevEnd: Date;
+    if (start && end) {
+        const diffMs = end.getTime() - start.getTime();
+        const isFullMonth =
+            start.getDate() === 1 &&
+            new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate() === end.getDate() &&
+            start.getMonth() === end.getMonth();
 
-    if (isFullMonth) {
-        prevStart = new Date(start.getFullYear(), start.getMonth() - 1, 1, 0, 0, 0, 0);
-        prevEnd = new Date(start.getFullYear(), start.getMonth(), 0, 23, 59, 59, 999);
-    } else {
-        prevEnd = new Date(start.getTime() - 1);
-        prevStart = new Date(prevEnd.getTime() - diffMs);
+        if (isFullMonth) {
+            prevStart = new Date(start.getFullYear(), start.getMonth() - 1, 1, 0, 0, 0, 0);
+            prevEnd = new Date(start.getFullYear(), start.getMonth(), 0, 23, 59, 59, 999);
+        } else {
+            prevEnd = new Date(start.getTime() - 1);
+            prevStart = new Date(prevEnd.getTime() - diffMs);
+        }
     }
 
-    const formatGrowth = (current: number, previous: number) => {
+    const formatGrowth = (current: number, previous: number | null | undefined) => {
+        if (previous === null || previous === undefined) {
+            return {
+                percentage: 0,
+                formatted: "N/A",
+                trend: "neutral" as const,
+            };
+        }
         let growth = 0;
         if (previous === 0) {
             growth = current > 0 ? 100 : 0;
@@ -1448,7 +1449,14 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
         };
     };
 
-    const formatDiff = (current: number, previous: number, unit = "%") => {
+    const formatDiff = (current: number, previous: number | null | undefined, unit = "%") => {
+        if (previous === null || previous === undefined) {
+            return {
+                diff: 0,
+                formatted: "N/A",
+                trend: "neutral" as const,
+            };
+        }
         const diff = Number((current - previous).toFixed(1));
         const sign = diff > 0 ? "+" : "";
         return {
@@ -1458,7 +1466,73 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
         };
     };
 
-    // تنفيذ الاستعلامات بالتوازي للحصول على أفضل أداء
+    // Conditions for current period queries based strictly on query params
+    const currOrdersConditions: SQL[] = [ne(orders.status, "failed")];
+    if (start) currOrdersConditions.push(gte(orders.createdAt, start));
+    if (end) currOrdersConditions.push(lte(orders.createdAt, end));
+
+    const currRestConditions: SQL[] = [
+        ne(restaurants.type, "test"),
+        ne(restaurants.status, "inactive"),
+        ne(restaurants.operationStatus, "inactive"),
+        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!,
+    ];
+    if (end) currRestConditions.push(lte(restaurants.createdAt, end));
+
+    const newRestConditions: SQL[] = [
+        ne(restaurants.type, "test"),
+        ne(restaurants.status, "inactive"),
+        ne(restaurants.operationStatus, "inactive"),
+        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!,
+    ];
+    if (start) newRestConditions.push(gte(restaurants.createdAt, start));
+    if (end) newRestConditions.push(lte(restaurants.createdAt, end));
+
+    const currActiveRestConditions: SQL[] = [
+        eq(restaurants.status, "active"),
+        eq(restaurants.operationStatus, "active"),
+        ne(restaurants.type, "test"),
+        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!,
+    ];
+    if (end) currActiveRestConditions.push(lte(restaurants.createdAt, end));
+
+    const currDemoConditions: SQL[] = [
+        eq(restaurantOperations.status, "demo"),
+        ne(restaurants.type, "test"),
+    ];
+    if (end) currDemoConditions.push(lte(restaurants.createdAt, end));
+
+    const addedDemoConditions: SQL[] = [
+        eq(restaurantOperations.status, "demo"),
+        ne(restaurants.type, "test"),
+    ];
+    if (start) addedDemoConditions.push(gte(restaurants.createdAt, start));
+    if (end) addedDemoConditions.push(lte(restaurants.createdAt, end));
+
+    const currNonDeliveredConditions: SQL[] = [
+        ne(restaurants.type, "test"),
+        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!,
+    ];
+    if (end) currNonDeliveredConditions.push(lte(restaurants.createdAt, end));
+
+    const currOnboardingConditions: SQL[] = [ne(restaurants.type, "test")];
+    if (start) currOnboardingConditions.push(gte(restaurants.createdAt, start));
+    if (end) currOnboardingConditions.push(lte(restaurants.createdAt, end));
+
+    const currGoLivesOrderConditions: SQL[] = [
+        eq(orders.restaurantId, restaurants.id),
+        ne(orders.status, "failed"),
+    ];
+    if (start) currGoLivesOrderConditions.push(gte(orders.createdAt, start));
+    if (end) currGoLivesOrderConditions.push(lte(orders.createdAt, end));
+
+    const currLeadsConditions: SQL[] = [
+        inArray(restaurantOperations.status, ["demo", "start order"]),
+        ne(restaurants.type, "test"),
+    ];
+    if (end) currLeadsConditions.push(lte(restaurants.createdAt, end));
+
+    // Parallel DB queries
     const [
         [currOrdersRow],
         [prevOrdersRow],
@@ -1483,131 +1557,101 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
         db
             .select({ total: count() })
             .from(orders)
-            .where(and(gte(orders.createdAt, start), lte(orders.createdAt, end), ne(orders.status, "failed"))),
+            .where(and(...currOrdersConditions)),
 
         // 1. إجمالي الطلبات (الفترة السابقة)
-        db
-            .select({ total: count() })
-            .from(orders)
-            .where(and(gte(orders.createdAt, prevStart), lte(orders.createdAt, prevEnd), ne(orders.status, "failed"))),
+        prevStart && prevEnd
+            ? db
+                .select({ total: count() })
+                .from(orders)
+                .where(and(gte(orders.createdAt, prevStart), lte(orders.createdAt, prevEnd), ne(orders.status, "failed")))
+            : Promise.resolve([{ total: null }]),
 
-        // 2. إجمالي المطاعم حتى نهاية الفترة الحالية (بدون demo، بدون test، بدون inactive)
+        // 2. إجمالي المطاعم حتى نهاية الفترة الحالية
         db
             .select({ total: count() })
             .from(restaurants)
             .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
-            .where(
-                and(
-                    lte(restaurants.createdAt, end),
-                    ne(restaurants.type, "test"),
-                    ne(restaurants.status, "inactive"),
-                    ne(restaurants.operationStatus, "inactive"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
-                )
-            ),
+            .where(and(...currRestConditions)),
 
         // 2. إجمالي المطاعم حتى نهاية الفترة السابقة
-        db
-            .select({ total: count() })
-            .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
-            .where(
-                and(
-                    lte(restaurants.createdAt, prevEnd),
-                    ne(restaurants.type, "test"),
-                    ne(restaurants.status, "inactive"),
-                    ne(restaurants.operationStatus, "inactive"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
+        prevEnd
+            ? db
+                .select({ total: count() })
+                .from(restaurants)
+                .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
+                .where(
+                    and(
+                        lte(restaurants.createdAt, prevEnd),
+                        ne(restaurants.type, "test"),
+                        ne(restaurants.status, "inactive"),
+                        ne(restaurants.operationStatus, "inactive"),
+                        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!
+                    )
                 )
-            ),
+            : Promise.resolve([{ total: null }]),
 
         // 2. المطاعم الجديدة المضافة خلال الفترة
         db
             .select({ total: count() })
             .from(restaurants)
             .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
-            .where(
-                and(
-                    gte(restaurants.createdAt, start),
-                    lte(restaurants.createdAt, end),
-                    ne(restaurants.type, "test"),
-                    ne(restaurants.status, "inactive"),
-                    ne(restaurants.operationStatus, "inactive"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
-                )
-            ),
+            .where(and(...newRestConditions)),
 
-        // 3. المطاعم النشطة (Active Restaurants) حتى نهاية الفترة
+        // 3. المطاعم النشطة حتى نهاية الفترة
         db
             .select({ total: count() })
             .from(restaurants)
             .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
-            .where(
-                and(
-                    lte(restaurants.createdAt, end),
-                    eq(restaurants.status, "active"),
-                    eq(restaurants.operationStatus, "active"),
-                    ne(restaurants.type, "test"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
-                )
-            ),
+            .where(and(...currActiveRestConditions)),
 
         // 3. المطاعم النشطة حتى نهاية الفترة السابقة
-        db
-            .select({ total: count() })
-            .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
-            .where(
-                and(
-                    lte(restaurants.createdAt, prevEnd),
-                    eq(restaurants.status, "active"),
-                    eq(restaurants.operationStatus, "active"),
-                    ne(restaurants.type, "test"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
+        prevEnd
+            ? db
+                .select({ total: count() })
+                .from(restaurants)
+                .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
+                .where(
+                    and(
+                        lte(restaurants.createdAt, prevEnd),
+                        eq(restaurants.status, "active"),
+                        eq(restaurants.operationStatus, "active"),
+                        ne(restaurants.type, "test"),
+                        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!
+                    )
                 )
-            ),
+            : Promise.resolve([{ total: null }]),
 
-        // 4. مطاعم الديمو (Demo Restaurants) حتى نهاية الفترة
+        // 4. مطاعم الديمو حتى نهاية الفترة
         db
             .select({ total: count() })
             .from(restaurantOperations)
             .innerJoin(restaurants, eq(restaurantOperations.restaurantId, restaurants.id))
-            .where(
-                and(
-                    lte(restaurants.createdAt, end),
-                    eq(restaurantOperations.status, "demo"),
-                    ne(restaurants.type, "test")
-                )
-            ),
+            .where(and(...currDemoConditions)),
 
         // 4. مطاعم الديمو حتى نهاية الفترة السابقة
-        db
-            .select({ total: count() })
-            .from(restaurantOperations)
-            .innerJoin(restaurants, eq(restaurantOperations.restaurantId, restaurants.id))
-            .where(
-                and(
-                    lte(restaurants.createdAt, prevEnd),
-                    eq(restaurantOperations.status, "demo"),
-                    ne(restaurants.type, "test")
+        prevEnd
+            ? db
+                .select({ total: count() })
+                .from(restaurantOperations)
+                .innerJoin(restaurants, eq(restaurantOperations.restaurantId, restaurants.id))
+                .where(
+                    and(
+                        lte(restaurants.createdAt, prevEnd),
+                        eq(restaurantOperations.status, "demo"),
+                        ne(restaurants.type, "test")
+                    )
                 )
-            ),
+            : Promise.resolve([{ total: null }]),
 
         // 4. مطاعم الديمو المضافة خلال الفترة المحددة
         db
             .select({ total: count() })
             .from(restaurantOperations)
             .innerJoin(restaurants, eq(restaurantOperations.restaurantId, restaurants.id))
-            .where(
-                and(
-                    gte(restaurants.createdAt, start),
-                    lte(restaurants.createdAt, end),
-                    eq(restaurantOperations.status, "demo"),
-                    ne(restaurants.type, "test")
-                )
-            ),
+            .where(and(...addedDemoConditions)),
 
-        // 5. نسبة المطاعم غير المسلمة (Not Delivered) للفترة الحالية
+        // 5. نسبة المطاعم غير المسلمة للفترة الحالية
         db
             .select({
                 totalEligible: count(),
@@ -1615,31 +1659,27 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             })
             .from(restaurants)
             .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
-            .where(
-                and(
-                    lte(restaurants.createdAt, end),
-                    ne(restaurants.type, "test"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
-                )
-            ),
+            .where(and(...currNonDeliveredConditions)),
 
         // 5. نسبة المطاعم غير المسلمة للفترة السابقة
-        db
-            .select({
-                totalEligible: count(),
-                totalNotDelivered: count(sql`CASE WHEN ${restaurants.deliverystatus} = 'not_delivered' THEN 1 END`),
-            })
-            .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
-            .where(
-                and(
-                    lte(restaurants.createdAt, prevEnd),
-                    ne(restaurants.type, "test"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
+        prevEnd
+            ? db
+                .select({
+                    totalEligible: count(),
+                    totalNotDelivered: count(sql`CASE WHEN ${restaurants.deliverystatus} = 'not_delivered' THEN 1 END`),
+                })
+                .from(restaurants)
+                .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
+                .where(
+                    and(
+                        lte(restaurants.createdAt, prevEnd),
+                        ne(restaurants.type, "test"),
+                        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!
+                    )
                 )
-            ),
+            : Promise.resolve([{ totalEligible: null, totalNotDelivered: null }]),
 
-        // 6. متوسط وقت التهيئة (Avg. Onboarding Time) للفترة الحالية
+        // 6. متوسط وقت التهيئة للفترة الحالية
         db
             .select({
                 restaurantId: restaurants.id,
@@ -1648,34 +1688,30 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             })
             .from(restaurants)
             .leftJoin(orders, and(eq(orders.restaurantId, restaurants.id), ne(orders.status, "failed")))
-            .where(
-                and(
-                    gte(restaurants.createdAt, start),
-                    lte(restaurants.createdAt, end),
-                    ne(restaurants.type, "test")
-                )
-            )
+            .where(and(...currOnboardingConditions))
             .groupBy(restaurants.id, restaurants.createdAt),
 
         // 6. متوسط وقت التهيئة للفترة السابقة
-        db
-            .select({
-                restaurantId: restaurants.id,
-                restaurantCreatedAt: restaurants.createdAt,
-                firstOrderCreatedAt: sql<Date | null>`MIN(${orders.createdAt})`,
-            })
-            .from(restaurants)
-            .leftJoin(orders, and(eq(orders.restaurantId, restaurants.id), ne(orders.status, "failed")))
-            .where(
-                and(
-                    gte(restaurants.createdAt, prevStart),
-                    lte(restaurants.createdAt, prevEnd),
-                    ne(restaurants.type, "test")
+        prevStart && prevEnd
+            ? db
+                .select({
+                    restaurantId: restaurants.id,
+                    restaurantCreatedAt: restaurants.createdAt,
+                    firstOrderCreatedAt: sql<Date | null>`MIN(${orders.createdAt})`,
+                })
+                .from(restaurants)
+                .leftJoin(orders, and(eq(orders.restaurantId, restaurants.id), ne(orders.status, "failed")))
+                .where(
+                    and(
+                        gte(restaurants.createdAt, prevStart),
+                        lte(restaurants.createdAt, prevEnd),
+                        ne(restaurants.type, "test")
+                    )
                 )
-            )
-            .groupBy(restaurants.id, restaurants.createdAt),
+                .groupBy(restaurants.id, restaurants.createdAt)
+            : Promise.resolve([]),
 
-        // 7. الانطلاق الناجح (Successful Go-Lives): استلام طلبات بعد التسليم
+        // 7. الانطلاق الناجح للفترة الحالية
         db
             .select({
                 total: count(sql`DISTINCT ${restaurants.id}`),
@@ -1683,12 +1719,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             .from(restaurants)
             .innerJoin(
                 orders,
-                and(
-                    eq(orders.restaurantId, restaurants.id),
-                    gte(orders.createdAt, start),
-                    lte(orders.createdAt, end),
-                    ne(orders.status, "failed")
-                )
+                and(...currGoLivesOrderConditions)
             )
             .where(
                 and(
@@ -1698,28 +1729,30 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             ),
 
         // 7. الانطلاق الناجح للفترة السابقة
-        db
-            .select({
-                total: count(sql`DISTINCT ${restaurants.id}`),
-            })
-            .from(restaurants)
-            .innerJoin(
-                orders,
-                and(
-                    eq(orders.restaurantId, restaurants.id),
-                    gte(orders.createdAt, prevStart),
-                    lte(orders.createdAt, prevEnd),
-                    ne(orders.status, "failed")
+        prevStart && prevEnd
+            ? db
+                .select({
+                    total: count(sql`DISTINCT ${restaurants.id}`),
+                })
+                .from(restaurants)
+                .innerJoin(
+                    orders,
+                    and(
+                        eq(orders.restaurantId, restaurants.id),
+                        gte(orders.createdAt, prevStart),
+                        lte(orders.createdAt, prevEnd),
+                        ne(orders.status, "failed")
+                    )
                 )
-            )
-            .where(
-                and(
-                    eq(restaurants.deliverystatus, "delivered"),
-                    ne(restaurants.type, "test")
+                .where(
+                    and(
+                        eq(restaurants.deliverystatus, "delivered"),
+                        ne(restaurants.type, "test")
+                    )
                 )
-            ),
+            : Promise.resolve([{ total: null }]),
 
-        // 8. تحويل العملاء المحتملين (Leads: Demo to Start Order) للفترة الحالية
+        // 8. تحويل العملاء المحتملين للفترة الحالية
         db
             .select({
                 totalEligible: count(),
@@ -1727,52 +1760,48 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             })
             .from(restaurantOperations)
             .innerJoin(restaurants, eq(restaurantOperations.restaurantId, restaurants.id))
-            .where(
-                and(
-                    lte(restaurants.createdAt, end),
-                    inArray(restaurantOperations.status, ["demo", "start order"]),
-                    ne(restaurants.type, "test")
-                )
-            ),
+            .where(and(...currLeadsConditions)),
 
         // 8. تحويل العملاء المحتملين للفترة السابقة
-        db
-            .select({
-                totalEligible: count(),
-                totalConverted: count(sql`CASE WHEN ${restaurantOperations.status} = 'start order' THEN 1 END`),
-            })
-            .from(restaurantOperations)
-            .innerJoin(restaurants, eq(restaurantOperations.restaurantId, restaurants.id))
-            .where(
-                and(
-                    lte(restaurants.createdAt, prevEnd),
-                    inArray(restaurantOperations.status, ["demo", "start order"]),
-                    ne(restaurants.type, "test")
+        prevEnd
+            ? db
+                .select({
+                    totalEligible: count(),
+                    totalConverted: count(sql`CASE WHEN ${restaurantOperations.status} = 'start order' THEN 1 END`),
+                })
+                .from(restaurantOperations)
+                .innerJoin(restaurants, eq(restaurantOperations.restaurantId, restaurants.id))
+                .where(
+                    and(
+                        lte(restaurants.createdAt, prevEnd),
+                        inArray(restaurantOperations.status, ["demo", "start order"]),
+                        ne(restaurants.type, "test")
+                    )
                 )
-            ),
+            : Promise.resolve([{ totalEligible: null, totalConverted: null }]),
     ]);
 
     // 1. معالجة بيانات إجمالي الطلبات
     const totalOrders = Number(currOrdersRow?.total ?? 0);
-    const prevTotalOrders = Number(prevOrdersRow?.total ?? 0);
+    const prevTotalOrders = prevOrdersRow?.total != null ? Number(prevOrdersRow.total) : null;
     const ordersGrowth = formatGrowth(totalOrders, prevTotalOrders);
 
     // 2. معالجة بيانات إجمالي المطاعم
     const totalRestaurants = Number(currRestRow?.total ?? 0);
-    const prevTotalRestaurants = Number(prevRestRow?.total ?? 0);
+    const prevTotalRestaurants = prevRestRow?.total != null ? Number(prevRestRow.total) : null;
     const newRestaurantsThisPeriod = Number(newRestRow?.total ?? 0);
     const restaurantsGrowth = formatGrowth(totalRestaurants, prevTotalRestaurants);
 
     // 3. معالجة بيانات المطاعم النشطة
     const activeRestaurants = Number(currActiveRestRow?.total ?? 0);
-    const prevActiveRestaurants = Number(prevActiveRestRow?.total ?? 0);
+    const prevActiveRestaurants = prevActiveRestRow?.total != null ? Number(prevActiveRestRow.total) : null;
     const activeGrowth = formatGrowth(activeRestaurants, prevActiveRestaurants);
     const activePercentageOfTotal =
         totalRestaurants > 0 ? Number(((activeRestaurants / totalRestaurants) * 100).toFixed(1)) : 0;
 
     // 4. معالجة بيانات مطاعم الديمو
     const demoRestaurants = Number(currDemoRow?.total ?? 0);
-    const prevDemoRestaurants = Number(prevDemoRow?.total ?? 0);
+    const prevDemoRestaurants = prevDemoRow?.total != null ? Number(prevDemoRow.total) : null;
     const addedDemoThisPeriod = Number(addedDemoRow?.total ?? 0);
     const demoGrowth = formatGrowth(demoRestaurants, prevDemoRestaurants);
 
@@ -1782,10 +1811,12 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
     const notDeliveredPct =
         totalEligible > 0 ? Number(((totalNotDelivered / totalEligible) * 100).toFixed(1)) : 0;
 
-    const prevTotalEligible = Number(prevNonDeliveredRow?.totalEligible ?? 0);
-    const prevTotalNotDelivered = Number(prevNonDeliveredRow?.totalNotDelivered ?? 0);
+    const prevTotalEligible = prevNonDeliveredRow?.totalEligible != null ? Number(prevNonDeliveredRow.totalEligible) : null;
+    const prevTotalNotDelivered = prevNonDeliveredRow?.totalNotDelivered != null ? Number(prevNonDeliveredRow.totalNotDelivered) : null;
     const prevNotDeliveredPct =
-        prevTotalEligible > 0 ? Number(((prevTotalNotDelivered / prevTotalEligible) * 100).toFixed(1)) : 0;
+        prevTotalEligible && prevTotalEligible > 0
+            ? Number(((prevTotalNotDelivered! / prevTotalEligible) * 100).toFixed(1))
+            : null;
     const notDeliveredDiff = formatDiff(notDeliveredPct, prevNotDeliveredPct, "%");
 
     // 6. معالجة متوسط وقت التهيئة (Avg. Onboarding Time)
@@ -1813,28 +1844,31 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
     const activationRate =
         totalCreatedInPeriod > 0 ? Number(((completedOnboardingCount / totalCreatedInPeriod) * 100).toFixed(1)) : 0;
 
-    let prevTotalOnboardingDays = 0;
-    let prevCompletedOnboardingCount = 0;
-    for (const row of prevOnboardingStats) {
-        if (row.firstOrderCreatedAt && row.restaurantCreatedAt) {
-            const diffDays = Math.max(
-                0,
-                (new Date(row.firstOrderCreatedAt).getTime() - new Date(row.restaurantCreatedAt).getTime()) /
-                    (1000 * 60 * 60 * 24)
-            );
-            prevTotalOnboardingDays += diffDays;
-            prevCompletedOnboardingCount++;
+    let prevAvgOnboardingDays: number | null = null;
+    if (prevStart && prevEnd && prevOnboardingStats.length > 0) {
+        let prevTotalOnboardingDays = 0;
+        let prevCompletedOnboardingCount = 0;
+        for (const row of prevOnboardingStats) {
+            if (row.firstOrderCreatedAt && row.restaurantCreatedAt) {
+                const diffDays = Math.max(
+                    0,
+                    (new Date(row.firstOrderCreatedAt).getTime() - new Date(row.restaurantCreatedAt).getTime()) /
+                        (1000 * 60 * 60 * 24)
+                );
+                prevTotalOnboardingDays += diffDays;
+                prevCompletedOnboardingCount++;
+            }
         }
+        prevAvgOnboardingDays =
+            prevCompletedOnboardingCount > 0
+                ? Number((prevTotalOnboardingDays / prevCompletedOnboardingCount).toFixed(1))
+                : 0;
     }
-    const prevAvgOnboardingDays =
-        prevCompletedOnboardingCount > 0
-            ? Number((prevTotalOnboardingDays / prevCompletedOnboardingCount).toFixed(1))
-            : 0;
     const onboardingDiff = formatDiff(avgOnboardingDays, prevAvgOnboardingDays, " days");
 
     // 7. معالجة الانطلاق الناجح (Successful Go-Lives)
     const successfulGoLives = Number(currGoLivesRow?.total ?? 0);
-    const prevSuccessfulGoLives = Number(prevGoLivesRow?.total ?? 0);
+    const prevSuccessfulGoLives = prevGoLivesRow?.total != null ? Number(prevGoLivesRow.total) : null;
     const goLivesGrowth = formatGrowth(successfulGoLives, prevSuccessfulGoLives);
 
     // 8. معالجة تحويل العملاء المحتملين (Leads)
@@ -1843,23 +1877,27 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
     const leadsConversionPct =
         totalEligibleLeads > 0 ? Number(((convertedLeads / totalEligibleLeads) * 100).toFixed(1)) : 0;
 
-    const prevTotalEligibleLeads = Number(prevLeadsRow?.totalEligible ?? 0);
-    const prevConvertedLeads = Number(prevLeadsRow?.totalConverted ?? 0);
+    const prevTotalEligibleLeads = prevLeadsRow?.totalEligible != null ? Number(prevLeadsRow.totalEligible) : null;
+    const prevConvertedLeads = prevLeadsRow?.totalConverted != null ? Number(prevLeadsRow.totalConverted) : null;
     const prevLeadsConversionPct =
-        prevTotalEligibleLeads > 0
-            ? Number(((prevConvertedLeads / prevTotalEligibleLeads) * 100).toFixed(1))
-            : 0;
+        prevTotalEligibleLeads && prevTotalEligibleLeads > 0
+            ? Number(((prevConvertedLeads! / prevTotalEligibleLeads) * 100).toFixed(1))
+            : null;
     const leadsDiff = formatDiff(leadsConversionPct, prevLeadsConversionPct, "%");
 
     // توليد نقاط الخط البياني الصغير (Sparkline) عبر 6 نقاط زمنية
     const sparklineBuckets = 6;
-    const stepMs = Math.max(1, (end.getTime() - start.getTime()) / sparklineBuckets);
+    const sparklineEnd = end ? new Date(end) : new Date();
+    const sparklineStart = start
+        ? new Date(start)
+        : new Date(sparklineEnd.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const stepMs = Math.max(1, (sparklineEnd.getTime() - sparklineStart.getTime()) / sparklineBuckets);
 
     const sparklines = await Promise.all(
         Array.from({ length: sparklineBuckets }, (_, i) => {
-            const bStart = new Date(start.getTime() + i * stepMs);
+            const bStart = new Date(sparklineStart.getTime() + i * stepMs);
             const bEnd = new Date(
-                i === sparklineBuckets - 1 ? end.getTime() : start.getTime() + (i + 1) * stepMs - 1
+                i === sparklineBuckets - 1 ? sparklineEnd.getTime() : sparklineStart.getTime() + (i + 1) * stepMs - 1
             );
             return db
                 .select({
@@ -1875,14 +1913,16 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
     );
 
     // صياغة التاريخ النهائي للعرض
-    const endFormatted = end.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const endFormatted = end
+        ? end.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        : "today";
 
     return SuccessResponse(res, {
         period: {
-            startDate: start.toISOString(),
-            endDate: end.toISOString(),
-            previousStartDate: prevStart.toISOString(),
-            previousEndDate: prevEnd.toISOString(),
+            startDate: start ? start.toISOString() : null,
+            endDate: end ? end.toISOString() : null,
+            previousStartDate: prevStart ? prevStart.toISOString() : null,
+            previousEndDate: prevEnd ? prevEnd.toISOString() : null,
         },
         cards: {
             totalOrders: {
@@ -1891,7 +1931,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                 growthPercentage: ordersGrowth.percentage,
                 previousValue: prevTotalOrders,
                 trendDirection: ordersGrowth.trend,
-                subtext: "Selected period",
+                subtext: start || end ? "Selected period" : "All time",
                 sparkline: sparklines.map((s) => ({ date: s.date, value: s.orders })),
             },
             totalRestaurants: {
@@ -1900,7 +1940,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                 growthPercentage: restaurantsGrowth.percentage,
                 previousValue: prevTotalRestaurants,
                 trendDirection: restaurantsGrowth.trend,
-                subtext: `Lifetime total as of ${endFormatted}`,
+                subtext: end ? `Lifetime total as of ${endFormatted}` : "Lifetime total",
                 details: {
                     newThisPeriod: newRestaurantsThisPeriod,
                     lifetimeTotal: totalRestaurants,
@@ -1930,7 +1970,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                 previousValue: prevDemoRestaurants,
                 addedThisPeriod: addedDemoThisPeriod,
                 trendDirection: demoGrowth.trend,
-                subtext: `${addedDemoThisPeriod} added this period`,
+                subtext: start || end ? `${addedDemoThisPeriod} added this period` : `${demoRestaurants} total demo`,
                 sparkline: sparklines.map((s, idx) => ({
                     date: s.date,
                     value: Math.max(0, demoRestaurants - (sparklineBuckets - idx - 1)),
