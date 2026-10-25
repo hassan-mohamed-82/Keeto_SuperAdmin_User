@@ -2122,6 +2122,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             db.select({
                 id: restaurantZoneDeliveryFees.id,
                 zoneId: restaurantZoneDeliveryFees.zoneId,
+                zoneName:zones.name,
+                zoneNameAr:zones.nameAr,
                 branchId: restaurantZoneDeliveryFees.branchId,
                 branchStatus: branches.status,
                 deliveryFee: restaurantZoneDeliveryFees.deliveryFee,
