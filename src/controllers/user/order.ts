@@ -261,7 +261,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                         .where(eq(cartItems.userId, guestSessionId));
 
                     await db.update(users)
-                        .set({ isDeleted: true, status: "blocked" })
+                        .set({ isDeleted: true , deletedAt: new Date() })
                         .where(eq(users.id, guestSessionId));
                 }
             } else {
