@@ -61,7 +61,7 @@ export class KashierService {
 
         // Use baseUrl from DB creds if present, otherwise derive from environment field stored in DB.
         // Default: test sandbox.
-        const baseUrl = creds.baseUrl || "https://test-api.kashier.io";
+        const baseUrl = creds.baseUrl || "https://api.kashier.io";
 
         // Session expires in 24 hours from now
         const expireAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
