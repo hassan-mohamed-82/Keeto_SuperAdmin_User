@@ -82,7 +82,7 @@ export class KashierService {
             type: "one-time",
             display: "en",
             maxFailureAttempts: 3,
-            allowedMethods: "card,wallet",
+            allowedMethods: "card",
             // Kashier requires customer field on every session
             customer: {
                 email: input.customerEmail || "customer@example.com",
