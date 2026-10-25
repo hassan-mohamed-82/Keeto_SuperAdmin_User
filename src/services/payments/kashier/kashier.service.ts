@@ -3,7 +3,6 @@ import { db } from "../../../models/connection";
 import { orders, paymentMethods } from "../../../models/schema";
 import { eq, like, or } from "drizzle-orm";
 import { BadRequest } from "../../../Errors";
-import { getKashierConfig } from "./kashier";
 
 // ──────────────────────────────────────────────────────
 // Kashier Payment Sessions API types
@@ -45,20 +44,24 @@ export class KashierService {
      * so the session is never lost even if the client disconnects.
      */
     static async createPaymentSession(input: CreateSessionInput): Promise<PaymentSessionResponse> {
-        const sysConfig = getKashierConfig();
-        const mid = input.credentials?.mid || sysConfig.mid;
-        const apiKey = input.credentials?.apiKey || sysConfig.apiKey;
-        const secretKey = input.credentials?.secretKey || sysConfig.secretKey;
-        const baseUrl = input.credentials?.baseUrl || sysConfig.baseUrl;
-
-        const currency = (input.currency || "EGP").toUpperCase();
-        const amount = input.amount.toFixed(2);
-
-        if (!mid || !apiKey) {
+        // Credentials MUST be provided from the DB (restaurant's gateway or platform gateway).
+        // We do NOT fall back to .env so that each restaurant/account always uses its own correct keys.
+        const creds = input.credentials;
+        if (!creds?.mid || !creds?.apiKey) {
             throw new BadRequest(
-                "Kashier credentials (KASHIER_MID or KASHIER_API_KEY) are missing or incomplete."
+                "Kashier credentials (mid / apiKey) are missing. Ensure the active platform or custom gateway is configured correctly in the database."
             );
         }
+
+        const mid = creds.mid;
+        const apiKey = creds.apiKey;
+        const secretKey = creds.secretKey;
+        const amount = String(input.amount);
+        const currency = input.currency || "EGP";
+
+        // Use baseUrl from DB creds if present, otherwise derive from environment field stored in DB.
+        // Default: test sandbox.
+        const baseUrl = creds.baseUrl || "https://test-api.kashier.io";
 
         // Session expires in 24 hours from now
         const expireAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();

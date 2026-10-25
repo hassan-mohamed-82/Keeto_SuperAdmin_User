@@ -60,6 +60,7 @@ export const generatePaymentSession = async (req: Request, res: Response) => {
         .limit(1);
 
     if (settings?.paymentGatewayType === "CUSTOM") {
+        // ── CUSTOM: use the restaurant's own gateway credentials ──────────────
         const activeGateway = await getActiveCustomGateway(existingOrder.restaurantId);
 
         if (!activeGateway) {
@@ -80,6 +81,29 @@ export const generatePaymentSession = async (req: Request, res: Response) => {
             apiKey: decryptSecret(rawCreds.apiKey),
             secretKey: rawCreds.secretKey ? decryptSecret(rawCreds.secretKey) : undefined,
             baseUrl: rawCreds.baseUrl,
+        };
+    } else {
+        // ── SYSTEM: use the platform-level gateway stored in the DB ───────────
+        const platformGateway = await getActivePlatformGateway();
+
+        if (!platformGateway) {
+            throw new BadRequest(
+                "No active platform payment gateway found. Please configure a system gateway in the Super Admin dashboard."
+            );
+        }
+
+        if (platformGateway.provider !== "KASHIER") {
+            throw new BadRequest(
+                `Active platform gateway is ${platformGateway.provider}, not KASHIER. Use the correct session endpoint.`
+            );
+        }
+
+        const creds = platformGateway.credentials;
+        kashierCredentials = {
+            mid: creds.mid,
+            apiKey: creds.apiKey,          // already decrypted by getActivePlatformGateway
+            secretKey: creds.secretKey,
+            baseUrl: creds.baseUrl,
         };
     }
 
