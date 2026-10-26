@@ -1585,7 +1585,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                         lte(restaurants.createdAt, prevEnd),
                         ne(restaurants.type, "test"),
                         ne(restaurants.status, "inactive"),
-                        ne(restaurants.operationStatus, "inactive"),
+                        // ne(restaurants.operationStatus, "inactive"),
                         or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!
                     )
                 )
@@ -1615,7 +1615,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                     and(
                         lte(restaurants.createdAt, prevEnd),
                         eq(restaurants.status, "active"),
-                        eq(restaurants.operationStatus, "active"),
+                        // eq(restaurants.operationStatus, "active"),
                         ne(restaurants.type, "test"),
                         or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!
                     )
@@ -2560,4 +2560,4 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
             restaurants: itemsToShow,
         },
     });
-};
+};
