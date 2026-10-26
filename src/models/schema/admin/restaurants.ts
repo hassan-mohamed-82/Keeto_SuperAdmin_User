@@ -58,8 +58,8 @@ export const restaurants = mysqlTable("restaurants", {
     operationStatus: mysqlEnum("operation_status", ["active", "inactive"]).default("inactive"),
 
     appBundleId: varchar("app_bundle_id", { length: 255 }).unique(),
-    iosFirebaseProject: varchar("ios_firebase_project", { length: 50 }).notNull().default("primary"),
-    androidFirebaseProject: varchar("android_firebase_project", { length: 50 }).notNull().default("primary"),
+    iosFirebaseProject: varchar("ios_firebase_project", { length: 50 }).notNull().default("secondary"),
+    androidFirebaseProject: varchar("android_firebase_project", { length: 50 }).notNull().default("secondary"),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),

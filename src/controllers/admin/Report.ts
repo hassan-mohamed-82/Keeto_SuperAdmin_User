@@ -1393,6 +1393,13 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
     const { startDate: queryStartDate, endDate: queryEndDate } =
         getPerformanceReportQuerySchema.parse(req.query);
 
+    const isDefault = !queryStartDate && !queryEndDate;
+
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
     let start: Date | undefined;
     let end: Date | undefined;
 
@@ -1406,7 +1413,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
         if (!queryEndDate.includes("T")) end.setHours(23, 59, 59, 999);
     }
 
-    // Previous period for comparison only when both start and end are provided
+    // Previous period for comparison
     let prevStart: Date | undefined;
     let prevEnd: Date | undefined;
 
@@ -1424,6 +1431,11 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             prevEnd = new Date(start.getTime() - 1);
             prevStart = new Date(prevEnd.getTime() - diffMs);
         }
+    } else if (isDefault) {
+        // In default mode, compare cumulative lifetime metrics as of now against cumulative totals up to end of last month
+        // to clearly show how much numbers increased during the current month ("خلال الشهر ده زاد قد ايه")
+        prevStart = prevMonthStart;
+        prevEnd = prevMonthEnd;
     }
 
     const formatGrowth = (current: number, previous: number | null | undefined) => {
@@ -1471,47 +1483,52 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
     if (start) currOrdersConditions.push(gte(orders.createdAt, start));
     if (end) currOrdersConditions.push(lte(orders.createdAt, end));
 
+    // Total restaurants (all non-test restaurants)
     const currRestConditions: SQL[] = [
         ne(restaurants.type, "test"),
-        ne(restaurants.status, "inactive"),
-        ne(restaurants.operationStatus, "inactive"),
-        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!,
     ];
     if (end) currRestConditions.push(lte(restaurants.createdAt, end));
 
+    // New restaurants added in this period (or added this month in default mode)
     const newRestConditions: SQL[] = [
         ne(restaurants.type, "test"),
-        ne(restaurants.status, "inactive"),
-        ne(restaurants.operationStatus, "inactive"),
-        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!,
     ];
-    if (start) newRestConditions.push(gte(restaurants.createdAt, start));
+    if (start) {
+        newRestConditions.push(gte(restaurants.createdAt, start));
+    } else if (isDefault) {
+        newRestConditions.push(gte(restaurants.createdAt, currentMonthStart));
+    }
     if (end) newRestConditions.push(lte(restaurants.createdAt, end));
 
+    // Active restaurants (status active and non-test)
     const currActiveRestConditions: SQL[] = [
         eq(restaurants.status, "active"),
-        eq(restaurants.operationStatus, "active"),
         ne(restaurants.type, "test"),
-        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!,
     ];
     if (end) currActiveRestConditions.push(lte(restaurants.createdAt, end));
 
+    // Demo restaurants
     const currDemoConditions: SQL[] = [
         eq(restaurantOperations.status, "demo"),
         ne(restaurants.type, "test"),
     ];
     if (end) currDemoConditions.push(lte(restaurants.createdAt, end));
 
+    // Demo restaurants added in this period (or added this month in default mode)
     const addedDemoConditions: SQL[] = [
         eq(restaurantOperations.status, "demo"),
         ne(restaurants.type, "test"),
     ];
-    if (start) addedDemoConditions.push(gte(restaurants.createdAt, start));
+    if (start) {
+        addedDemoConditions.push(gte(restaurants.createdAt, start));
+    } else if (isDefault) {
+        addedDemoConditions.push(gte(restaurants.createdAt, currentMonthStart));
+    }
     if (end) addedDemoConditions.push(lte(restaurants.createdAt, end));
 
+    // Not delivered conditions
     const currNonDeliveredConditions: SQL[] = [
         ne(restaurants.type, "test"),
-        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!,
     ];
     if (end) currNonDeliveredConditions.push(lte(restaurants.createdAt, end));
 
@@ -1560,18 +1577,23 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             .where(and(...currOrdersConditions)),
 
         // 1. إجمالي الطلبات (الفترة السابقة)
-        prevStart && prevEnd
+        prevEnd
             ? db
                 .select({ total: count() })
                 .from(orders)
-                .where(and(gte(orders.createdAt, prevStart), lte(orders.createdAt, prevEnd), ne(orders.status, "failed")))
+                .where(
+                    and(
+                        ...(prevStart && !isDefault ? [gte(orders.createdAt, prevStart)] : []),
+                        lte(orders.createdAt, prevEnd),
+                        ne(orders.status, "failed")
+                    )
+                )
             : Promise.resolve([{ total: null }]),
 
         // 2. إجمالي المطاعم حتى نهاية الفترة الحالية
         db
             .select({ total: count() })
             .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
             .where(and(...currRestConditions)),
 
         // 2. إجمالي المطاعم حتى نهاية الفترة السابقة
@@ -1579,14 +1601,10 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             ? db
                 .select({ total: count() })
                 .from(restaurants)
-                .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
                 .where(
                     and(
                         lte(restaurants.createdAt, prevEnd),
-                        ne(restaurants.type, "test"),
-                        ne(restaurants.status, "inactive"),
-                        // ne(restaurants.operationStatus, "inactive"),
-                        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!
+                        ne(restaurants.type, "test")
                     )
                 )
             : Promise.resolve([{ total: null }]),
@@ -1595,14 +1613,12 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
         db
             .select({ total: count() })
             .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
             .where(and(...newRestConditions)),
 
         // 3. المطاعم النشطة حتى نهاية الفترة
         db
             .select({ total: count() })
             .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
             .where(and(...currActiveRestConditions)),
 
         // 3. المطاعم النشطة حتى نهاية الفترة السابقة
@@ -1610,14 +1626,11 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             ? db
                 .select({ total: count() })
                 .from(restaurants)
-                .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
                 .where(
                     and(
                         lte(restaurants.createdAt, prevEnd),
                         eq(restaurants.status, "active"),
-                        // eq(restaurants.operationStatus, "active"),
-                        ne(restaurants.type, "test"),
-                        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!
+                        ne(restaurants.type, "test")
                     )
                 )
             : Promise.resolve([{ total: null }]),
@@ -1658,7 +1671,6 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                 totalNotDelivered: count(sql`CASE WHEN ${restaurants.deliverystatus} = 'not_delivered' THEN 1 END`),
             })
             .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
             .where(and(...currNonDeliveredConditions)),
 
         // 5. نسبة المطاعم غير المسلمة للفترة السابقة
@@ -1669,12 +1681,10 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                     totalNotDelivered: count(sql`CASE WHEN ${restaurants.deliverystatus} = 'not_delivered' THEN 1 END`),
                 })
                 .from(restaurants)
-                .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
                 .where(
                     and(
                         lte(restaurants.createdAt, prevEnd),
-                        ne(restaurants.type, "test"),
-                        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!
+                        ne(restaurants.type, "test")
                     )
                 )
             : Promise.resolve([{ totalEligible: null, totalNotDelivered: null }]),
@@ -1692,7 +1702,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             .groupBy(restaurants.id, restaurants.createdAt),
 
         // 6. متوسط وقت التهيئة للفترة السابقة
-        prevStart && prevEnd
+        (isDefault ? prevMonthStart && prevMonthEnd : prevStart && prevEnd)
             ? db
                 .select({
                     restaurantId: restaurants.id,
@@ -1703,8 +1713,8 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                 .leftJoin(orders, and(eq(orders.restaurantId, restaurants.id), ne(orders.status, "failed")))
                 .where(
                     and(
-                        gte(restaurants.createdAt, prevStart),
-                        lte(restaurants.createdAt, prevEnd),
+                        gte(restaurants.createdAt, isDefault ? prevMonthStart : prevStart!),
+                        lte(restaurants.createdAt, isDefault ? prevMonthEnd : prevEnd!),
                         ne(restaurants.type, "test")
                     )
                 )
@@ -1729,7 +1739,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
             ),
 
         // 7. الانطلاق الناجح للفترة السابقة
-        prevStart && prevEnd
+        prevEnd
             ? db
                 .select({
                     total: count(sql`DISTINCT ${restaurants.id}`),
@@ -1739,7 +1749,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                     orders,
                     and(
                         eq(orders.restaurantId, restaurants.id),
-                        gte(orders.createdAt, prevStart),
+                        ...(prevStart && !isDefault ? [gte(orders.createdAt, prevStart)] : []),
                         lte(orders.createdAt, prevEnd),
                         ne(orders.status, "failed")
                     )
@@ -1747,7 +1757,8 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                 .where(
                     and(
                         eq(restaurants.deliverystatus, "delivered"),
-                        ne(restaurants.type, "test")
+                        ne(restaurants.type, "test"),
+                        ...(isDefault ? [lte(restaurants.createdAt, prevEnd)] : [])
                     )
                 )
             : Promise.resolve([{ total: null }]),
@@ -1845,7 +1856,7 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
         totalCreatedInPeriod > 0 ? Number(((completedOnboardingCount / totalCreatedInPeriod) * 100).toFixed(1)) : 0;
 
     let prevAvgOnboardingDays: number | null = null;
-    if (prevStart && prevEnd && prevOnboardingStats.length > 0) {
+    if (prevOnboardingStats && prevOnboardingStats.length > 0) {
         let prevTotalOnboardingDays = 0;
         let prevCompletedOnboardingCount = 0;
         for (const row of prevOnboardingStats) {
@@ -1931,7 +1942,9 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                 growthPercentage: ordersGrowth.percentage,
                 previousValue: prevTotalOrders,
                 trendDirection: ordersGrowth.trend,
-                subtext: start || end ? "Selected period" : "All time",
+                subtext: isDefault
+                    ? (ordersGrowth.percentage !== 0 ? `+${Math.max(0, totalOrders - (prevTotalOrders ?? 0)).toLocaleString()} this month` : "All time")
+                    : (start || end ? "Selected period" : "All time"),
                 sparkline: sparklines.map((s) => ({ date: s.date, value: s.orders })),
             },
             totalRestaurants: {
@@ -1940,7 +1953,9 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                 growthPercentage: restaurantsGrowth.percentage,
                 previousValue: prevTotalRestaurants,
                 trendDirection: restaurantsGrowth.trend,
-                subtext: end ? `Lifetime total as of ${endFormatted}` : "Lifetime total",
+                subtext: isDefault
+                    ? (newRestaurantsThisPeriod > 0 ? `+${newRestaurantsThisPeriod} added this month` : "Lifetime total")
+                    : (end ? `Lifetime total as of ${endFormatted}` : "Lifetime total"),
                 details: {
                     newThisPeriod: newRestaurantsThisPeriod,
                     lifetimeTotal: totalRestaurants,
@@ -1970,7 +1985,9 @@ export const getOperationsPerformanceReport = async (req: Request, res: Response
                 previousValue: prevDemoRestaurants,
                 addedThisPeriod: addedDemoThisPeriod,
                 trendDirection: demoGrowth.trend,
-                subtext: start || end ? `${addedDemoThisPeriod} added this period` : `${demoRestaurants} total demo`,
+                subtext: isDefault
+                    ? (addedDemoThisPeriod > 0 ? `+${addedDemoThisPeriod} added this month` : `${demoRestaurants} total demo`)
+                    : (start || end ? `${addedDemoThisPeriod} added this period` : `${demoRestaurants} total demo`),
                 sparkline: sparklines.map((s, idx) => ({
                     date: s.date,
                     value: Math.max(0, demoRestaurants - (sparklineBuckets - idx - 1)),
@@ -2045,8 +2062,18 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
         restaurantIds,
     } = getChartsQuerySchema.parse(req.query);
 
+    const isDefault = !queryStartDate && !queryEndDate;
+
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
     let start: Date;
     let end: Date;
+    let prevStart: Date;
+    let prevEnd: Date;
 
     if (queryStartDate && queryEndDate) {
         start = new Date(queryStartDate);
@@ -2054,42 +2081,49 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
 
         end = new Date(queryEndDate);
         if (!queryEndDate.includes("T")) end.setHours(23, 59, 59, 999);
+
+        const diffMs = end.getTime() - start.getTime();
+        const isFullMonth =
+            start.getDate() === 1 &&
+            new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate() === end.getDate() &&
+            start.getMonth() === end.getMonth();
+
+        if (isFullMonth) {
+            prevStart = new Date(start.getFullYear(), start.getMonth() - 1, 1, 0, 0, 0, 0);
+            prevEnd = new Date(start.getFullYear(), start.getMonth(), 0, 23, 59, 59, 999);
+        } else {
+            prevEnd = new Date(start.getTime() - 1);
+            prevStart = new Date(prevEnd.getTime() - diffMs);
+        }
     } else if (queryStartDate && !queryEndDate) {
         start = new Date(queryStartDate);
         if (!queryStartDate.includes("T")) start.setHours(0, 0, 0, 0);
         end = new Date();
         end.setHours(23, 59, 59, 999);
-    } else {
-        const now = new Date();
-        start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-        end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    }
 
-    // Previous period for comparison
-    const diffMs = end.getTime() - start.getTime();
-    const isFullMonth =
-        start.getDate() === 1 &&
-        new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate() === end.getDate() &&
-        start.getMonth() === end.getMonth();
-
-    let prevStart: Date;
-    let prevEnd: Date;
-
-    if (isFullMonth) {
-        prevStart = new Date(start.getFullYear(), start.getMonth() - 1, 1, 0, 0, 0, 0);
-        prevEnd = new Date(start.getFullYear(), start.getMonth(), 0, 23, 59, 59, 999);
-    } else {
+        const diffMs = end.getTime() - start.getTime();
         prevEnd = new Date(start.getTime() - 1);
         prevStart = new Date(prevEnd.getTime() - diffMs);
+    } else {
+        // Default mode: return all data without filtering by the month,
+        // but compare current month with previous month to show growth this month ("زاد قد ايه خلال الشهر ده")
+        start = new Date(2020, 0, 1);
+        end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        prevStart = prevMonthStart;
+        prevEnd = prevMonthEnd;
     }
 
-    // Timeline start for monthly aggregation charts (if range <= 32 days, show last 6 months for trends)
-    const rangeDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+    // Timeline start for monthly aggregation charts (in default mode show last 12 months for comprehensive trends)
     let timelineStart: Date;
-    if (rangeDays <= 32) {
-        timelineStart = new Date(end.getFullYear(), end.getMonth() - 5, 1, 0, 0, 0, 0);
+    if (isDefault) {
+        timelineStart = new Date(now.getFullYear(), now.getMonth() - 11, 1, 0, 0, 0, 0);
     } else {
-        timelineStart = new Date(start.getFullYear(), start.getMonth(), 1, 0, 0, 0, 0);
+        const rangeDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+        if (rangeDays <= 32) {
+            timelineStart = new Date(end.getFullYear(), end.getMonth() - 5, 1, 0, 0, 0, 0);
+        } else {
+            timelineStart = new Date(start.getFullYear(), start.getMonth(), 1, 0, 0, 0, 0);
+        }
     }
 
     // Generate monthly series slots
@@ -2120,15 +2154,24 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
     };
 
     const lowOrderConditions = [
-        lte(restaurants.createdAt, end),
+        ...(isDefault ? [] : [lte(restaurants.createdAt, end)]),
         ne(restaurants.type, "test"),
-        ne(restaurants.status, "inactive"),
-        ne(restaurants.operationStatus, "inactive"),
-        or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))!,
+        eq(restaurants.status, "active"),
     ];
 
     if (restaurantIds && restaurantIds.length > 0) {
         lowOrderConditions.push(inArray(restaurants.id, restaurantIds));
+    }
+
+    // Order date filters for low order chart (evaluates current month in default mode)
+    const lowOrderDateConditions = [
+        eq(orders.restaurantId, restaurants.id),
+        ne(orders.status, "failed"),
+    ];
+    if (isDefault) {
+        lowOrderDateConditions.push(gte(orders.createdAt, currentMonthStart));
+    } else {
+        lowOrderDateConditions.push(gte(orders.createdAt, start), lte(orders.createdAt, end));
     }
 
     // Parallel DB Queries
@@ -2136,6 +2179,8 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
         monthlyDeliveredOrdersRows,
         [currDeliveredOrdersRow],
         [prevDeliveredOrdersRow],
+        [currMonthDeliveredRow],
+        [prevMonthDeliveredRow],
         [deliveryOverviewRow],
         monthlyCreatedRows,
         firstOrdersSubqueryRows,
@@ -2161,14 +2206,14 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
             )
             .groupBy(sql`DATE_FORMAT(${orders.createdAt}, '%Y-%m')`),
 
-        // 1. Total delivered orders in selected period
+        // 1. Total delivered orders (in default mode: all-time delivered orders)
         db
             .select({ total: count() })
             .from(orders)
             .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
             .where(
                 and(
-                    gte(orders.createdAt, start),
+                    ...(isDefault ? [] : [gte(orders.createdAt, start)]),
                     lte(orders.createdAt, end),
                     eq(restaurants.deliverystatus, "delivered"),
                     ne(restaurants.type, "test"),
@@ -2176,7 +2221,7 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
                 )
             ),
 
-        // 1. Total delivered orders in previous period
+        // 1. Total delivered orders in previous period (when filtered)
         db
             .select({ total: count() })
             .from(orders)
@@ -2191,7 +2236,37 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
                 )
             ),
 
-        // 2. Delivery Overview (Donut): Delivered vs Not Delivered
+        // Delivered orders in current month (for default growth)
+        db
+            .select({ total: count() })
+            .from(orders)
+            .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+            .where(
+                and(
+                    gte(orders.createdAt, currentMonthStart),
+                    lte(orders.createdAt, currentMonthEnd),
+                    eq(restaurants.deliverystatus, "delivered"),
+                    ne(restaurants.type, "test"),
+                    ne(orders.status, "failed")
+                )
+            ),
+
+        // Delivered orders in previous month (for default growth)
+        db
+            .select({ total: count() })
+            .from(orders)
+            .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+            .where(
+                and(
+                    gte(orders.createdAt, prevMonthStart),
+                    lte(orders.createdAt, prevMonthEnd),
+                    eq(restaurants.deliverystatus, "delivered"),
+                    ne(restaurants.type, "test"),
+                    ne(orders.status, "failed")
+                )
+            ),
+
+        // 2. Delivery Overview (Donut): Delivered vs Not Delivered across all eligible restaurants
         db
             .select({
                 totalEligible: count(),
@@ -2201,14 +2276,10 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
                 ),
             })
             .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
             .where(
                 and(
-                    lte(restaurants.createdAt, end),
-                    ne(restaurants.type, "test"),
-                    ne(restaurants.status, "inactive"),
-                    ne(restaurants.operationStatus, "inactive"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
+                    ...(isDefault ? [] : [lte(restaurants.createdAt, end)]),
+                    ne(restaurants.type, "test")
                 )
             ),
 
@@ -2219,13 +2290,11 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
                 count: count(),
             })
             .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
             .where(
                 and(
                     gte(restaurants.createdAt, timelineStart),
                     lte(restaurants.createdAt, end),
-                    ne(restaurants.type, "test"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
+                    ne(restaurants.type, "test")
                 )
             )
             .groupBy(sql`DATE_FORMAT(${restaurants.createdAt}, '%Y-%m')`),
@@ -2263,14 +2332,12 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
                 totalOrders: count(orders.id),
             })
             .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
             .leftJoin(orders, and(eq(orders.restaurantId, restaurants.id), ne(orders.status, "failed")))
             .where(
                 and(
-                    lte(restaurants.createdAt, end),
+                    ...(isDefault ? [] : [lte(restaurants.createdAt, end)]),
                     eq(restaurants.deliverystatus, "delivered"),
-                    ne(restaurants.type, "test"),
-                    or(isNull(restaurantOperations.status), ne(restaurantOperations.status, "demo"))
+                    ne(restaurants.type, "test")
                 )
             )
             .groupBy(restaurants.id, restaurants.name, restaurants.nameAr),
@@ -2287,15 +2354,9 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
                 orderCount: count(orders.id),
             })
             .from(restaurants)
-            .leftJoin(restaurantOperations, eq(restaurants.id, restaurantOperations.restaurantId))
             .leftJoin(
                 orders,
-                and(
-                    eq(orders.restaurantId, restaurants.id),
-                    gte(orders.createdAt, start),
-                    lte(orders.createdAt, end),
-                    ne(orders.status, "failed")
-                )
+                and(...lowOrderDateConditions)
             )
             .where(and(...lowOrderConditions))
             .groupBy(
@@ -2315,7 +2376,11 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
     });
     const currDeliveredOrders = Number(currDeliveredOrdersRow?.total ?? 0);
     const prevDeliveredOrders = Number(prevDeliveredOrdersRow?.total ?? 0);
-    const deliveredGrowth = calculateGrowth(currDeliveredOrders, prevDeliveredOrders);
+    const currMonthDelivered = Number(currMonthDeliveredRow?.total ?? 0);
+    const prevMonthDelivered = Number(prevMonthDeliveredRow?.total ?? 0);
+    const deliveredGrowth = isDefault
+        ? calculateGrowth(currMonthDelivered, prevMonthDelivered)
+        : calculateGrowth(currDeliveredOrders, prevDeliveredOrders);
 
     // 2. Process Delivery Overview (Donut)
     const deliveryTotal = Number(deliveryOverviewRow?.totalEligible ?? 0);
@@ -2366,17 +2431,21 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
     const activeDeliveredIds = activeRestaurantsAfterDelivery.map((r) => r.restaurantId);
     let currActiveDelivOrders = 0;
     let prevActiveDelivOrders = 0;
+    let activeDelivGrowth: { percentage: number; trend: "up" | "down" | "neutral" } = {
+        percentage: 0,
+        trend: "neutral",
+    };
     const activeDelivOrdersMap = new Map<string, number>();
 
     if (activeDeliveredIds.length > 0) {
-        const [currRow, prevRow, monthlyRows] = await Promise.all([
+        const [currRow, prevRow, currMonthRow, monthlyRows] = await Promise.all([
             db
                 .select({ total: count() })
                 .from(orders)
                 .where(
                     and(
                         inArray(orders.restaurantId, activeDeliveredIds),
-                        gte(orders.createdAt, start),
+                        ...(isDefault ? [] : [gte(orders.createdAt, start)]),
                         lte(orders.createdAt, end),
                         ne(orders.status, "failed")
                     )
@@ -2387,8 +2456,19 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
                 .where(
                     and(
                         inArray(orders.restaurantId, activeDeliveredIds),
-                        gte(orders.createdAt, prevStart),
-                        lte(orders.createdAt, prevEnd),
+                        gte(orders.createdAt, isDefault ? prevMonthStart : prevStart),
+                        lte(orders.createdAt, isDefault ? prevMonthEnd : prevEnd),
+                        ne(orders.status, "failed")
+                    )
+                ),
+            db
+                .select({ total: count() })
+                .from(orders)
+                .where(
+                    and(
+                        inArray(orders.restaurantId, activeDeliveredIds),
+                        gte(orders.createdAt, currentMonthStart),
+                        lte(orders.createdAt, currentMonthEnd),
                         ne(orders.status, "failed")
                     )
                 ),
@@ -2411,11 +2491,17 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
 
         currActiveDelivOrders = Number(currRow[0]?.total ?? 0);
         prevActiveDelivOrders = Number(prevRow[0]?.total ?? 0);
+        const currMonthDelivOrders = Number(currMonthRow[0]?.total ?? 0);
         monthlyRows.forEach((r) => {
             if (r.month) activeDelivOrdersMap.set(r.month, Number(r.orderCount ?? 0));
         });
+
+        activeDelivGrowth = isDefault
+            ? calculateGrowth(currMonthDelivOrders, prevActiveDelivOrders)
+            : calculateGrowth(currActiveDelivOrders, prevActiveDelivOrders);
+    } else {
+        activeDelivGrowth = { percentage: 0, trend: "neutral" };
     }
-    const activeDelivGrowth = calculateGrowth(currActiveDelivOrders, prevActiveDelivOrders);
 
     // 5. Process Restaurant Acquisition & Order Activation Growth (Timeline)
     const createdMap = new Map<string, number>();
@@ -2443,7 +2529,9 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
         totalCreatedInTimeline > 0 ? Number(((totalActivatedInTimeline / totalCreatedInTimeline) * 100).toFixed(1)) : 0;
 
     // 6. Process Low Order Restaurants (Bar Chart)
-    const daysInPeriod = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+    const daysInPeriod = isDefault
+        ? Math.max(1, now.getDate())
+        : Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
     let filteredLowOrders = restaurantOrdersInPeriodRows.map((r) => {
         const oCount = Number(r.orderCount ?? 0);
         const dailyAvg = Number((oCount / daysInPeriod).toFixed(1));
@@ -2475,8 +2563,8 @@ export const getOperationsCharts = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, {
         period: {
-            startDate: start.toISOString(),
-            endDate: end.toISOString(),
+            startDate: isDefault ? null : start.toISOString(),
+            endDate: isDefault ? null : end.toISOString(),
             previousStartDate: prevStart.toISOString(),
             previousEndDate: prevEnd.toISOString(),
             timelineStartDate: timelineStart.toISOString(),
