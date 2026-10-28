@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { notifications } from "../../models/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql, count } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { UnauthorizedError } from "../../Errors";
 import { NotFound } from "../../Errors/NotFound";
@@ -14,29 +14,57 @@ export const getMyNotifications = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
 
-    // Pagination (optional)
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    // Pagination
+    const page   = parseInt(req.query.page  as string) || 1;
+    const limit  = parseInt(req.query.limit as string) || 20;
     const offset = (page - 1) * limit;
 
-    const userNotifications = await db
-        .select()
-        .from(notifications)
-        .where(and(
-            eq(notifications.recipientType, "user"),
-            eq(notifications.recipientId, userId)
-        ))
-        .orderBy(desc(notifications.createdAt))
-        .limit(limit)
-        .offset(offset);
+    // Optional restaurantId filter from query string
+    // e.g. GET /user/notifications?restaurantId=uuid-xxx
+    const restaurantId = req.query.restaurantId as string | undefined;
+
+    // Build conditions
+    const conditions: any[] = [
+        eq(notifications.recipientType, "user"),
+        eq(notifications.recipientId,   userId),
+    ];
+
+    if (restaurantId) {
+        // Filter by restaurantId stored inside the JSON data column
+        conditions.push(
+            sql`JSON_UNQUOTE(JSON_EXTRACT(${notifications.data}, '$.restaurantId')) = ${restaurantId}`
+        );
+    }
+
+    const [userNotifications, totalResult] = await Promise.all([
+        db
+            .select()
+            .from(notifications)
+            .where(and(...conditions))
+            .orderBy(desc(notifications.createdAt))
+            .limit(limit)
+            .offset(offset),
+
+        db
+            .select({ count: count() })
+            .from(notifications)
+            .where(and(...conditions)),
+    ]);
+
+    const totalItems = Number(totalResult[0]?.count ?? 0);
 
     return SuccessResponse(res, {
         message: "Notifications fetched successfully",
         data: userNotifications,
-        page,
-        limit
+        pagination: {
+            page,
+            limit,
+            totalItems,
+            totalPages: Math.ceil(totalItems / limit),
+        },
     });
 };
+
 
 // ==========================================
 // 2. Mark Notification as Read
@@ -51,6 +79,7 @@ export const markNotificationAsRead = async (req: Request | any, res: Response) 
         .from(notifications)
         .where(and(
             eq(notifications.id, id),
+            eq(notifications.recipientType, "user"),
             eq(notifications.recipientId, userId)
         ))
         .limit(1);
@@ -59,7 +88,11 @@ export const markNotificationAsRead = async (req: Request | any, res: Response) 
 
     await db.update(notifications)
         .set({ isRead: true })
-        .where(eq(notifications.id, id));
+        .where(and(
+            eq(notifications.id, id),
+            eq(notifications.recipientType, "user"),
+            eq(notifications.recipientId, userId)
+        ));
 
     return SuccessResponse(res, { message: "Notification marked as read" });
 };
