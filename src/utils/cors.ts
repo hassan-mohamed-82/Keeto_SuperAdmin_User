@@ -5,10 +5,10 @@ import { domainResolutionCache } from "./domainCache";
 
 /**
  * Checks whether an incoming request Origin is allowed.
+ * - Localhost / local IPs are always allowed for development.
  * - Requests without Origin are allowed (server-to-server, curl, mobile apps).
  * - Origins ending with .keeto.org (or keeto.org) are allowed.
- * - Custom domains are allowed only if verified in restaurant_domains.
- * - Uses in-memory cache for fast lookup.
+ * - Custom domains are allowed if verified in restaurant_domains.
  */
 export async function isAllowedOrigin(origin?: string): Promise<boolean> {
   if (!origin) return true;
@@ -18,6 +18,17 @@ export async function isAllowedOrigin(origin?: string): Promise<boolean> {
     hostname = new URL(origin).hostname.toLowerCase();
   } catch {
     return false;
+  }
+
+  // Local development
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname.endsWith(".localhost") ||
+    hostname.startsWith("192.168.") ||
+    hostname.startsWith("10.")
+  ) {
+    return true;
   }
 
   // Any keeto.org domain or subdomain
