@@ -878,7 +878,18 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         (r) => r.type !== "test" && r.operationStatus !== "demo"
     );
 
+    // Demo restaurants only (without test)
+    const demoOnlyRestaurants = allRestaurantsMapped.filter(
+        (r) => r.operationStatus === "demo"
+    );
+
     let totalRestaurants = allRestaurants.length;
+
+    // Real restaurants (no test / no demo) where restaurants.deliverystatus = "delivered"
+    const totalDeliveredRestaurants = allRestaurants.filter(
+        (r) => r.deliverystatus === "delivered"
+    ).length;
+
     let restaurantsByType: Record<string, number> = {
         "mega": 0,
         "super": 0,
@@ -1120,6 +1131,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
                 restaurant: totalCanceledByRestaurant,
             },
             totalRestaurants,
+            deliveredRestaurants: totalDeliveredRestaurants,
             restaurantsWithOrders: withOrdersList.length,
             restaurantsWithoutOrders: withoutOrdersList.length,
             total_commission,
@@ -1139,7 +1151,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
         canceledOrders: canceledOrdersList,
         // ─ Demo / Test summary (مستبعدة من الحسابات الرئيسية)
         demoSummary: {
-            totalTestDemoRestaurants: testOrDemoRestaurants.length,
+            totalTestDemoRestaurants: demoOnlyRestaurants.length,
             totalOrders: demoAgg.totalOrders,
             validOrders: demoAgg.totalValidOrders,
             canceledOrders: demoAgg.totalCanceledOrders,
