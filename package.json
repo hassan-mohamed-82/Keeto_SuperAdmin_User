@@ -58,6 +58,7 @@
     "socket.io-client": "^4.8.3",
     "swagger-ui-express": "^5.0.1",
     "tesseract.js": "^7.0.0",
+    "tldts": "^7.4.19",
     "uuid": "^11.1.0",
     "xss-clean": "^0.1.4",
     "zod": "^3.25.74"
