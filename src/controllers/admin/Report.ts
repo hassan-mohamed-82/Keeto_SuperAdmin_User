@@ -880,7 +880,7 @@ export const getRestaurantOrdersReport = async (req: Request | any, res: Respons
 
     // Demo restaurants only (without test)
     const demoOnlyRestaurants = allRestaurantsMapped.filter(
-        (r) => r.operationStatus === "demo"
+        (r) => r.operationStatus === "demo" && r.type !== "test"
     );
 
     let totalRestaurants = allRestaurants.length;
