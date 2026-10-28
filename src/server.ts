@@ -40,14 +40,15 @@ const io = initSocket(httpServer);
 // 3. Other origins → allowed only if the hostname is a verified custom domain in restaurant_domains.
 app.use(
   cors({
-    origin: async (origin, callback) => {
-      try {
-        const allowed = await isAllowedOrigin(origin);
-        callback(null, allowed);
-      } catch (err) {
-        callback(null, false);
-      }
-    },
+    origin: true,
+    // origin: async (origin, callback) => {
+    //   try {
+    //     const allowed = await isAllowedOrigin(origin);
+    //     callback(null, allowed);
+    //   } catch (err) {
+    //     callback(null, false);
+    //   }
+    // },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
