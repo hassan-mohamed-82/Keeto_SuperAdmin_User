@@ -90,17 +90,36 @@ export async function pointsToServer(domain: string): Promise<boolean> {
   const serverIp = process.env.SERVER_IP;
   const mainDomain = process.env.MAIN_DOMAIN;
 
+  const resolver = new dns.promises.Resolver();
+  try {
+    resolver.setServers(["8.8.8.8", "1.1.1.1"]);
+  } catch {}
+
   try {
     // Try A record first
-    const addresses = await dns.promises
+    let addresses = await resolver
       .resolve4(domain)
       .catch(() => [] as string[]);
+
+    if (addresses.length === 0) {
+      addresses = await dns.promises
+        .resolve4(domain)
+        .catch(() => [] as string[]);
+    }
+
     if (serverIp && addresses.includes(serverIp)) return true;
 
     // Try CNAME
-    const cnames = await dns.promises
+    let cnames = await resolver
       .resolveCname(domain)
       .catch(() => [] as string[]);
+
+    if (cnames.length === 0) {
+      cnames = await dns.promises
+        .resolveCname(domain)
+        .catch(() => [] as string[]);
+    }
+
     if (
       mainDomain &&
       cnames.some((c) => c === mainDomain || c === `${mainDomain}.`)
