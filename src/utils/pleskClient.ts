@@ -454,56 +454,86 @@ location ~ ^/(?!\\.well-known/) {
 }
 `.trim();
 
-    const confPath = `/var/www/vhosts/system/${domain}/conf/vhost_nginx.conf`;
+    const confDir = `/var/www/vhosts/system/${domain}/conf`;
+    const confPath = `${confDir}/vhost_nginx.conf`;
     let nginxApplied = false;
 
-    // Attempt 1: write the file directly
+    // Attempt 1: write via Plesk scheduler CLI (executes as root on Plesk server)
     try {
-      await fs.mkdir(path.dirname(confPath), { recursive: true });
-      await fs.writeFile(confPath, nginxConfig, { encoding: "utf8" });
-      const repairResult = await pleskCli("repair", [
-        "--web",
-        "-domain",
-        domain,
+      const b64 = Buffer.from(nginxConfig, "utf8").toString("base64");
+      const writeCmd = `mkdir -p ${confDir} && echo "${b64}" | base64 -d > ${confPath}`;
+
+      const createRes = await pleskCli("scheduler", [
+        "--create",
+        "-user",
+        "root",
+        "-type",
+        "exec",
+        "-command",
+        writeCmd,
+        "-schedule",
+        "0 0 1 1 *",
+        "-description",
+        `nginx_proxy_${domain.replace(/[^a-z0-9_-]/gi, "_")}`,
+        "-json",
       ]);
-      if (repairResult.code === 0) {
-        nginxApplied = true;
-      } else {
-        console.warn(
-          `[Plesk] repair --web returned code ${repairResult.code}: ${repairResult.stderr}`
-        );
+
+      if (createRes.code === 0 && createRes.stdout) {
+        let taskId: number | null = null;
+        try {
+          const parsed = JSON.parse(createRes.stdout);
+          taskId = parsed.id;
+        } catch {}
+
+        if (taskId) {
+          try {
+            const runRes = await pleskCli("scheduler", ["--run", String(taskId)]);
+            if (runRes.code === 0) {
+              // Reconfigure web server for this domain using plesk repair --web <domain> -y
+              const repairResult = await pleskCli("repair", [
+                "--web",
+                domain,
+                "-y",
+              ]);
+              if (repairResult.code === 0) {
+                nginxApplied = true;
+              } else {
+                console.warn(
+                  `[Plesk] repair --web returned code ${repairResult.code}: ${repairResult.stderr}`
+                );
+              }
+            } else {
+              console.warn(
+                `[Plesk] scheduler --run failed for task ${taskId}: ${runRes.stderr}`
+              );
+            }
+          } finally {
+            // Always clean up the temporary scheduled task
+            await pleskCli("scheduler", ["--delete", String(taskId)]).catch(() => {});
+          }
+        }
       }
-    } catch (fsErr: any) {
+    } catch (schedErr: any) {
       console.warn(
-        `[Plesk] Could not write nginx config file directly (${fsErr?.message}). Trying Plesk REST API fallback.`
+        `[Plesk] Scheduler-based nginx config application failed: ${schedErr?.message}`
       );
     }
 
-    // Attempt 2: Plesk REST API for nginx additional directives (fallback)
+    // Attempt 2: Direct filesystem fallback (if backend is running on the Plesk host directly)
     if (!nginxApplied) {
       try {
-        const pleskUrl = env("PLESK_URL");
-        const apiKey = process.env.PLESK_API_KEY;
-        if (pleskUrl && apiKey) {
-          await axios.put(
-            `${pleskUrl}/api/v2/domains/${encodeURIComponent(domain)}/hosting/settings`,
-            {
-              nginx_directives: nginxConfig,
-            },
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "X-API-Key": apiKey,
-              },
-              timeout: 30_000,
-            }
-          );
+        await fs.mkdir(confDir, { recursive: true });
+        await fs.writeFile(confPath, nginxConfig, { encoding: "utf8" });
+        const repairResult = await pleskCli("repair", [
+          "--web",
+          domain,
+          "-y",
+        ]);
+        if (repairResult.code === 0) {
           nginxApplied = true;
         }
-      } catch (apiErr: any) {
-        console.warn(
-          `[Plesk] REST API nginx directive fallback failed: ${apiErr?.message}`
-        );
+      } catch (fsErr: any) {
+        // Direct write unavailable
       }
     }
 
@@ -711,7 +741,7 @@ export async function deletePleskDomain(
     return { success: true };
   }
 
-  let result = await pleskCli("site", ["--remove", domain, "-force-remove", "true"]);
+  let result = await pleskCli("site", ["--remove", domain]);
 
   // If site --remove failed with not found, and domain is a subdomain, try subdomain --remove
   if (result.code !== 0) {

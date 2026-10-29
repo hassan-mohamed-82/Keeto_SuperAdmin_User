@@ -72,6 +72,18 @@ function startBackgroundProvisioning(
           .where(eq(restaurantDomains.id, domainId));
       } else {
         console.error(`[Plesk] Provisioning ended for domain ${domainId}: ${result.error}`);
+        // If it stopped at dns_check, it's waiting for DNS (kept as running).
+        // Otherwise, mark as failed and persist the exact error!
+        if (result.step !== "dns_check") {
+          await db
+            .update(restaurantDomains)
+            .set({
+              provisionStatus: "failed",
+              lastError: result.error ?? "Provisioning failed",
+            })
+            .where(eq(restaurantDomains.id, domainId))
+            .catch(console.error);
+        }
       }
     } catch (err: any) {
       console.error("[Plesk] Unexpected error in background provisioning:", err?.message);
