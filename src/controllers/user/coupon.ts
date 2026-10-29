@@ -26,6 +26,8 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
         subtotal: reqSubtotal,
         deliveryFee: reqDeliveryFee = 0,
         orderType = "delivery",
+        foodIds: reqFoodIds,
+        foods: reqFoods,
     } = req.body;
 
     if (!code || !code.trim()) {
@@ -41,7 +43,12 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
     // Resolve subtotal (from body if provided, or from user's current cart items)
     let subtotal = typeof reqSubtotal === "number" ? reqSubtotal : parseFloat(reqSubtotal || "0");
 
-    if (!subtotal || subtotal <= 0) {
+    const rawFoodIds = reqFoodIds !== undefined ? reqFoodIds : reqFoods;
+    let cartFoodIds: string[] | undefined = Array.isArray(rawFoodIds) && rawFoodIds.length > 0
+        ? rawFoodIds.map(String).filter(Boolean)
+        : undefined;
+
+    if (!subtotal || subtotal <= 0 || !cartFoodIds) {
         const userCart = await db
             .select()
             .from(cartItems)
@@ -53,9 +60,14 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
             );
 
         if (userCart.length > 0) {
-            subtotal = userCart.reduce((sum, item) => {
-                return sum + parseFloat(item.totalPrice as string || "0");
-            }, 0);
+            if (!subtotal || subtotal <= 0) {
+                subtotal = userCart.reduce((sum, item) => {
+                    return sum + parseFloat(item.totalPrice as string || "0");
+                }, 0);
+            }
+            if (!cartFoodIds) {
+                cartFoodIds = userCart.map(item => item.foodId).filter(Boolean);
+            }
         }
     }
 
@@ -67,7 +79,8 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
         userId,
         restaurantId,
         subtotal,
-        deliveryFee
+        deliveryFee,
+        cartFoodIds
     );
 
     const finalDeliveryFee = isFreeDelivery ? 0 : deliveryFee;
@@ -86,6 +99,7 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
             discountValue: parseFloat((coupon.discountValue as string) || "0"),
             maxDiscount: coupon.maxDiscount ? parseFloat((coupon.maxDiscount as string) || "0") : null,
             minOrderAmount: parseFloat((coupon.minOrderAmount as string) || "0"),
+            foodIds: coupon.foodIds,
             discountAmount,
             isFreeDelivery,
             summary: {
@@ -108,9 +122,9 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
  */
 export const getAvailableCoupons = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
-    const { restaurantId } = req.query;
+    const restaurantId = req.query?.restaurantId as string;
 
-    if (!restaurantId || typeof restaurantId !== "string") {
+    if (!restaurantId) {
         throw new BadRequest("restaurantId query parameter is required.");
     }
 

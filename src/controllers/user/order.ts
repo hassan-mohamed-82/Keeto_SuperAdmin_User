@@ -932,7 +932,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             userId,
             restaurantId,
             subtotal,
-            0
+            0,
+            userCart.map((c) => c.foodId).filter(Boolean) as string[]
         );
 
         appliedCoupon = couponResult.coupon;

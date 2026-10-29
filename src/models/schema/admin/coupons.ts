@@ -7,6 +7,7 @@ import {
     mysqlEnum,
     int,
     boolean,
+    json,
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
@@ -58,6 +59,9 @@ export const coupons = mysqlTable("coupons", {
     isActive: boolean("is_active").default(true),
     
     isGlobal: boolean("is_global").default(false).notNull(),
+
+    // Array of eligible food IDs. If null/empty, coupon applies to cart without checking food
+    foodIds: json("food_ids").$type<string[] | null>().default(null),
 
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),

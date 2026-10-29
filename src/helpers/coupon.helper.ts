@@ -4,6 +4,7 @@ import {
     coupons,
     couponUsages,
     couponRestaurants,
+    cartItems,
 } from "../models/schema";
 import { eq, and, sql, or, isNull, lte, gte, inArray } from "drizzle-orm";
 import { BadRequest } from "../Errors/BadRequest";
@@ -26,13 +27,15 @@ export type CouponValidationResult = {
  *  4. Per-user usage limit (user usages < perUserLimit)
  *  5. Restaurant eligibility (isGlobal === true OR linked in couponRestaurants)
  *  6. Minimum order subtotal requirement
+ *  7. Food-level restriction (if foodIds is configured, cart must contain at least one eligible food)
  */
 export const validateAndCalculateCoupon = async (
     couponCode: string,
     userId: string,
     restaurantId: string,
     subtotal: number,
-    deliveryFee: number = 0
+    deliveryFee: number = 0,
+    cartFoodIds?: string[]
 ): Promise<CouponValidationResult> => {
     if (!couponCode || !couponCode.trim()) {
         throw new BadRequest("Coupon code is required.");
@@ -121,7 +124,34 @@ export const validateAndCalculateCoupon = async (
         );
     }
 
-    // 7. Calculate Discount Amount
+    // 7. Food-level restriction check
+    // If foodIds is null, undefined, or empty, the coupon applies to the cart without checking food items.
+    // If foodIds is specified, the coupon ONLY applies if at least one of these foods exists in the cart.
+    const eligibleFoodIds = coupon.foodIds;
+    if (eligibleFoodIds && Array.isArray(eligibleFoodIds) && eligibleFoodIds.length > 0) {
+        let currentCartFoodIds = cartFoodIds;
+
+        if (!currentCartFoodIds || currentCartFoodIds.length === 0) {
+            // Fetch cart items from database if not supplied
+            const userCart = await db
+                .select({ foodId: cartItems.foodId })
+                .from(cartItems)
+                .where(
+                    and(
+                        eq(cartItems.userId, userId),
+                        eq(cartItems.restaurantId, restaurantId)
+                    )
+                );
+            currentCartFoodIds = userCart.map((i) => i.foodId).filter(Boolean);
+        }
+
+        const hasEligibleFood = currentCartFoodIds.some((fId) => eligibleFoodIds.includes(fId));
+        if (!hasEligibleFood) {
+            throw new BadRequest("This coupon is only valid for specific items that are not in your cart.");
+        }
+    }
+
+    // 8. Calculate Discount Amount
     let discountAmount = 0;
     let isFreeDelivery = false;
     const value = parseFloat((coupon.discountValue as string) || "0");
@@ -179,6 +209,7 @@ export const getAvailableCouponsForUser = async (
             startDate: coupons.startDate,
             endDate: coupons.endDate,
             isGlobal: coupons.isGlobal,
+            foodIds: coupons.foodIds,
         })
         .from(coupons)
         .leftJoin(couponRestaurants, eq(coupons.id, couponRestaurants.couponId))
@@ -256,6 +287,7 @@ export const getAvailableCouponsForUser = async (
             remainingUserUsages: c.userUsageType === "fixed"
                 ? (c.perUserLimit ?? 1) - userUsed
                 : null,
+            foodIds: c.foodIds,
         });
     }
 

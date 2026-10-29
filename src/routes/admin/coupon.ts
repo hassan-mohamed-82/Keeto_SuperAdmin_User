@@ -7,20 +7,21 @@ import {
     updateCoupon,
     deleteCoupon,
     toggleCouponStatus,
-    // validateCouponEndpoint,
     getCouponUsages,
 } from "../../controllers/admin/coupon";
+import { validate } from "../../middlewares/validation";
+import {
+    createCouponSchema,
+    updateCouponSchema,
+} from "../../validation/admin/coupon";
 
 const router = Router();
-``
-// Validate a coupon code before placing order
-// router.post("/validate", catchAsync(validateCouponEndpoint));
 
 // CRUD
-router.post("/", catchAsync(createCoupon));
+router.post("/", validate(createCouponSchema), catchAsync(createCoupon));
 router.get("/", catchAsync(getAllCoupons));
 router.get("/:id", catchAsync(getCouponById));
-router.put("/:id", catchAsync(updateCoupon));
+router.put("/:id", validate(updateCouponSchema), catchAsync(updateCoupon));
 router.delete("/:id", catchAsync(deleteCoupon));
 
 // Toggle active/inactive

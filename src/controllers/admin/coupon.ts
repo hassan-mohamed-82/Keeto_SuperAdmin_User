@@ -17,7 +17,8 @@ export const createCoupon = async (req: Request, res: Response) => {
         maxDiscount, minOrderAmount,
         usageLimit, perUserLimit,
         startDate, endDate, isActive,
-        restaurantIds // مصفوفة اختيارية الآن لتحديد المطاعم
+        restaurantIds, // مصفوفة اختيارية الآن لتحديد المطاعم
+        foodIds, foods,
     } = req.body;
 
     // التحققات الأساسية
@@ -61,6 +62,14 @@ export const createCoupon = async (req: Request, res: Response) => {
 
     const couponId = uuidv4();
 
+    // Resolve foodIds
+    const rawFoodIds = foodIds !== undefined ? foodIds : foods;
+    let resolvedFoodIds: string[] | null = null;
+    if (Array.isArray(rawFoodIds) && rawFoodIds.length > 0) {
+        const filtered = rawFoodIds.map(String).filter(Boolean);
+        resolvedFoodIds = filtered.length > 0 ? filtered : null;
+    }
+
     // 1. إدخال الكوبون في الجدول الرئيسي
     await db.insert(coupons).values({
         id: couponId,
@@ -78,6 +87,7 @@ export const createCoupon = async (req: Request, res: Response) => {
         endDate: endDate ? new Date(endDate) : null,
         isActive: isActive !== undefined ? isActive : true,
         isGlobal: isGlobal, // ضبط حقل العالمية
+        foodIds: resolvedFoodIds,
     });
 
     // 2. بناء سجلات الربط فقط إذا لم يكن الكوبون عاماً
@@ -94,7 +104,12 @@ export const createCoupon = async (req: Request, res: Response) => {
         message: isGlobal
             ? "Global coupon created successfully for all restaurants"
             : "Coupon created and linked to selected restaurants successfully",
-        data: { id: couponId, isGlobal }
+        data: {
+            id: couponId,
+            isGlobal,
+            foodIds: resolvedFoodIds,
+            foods: resolvedFoodIds,
+        }
     }, 201);
 };
 
@@ -108,7 +123,12 @@ export const getAllCoupons = async (req: Request, res: Response) => {
         .where(eq(coupons.isGlobal, true))
         .orderBy(desc(coupons.createdAt));
 
-    return SuccessResponse(res, { message: "Get coupons success", data: allCoupons });
+    const couponsWithFoods = allCoupons.map((c) => ({
+        ...c,
+        foods: c.foodIds ?? null,
+    }));
+
+    return SuccessResponse(res, { message: "Get coupons success", data: couponsWithFoods });
 };
 
 // ========================================================
@@ -139,7 +159,11 @@ export const getCouponById = async (req: Request, res: Response) => {
 
     return SuccessResponse(res, {
         message: "Get coupon success",
-        data: { ...coupon, restaurantIds }
+        data: {
+            ...coupon,
+            foods: coupon.foodIds ?? null,
+            restaurantIds,
+        }
     });
 };
 
@@ -163,7 +187,8 @@ export const updateCoupon = async (req: Request, res: Response) => {
         maxDiscount, minOrderAmount,
         usageLimit, perUserLimit,
         startDate, endDate, isActive,
-        restaurantIds
+        restaurantIds,
+        foodIds, foods,
     } = req.body;
 
     const normalizedCode = code ? code.toUpperCase().trim() : existing.code;
@@ -182,6 +207,16 @@ export const updateCoupon = async (req: Request, res: Response) => {
     if (startDate !== undefined) updateData.startDate = startDate ? new Date(startDate) : null;
     if (endDate !== undefined) updateData.endDate = endDate ? new Date(endDate) : null;
     if (isActive !== undefined) updateData.isActive = isActive;
+
+    if (foodIds !== undefined || foods !== undefined) {
+        const rawFoodIds = foodIds !== undefined ? foodIds : foods;
+        if (rawFoodIds === null) {
+            updateData.foodIds = null;
+        } else if (Array.isArray(rawFoodIds)) {
+            const filtered = rawFoodIds.map(String).filter(Boolean);
+            updateData.foodIds = filtered.length > 0 ? filtered : null;
+        }
+    }
 
     // إذا تم تمرير مصفوفة المطاعم، نعيد هيكلة الربط والعالمية تماماً مثل الـ Discounts
     if (restaurantIds !== undefined && Array.isArray(restaurantIds)) {
