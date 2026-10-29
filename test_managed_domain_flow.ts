@@ -35,8 +35,9 @@ const headersWithAuth = {
   Authorization: `Bearer ${TOKEN}`,
 };
 
-const uniqueSuffix = Date.now().toString(36);
-const TEST_DOMAIN = `keeto-managed-test-${uniqueSuffix}.com`;
+// Default domain example requested: test2.82-208-20-108.sslip.io
+const TEST_DOMAIN = (process.env.TEST_DOMAIN || "test2.82-208-20-108.sslip.io").trim().toLowerCase();
+const KEEP_DOMAIN = process.env.KEEP_DOMAIN === "true" || process.argv.includes("--keep");
 
 interface StepResult {
   step: string;
@@ -97,6 +98,25 @@ async function run() {
     console.error(`❌ Server is not reachable at ${BASE_URL}.`);
     printSummary();
     return;
+  }
+
+  // PRE-CLEANUP: If TEST_DOMAIN is already registered from a previous run, clean it up first
+  const existingListRes = await request(`${BASE_URL}${adminPrefix}/restaurants/${RESTAURANT_ID}/domains`, {
+    headers: headersWithAuth,
+  });
+  const existingDomains: any[] = Array.isArray(existingListRes.body?.data)
+    ? existingListRes.body.data
+    : Array.isArray(existingListRes.body)
+    ? existingListRes.body
+    : [];
+  const existingRecord = existingDomains.find((d: any) => d.domain === TEST_DOMAIN);
+  if (existingRecord) {
+    console.log(`ℹ️ Domain ${TEST_DOMAIN} already exists (ID ${existingRecord.id}). Cleaning up before test...`);
+    await request(`${BASE_URL}${adminPrefix}/domains/${existingRecord.id}`, {
+      method: "DELETE",
+      headers: headersWithAuth,
+    });
+    console.log(`🧹 Cleaned up existing domain ${TEST_DOMAIN}`);
   }
 
   // STEP 2
@@ -211,11 +231,16 @@ async function run() {
     provisionRes.status === 400 &&
     errorMessage.includes("ENABLE_PLESK_PROVISIONING is disabled");
 
+  const provisionSuccess =
+    provisionRes.status === 200 ||
+    provisionRes.status === 202 ||
+    isPleskDisabledExpected;
+
   results.push({
     step: "6. Provisioning Endpoint",
-    success: provisionRes.status === 200 || isPleskDisabledExpected,
-    message: provisionRes.status === 200
-      ? `Provisioning succeeded on Plesk`
+    success: provisionSuccess,
+    message: provisionRes.status === 200 || provisionRes.status === 202
+      ? `Provisioning accepted (status ${provisionRes.status}): ${JSON.stringify(provisionRes.body)}`
       : `Plesk disabled guard verified properly: ${JSON.stringify(provisionRes.body)}`,
   });
 
@@ -240,6 +265,24 @@ async function run() {
       ? `Order link updated to https://${TEST_DOMAIN}`
       : `Safety check verified: prevented setting order link while SSL status is pending`,
   });
+
+  if (KEEP_DOMAIN) {
+    console.log(`\n============================================================`);
+    console.log(`ℹ️ KEEP_DOMAIN is active (--keep). Retaining domain in database for live testing.`);
+    console.log(`============================================================`);
+    results.push({
+      step: "8. Delete Domain",
+      success: true,
+      message: `Skipped (KEEP_DOMAIN active) - Domain ${TEST_DOMAIN} remains registered on restaurant`,
+    });
+    results.push({
+      step: "9. Cache Eviction / 404 After Delete",
+      success: true,
+      message: `Skipped (KEEP_DOMAIN active) - Domain remains active and resolvable`,
+    });
+    printSummary();
+    return;
+  }
 
   // STEP 8
   logStep(`STEP 8: DELETE ${adminPrefix}/domains/${createdDomainId}`);

@@ -27,9 +27,28 @@ const domainString = z
   });
 
 /** POST /api/admin/restaurants/:id/domains */
-export const addDomainSchema = z.object({
-  domain: domainString,
-  source: z.enum(["external", "managed"]).default("external"),
+export const addDomainSchema = z.union([
+  z.object({
+    source: z.literal("subdomain"),
+    label: z
+      .string()
+      .min(1, "Subdomain label is required")
+      .transform((v) => v.trim().toLowerCase()),
+    domain: z.string().optional(),
+  }),
+  z.object({
+    domain: domainString,
+    source: z.enum(["external", "managed"]).default("external"),
+    label: z.string().optional(),
+  }),
+]);
+
+/** GET /api/admin/domains/check-subdomain?label= */
+export const checkSubdomainQuerySchema = z.object({
+  label: z
+    .string()
+    .min(1, "Subdomain label is required")
+    .transform((v) => v.trim().toLowerCase()),
 });
 
 /** Params for /api/admin/restaurants/:id/domains */
