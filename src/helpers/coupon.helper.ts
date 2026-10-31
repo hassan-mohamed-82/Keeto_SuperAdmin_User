@@ -229,11 +229,14 @@ export const validateAndCalculateCoupon = async (
         eligibleSubtotal = eligibleCartItems.reduce((sum, item) => sum + item.totalPrice, 0);
         eligibleSubtotal = Math.round(eligibleSubtotal * 100) / 100;
 
-        // Fetch food details for the eligible food IDs
-        const foodRows = await db
-            .select({ id: food.id, name: food.name, nameAr: food.nameAr, nameFr: food.nameFr })
-            .from(food)
-            .where(inArray(food.id, eligibleFoodIds));
+        // Fetch food details ONLY for the items present in the cart that the coupon was applied to
+        const appliedCartFoodIds = [...new Set(eligibleCartItems.map((item) => item.foodId))];
+        const foodRows = appliedCartFoodIds.length > 0
+            ? await db
+                .select({ id: food.id, name: food.name, nameAr: food.nameAr, nameFr: food.nameFr })
+                .from(food)
+                .where(inArray(food.id, appliedCartFoodIds))
+            : [];
         eligibleFoods = foodRows.map((f) => ({
             id: f.id,
             name: f.name,
