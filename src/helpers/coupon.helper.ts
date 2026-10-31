@@ -1,4 +1,4 @@
-// src/helpers/coupon.helper.ts
+﻿// src/helpers/coupon.helper.ts
 import { db } from "../models/connection";
 import {
     coupons,
@@ -127,8 +127,21 @@ export const validateAndCalculateCoupon = async (
     // 7. Food-level restriction check
     // If foodIds is null, undefined, or empty, the coupon applies to the cart without checking food items.
     // If foodIds is specified, the coupon ONLY applies if at least one of these foods exists in the cart.
-    const eligibleFoodIds = coupon.foodIds;
-    if (eligibleFoodIds && Array.isArray(eligibleFoodIds) && eligibleFoodIds.length > 0) {
+    // foodIds may be stored as a JSON string in the DB, so we parse it if needed.
+    let eligibleFoodIds: string[] | null = null;
+    if (coupon.foodIds) {
+        if (Array.isArray(coupon.foodIds)) {
+            eligibleFoodIds = coupon.foodIds as string[];
+        } else if (typeof coupon.foodIds === "string") {
+            try {
+                const parsed = JSON.parse(coupon.foodIds);
+                eligibleFoodIds = Array.isArray(parsed) ? parsed : null;
+            } catch {
+                eligibleFoodIds = null;
+            }
+        }
+    }
+    if (eligibleFoodIds && eligibleFoodIds.length > 0) {
         let currentCartFoodIds = cartFoodIds;
 
         if (!currentCartFoodIds || currentCartFoodIds.length === 0) {
@@ -145,7 +158,7 @@ export const validateAndCalculateCoupon = async (
             currentCartFoodIds = userCart.map((i) => i.foodId).filter(Boolean);
         }
 
-        const hasEligibleFood = currentCartFoodIds.some((fId) => eligibleFoodIds.includes(fId));
+        const hasEligibleFood = currentCartFoodIds.some((fId) => eligibleFoodIds!.includes(fId));
         if (!hasEligibleFood) {
             throw new BadRequest("This coupon is only valid for specific items that are not in your cart.");
         }
