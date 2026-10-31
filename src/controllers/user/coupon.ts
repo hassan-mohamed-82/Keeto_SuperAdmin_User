@@ -9,6 +9,7 @@ import { validateUserNotBlocked } from "../../utils/userBlockCheck";
 import {
     validateAndCalculateCoupon,
     getAvailableCouponsForUser,
+    getCartItemsWithDiscounts,
 } from "../../helpers/coupon.helper";
 
 /**
@@ -61,33 +62,15 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
             .filter((i: any) => Boolean(i.foodId));
     }
 
-    if (!subtotal || subtotal <= 0 || !cartFoodIds || !cartItemsData) {
-        const userCart = await db
-            .select()
-            .from(cartItems)
-            .where(
-                and(
-                    eq(cartItems.userId, userId),
-                    eq(cartItems.restaurantId, restaurantId)
-                )
-            );
+    if (!cartItemsData || cartItemsData.length === 0) {
+        cartItemsData = await getCartItemsWithDiscounts(userId, restaurantId);
+    }
 
-        if (userCart.length > 0) {
-            if (!subtotal || subtotal <= 0) {
-                subtotal = userCart.reduce((sum, item) => {
-                    return sum + parseFloat(item.totalPrice as string || "0");
-                }, 0);
-            }
-            if (!cartFoodIds) {
-                cartFoodIds = userCart.map((item) => item.foodId).filter(Boolean);
-            }
-            if (!cartItemsData) {
-                cartItemsData = userCart.map((item) => ({
-                    foodId: item.foodId,
-                    totalPrice: parseFloat((item.totalPrice as string) || "0"),
-                }));
-            }
-        }
+    if (!subtotal || subtotal <= 0) {
+        subtotal = cartItemsData.reduce((sum, item) => sum + item.totalPrice, 0);
+    }
+    if (!cartFoodIds) {
+        cartFoodIds = cartItemsData.map((item) => item.foodId).filter(Boolean);
     }
 
     const deliveryFee = typeof reqDeliveryFee === "number" ? reqDeliveryFee : parseFloat(reqDeliveryFee || "0");

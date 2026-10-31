@@ -9,6 +9,7 @@ import {
 } from "../models/schema";
 import { eq, and, sql, or, isNull, lte, gte, inArray } from "drizzle-orm";
 import { BadRequest } from "../Errors/BadRequest";
+import { formatProductsWithDiscounts } from "../services/discount.service";
 import { NotFound } from "../Errors/NotFound";
 
 export type EligibleFood = {
@@ -39,6 +40,61 @@ export type CouponValidationResult = {
  *  6. Minimum order subtotal requirement
  *  7. Food-level restriction (if foodIds is configured, cart must contain at least one eligible food)
  */
+/**
+ * Fetches user cart items for a restaurant with live product-level discounts applied.
+ */
+export const getCartItemsWithDiscounts = async (
+    userId: string,
+    restaurantId: string
+): Promise<{ foodId: string; totalPrice: number }[]> => {
+    const userCart = await db
+        .select({
+            foodId: cartItems.foodId,
+            quantity: cartItems.quantity,
+            unitPrice: cartItems.unitPrice,
+            totalPrice: cartItems.totalPrice,
+            foodPrice: food.price,
+            discountId: food.discountId,
+            discount_type: food.discount_type,
+            discount_value: food.discount_value,
+        })
+        .from(cartItems)
+        .leftJoin(food, eq(cartItems.foodId, food.id))
+        .where(
+            and(
+                eq(cartItems.userId, userId),
+                eq(cartItems.restaurantId, restaurantId)
+            )
+        );
+
+    if (userCart.length === 0) return [];
+
+    const resolvedDiscounts = await formatProductsWithDiscounts(
+        userCart.map((i) => ({
+            id: i.foodId,
+            price: i.foodPrice,
+            discountId: i.discountId,
+            discount_type: i.discount_type,
+            discount_value: i.discount_value,
+        })),
+        restaurantId
+    );
+
+    const discountMap = new Map(resolvedDiscounts.map((d) => [d.id, d.discountAmount]));
+
+    return userCart.map((item) => {
+        const discountPerUnit = discountMap.get(item.foodId) || 0;
+        const originalUnit = parseFloat((item.unitPrice as string) || "0");
+        const finalUnit = Math.max(0, originalUnit - discountPerUnit);
+        const finalTotal = Math.round(finalUnit * item.quantity * 100) / 100;
+
+        return {
+            foodId: item.foodId,
+            totalPrice: finalTotal,
+        };
+    });
+};
+
 export const validateAndCalculateCoupon = async (
     couponCode: string,
     userId: string,
@@ -159,20 +215,7 @@ export const validateAndCalculateCoupon = async (
         let currentCartItems = cartItemsData;
 
         if (!currentCartItems || currentCartItems.length === 0) {
-            // Fetch cart items from database if not supplied
-            const userCart = await db
-                .select({ foodId: cartItems.foodId, totalPrice: cartItems.totalPrice })
-                .from(cartItems)
-                .where(
-                    and(
-                        eq(cartItems.userId, userId),
-                        eq(cartItems.restaurantId, restaurantId)
-                    )
-                );
-            currentCartItems = userCart.map((i) => ({
-                foodId: i.foodId,
-                totalPrice: parseFloat((i.totalPrice as string) || "0"),
-            }));
+            currentCartItems = await getCartItemsWithDiscounts(userId, restaurantId);
         }
 
         const eligibleCartItems = currentCartItems.filter((item) =>
