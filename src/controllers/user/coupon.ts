@@ -1,4 +1,4 @@
-// src/controllers/user/coupon.ts
+﻿// src/controllers/user/coupon.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { cartItems } from "../../models/schema";
@@ -74,7 +74,7 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
     const deliveryFee = typeof reqDeliveryFee === "number" ? reqDeliveryFee : parseFloat(reqDeliveryFee || "0");
 
     // Validate coupon and compute discount
-    const { coupon, discountAmount, isFreeDelivery } = await validateAndCalculateCoupon(
+    const { coupon, discountAmount, isFreeDelivery, eligibleFoods } = await validateAndCalculateCoupon(
         code,
         userId,
         restaurantId,
@@ -99,7 +99,7 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
             discountValue: parseFloat((coupon.discountValue as string) || "0"),
             maxDiscount: coupon.maxDiscount ? parseFloat((coupon.maxDiscount as string) || "0") : null,
             minOrderAmount: parseFloat((coupon.minOrderAmount as string) || "0"),
-            foodIds: coupon.foodIds,
+            foods: eligibleFoods,
             discountAmount,
             isFreeDelivery,
             summary: {

@@ -5,15 +5,24 @@ import {
     couponUsages,
     couponRestaurants,
     cartItems,
+    food,
 } from "../models/schema";
 import { eq, and, sql, or, isNull, lte, gte, inArray } from "drizzle-orm";
 import { BadRequest } from "../Errors/BadRequest";
 import { NotFound } from "../Errors/NotFound";
 
+export type EligibleFood = {
+    id: string;
+    name: string;
+    nameAr: string | null;
+    nameFr: string | null;
+};
+
 export type CouponValidationResult = {
     coupon: typeof coupons.$inferSelect;
     discountAmount: number;
     isFreeDelivery: boolean;
+    eligibleFoods: EligibleFood[] | null;
 };
 
 /**
@@ -141,6 +150,8 @@ export const validateAndCalculateCoupon = async (
             }
         }
     }
+
+    let eligibleFoods: EligibleFood[] | null = null;
     if (eligibleFoodIds && eligibleFoodIds.length > 0) {
         let currentCartFoodIds = cartFoodIds;
 
@@ -162,6 +173,18 @@ export const validateAndCalculateCoupon = async (
         if (!hasEligibleFood) {
             throw new BadRequest("This coupon is only valid for specific items that are not in your cart.");
         }
+
+        // Fetch food details for the eligible food IDs
+        const foodRows = await db
+            .select({ id: food.id, name: food.name, nameAr: food.nameAr, nameFr: food.nameFr })
+            .from(food)
+            .where(inArray(food.id, eligibleFoodIds));
+        eligibleFoods = foodRows.map((f) => ({
+            id: f.id,
+            name: f.name,
+            nameAr: f.nameAr ?? null,
+            nameFr: f.nameFr ?? null,
+        }));
     }
 
     // 8. Calculate Discount Amount
@@ -191,6 +214,7 @@ export const validateAndCalculateCoupon = async (
         coupon,
         discountAmount,
         isFreeDelivery,
+        eligibleFoods,
     };
 };
 
