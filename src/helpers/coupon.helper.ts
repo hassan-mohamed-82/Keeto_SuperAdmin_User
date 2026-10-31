@@ -23,6 +23,7 @@ export type CouponValidationResult = {
     discountAmount: number;
     isFreeDelivery: boolean;
     eligibleFoods: EligibleFood[] | null;
+    eligibleSubtotal: number | null; // subtotal of only the coupon-eligible foods (null = applies to full cart)
 };
 
 /**
@@ -44,7 +45,8 @@ export const validateAndCalculateCoupon = async (
     restaurantId: string,
     subtotal: number,
     deliveryFee: number = 0,
-    cartFoodIds?: string[]
+    cartFoodIds?: string[],
+    cartItemsData?: { foodId: string; totalPrice: number }[]
 ): Promise<CouponValidationResult> => {
     if (!couponCode || !couponCode.trim()) {
         throw new BadRequest("Coupon code is required.");
@@ -152,13 +154,14 @@ export const validateAndCalculateCoupon = async (
     }
 
     let eligibleFoods: EligibleFood[] | null = null;
+    let eligibleSubtotal: number | null = null;
     if (eligibleFoodIds && eligibleFoodIds.length > 0) {
-        let currentCartFoodIds = cartFoodIds;
+        let currentCartItems = cartItemsData;
 
-        if (!currentCartFoodIds || currentCartFoodIds.length === 0) {
+        if (!currentCartItems || currentCartItems.length === 0) {
             // Fetch cart items from database if not supplied
             const userCart = await db
-                .select({ foodId: cartItems.foodId })
+                .select({ foodId: cartItems.foodId, totalPrice: cartItems.totalPrice })
                 .from(cartItems)
                 .where(
                     and(
@@ -166,13 +169,22 @@ export const validateAndCalculateCoupon = async (
                         eq(cartItems.restaurantId, restaurantId)
                     )
                 );
-            currentCartFoodIds = userCart.map((i) => i.foodId).filter(Boolean);
+            currentCartItems = userCart.map((i) => ({
+                foodId: i.foodId,
+                totalPrice: parseFloat((i.totalPrice as string) || "0"),
+            }));
         }
 
-        const hasEligibleFood = currentCartFoodIds.some((fId) => eligibleFoodIds!.includes(fId));
-        if (!hasEligibleFood) {
+        const eligibleCartItems = currentCartItems.filter((item) =>
+            eligibleFoodIds!.includes(item.foodId)
+        );
+
+        if (eligibleCartItems.length === 0) {
             throw new BadRequest("This coupon is only valid for specific items that are not in your cart.");
         }
+
+        eligibleSubtotal = eligibleCartItems.reduce((sum, item) => sum + item.totalPrice, 0);
+        eligibleSubtotal = Math.round(eligibleSubtotal * 100) / 100;
 
         // Fetch food details for the eligible food IDs
         const foodRows = await db
@@ -188,6 +200,10 @@ export const validateAndCalculateCoupon = async (
     }
 
     // 8. Calculate Discount Amount
+    // When the coupon is restricted to specific foods, discount is applied ONLY on those foods' subtotal.
+    // This prevents users from gaming the system by adding one cheap eligible item to get discount on everything.
+    const discountBase = eligibleSubtotal !== null ? eligibleSubtotal : subtotal;
+
     let discountAmount = 0;
     let isFreeDelivery = false;
     const value = parseFloat((coupon.discountValue as string) || "0");
@@ -196,16 +212,16 @@ export const validateAndCalculateCoupon = async (
         isFreeDelivery = true;
         discountAmount = Math.max(0, deliveryFee);
     } else if (coupon.discountType === "fixed_amount") {
-        discountAmount = Math.min(value, subtotal);
+        discountAmount = Math.min(value, discountBase);
     } else if (coupon.discountType === "percentage") {
-        let pDiscount = subtotal * (value / 100);
+        let pDiscount = discountBase * (value / 100);
         if (coupon.maxDiscount) {
             const max = parseFloat((coupon.maxDiscount as string) || "0");
             if (max > 0 && pDiscount > max) {
                 pDiscount = max;
             }
         }
-        discountAmount = Math.min(pDiscount, subtotal);
+        discountAmount = Math.min(pDiscount, discountBase);
     }
 
     discountAmount = Math.round(discountAmount * 100) / 100;
@@ -215,6 +231,7 @@ export const validateAndCalculateCoupon = async (
         discountAmount,
         isFreeDelivery,
         eligibleFoods,
+        eligibleSubtotal,
     };
 };
 

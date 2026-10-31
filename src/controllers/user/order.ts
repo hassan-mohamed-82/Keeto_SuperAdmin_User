@@ -1,4 +1,4 @@
-// controllers/user/OrderController.ts
+﻿// controllers/user/OrderController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import {
@@ -933,7 +933,11 @@ export const checkout = async (req: Request | any, res: Response) => {
             restaurantId,
             subtotal,
             0,
-            userCart.map((c) => c.foodId).filter(Boolean) as string[]
+            itemsToInsert.map((c) => c.foodId).filter(Boolean) as string[],
+            itemsToInsert.map((c) => ({
+                foodId: c.foodId,
+                totalPrice: parseFloat(c.totalPrice || "0"),
+            }))
         );
 
         appliedCoupon = couponResult.coupon;

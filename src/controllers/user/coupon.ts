@@ -28,6 +28,8 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
         orderType = "delivery",
         foodIds: reqFoodIds,
         foods: reqFoods,
+        items: reqItems,
+        cartItems: reqCartItems,
     } = req.body;
 
     if (!code || !code.trim()) {
@@ -48,7 +50,18 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
         ? rawFoodIds.map(String).filter(Boolean)
         : undefined;
 
-    if (!subtotal || subtotal <= 0 || !cartFoodIds) {
+    const rawItems = reqItems || reqCartItems;
+    let cartItemsData: { foodId: string; totalPrice: number }[] | undefined = undefined;
+    if (Array.isArray(rawItems) && rawItems.length > 0) {
+        cartItemsData = rawItems
+            .map((item: any) => ({
+                foodId: item.foodId || item.id,
+                totalPrice: typeof item.totalPrice === "number" ? item.totalPrice : parseFloat(item.totalPrice || item.price || "0"),
+            }))
+            .filter((i: any) => Boolean(i.foodId));
+    }
+
+    if (!subtotal || subtotal <= 0 || !cartFoodIds || !cartItemsData) {
         const userCart = await db
             .select()
             .from(cartItems)
@@ -66,7 +79,13 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
                 }, 0);
             }
             if (!cartFoodIds) {
-                cartFoodIds = userCart.map(item => item.foodId).filter(Boolean);
+                cartFoodIds = userCart.map((item) => item.foodId).filter(Boolean);
+            }
+            if (!cartItemsData) {
+                cartItemsData = userCart.map((item) => ({
+                    foodId: item.foodId,
+                    totalPrice: parseFloat((item.totalPrice as string) || "0"),
+                }));
             }
         }
     }
@@ -74,13 +93,14 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
     const deliveryFee = typeof reqDeliveryFee === "number" ? reqDeliveryFee : parseFloat(reqDeliveryFee || "0");
 
     // Validate coupon and compute discount
-    const { coupon, discountAmount, isFreeDelivery, eligibleFoods } = await validateAndCalculateCoupon(
+    const { coupon, discountAmount, isFreeDelivery, eligibleFoods, eligibleSubtotal } = await validateAndCalculateCoupon(
         code,
         userId,
         restaurantId,
         subtotal,
         deliveryFee,
-        cartFoodIds
+        cartFoodIds,
+        cartItemsData
     );
 
     const finalDeliveryFee = isFreeDelivery ? 0 : deliveryFee;
@@ -100,10 +120,12 @@ export const checkCoupon = async (req: Request | any, res: Response) => {
             maxDiscount: coupon.maxDiscount ? parseFloat((coupon.maxDiscount as string) || "0") : null,
             minOrderAmount: parseFloat((coupon.minOrderAmount as string) || "0"),
             foods: eligibleFoods,
+            eligibleSubtotal,
             discountAmount,
             isFreeDelivery,
             summary: {
                 subtotal: Math.round(subtotal * 100) / 100,
+                eligibleSubtotal: eligibleSubtotal !== null ? Math.round(eligibleSubtotal * 100) / 100 : null,
                 deliveryFee: Math.round(deliveryFee * 100) / 100,
                 effectiveDeliveryFee: Math.round(finalDeliveryFee * 100) / 100,
                 discountAmount,
