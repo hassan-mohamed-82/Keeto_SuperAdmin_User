@@ -5,7 +5,7 @@ import {
     firstOrderDiscountUsages,
     orders,
 } from "../models/schema";
-import { eq, and, sql, count, lte, gte, isNull, or } from "drizzle-orm";
+import { eq, and, ne, sql, count, lte, gte, isNull, or } from "drizzle-orm";
 import { BadRequest } from "../Errors/BadRequest";
 
 export type FirstOrderDiscountResult = {
@@ -60,8 +60,10 @@ export const resolveFirstOrderDiscount = async (
             and(
                 eq(orders.userId, userId),
                 eq(orders.restaurantId, restaurantId),
-                // Only count successfully placed orders (not cancelled / failed)
-                sql`${orders.status} NOT IN ('cancelled', 'failed')`
+                // Exclude failed orders, pending visa payments, and orders cancelled by restaurant
+                ne(orders.status, 'failed'),
+                sql`NOT (${orders.paymentStatus} = 'pending_payment' AND ${orders.status} = 'pending')`,
+                sql`NOT (${orders.status} = 'cancelled' AND ${orders.cancelReasonType} = 'restaurant')`
             )
         );
     const userOrderCount = Number(orderCountRow?.cnt ?? 0);

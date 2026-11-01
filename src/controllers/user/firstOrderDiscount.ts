@@ -2,7 +2,7 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import { cartItems, firstOrderDiscounts, firstOrderDiscountUsages, orders } from "../../models/schema";
-import { eq, and, count, sql, or, isNull, lte, gte } from "drizzle-orm";
+import { eq, and, ne, count, sql, or, isNull, lte, gte } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
@@ -135,7 +135,9 @@ export const getAvailableFirstOrderDiscounts = async (req: Request | any, res: R
             and(
                 eq(orders.userId, userId),
                 eq(orders.restaurantId, restaurantId),
-                sql`${orders.status} NOT IN ('cancelled', 'failed')`
+                ne(orders.status, 'failed'),
+                sql`NOT (${orders.paymentStatus} = 'pending_payment' AND ${orders.status} = 'pending')`,
+                sql`NOT (${orders.status} = 'cancelled' AND ${orders.cancelReasonType} = 'restaurant')`
             )
         );
     const userOrderCount = Number(orderCountRow?.cnt ?? 0);
