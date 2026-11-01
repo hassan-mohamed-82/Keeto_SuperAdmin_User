@@ -107,7 +107,9 @@ export const signup = async (req: Request, res: Response) => {
             purpose: "verify_email",
             expiresAt
         });
+    });
 
+    try {
         await sendEmail({
             to: email,
             subject: "Verify Your Keeto Account",
@@ -170,7 +172,9 @@ export const signup = async (req: Request, res: Response) => {
 </html>
             `
         });
-    });
+    } catch (emailErr) {
+        console.error("⚠️ Failed to send verification email:", emailErr);
+    }
 
     const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
     return SuccessResponse(res, {
