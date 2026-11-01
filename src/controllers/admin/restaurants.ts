@@ -13,6 +13,7 @@ import {
     cities,
     restaurantPaymentCredentials,
     restaurantOperations,
+    role_restaurant,
 } from "../../models/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
@@ -23,8 +24,38 @@ import { v4 as uuidv4 } from "uuid";
 import { saveBase64Image, handleImageUpdate } from "../../utils/handleImages";
 import { encryptSecret } from "../../utils/encryption";
 import { applyGatewaySwitch } from "../../services/restaurantWalletService";
+import { MODULES, ACTION_NAMES } from "../../types/constant";
+import { Permission } from "../../types/custom";
 
 // Helper: Parse payment credentials from request body (accepts array, single object, or JSON string)
+// Helper: Generate Action ID for permission action
+const generateActionId = (): string => {
+    return uuidv4().replace(/-/g, "").substring(0, 24);
+};
+
+// Helper: Build default permissions for Manager and Cashier
+const buildManagerPermissions = (): Permission[] => {
+    return MODULES.map((module) => ({
+        module: module as any,
+        actions: ACTION_NAMES.map((action) => ({
+            id: generateActionId(),
+            action: action as any,
+        })),
+    }));
+};
+
+const buildCashierPermissions = (): Permission[] => {
+    return [
+        {
+            module: "Orders" as any,
+            actions: ACTION_NAMES.map((action) => ({
+                id: generateActionId(),
+                action: action as any,
+            })),
+        },
+    ];
+};
+
 const parsePaymentCredentialsInput = (input: any): any[] => {
     if (!input) return [];
     let parsed = input;
@@ -604,7 +635,25 @@ export const createRestaurant = async (req: Request, res: Response) => {
             status: "demo",
             app: "on",
             notes: [],
-        })
+        });
+
+        // 7. Create default restaurant roles: Manager (all permissions) & Cashier (Orders permissions)
+        await tx.insert(role_restaurant).values([
+            {
+                id: uuidv4(),
+                restaurantId,
+                name: "manager",
+                permissions: buildManagerPermissions(),
+                status: "active",
+            },
+            {
+                id: uuidv4(),
+                restaurantId,
+                name: "cashier",
+                permissions: buildCashierPermissions(),
+                status: "active",
+            },
+        ]);
 
 
         await adjustSalesRepPoints(tx, salesId ? clean(salesId) : null, pointsToAward);
