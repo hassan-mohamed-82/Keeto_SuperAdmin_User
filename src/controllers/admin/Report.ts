@@ -161,22 +161,25 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
     let totalDueOnRestaurants = 0;
     let totalDueToRestaurants = 0;
 
-    const restaurantWalletsList = walletsData.map((row) => {
-        const numBalance = parseFloat(row.balance as string || "0");
-        totalPlatformBalance += numBalance;
+    const restaurantWalletsList: any[] = [];
 
+    walletsData.forEach((row) => {
+        const numBalance = parseFloat(row.balance as string || "0");
+        if (numBalance === 0) return;
+
+        totalPlatformBalance += numBalance;
         if (numBalance < 0) {
             totalDueOnRestaurants += Math.abs(numBalance);
-        } else if (numBalance > 0) {
+        } else {
             totalDueToRestaurants += numBalance;
         }
 
-        return {
+        restaurantWalletsList.push({
             restaurantId: row.restaurantId,
             restaurantName: row.restaurantName,
-            balance: numBalance >= 0 ? `+${numBalance.toFixed(2)}` : numBalance.toFixed(2),
-            claimSide: numBalance < 0 ? "المنصة تريد من المطعم" : numBalance > 0 ? "المطعم يريد من المنصة" : "خالص",
-        };
+            balance: numBalance > 0 ? `+${numBalance.toFixed(2)}` : numBalance.toFixed(2),
+            claimSide: numBalance < 0 ? "المنصة تريد من المطعم" : "المطعم يريد من المنصة",
+        });
     });
 
     const platformClaimSide = totalPlatformBalance < 0
