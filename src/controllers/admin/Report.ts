@@ -1,7 +1,7 @@
 // controllers/admin/FinancialReportController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales, restaurant_users, users, zones, cities, cuisines, restaurantOperations } from "../../models/schema";
+import { orders, restaurants, restaurantBusinessPlans, invoices, paymentMethods, selectReasons, sales, restaurant_users, users, zones, cities, cuisines, restaurantOperations, restaurantWallets } from "../../models/schema";
 import { eq, and, desc, gte, lte, inArray, count, sql, SQL, isNull, ne, or } from "drizzle-orm";
 import { getPerformanceReportQuerySchema, getChartsQuerySchema } from "../../validation/admin/report";
 import { SuccessResponse } from "../../utils/response";
@@ -141,6 +141,50 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
     }
 
     // ==========================================
+    // 💼 3.1 إدارة المحافظ لجميع المطاعم (Wallet Management)
+    // ==========================================
+    const walletConditions = [];
+    if (restaurantId) walletConditions.push(eq(restaurants.id, restaurantId as string));
+    if (cityId) walletConditions.push(eq(restaurants.cityId, cityId as string));
+
+    const walletsData = await db
+        .select({
+            restaurantId: restaurants.id,
+            restaurantName: restaurants.name,
+            balance: restaurantWallets.balance,
+        })
+        .from(restaurants)
+        .leftJoin(restaurantWallets, eq(restaurants.id, restaurantWallets.restaurantId))
+        .where(walletConditions.length > 0 ? and(...walletConditions) : undefined);
+
+    let totalPlatformBalance = 0;
+    let totalDueOnRestaurants = 0;
+    let totalDueToRestaurants = 0;
+
+    const restaurantWalletsList = walletsData.map((row) => {
+        const numBalance = parseFloat(row.balance as string || "0");
+        totalPlatformBalance += numBalance;
+
+        if (numBalance < 0) {
+            totalDueOnRestaurants += Math.abs(numBalance);
+        } else if (numBalance > 0) {
+            totalDueToRestaurants += numBalance;
+        }
+
+        return {
+            restaurantId: row.restaurantId,
+            restaurantName: row.restaurantName,
+            balance: numBalance >= 0 ? `+${numBalance.toFixed(2)}` : numBalance.toFixed(2),
+            claimSide: numBalance < 0 ? "المنصة تريد من المطعم" : numBalance > 0 ? "المطعم يريد من المنصة" : "خالص",
+        };
+    });
+
+    const platformClaimSide = totalPlatformBalance < 0
+        ? "المنصة تريد من المطاعم"
+        : totalPlatformBalance > 0
+            ? "المطاعم تريد من المنصة"
+            : "خالص";
+    // ==========================================
     // 🏗️ 4. بناء الـ Response النهائي المالي
     // ==========================================
     const summary = {
@@ -176,7 +220,16 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             status,
             ordersCount: stats.orders,
             potentialRevenue: stats.revenue.toFixed(2)
-        }))
+        })),
+        walletManagement: {
+            summary: {
+                totalNetBalance: totalPlatformBalance >= 0 ? `+${totalPlatformBalance.toFixed(2)}` : totalPlatformBalance.toFixed(2),
+                claimSide: platformClaimSide,
+                totalDueOnRestaurants: totalDueOnRestaurants.toFixed(2),
+                totalDueToRestaurants: totalDueToRestaurants.toFixed(2),
+            },
+            restaurants: restaurantWalletsList
+        }
     };
 
     return SuccessResponse(res, {
