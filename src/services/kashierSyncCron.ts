@@ -249,7 +249,7 @@ async function syncSingleOrder(
 
 /**
  * Main Sync Runner:
- * Queries pending Kashier orders between 5 minutes and 48 hours old and checks their status.
+ * Queries pending Kashier orders created within the last 48 hours and checks their status immediately.
  */
 export async function runKashierOrderSync(): Promise<{
     checked: number;
@@ -257,7 +257,8 @@ export async function runKashierOrderSync(): Promise<{
     diagnostics?: SyncDiagnostic[];
 }> {
     const now = new Date();
-    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+    // Check orders created up to 30 seconds ago (to allow checkout transaction to commit)
+    const thirtySecondsAgo = new Date(now.getTime() - 30 * 1000);
     const fortyEightHoursAgo = new Date(now.getTime() - 48 * 60 * 60 * 1000);
 
     let confirmedCount = 0;
@@ -276,7 +277,7 @@ export async function runKashierOrderSync(): Promise<{
                         eq(orders.status, "pending")
                     ),
                     gte(orders.createdAt, fortyEightHoursAgo),
-                    lte(orders.createdAt, fiveMinutesAgo)
+                    lte(orders.createdAt, thirtySecondsAgo)
                 )
             );
 
@@ -302,11 +303,11 @@ export async function runKashierOrderSync(): Promise<{
 
 /**
  * Initialize the Kashier Reconciliation Cron Job.
- * Runs every 3 minutes.
+ * Runs every minute to confirm payments without any delay.
  */
 export function initKashierSyncCron() {
-    // Run every 3 minutes: */3 * * * *
-    cron.schedule("*/3 * * * *", async () => {
+    // Run every minute: * * * * *
+    cron.schedule("* * * * *", async () => {
         try {
             await runKashierOrderSync();
         } catch (err) {
@@ -314,5 +315,5 @@ export function initKashierSyncCron() {
         }
     });
 
-    console.log("🕒 Kashier Order Sync Cron initialized (runs every 3 minutes).");
+    console.log("🕒 Kashier Order Sync Cron initialized (runs every 1 minute).");
 }
