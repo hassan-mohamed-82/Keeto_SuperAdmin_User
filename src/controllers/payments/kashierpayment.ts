@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+﻿import { Request, Response } from "express";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors";
 import { verifyKashierWebhookSignature } from "../../services/payments/kashier/kashier";
@@ -154,18 +154,32 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
         (req.headers["x-kashier-signature"] as string) ||
         (req.headers["Kashier-Signature"] as string);
 
-    // Kashier field mapping:
-    //   merchantOrderId → رقمنا (= orders.id)  → للبحث في DB
-    //   orderId         → رقم البوابة           → يُحفظ في payment_order_id
-    const merchantOrderId = webhookData?.merchantOrderId;   // our ID
-    const gatewayOrderId  = webhookData?.orderId;           // Kashier's ID
-    const transactionId   = webhookData?.transactionId || webhookData?.kashierTransactionId;
-    const paymentStatus   = (webhookData?.status || "").toUpperCase();
+    // Field mapping confirmed from Kashier dashboard:
+    //   webhookData.merchantOrderId  ->  OUR orders.id (UUID we sent at session creation)
+    //   webhookData.orderId          ->  Kashier's internal order ID (store in paymentOrderId)
+    //   webhookData.transactionId    ->  Kashier's transaction ID
+    const ourOrderId: string | undefined =
+        webhookData?.merchantOrderId ||   // primary: Kashier echoes our UUID here
+        webhookData?.merchantOrder ||     // fallback alias
+        webhookData?.order;               // last-resort fallback
+
+    // Kashier's own order reference - stored in paymentOrderId for traceability
+    const gatewayOrderId: string | undefined =
+        webhookData?.orderId ||           // Kashier's internal order ID
+        webhookData?.orderReference ||
+        webhookData?.kashierOrderId ||
+        webhookData?.reference;
+
+    const transactionId: string | undefined =
+        webhookData?.transactionId ||
+        webhookData?.kashierTransactionId;
+
+    const paymentStatus = (webhookData?.status || "").toUpperCase();
     const webhookAmount = webhookData?.amount !== undefined ? Number(webhookData.amount) : undefined;
 
     console.log("[Kashier Webhook Received]:", {
         event: req.body?.event || "PAYMENT_STATUS",
-        merchantOrderId,
+        ourOrderId,
         gatewayOrderId,
         transactionId,
         paymentStatus,
@@ -173,92 +187,95 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
         signatureKeys: webhookData?.signatureKeys,
     });
 
+    // ─── Look up order in DB ──────────────────────────────────────────────────
+    let matchedOrder: typeof orders.$inferSelect | undefined = undefined;
+    if (ourOrderId) {
+        const [found] = await db
+            .select()
+            .from(orders)
+            .where(
+                or(
+                    eq(orders.id, String(ourOrderId)),
+                    eq(orders.orderNumber, String(ourOrderId)),
+                    eq(orders.paymentOrderId, String(ourOrderId))
+                )
+            )
+            .limit(1);
+        matchedOrder = found;
+    }
+
     // ─── Signature Verification ───────────────────────────────────────────────
     if (!headerSignature) {
         console.error("⚠️ Kashier webhook has no x-kashier-signature header — rejecting.");
         throw new BadRequest("Webhook signature is required.");
     }
 
-    // Look up restaurant using merchantOrderId (= our orders.id) to check
-    // if CUSTOM gateway credentials should be used for signature verification.
+    // Look up restaurant / platform gateway credentials for signature verification.
     let customApiKey: string | undefined = undefined;
-    if (merchantOrderId) {
-        const [matchedOrder] = await db
-            .select({ id: orders.id, restaurantId: orders.restaurantId })
-            .from(orders)
-            .where(eq(orders.id, String(merchantOrderId)))
+    if (matchedOrder?.restaurantId) {
+        const [settings] = await db
+            .select({ paymentGatewayType: restaurantSettings.paymentGatewayType })
+            .from(restaurantSettings)
+            .where(eq(restaurantSettings.restaurantId, matchedOrder.restaurantId))
             .limit(1);
 
-        if (matchedOrder?.restaurantId) {
-            const [settings] = await db
-                .select({ paymentGatewayType: restaurantSettings.paymentGatewayType })
-                .from(restaurantSettings)
-                .where(eq(restaurantSettings.restaurantId, matchedOrder.restaurantId))
-                .limit(1);
-
-            if (settings?.paymentGatewayType === "CUSTOM") {
-                const activeGateway = await getActiveCustomGateway(matchedOrder.restaurantId);
-                if (activeGateway?.provider === "KASHIER") {
-                    const rawCreds = activeGateway.record.credentials as any;
-                    if (rawCreds?.apiKey) {
-                        customApiKey = decryptSecret(rawCreds.apiKey);
-                    }
-                }
-            } else {
-                // SYSTEM gateway: look up platform DB credentials (replaces .env lookup)
-                const platformGateway = await getActivePlatformGateway();
-                if (platformGateway?.provider === "KASHIER" && platformGateway.credentials?.apiKey) {
-                    customApiKey = platformGateway.credentials.apiKey;
+        if (settings?.paymentGatewayType === "CUSTOM") {
+            const activeGateway = await getActiveCustomGateway(matchedOrder.restaurantId);
+            if (activeGateway?.provider === "KASHIER") {
+                const rawCreds = activeGateway.record.credentials as any;
+                if (rawCreds?.apiKey) {
+                    customApiKey = decryptSecret(rawCreds.apiKey);
                 }
             }
+        } else {
+            // SYSTEM gateway: look up platform DB credentials (replaces .env lookup)
+            const platformGateway = await getActivePlatformGateway();
+            if (platformGateway?.provider === "KASHIER" && platformGateway.credentials?.apiKey) {
+                customApiKey = platformGateway.credentials.apiKey;
+            }
+        }
+    } else {
+        // Fallback: check platform DB credentials if matchedOrder is not found yet
+        const platformGateway = await getActivePlatformGateway();
+        if (platformGateway?.provider === "KASHIER" && platformGateway.credentials?.apiKey) {
+            customApiKey = platformGateway.credentials.apiKey;
         }
     }
 
     let isValid = verifyKashierWebhookSignature(webhookData, headerSignature, customApiKey);
     if (!isValid && customApiKey) {
-        // Fallback: try without any key (uses .env KASHIER_API_KEY internally)
+        // Fallback: try without custom key (uses .env KASHIER_API_KEY internally)
         isValid = verifyKashierWebhookSignature(webhookData, headerSignature);
     }
 
     if (!isValid) {
         console.error("⚠️ Invalid Kashier webhook signature received.");
-        // TEMP DEBUG: log what we computed vs what we got, to make the next
-        // failure immediately diagnosable from the console without needing
-        // to re-run the separate debug script.
         console.error("[Kashier Webhook] signatureKeys used:", webhookData?.signatureKeys);
         console.error("[Kashier Webhook] header signature received:", headerSignature);
         throw new BadRequest("Invalid webhook signature.");
     }
 
     // ─── Process payment result ───────────────────────────────────────────────
-    if (merchantOrderId && (paymentStatus === "SUCCESS" || paymentStatus === "CAPTURED" || paymentStatus === "PAID")) {
+    if (matchedOrder && (paymentStatus === "SUCCESS" || paymentStatus === "CAPTURED" || paymentStatus === "PAID")) {
         if (webhookAmount !== undefined) {
-            const [orderForAmountCheck] = await db
-                .select({ totalAmount: orders.totalAmount })
-                .from(orders)
-                .where(eq(orders.id, String(merchantOrderId)))  // merchantOrderId = orders.id
-                .limit(1);
-
-            if (orderForAmountCheck) {
-                const expectedAmount = parseFloat(orderForAmountCheck.totalAmount as string);
-                if (Math.abs(expectedAmount - webhookAmount) > 0.01) {
-                    console.error(
-                        `[Kashier Webhook] Amount mismatch for order ${merchantOrderId}. Expected ${expectedAmount}, got ${webhookAmount}.`
-                    );
-                    throw new BadRequest("Paid amount does not match the order total.");
-                }
+            const expectedAmount = parseFloat(matchedOrder.totalAmount as string);
+            if (Math.abs(expectedAmount - webhookAmount) > 0.01) {
+                console.error(
+                    `[Kashier Webhook] Amount mismatch for order ${matchedOrder.id}. Expected ${expectedAmount}, got ${webhookAmount}.`
+                );
+                throw new BadRequest("Paid amount does not match the order total.");
             }
         }
 
         await confirmOrderPayment({
-            orderId: String(merchantOrderId),    // orders.id
+            orderId: matchedOrder.id,
             gateway: "kashier",
             transactionId: transactionId || undefined,
-            gatewayOrderId: gatewayOrderId || undefined,  // orderId = Kashier's gateway order ID → payment_order_id
+            gatewayOrderId: gatewayOrderId || undefined,
             rawPayload: webhookData,
         });
-        console.log(`[Kashier Webhook] Order ${merchantOrderId} confirmed as paid & accepted. Tx: ${transactionId}`);
-    } else if (merchantOrderId && (paymentStatus === "FAILED" || paymentStatus === "DECLINED" || paymentStatus === "REJECTED")) {
+        console.log(`[Kashier Webhook] Order ${matchedOrder.orderNumber} (${matchedOrder.id}) confirmed as paid & accepted. Tx: ${transactionId}`);
+    } else if (matchedOrder && (paymentStatus === "FAILED" || paymentStatus === "DECLINED" || paymentStatus === "REJECTED")) {
         try {
             const failureReason =
                 webhookData?.statusReason ||
@@ -268,22 +285,21 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
                 `Transaction ${paymentStatus}`;
 
             await recordFailedPayment({
-                orderId: String(merchantOrderId),   // orders.id
+                orderId: matchedOrder.id,
                 gateway: "kashier",
                 transactionId: transactionId || undefined,
-                gatewayOrderId: gatewayOrderId || undefined,  // Kashier's orderId → payment_order_id
+                gatewayOrderId: gatewayOrderId || undefined,
                 failureReason,
                 rawPayload: webhookData,
             });
 
-            console.log(`[Kashier Webhook] Order ${merchantOrderId} payment failed recorded. Reason: ${failureReason}. Tx: ${transactionId}`);
+            console.log(`[Kashier Webhook] Order ${matchedOrder.orderNumber} (${matchedOrder.id}) payment failed recorded. Reason: ${failureReason}. Tx: ${transactionId}`);
         } catch (dbErr) {
-            console.error(`[Kashier Webhook] Failed to record order ${merchantOrderId} failure:`, dbErr);
+            console.error(`[Kashier Webhook] Failed to record order ${matchedOrder.id} failure:`, dbErr);
         }
     } else {
-        console.log(`[Kashier Webhook] Unhandled status "${paymentStatus}" for order ${merchantOrderId} — no DB change (this is expected/harmless for a "Test Webhook" click with no real order).`);
+        console.log(`[Kashier Webhook] Unhandled status "${paymentStatus}" for order ${ourOrderId} — no DB change.`);
     }
-
     return SuccessResponse(res, {
         received: true,
         message: "Webhook processed successfully",
