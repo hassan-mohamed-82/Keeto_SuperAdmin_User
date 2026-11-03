@@ -90,7 +90,7 @@ async function getKashierCredentials(restaurantId: string): Promise<{
 /**
  * Check a single pending order against Kashier's Order Lookup API
  */
-async function syncSingleOrder(
+export async function syncSingleOrder(
     order: typeof orders.$inferSelect,
     diagnosticList?: SyncDiagnostic[]
 ): Promise<boolean> {
@@ -248,8 +248,38 @@ async function syncSingleOrder(
 }
 
 /**
- * Main Sync Runner:
- * Queries pending Kashier orders created within the last 48 hours and checks their status immediately.
+ * On-Demand Single Order Sync:
+ * Queries Kashier immediately for a specific order and confirms it if PAID.
+ * Used during the user return / callback redirect flow.
+ */
+export async function syncOrderByOrderId(orderId: string): Promise<boolean> {
+    try {
+        const [order] = await db
+            .select()
+            .from(orders)
+            .where(
+                or(
+                    eq(orders.id, orderId),
+                    eq(orders.orderNumber, orderId),
+                    eq(orders.paymentOrderId, orderId)
+                )
+            )
+            .limit(1);
+
+        if (!order) return false;
+        if (order.paymentStatus === "paid") return true;
+
+        return await syncSingleOrder(order);
+    } catch (err) {
+        console.error(`[syncOrderByOrderId] Error syncing order ${orderId}:`, err);
+        return false;
+    }
+}
+
+/**
+ * Lightweight Cron Sync Runner:
+ * Queries ONLY recent pending Kashier orders (created within the last 30 minutes, max 10 orders).
+ * This keeps server load virtually 0 while serving as a reliable fallback.
  */
 export async function runKashierOrderSync(): Promise<{
     checked: number;
@@ -257,9 +287,8 @@ export async function runKashierOrderSync(): Promise<{
     diagnostics?: SyncDiagnostic[];
 }> {
     const now = new Date();
-    // Check orders created up to 30 seconds ago (to allow checkout transaction to commit)
     const thirtySecondsAgo = new Date(now.getTime() - 30 * 1000);
-    const fortyEightHoursAgo = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+    const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
 
     let confirmedCount = 0;
     const diagnostics: SyncDiagnostic[] = [];
@@ -276,16 +305,17 @@ export async function runKashierOrderSync(): Promise<{
                         eq(orders.paymentStatus, "pending_payment"),
                         eq(orders.status, "pending")
                     ),
-                    gte(orders.createdAt, fortyEightHoursAgo),
+                    gte(orders.createdAt, thirtyMinutesAgo),
                     lte(orders.createdAt, thirtySecondsAgo)
                 )
-            );
+            )
+            .limit(10); // Limit to 10 orders per run to prevent server/network spikes
 
         if (pendingOrders.length === 0) {
             return { checked: 0, confirmed: 0, diagnostics: [] };
         }
 
-        console.log(`[KashierSyncCron] Checking ${pendingOrders.length} pending Kashier order(s)...`);
+        console.log(`[KashierSyncCron] Checking ${pendingOrders.length} recent pending Kashier order(s)...`);
 
         for (const order of pendingOrders) {
             const confirmed = await syncSingleOrder(order, diagnostics);
@@ -303,11 +333,11 @@ export async function runKashierOrderSync(): Promise<{
 
 /**
  * Initialize the Kashier Reconciliation Cron Job.
- * Runs every minute to confirm payments without any delay.
+ * Runs every 5 minutes as a lightweight safety net.
  */
 export function initKashierSyncCron() {
-    // Run every minute: * * * * *
-    cron.schedule("* * * * *", async () => {
+    // Run every 5 minutes: */5 * * * *
+    cron.schedule("*/5 * * * *", async () => {
         try {
             await runKashierOrderSync();
         } catch (err) {
@@ -315,5 +345,5 @@ export function initKashierSyncCron() {
         }
     });
 
-    console.log("🕒 Kashier Order Sync Cron initialized (runs every 1 minute).");
+    console.log("🕒 Kashier Order Sync Cron initialized (lightweight, runs every 5 minutes).");
 }

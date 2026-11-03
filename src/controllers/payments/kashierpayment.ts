@@ -1,4 +1,4 @@
-﻿import { runKashierOrderSync } from "../../services/kashierSyncCron";
+﻿import { runKashierOrderSync, syncOrderByOrderId } from "../../services/kashierSyncCron";
 import { Request, Response } from "express";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors";
@@ -314,12 +314,27 @@ export const handleKashierWebhook = async (req: Request, res: Response) => {
  * Payment confirmation is handled exclusively via the server-to-server webhook.
  */
 export const handleKashierRedirect = async (req: Request, res: Response) => {
-    const success = req.query.success === "true";
+    let success = req.query.success === "true" || (req.query.paymentStatus as string)?.toUpperCase() === "SUCCESS";
 
     const rawOrderId = (
         req.query.order_id ||
+        req.query.merchantOrderId ||
         req.query.order
     ) as string | undefined;
+
+    // ⚡ Instant Payment Verification:
+    // When the customer returns from Kashier, immediately verify and confirm payment
+    // for this specific order without waiting for any cron or webhook.
+    if (rawOrderId) {
+        try {
+            const isConfirmedPaid = await syncOrderByOrderId(rawOrderId);
+            if (isConfirmedPaid) {
+                success = true;
+            }
+        } catch (syncErr) {
+            console.error("[handleKashierRedirect] Immediate sync check error:", syncErr);
+        }
+    }
 
     let callbackSlug = req.query.callbackSlug as string | undefined;
     const frontendBaseUrl = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
