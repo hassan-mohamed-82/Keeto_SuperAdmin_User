@@ -6,7 +6,7 @@ import { and, eq, ne, gte, lte, or } from "drizzle-orm";
 import { decryptSecret } from "../utils/encryption";
 import { getActiveCustomGateway } from "../utils/getActiveCustomGateway";
 import { getActivePlatformGateway } from "../utils/getActivePlatformGateway";
-import { confirmOrderPayment } from "../helpers/orderPaymentConfirmation";
+import { confirmOrderPayment, recordFailedPayment } from "../helpers/orderPaymentConfirmation";
 
 export interface SyncDiagnostic {
     orderId: string;
@@ -24,7 +24,19 @@ export interface SyncDiagnostic {
 }
 
 /**
- * Helper: Retrieve Kashier credentials for a given restaurant
+ * Helper: Safely extract array of orders from Kashier response
+ */
+function extractOrders(data: any): any[] {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.data)) return data.data;
+    if (Array.isArray(data.data?.orders)) return data.data.orders;
+    if (Array.isArray(data.orders)) return data.orders;
+    return [];
+}
+
+/**
+ * Helper: Retrieve Kashier credentials for a given restaurant strictly from DB
  */
 async function getKashierCredentials(restaurantId: string): Promise<{
     mid: string;
@@ -91,7 +103,7 @@ async function syncSingleOrder(
 
     const creds = await getKashierCredentials(order.restaurantId);
     if (!creds) {
-        diag.error = "No Kashier credentials found";
+        diag.error = "No Kashier credentials found in DB";
         if (diagnosticList && diagnosticList.length < 10) diagnosticList.push(diag);
         return false;
     }
@@ -124,26 +136,26 @@ async function syncSingleOrder(
 
         diag.httpStatus = response.status;
         const data = response.data;
-        const matchedOrders: any[] = data?.data?.orders || data?.orders || [];
+        let matchedOrders = extractOrders(data);
         diag.matchedOrdersCount = matchedOrders.length;
         diag.rawResponse = data;
 
-        if (matchedOrders.length === 0) {
-            // Also try searching by orderNumber or paymentOrderId as fallback if available
-            if (order.orderNumber) {
-                const retryResp = await axios.get(requestUrl, {
-                    params: {
-                        search: order.orderNumber,
-                    },
-                    headers: requestHeaders,
-                    timeout: 10000,
-                }).catch(() => null);
+        if (matchedOrders.length === 0 && order.orderNumber) {
+            // Also try searching by orderNumber as fallback
+            const retryResp = await axios.get(requestUrl, {
+                params: {
+                    search: order.orderNumber,
+                },
+                headers: requestHeaders,
+                timeout: 10000,
+            }).catch(() => null);
 
-                const retryOrders: any[] = retryResp?.data?.data?.orders || retryResp?.data?.orders || [];
+            if (retryResp?.data) {
+                const retryOrders = extractOrders(retryResp.data);
                 if (retryOrders.length > 0) {
-                    matchedOrders.push(...retryOrders);
+                    matchedOrders = retryOrders;
                     diag.matchedOrdersCount = matchedOrders.length;
-                    diag.rawResponse = retryResp?.data;
+                    diag.rawResponse = retryResp.data;
                 }
             }
         }
@@ -154,19 +166,23 @@ async function syncSingleOrder(
             return false;
         }
 
-        // Find the order record
-        const kashierOrder = matchedOrders[0];
-        const rawStatus = (kashierOrder.status || "").toUpperCase();
-        diag.kashierStatus = rawStatus;
+        // Look for any order that is PAID/CAPTURED/SUCCESS
+        const paidOrder = matchedOrders.find((ko: any) => {
+            const s = (ko.status || "").toUpperCase();
+            return s === "PAID" || s === "CAPTURED" || s === "SUCCESS";
+        });
 
-        if (rawStatus === "PAID" || rawStatus === "CAPTURED" || rawStatus === "SUCCESS") {
-            const successfulTx = (kashierOrder.transactions || []).find((tx: any) => {
+        if (paidOrder) {
+            const rawStatus = (paidOrder.status || "").toUpperCase();
+            diag.kashierStatus = rawStatus;
+
+            const successfulTx = (paidOrder.transactions || []).find((tx: any) => {
                 const txStatus = (tx.status || "").toUpperCase();
                 return txStatus === "SUCCESS" || txStatus === "CAPTURED" || txStatus === "PAID";
             });
 
-            const transactionId = successfulTx?.transactionId || kashierOrder.transactionId;
-            const gatewayOrderId = kashierOrder.id || kashierOrder.orderReference;
+            const transactionId = successfulTx?.transactionId || paidOrder.transactionId;
+            const gatewayOrderId = paidOrder.id || paidOrder.orderId || paidOrder.orderReference;
 
             console.log(`[KashierSyncCron] Found PAID order at Kashier: Order #${order.orderNumber} (${order.id}). Confirming payment...`);
 
@@ -175,14 +191,47 @@ async function syncSingleOrder(
                 gateway: "kashier",
                 transactionId: transactionId || undefined,
                 gatewayOrderId: gatewayOrderId || undefined,
-                rawPayload: kashierOrder,
+                rawPayload: paidOrder,
             });
 
             console.log(`[KashierSyncCron] Successfully confirmed Order #${order.orderNumber} as PAID via Cron Sync.`);
             if (diagnosticList && diagnosticList.length < 10) diagnosticList.push(diag);
             return true;
+        }
+
+        // Check if latest order failed
+        const firstOrder = matchedOrders[0];
+        const rawStatus = (firstOrder.status || "").toUpperCase();
+        diag.kashierStatus = rawStatus;
+
+        if (rawStatus === "FAILED" || rawStatus === "FAILURE" || rawStatus === "DECLINED" || rawStatus === "CANCELLED") {
+            const failedTx = (firstOrder.transactions || []).find((tx: any) => {
+                const txStatus = (tx.status || "").toUpperCase();
+                return txStatus === "FAILURE" || txStatus === "FAILED" || txStatus === "DECLINED";
+            });
+
+            const failureReason =
+                failedTx?.transactionResponseMessage?.en ||
+                failedTx?.transactionResponseMessage?.ar ||
+                failedTx?.transactionResponseCode ||
+                `Transaction ${rawStatus}`;
+
+            const transactionId = failedTx?.transactionId || firstOrder.transactionId;
+            const gatewayOrderId = firstOrder.id || firstOrder.orderId || firstOrder.orderReference;
+
+            await recordFailedPayment({
+                orderId: order.id,
+                gateway: "kashier",
+                transactionId: transactionId || undefined,
+                gatewayOrderId: gatewayOrderId || undefined,
+                failureReason,
+                rawPayload: firstOrder,
+            });
+
+            diag.error = `Order marked as failed: ${failureReason}`;
+            console.log(`[KashierSyncCron] Order #${order.orderNumber} marked as failed: ${failureReason}`);
         } else {
-            diag.error = `Order status at Kashier is "${rawStatus}" (not PAID/CAPTURED/SUCCESS)`;
+            diag.error = `Order status at Kashier is "${rawStatus}" (not PAID)`;
         }
     } catch (err: any) {
         diag.httpStatus = err?.response?.status;
