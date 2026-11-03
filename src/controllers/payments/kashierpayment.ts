@@ -1,4 +1,5 @@
-﻿import { Request, Response } from "express";
+﻿import { runKashierOrderSync } from "../../services/kashierSyncCron";
+import { Request, Response } from "express";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors";
 import { verifyKashierWebhookSignature } from "../../services/payments/kashier/kashier";
@@ -354,4 +355,16 @@ export const handleKashierRedirect = async (req: Request, res: Response) => {
             : `${frontendBaseUrl}/payment/result?success=false&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=KASHIER`);
 
     return res.redirect(redirectUrl);
+};
+
+/**
+ * Controller: Manually trigger Kashier Orders Reconciliation / Sync
+ * Endpoint: POST /api/payments/kashier/sync
+ */
+export const triggerKashierSync = async (req: Request, res: Response) => {
+    const result = await runKashierOrderSync();
+    return SuccessResponse(res, {
+        message: "Kashier order sync completed",
+        ...result,
+    });
 };

@@ -8,6 +8,7 @@ import {
     generatePaymentSession,
     handleKashierWebhook,
     handleKashierRedirect,
+    triggerKashierSync,
 } from "../../controllers/payments/kashierpayment";
 
 const router = Router();
@@ -43,5 +44,13 @@ router.get(
     "/callback",
     handleKashierRedirect
 );
+
+/**
+ * @route   POST & GET /api/payments/kashier/sync
+ * @desc    Manually trigger sync for pending Kashier orders (supports POST & GET for easy browser/Postman testing)
+ * @access  Public / Admin
+ */
+router.post("/sync", triggerKashierSync);
+router.get("/sync", triggerKashierSync);
 
 export default router;
