@@ -1,0 +1,349 @@
+import cron from "node-cron";
+import axios from "axios";
+import { db } from "../models/connection";
+import { orders, restaurantSettings } from "../models/schema";
+import { and, eq, ne, gte, lte, or } from "drizzle-orm";
+import { decryptSecret } from "../utils/encryption";
+import { getActiveCustomGateway } from "../utils/getActiveCustomGateway";
+import { getActivePlatformGateway } from "../utils/getActivePlatformGateway";
+import { confirmOrderPayment, recordFailedPayment } from "../helpers/orderPaymentConfirmation";
+
+export interface SyncDiagnostic {
+    orderId: string;
+    orderNumber: string;
+    restaurantId: string;
+    credsFound: boolean;
+    credsSource?: string;
+    mid?: string;
+    requestUrl?: string;
+    httpStatus?: number;
+    kashierStatus?: string;
+    matchedOrdersCount?: number;
+    rawResponse?: any;
+    error?: string;
+}
+
+/**
+ * Helper: Safely extract array of orders from Kashier response
+ */
+function extractOrders(data: any): any[] {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.data)) return data.data;
+    if (Array.isArray(data.data?.orders)) return data.data.orders;
+    if (Array.isArray(data.orders)) return data.orders;
+    return [];
+}
+
+/**
+ * Helper: Retrieve Kashier credentials for a given restaurant strictly from DB
+ */
+async function getKashierCredentials(restaurantId: string): Promise<{
+    mid: string;
+    apiKey: string;
+    secretKey?: string;
+    baseUrl: string;
+    source: string;
+} | null> {
+    try {
+        const [settings] = await db
+            .select({ paymentGatewayType: restaurantSettings.paymentGatewayType })
+            .from(restaurantSettings)
+            .where(eq(restaurantSettings.restaurantId, restaurantId))
+            .limit(1);
+
+        if (settings?.paymentGatewayType === "CUSTOM") {
+            const activeGateway = await getActiveCustomGateway(restaurantId);
+            if (activeGateway?.provider === "KASHIER") {
+                const rawCreds = activeGateway.record.credentials as any;
+                if (rawCreds?.apiKey && rawCreds?.mid) {
+                    return {
+                        mid: rawCreds.mid,
+                        apiKey: decryptSecret(rawCreds.apiKey),
+                        secretKey: rawCreds.secretKey ? decryptSecret(rawCreds.secretKey) : undefined,
+                        baseUrl: rawCreds.baseUrl || "https://api.kashier.io",
+                        source: "custom",
+                    };
+                }
+            }
+        }
+
+        // Platform / SYSTEM gateway fallback from DB
+        const platformGateway = await getActivePlatformGateway();
+        if (platformGateway?.provider === "KASHIER" && platformGateway.credentials) {
+            const creds = platformGateway.credentials;
+            return {
+                mid: creds.mid,
+                apiKey: creds.apiKey,
+                secretKey: creds.secretKey,
+                baseUrl: creds.baseUrl || "https://api.kashier.io",
+                source: "platform",
+            };
+        }
+    } catch (err) {
+        console.error(`[KashierSyncCron] Failed to resolve credentials for restaurant ${restaurantId}:`, err);
+    }
+
+    return null;
+}
+
+/**
+ * Check a single pending order against Kashier's Order Lookup API
+ */
+export async function syncSingleOrder(
+    order: typeof orders.$inferSelect,
+    diagnosticList?: SyncDiagnostic[]
+): Promise<boolean> {
+    const diag: SyncDiagnostic = {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        restaurantId: order.restaurantId,
+        credsFound: false,
+    };
+
+    const creds = await getKashierCredentials(order.restaurantId);
+    if (!creds) {
+        diag.error = "No Kashier credentials found in DB";
+        if (diagnosticList && diagnosticList.length < 10) diagnosticList.push(diag);
+        return false;
+    }
+
+    diag.credsFound = true;
+    diag.credsSource = creds.source;
+    diag.mid = creds.mid;
+
+    const authHeader = creds.secretKey || creds.apiKey;
+    const requestHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "api-key": creds.apiKey,
+    };
+    if (authHeader) {
+        requestHeaders["Authorization"] = authHeader;
+    }
+
+    const requestUrl = `${creds.baseUrl}/v3/payment/orders`;
+    diag.requestUrl = `${requestUrl}?search=${order.id}`;
+
+    try {
+        // Query Kashier by our order UUID (merchantOrderId)
+        const response = await axios.get(requestUrl, {
+            params: {
+                search: order.id,
+            },
+            headers: requestHeaders,
+            timeout: 10000,
+        });
+
+        diag.httpStatus = response.status;
+        const data = response.data;
+        let matchedOrders = extractOrders(data);
+        diag.matchedOrdersCount = matchedOrders.length;
+        diag.rawResponse = data;
+
+        if (matchedOrders.length === 0 && order.orderNumber) {
+            // Also try searching by orderNumber as fallback
+            const retryResp = await axios.get(requestUrl, {
+                params: {
+                    search: order.orderNumber,
+                },
+                headers: requestHeaders,
+                timeout: 10000,
+            }).catch(() => null);
+
+            if (retryResp?.data) {
+                const retryOrders = extractOrders(retryResp.data);
+                if (retryOrders.length > 0) {
+                    matchedOrders = retryOrders;
+                    diag.matchedOrdersCount = matchedOrders.length;
+                    diag.rawResponse = retryResp.data;
+                }
+            }
+        }
+
+        if (matchedOrders.length === 0) {
+            diag.error = "No orders matched in Kashier";
+            if (diagnosticList && diagnosticList.length < 10) diagnosticList.push(diag);
+            return false;
+        }
+
+        // Look for any order that is PAID/CAPTURED/SUCCESS
+        const paidOrder = matchedOrders.find((ko: any) => {
+            const s = (ko.status || "").toUpperCase();
+            return s === "PAID" || s === "CAPTURED" || s === "SUCCESS";
+        });
+
+        if (paidOrder) {
+            const rawStatus = (paidOrder.status || "").toUpperCase();
+            diag.kashierStatus = rawStatus;
+
+            const successfulTx = (paidOrder.transactions || []).find((tx: any) => {
+                const txStatus = (tx.status || "").toUpperCase();
+                return txStatus === "SUCCESS" || txStatus === "CAPTURED" || txStatus === "PAID";
+            });
+
+            const transactionId = successfulTx?.transactionId || paidOrder.transactionId;
+            const gatewayOrderId = paidOrder.id || paidOrder.orderId || paidOrder.orderReference;
+
+            console.log(`[KashierSyncCron] Found PAID order at Kashier: Order #${order.orderNumber} (${order.id}). Confirming payment...`);
+
+            await confirmOrderPayment({
+                orderId: order.id,
+                gateway: "kashier",
+                transactionId: transactionId || undefined,
+                gatewayOrderId: gatewayOrderId || undefined,
+                rawPayload: paidOrder,
+            });
+
+            console.log(`[KashierSyncCron] Successfully confirmed Order #${order.orderNumber} as PAID via Cron Sync.`);
+            if (diagnosticList && diagnosticList.length < 10) diagnosticList.push(diag);
+            return true;
+        }
+
+        // Check if latest order failed
+        const firstOrder = matchedOrders[0];
+        const rawStatus = (firstOrder.status || "").toUpperCase();
+        diag.kashierStatus = rawStatus;
+
+        if (rawStatus === "FAILED" || rawStatus === "FAILURE" || rawStatus === "DECLINED" || rawStatus === "CANCELLED") {
+            const failedTx = (firstOrder.transactions || []).find((tx: any) => {
+                const txStatus = (tx.status || "").toUpperCase();
+                return txStatus === "FAILURE" || txStatus === "FAILED" || txStatus === "DECLINED";
+            });
+
+            const failureReason =
+                failedTx?.transactionResponseMessage?.en ||
+                failedTx?.transactionResponseMessage?.ar ||
+                failedTx?.transactionResponseCode ||
+                `Transaction ${rawStatus}`;
+
+            const transactionId = failedTx?.transactionId || firstOrder.transactionId;
+            const gatewayOrderId = firstOrder.id || firstOrder.orderId || firstOrder.orderReference;
+
+            await recordFailedPayment({
+                orderId: order.id,
+                gateway: "kashier",
+                transactionId: transactionId || undefined,
+                gatewayOrderId: gatewayOrderId || undefined,
+                failureReason,
+                rawPayload: firstOrder,
+            });
+
+            diag.error = `Order marked as failed: ${failureReason}`;
+            console.log(`[KashierSyncCron] Order #${order.orderNumber} marked as failed: ${failureReason}`);
+        } else {
+            diag.error = `Order status at Kashier is "${rawStatus}" (not PAID)`;
+        }
+    } catch (err: any) {
+        diag.httpStatus = err?.response?.status;
+        diag.rawResponse = err?.response?.data;
+        diag.error = err?.message || String(err);
+        console.error(`[KashierSyncCron] Error checking order ${order.orderNumber} (${order.id}):`, diag.error);
+    }
+
+    if (diagnosticList && diagnosticList.length < 10) {
+        diagnosticList.push(diag);
+    }
+
+    return false;
+}
+
+/**
+ * On-Demand Single Order Sync:
+ * Queries Kashier immediately for a specific order and confirms it if PAID.
+ * Used during the user return / callback redirect flow.
+ */
+export async function syncOrderByOrderId(orderId: string): Promise<boolean> {
+    try {
+        const [order] = await db
+            .select()
+            .from(orders)
+            .where(
+                or(
+                    eq(orders.id, orderId),
+                    eq(orders.orderNumber, orderId),
+                    eq(orders.paymentOrderId, orderId)
+                )
+            )
+            .limit(1);
+
+        if (!order) return false;
+        if (order.paymentStatus === "paid") return true;
+
+        return await syncSingleOrder(order);
+    } catch (err) {
+        console.error(`[syncOrderByOrderId] Error syncing order ${orderId}:`, err);
+        return false;
+    }
+}
+
+/**
+ * Lightweight Cron Sync Runner:
+ * Queries ONLY recent pending Kashier orders (created within the last 30 minutes, max 10 orders).
+ * This keeps server load virtually 0 while serving as a reliable fallback.
+ */
+export async function runKashierOrderSync(): Promise<{
+    checked: number;
+    confirmed: number;
+    diagnostics?: SyncDiagnostic[];
+}> {
+    const now = new Date();
+    const thirtySecondsAgo = new Date(now.getTime() - 30 * 1000);
+    const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
+
+    let confirmedCount = 0;
+    const diagnostics: SyncDiagnostic[] = [];
+
+    try {
+        const pendingOrders = await db
+            .select()
+            .from(orders)
+            .where(
+                and(
+                    eq(orders.paymentGateway, "kashier"),
+                    ne(orders.paymentStatus, "paid"),
+                    or(
+                        eq(orders.paymentStatus, "pending_payment"),
+                        eq(orders.status, "pending")
+                    ),
+                    gte(orders.createdAt, thirtyMinutesAgo),
+                    lte(orders.createdAt, thirtySecondsAgo)
+                )
+            )
+            .limit(10); // Limit to 10 orders per run to prevent server/network spikes
+
+        if (pendingOrders.length === 0) {
+            return { checked: 0, confirmed: 0, diagnostics: [] };
+        }
+
+        console.log(`[KashierSyncCron] Checking ${pendingOrders.length} recent pending Kashier order(s)...`);
+
+        for (const order of pendingOrders) {
+            const confirmed = await syncSingleOrder(order, diagnostics);
+            if (confirmed) {
+                confirmedCount++;
+            }
+        }
+
+        return { checked: pendingOrders.length, confirmed: confirmedCount, diagnostics };
+    } catch (err: any) {
+        console.error("[KashierSyncCron] Error in runKashierOrderSync:", err);
+        return { checked: 0, confirmed: 0, diagnostics: [{ orderId: "", orderNumber: "", restaurantId: "", credsFound: false, error: err?.message }] };
+    }
+}
+
+/**
+ * Initialize the Kashier Reconciliation Cron Job.
+ * Runs every 5 minutes as a lightweight safety net.
+ */
+export function initKashierSyncCron() {
+    // Run every 5 minutes: */5 * * * *
+    cron.schedule("*/5 * * * *", async () => {
+        try {
+            await runKashierOrderSync();
+        } catch (err) {
+            console.error("[KashierSyncCron] Scheduled job failed:", err);
+        }
+    });
+
+    console.log("🕒 Kashier Order Sync Cron initialized (lightweight, runs every 5 minutes).");
+}

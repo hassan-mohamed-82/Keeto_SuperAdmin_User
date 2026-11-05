@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from "express";
+﻿import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import crypto from "crypto";
 import ApiRoute from "./routes";
@@ -15,6 +15,7 @@ import { initSocket } from './services/socket/socketService';
 import swaggerUi from 'swagger-ui-express';
 import swaggerFile from './swagger-output.json';
 import { initDomainHealthCron } from "./services/domainHealthCron";
+import { initKashierSyncCron } from "./services/kashierSyncCron";
 import { isAllowedOrigin } from "./utils/cors";
 // import { initAbandonedCartCron } from "./services/abandonedCartCron";
 // import { initOrderNotificationCron } from "./services/orderNotificationCron";
@@ -27,6 +28,7 @@ connectDB();
 // initAbandonedCartCron();
 // initOrderNotificationCron();
 initDomainHealthCron();
+initKashierSyncCron();
 
 const httpServer = http.createServer(app);
 
