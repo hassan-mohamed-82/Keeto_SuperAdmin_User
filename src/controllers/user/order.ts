@@ -79,6 +79,19 @@ const formatDate = (date: Date | null | undefined): string | null => {
     }).format(new Date(date));
 };
 
+const parseJsonArray = (val: any): any[] => {
+    if (!val) return [];
+    if (typeof val === "string") {
+        try {
+            const parsed = JSON.parse(val);
+            return typeof parsed === "string" ? JSON.parse(parsed) : (Array.isArray(parsed) ? parsed : []);
+        } catch {
+            return [];
+        }
+    }
+    return Array.isArray(val) ? val : [];
+};
+
 // Helper to format order items variations, supporting both snapshot-stored variations and old database lookup fallback
 const formatOrderItemsVariations = async (items: any[]) => {
     const parsedItems = items.map(item => {
@@ -626,7 +639,48 @@ export const checkout = async (req: Request | any, res: Response) => {
         if (!checkoutOfferFoodsMap.has(ofRow.offerId)) {
             checkoutOfferFoodsMap.set(ofRow.offerId, []);
         }
-        checkoutOfferFoodsMap.get(ofRow.offerId)!.push(ofRow);
+                checkoutOfferFoodsMap.get(ofRow.offerId)!.push(ofRow);
+    }
+
+    if (dbOfferFoodsForCheckout.length > 0) {
+        const bundleOptionIds = new Set<string>();
+        for (const ofRow of dbOfferFoodsForCheckout) {
+            const rawOpts = parseJsonArray(ofRow.optionIds);
+            rawOpts.forEach((id: any) => id && bundleOptionIds.add(String(id)));
+
+            const rawVars = parseJsonArray(ofRow.variations);
+            for (const pv of rawVars) {
+                if (pv?.optionId) bundleOptionIds.add(String(pv.optionId));
+                if (Array.isArray(pv?.options)) {
+                    pv.options.forEach((id: any) => id && bundleOptionIds.add(String(id)));
+                }
+            }
+        }
+
+        const missingOptionIds = Array.from(bundleOptionIds).filter((id) => !optionsWithParentMap.has(id));
+        if (missingOptionIds.length > 0) {
+            const extraOptions = await db
+                .select({
+                    optionId: variationOptions.id,
+                    optionName: variationOptions.optionName,
+                    optionNameAr: variationOptions.optionNameAr,
+                    optionNameFr: variationOptions.optionNameFr,
+                    additionalPrice: variationOptions.additionalPrice,
+                    status: variationOptions.status,
+                    variationId: foodVariations.id,
+                    variationName: foodVariations.name,
+                    variationNameAr: foodVariations.nameAr,
+                    variationNameFr: foodVariations.nameFr,
+                    variationStatus: foodVariations.status,
+                })
+                .from(variationOptions)
+                .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
+                .where(inArray(variationOptions.id, missingOptionIds));
+
+            for (const opt of extraOptions) {
+                optionsWithParentMap.set(opt.optionId, opt);
+            }
+        }
     }
 
     // ─── Calculate pricing per item ───
@@ -840,7 +894,35 @@ export const checkout = async (req: Request | any, res: Response) => {
             subtotal += offerTotal;
             const bFoods = checkoutOfferFoodsMap.get(offer.id) || [];
             const perFoodPrice = bFoods.length > 0 ? roundMoney(offerUnitPrice / bFoods.length) : offerUnitPrice;
-            for (const bf of bFoods) {
+                        for (const bf of bFoods) {
+                const rawOpts = parseJsonArray(bf.optionIds);
+                const rawVars = parseJsonArray(bf.variations);
+
+                const bfOptionIds = new Set<string>(rawOpts.map((id: any) => String(id)).filter(Boolean));
+                for (const pv of rawVars) {
+                    if (pv?.optionId) bfOptionIds.add(String(pv.optionId));
+                    if (Array.isArray(pv?.options)) {
+                        pv.options.forEach((id: any) => id && bfOptionIds.add(String(id)));
+                    }
+                }
+
+                const bundleDetailedVariations = Array.from(bfOptionIds).map((optId) => {
+                    const optDetails = optionsWithParentMap.get(optId);
+                    const resolvedPrice = optDetails?.additionalPrice ?? "0.00";
+                    return {
+                        variationId: optDetails?.variationId ?? null,
+                        variationName: optDetails?.variationName ?? null,
+                        variationNameAr: optDetails?.variationNameAr ?? null,
+                        variationNameFr: optDetails?.variationNameFr ?? null,
+                        optionId: optDetails?.optionId ?? optId,
+                        optionName: optDetails?.optionName ?? null,
+                        optionNameAr: optDetails?.optionNameAr ?? null,
+                        optionNameFr: optDetails?.optionNameFr ?? null,
+                        price: Number(resolvedPrice).toFixed(2),
+                        additionalPrice: Number(resolvedPrice).toFixed(2),
+                    };
+                });
+
                 itemsToInsert.push({
                     id: uuidv4(),
                     foodId: bf.foodId,
@@ -849,7 +931,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                     variationsPrice: "0.00",
                     addonsPrice: "0.00",
                     totalPrice: (perFoodPrice * cartItem.quantity).toFixed(2),
-                    variations: bf.variations || [],
+                    variations: bundleDetailedVariations,
                     addons: [],
                     note: cartItem.note || null,
                     isBundle: true,

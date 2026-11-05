@@ -126,7 +126,6 @@ const formatBundleFoodItem = (row: any, foodVariationsMap: Map<string, any[]>) =
         originalPrice: Number(row.foodPrice),
         isOutOfStock: Boolean(row.isOutOfStock),
         variations: formattedVariations,
-        optionIds: Array.from(selectedOptionIdSet),
     };
 };
 
