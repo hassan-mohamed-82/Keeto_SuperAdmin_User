@@ -28,7 +28,7 @@ connectDB();
 // initAbandonedCartCron();
 // initOrderNotificationCron();
 initDomainHealthCron();
-initKashierSyncCron();
+// initKashierSyncCron();
 
 const httpServer = http.createServer(app);
 
