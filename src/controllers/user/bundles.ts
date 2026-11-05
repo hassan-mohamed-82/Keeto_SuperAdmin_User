@@ -108,7 +108,6 @@ const getAddonsMap = async (addonIds: string[]) => {
             name: addons.name,
             nameAr: addons.nameAr,
             nameFr: addons.nameFr,
-            price: addons.price,
         })
         .from(addons)
         .where(inArray(addons.id, addonIds));
@@ -119,7 +118,6 @@ const getAddonsMap = async (addonIds: string[]) => {
             name: a.name,
             nameAr: a.nameAr,
             nameFr: a.nameFr,
-            price: Number(a.price || 0),
         });
     }
 
