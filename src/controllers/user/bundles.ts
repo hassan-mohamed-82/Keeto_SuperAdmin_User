@@ -8,6 +8,7 @@ import {
     food,
     foodVariations,
     variationOptions,
+    addons,
 } from "../../models/schema";
 import { SuccessResponse } from "../../utils/response";
 
@@ -91,9 +92,42 @@ const getFoodVariationsMap = async (foodIds: string[]) => {
     return foodVariationsMap;
 };
 
-const formatBundleFoodItem = (row: any, foodVariationsMap: Map<string, any[]>) => {
+const getAddonsMap = async (addonIds: string[]) => {
+    const addonsMap = new Map<string, any>();
+    if (!addonIds.length) return addonsMap;
+
+    const addonsList = await db
+        .select({
+            id: addons.id,
+            name: addons.name,
+            nameAr: addons.nameAr,
+            nameFr: addons.nameFr,
+            price: addons.price,
+        })
+        .from(addons)
+        .where(inArray(addons.id, addonIds));
+
+    for (const a of addonsList) {
+        addonsMap.set(a.id, {
+            id: a.id,
+            name: a.name,
+            nameAr: a.nameAr,
+            nameFr: a.nameFr,
+            price: Number(a.price || 0),
+        });
+    }
+
+    return addonsMap;
+};
+
+const formatBundleFoodItem = (
+    row: any,
+    foodVariationsMap: Map<string, any[]>,
+    addonsMap: Map<string, any>
+) => {
     const rawOptionIds = parseJsonArray(row.optionIds);
     const rawVariations = parseJsonArray(row.variations);
+    const rawAddonIds = parseJsonArray(row.addonIds);
 
     const selectedOptionIdSet = new Set<string>(rawOptionIds.map((id: any) => String(id)));
     for (const pv of rawVariations) {
@@ -114,6 +148,10 @@ const formatBundleFoodItem = (row: any, foodVariationsMap: Map<string, any[]>) =
         })
         .filter(Boolean);
 
+    const formattedAddons = rawAddonIds
+        .map((id: any) => addonsMap.get(String(id)))
+        .filter(Boolean);
+
     return {
         foodId: row.foodId,
         quantity: row.quantity,
@@ -126,6 +164,7 @@ const formatBundleFoodItem = (row: any, foodVariationsMap: Map<string, any[]>) =
         originalPrice: Number(row.foodPrice),
         isOutOfStock: Boolean(row.isOutOfStock),
         variations: formattedVariations,
+        addons: formattedAddons,
     };
 };
 
@@ -180,6 +219,7 @@ export const getAllBundles = async (req: Request, res: Response) => {
                     quantity: offerFoods.quantity,
                     variations: offerFoods.variations,
                     optionIds: offerFoods.optionIds,
+                    addonIds: offerFoods.addonIds,
                     foodName: food.name,
                     foodNameAr: food.nameAr,
                     foodNameFr: food.nameFr,
@@ -196,11 +236,20 @@ export const getAllBundles = async (req: Request, res: Response) => {
             const uniqueFoodIds = [...new Set(offerFoodRows.map((f) => f.foodId))];
             const foodVariationsMap = await getFoodVariationsMap(uniqueFoodIds);
 
+            const allAddonIds = [
+                ...new Set(
+                    offerFoodRows.flatMap((r) =>
+                        parseJsonArray(r.addonIds).map((id: any) => String(id)).filter(Boolean)
+                    )
+                ),
+            ];
+            const addonsMap = await getAddonsMap(allAddonIds);
+
             for (const row of offerFoodRows) {
                 if (!offerFoodsMap.has(row.offerId)) {
                     offerFoodsMap.set(row.offerId, []);
                 }
-                offerFoodsMap.get(row.offerId)!.push(formatBundleFoodItem(row, foodVariationsMap));
+                offerFoodsMap.get(row.offerId)!.push(formatBundleFoodItem(row, foodVariationsMap, addonsMap));
             }
         }
 
@@ -282,6 +331,7 @@ export const getBundleById = async (req: Request, res: Response) => {
                 quantity: offerFoods.quantity,
                 variations: offerFoods.variations,
                 optionIds: offerFoods.optionIds,
+                addonIds: offerFoods.addonIds,
                 foodName: food.name,
                 foodNameAr: food.nameAr,
                 foodNameFr: food.nameFr,
@@ -298,7 +348,16 @@ export const getBundleById = async (req: Request, res: Response) => {
         const uniqueFoodIds = [...new Set(offerFoodRows.map((f) => f.foodId))];
         const foodVariationsMap = await getFoodVariationsMap(uniqueFoodIds);
 
-        const foods = offerFoodRows.map((f) => formatBundleFoodItem(f, foodVariationsMap));
+        const allAddonIds = [
+            ...new Set(
+                offerFoodRows.flatMap((r) =>
+                    parseJsonArray(r.addonIds).map((id: any) => String(id)).filter(Boolean)
+                )
+            ),
+        ];
+        const addonsMap = await getAddonsMap(allAddonIds);
+
+        const foods = offerFoodRows.map((f) => formatBundleFoodItem(f, foodVariationsMap, addonsMap));
 
         return SuccessResponse(res, {
             message: "Offer details retrieved successfully",

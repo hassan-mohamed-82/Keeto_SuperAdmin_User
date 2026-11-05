@@ -1,4 +1,4 @@
-﻿// controllers/user/OrderController.ts
+// controllers/user/OrderController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import {
@@ -644,6 +644,8 @@ export const checkout = async (req: Request | any, res: Response) => {
 
     if (dbOfferFoodsForCheckout.length > 0) {
         const bundleOptionIds = new Set<string>();
+        const bundleAddonIds = new Set<string>();
+
         for (const ofRow of dbOfferFoodsForCheckout) {
             const rawOpts = parseJsonArray(ofRow.optionIds);
             rawOpts.forEach((id: any) => id && bundleOptionIds.add(String(id)));
@@ -655,6 +657,9 @@ export const checkout = async (req: Request | any, res: Response) => {
                     pv.options.forEach((id: any) => id && bundleOptionIds.add(String(id)));
                 }
             }
+
+            const rawAddonIds = parseJsonArray(ofRow.addonIds);
+            rawAddonIds.forEach((id: any) => id && bundleAddonIds.add(String(id)));
         }
 
         const missingOptionIds = Array.from(bundleOptionIds).filter((id) => !optionsWithParentMap.has(id));
@@ -679,6 +684,17 @@ export const checkout = async (req: Request | any, res: Response) => {
 
             for (const opt of extraOptions) {
                 optionsWithParentMap.set(opt.optionId, opt);
+            }
+        }
+
+        const missingAddonIds = Array.from(bundleAddonIds).filter((id) => !addonsMap.has(id));
+        if (missingAddonIds.length > 0) {
+            const extraAddons = await db
+                .select({ id: addons.id, name: addons.name, nameAr: addons.nameAr, nameFr: addons.nameFr, price: addons.price })
+                .from(addons)
+                .where(inArray(addons.id, missingAddonIds));
+            for (const a of extraAddons) {
+                addonsMap.set(a.id, a as any);
             }
         }
     }
@@ -923,16 +939,35 @@ export const checkout = async (req: Request | any, res: Response) => {
                     };
                 });
 
+                const rawBfAddonIds = parseJsonArray(bf.addonIds);
+                const bundleDetailedAddons: any[] = [];
+                let bundleAddonsPrice = 0;
+                for (const addonId of rawBfAddonIds) {
+                    const dbAddon = addonsMap.get(String(addonId));
+                    if (dbAddon) {
+                        const addonPrice = Number(dbAddon.price || 0);
+                        bundleAddonsPrice += addonPrice;
+                        bundleDetailedAddons.push({
+                            addonId: dbAddon.id,
+                            name: dbAddon.name,
+                            nameAr: dbAddon.nameAr,
+                            nameFr: dbAddon.nameFr,
+                            price: addonPrice.toFixed(2),
+                        });
+                    }
+                }
+                const bundleItemTotal = roundMoney(perFoodPrice * cartItem.quantity + bundleAddonsPrice);
+
                 itemsToInsert.push({
                     id: uuidv4(),
                     foodId: bf.foodId,
                     quantity: bf.quantity * cartItem.quantity,
                     basePrice: perFoodPrice.toFixed(2),
                     variationsPrice: "0.00",
-                    addonsPrice: "0.00",
-                    totalPrice: (perFoodPrice * cartItem.quantity).toFixed(2),
+                    addonsPrice: bundleAddonsPrice.toFixed(2),
+                    totalPrice: bundleItemTotal.toFixed(2),
                     variations: bundleDetailedVariations,
-                    addons: [],
+                    addons: bundleDetailedAddons,
                     note: cartItem.note || null,
                     isBundle: true,
                 });
