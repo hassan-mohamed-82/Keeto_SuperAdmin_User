@@ -764,7 +764,16 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         paymentCredentialsMap.get(cred.restaurantId)!.push(sanitizePaymentCredentialRecord(cred));
     }
 
-    const formatted = raw.map(r => {
+    // Deduplicate restaurants if a restaurant has multiple owners in restrauntadmin
+    const seenRestaurantIds = new Set<string>();
+    const uniqueRaw = raw.filter(r => {
+        if (!r.id) return false;
+        if (seenRestaurantIds.has(r.id)) return false;
+        seenRestaurantIds.add(r.id);
+        return true;
+    });
+
+    const formatted = uniqueRaw.map(r => {
         let parsedCuisines = safeParseArray(r.cuisineIds);
         return {
             id: r.id,

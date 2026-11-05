@@ -852,6 +852,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                     variations: bf.variations || [],
                     addons: [],
                     note: cartItem.note || null,
+                    isBundle: true,
                 });
             }
             continue;
@@ -876,6 +877,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             variations: vars,
             addons: addonsList,
             note: cartItem.note || null,
+            isBundle: false,
         });
     }
 
@@ -1555,6 +1557,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             dailyOrderNumber: isVisaPayment ? null : createdDailyOrderNumber,
             durationOrderPreparing: defaultPreparingDuration,
             offerId: userCart.find(c => c.offerId)?.offerId || null,
+            isBundle: Boolean(userCart.some(c => c.offerId)),
             createdAt: now
         });
 
