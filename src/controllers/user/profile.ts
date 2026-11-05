@@ -206,12 +206,20 @@ export const getRestaurantPoints = async (req: Request | any, res: Response) => 
 export const updateProfile = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
-    const { name, phone, email, photo, alternatePhone } = req.body;
+    const { name, phone, email, photo, alternatePhone, alternativePhone } = req.body;
+    const resolvedAlternatePhone = alternatePhone !== undefined ? alternatePhone : alternativePhone;
 
     const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
 
     await db.update(users)
-        .set({ name, phone, email, photo, alternatePhone, isProfileComplete })
+        .set({
+            ...(name !== undefined && { name }),
+            ...(phone !== undefined && { phone: phone ? phone.trim() : null }),
+            ...(email !== undefined && { email }),
+            ...(photo !== undefined && { photo }),
+            ...(resolvedAlternatePhone !== undefined && { alternatePhone: resolvedAlternatePhone ? resolvedAlternatePhone.trim() : null }),
+            isProfileComplete
+        })
         .where(eq(users.id, userId));
 
     return SuccessResponse(res, { message: "Profile updated successfully", data: { isProfileComplete } });

@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { validate } from "../../middlewares/validation";
+import { signupSchema } from "../../validation/user/auth";
 import { catchAsync } from "../../utils/catchAsync";
 import {
     signup,
@@ -15,7 +17,7 @@ import {verifyAppleToken} from "../../config/verifyAppleToken"
 
 const router = Router();
 
-router.post("/signup", catchAsync(signup));
+router.post("/signup", validate(signupSchema), catchAsync(signup));
 router.get("/verify-email", catchAsync(verifyEmail));
 router.post("/login", catchAsync(login));
 router.post("/forgot-password", catchAsync(forgotPassword));

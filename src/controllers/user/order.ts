@@ -218,21 +218,17 @@ const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
  */
 export const normalizeEgPhone = (raw: unknown): string => {
     if (typeof raw !== "string") throw new BadRequest("Phone number is required.");
-    let digits = raw.replace(/[^\d+]/g, "");
-    if (digits.startsWith("+")) digits = digits.slice(1);
-    if (digits.startsWith("00")) digits = digits.slice(2);
-    if (digits.startsWith("20")) digits = digits.slice(2);
-    if (digits.startsWith("0")) digits = digits.slice(1);
-    if (!/^1[0125]\d{8}$/.test(digits)) {
-        throw new BadRequest("Invalid phone number format.");
+    const trimmed = raw.trim();
+    if (!/^01[0125][0-9]{8}$/.test(trimmed)) {
+        throw new BadRequest("Phone number must be 11 digits and start with 01.");
     }
-    return `+20${digits}`;
+    return trimmed;
 };
 
 /** All formats a phone may have been stored in (for matching legacy data). */
-const phoneVariants = (e164: string): string[] => {
-    const national = e164.slice(3); // 1XXXXXXXXX
-    return [e164, `0${national}`, `20${national}`, `0020${national}`];
+const phoneVariants = (phone11: string): string[] => {
+    const withoutZero = phone11.startsWith("0") ? phone11.slice(1) : phone11;
+    return [phone11, `+20${withoutZero}`, `20${withoutZero}`, `0020${withoutZero}`];
 };
 
 /** Validates + builds the guest address row. It is NOT inserted here — it is inserted inside the transaction. */
@@ -302,6 +298,10 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (isGuestUser) {
         guestName = String(guestInfo?.name || req.user.name || "Guest").trim().slice(0, 100) || "Guest";
         guestPhone = normalizeEgPhone(guestInfo?.phone); // throws BadRequest if missing / invalid
+        const altPhone = guestInfo?.alternatePhone || guestInfo?.alternativePhone;
+        if (altPhone) {
+            normalizeEgPhone(altPhone);
+        }
 
         // A phone that belongs to a registered account can't be used by a guest (no silent merge, no takeover).
         const [registered] = await db
