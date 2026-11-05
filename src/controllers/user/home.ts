@@ -614,7 +614,13 @@ export const searchRestaurantWithMenu = async (req: Request, res: Response) => {
             )
         )
         .leftJoin(foodVariations, eq(food.id, foodVariations.foodId))
-        .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
+        .leftJoin(
+            variationOptions,
+            and(
+                eq(foodVariations.id, variationOptions.variationId),
+                eq(variationOptions.status, true)
+            )
+        )
         .where(
             and(
                 eq(restaurants.status, "active"),

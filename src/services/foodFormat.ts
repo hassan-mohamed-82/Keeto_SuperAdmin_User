@@ -49,7 +49,13 @@ export const formatFoodsList = async (
                 additionalPrice: variationOptions.additionalPrice,
             })
             .from(foodVariations)
-            .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
+            .leftJoin(
+                variationOptions,
+                and(
+                    eq(foodVariations.id, variationOptions.variationId),
+                    eq(variationOptions.status, true)
+                )
+            )
             .where(inArray(foodVariations.foodId, foodIds))
         : [];
 

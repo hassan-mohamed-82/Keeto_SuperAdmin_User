@@ -51,7 +51,13 @@ const getFoodVariationsMap = async (foodIds: string[]) => {
             additionalPrice: variationOptions.additionalPrice,
         })
         .from(foodVariations)
-        .leftJoin(variationOptions, eq(foodVariations.id, variationOptions.variationId))
+        .leftJoin(
+            variationOptions,
+            and(
+                eq(foodVariations.id, variationOptions.variationId),
+                eq(variationOptions.status, true)
+            )
+        )
         .where(inArray(foodVariations.foodId, foodIds));
 
     for (const v of variationsList) {
