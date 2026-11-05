@@ -103,13 +103,16 @@ const formatBundleFoodItem = (row: any, foodVariationsMap: Map<string, any[]>) =
     }
 
     const baseVariations = foodVariationsMap.get(row.foodId) || [];
-    const formattedVariations = baseVariations.map((v) => ({
-        ...v,
-        options: v.options.map((opt: any) => ({
-            ...opt,
-            isSelected: selectedOptionIdSet.has(opt.id),
-        })),
-    }));
+    const formattedVariations = baseVariations
+        .map((v) => {
+            const selectedOptions = v.options.filter((opt: any) => selectedOptionIdSet.has(opt.id));
+            if (selectedOptions.length === 0) return null;
+            return {
+                ...v,
+                options: selectedOptions,
+            };
+        })
+        .filter(Boolean);
 
     return {
         foodId: row.foodId,
