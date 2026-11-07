@@ -4,6 +4,7 @@ exports.searchRestaurantWithMenu = exports.getUserFavorites = exports.toggleFavo
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
+const mysql_core_1 = require("drizzle-orm/mysql-core");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
 const discount_1 = require("../../utils/discount");
@@ -410,6 +411,8 @@ const getUserFavorites = async (req, res) => {
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
     const restaurantId = req.query.restaurantId;
+    // Alias to get the restaurant that OWNS the favorited food
+    const foodRestaurant = (0, mysql_core_1.alias)(schema_1.restaurants, "foodRestaurant");
     const conditions = [(0, drizzle_orm_1.eq)(schema_1.favorites.userId, userId)];
     if (restaurantId) {
         // Filter favorited foods belonging to the specific restaurant ID
@@ -431,7 +434,9 @@ const getUserFavorites = async (req, res) => {
         },
         food: {
             id: schema_1.food.id,
-            restaurantId: schema_1.food.restaurantid, // Added restaurantId to food object
+            restaurantId: schema_1.food.restaurantid,
+            restaurantName: foodRestaurant.name,
+            restaurantNameAr: foodRestaurant.nameAr,
             name: schema_1.food.name,
             nameAr: schema_1.food.nameAr,
             nameFr: schema_1.food.nameFr,
@@ -445,6 +450,7 @@ const getUserFavorites = async (req, res) => {
         .from(schema_1.favorites)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.favorites.restaurantId, schema_1.restaurants.id))
         .leftJoin(schema_1.food, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.favorites.foodId, schema_1.food.id), foodConditions_1.activeFoodCondition))
+        .leftJoin(foodRestaurant, (0, drizzle_orm_1.eq)(schema_1.food.restaurantid, foodRestaurant.id))
         .where((0, drizzle_orm_1.and)(...conditions));
     // Get unique restaurant IDs from both restaurant favorites and favorited foods
     const uniqueRestaurants = [
@@ -507,7 +513,7 @@ const searchRestaurantWithMenu = async (req, res) => {
         .from(schema_1.restaurants)
         .leftJoin(schema_1.food, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.food.restaurantid), (0, drizzle_orm_1.eq)(schema_1.food.status, "active"), foodConditions_1.activeFoodCondition))
         .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.food.id, schema_1.foodVariations.foodId))
-        .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId))
+        .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId), (0, drizzle_orm_1.eq)(schema_1.variationOptions.status, true)))
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"), (0, drizzle_orm_1.or)(...restaurantConditions)));
     const restaurantsMap = new Map();
     for (const row of flatResults) {

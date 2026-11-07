@@ -108,6 +108,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     isDelayEmailSent: (0, mysql_core_1.boolean)("is_delay_email_sent").default(false),
     offerId: (0, mysql_core_1.char)("offer_id", { length: 36 })
         .references(() => schema_1.offers.id, { onDelete: "set null" }),
+    isBundle: (0, mysql_core_1.boolean)("is_bundle").default(false),
     // Unified payment gateway columns (supports Kashier, Paymob, and Geidea)
     paymentGateway: (0, mysql_core_1.mysqlEnum)("payment_gateway", ["kashier", "paymob", "geidea"]),
     paymentGatewayType: (0, mysql_core_1.mysqlEnum)("payment_gateway_type", ["SYSTEM", "CUSTOM"]),

@@ -90,3 +90,6 @@ __exportStar(require("./schema/admin/gatewaySwitchLog"), exports);
 __exportStar(require("./schema/admin/firstOrderDiscount"), exports);
 // Platform-level multi-gateway support (credentials stored in DB, managed by Super Admin)
 __exportStar(require("./schema/admin/platformPaymentGateways"), exports);
+__exportStar(require("./schema/admin/videos"), exports);
+__exportStar(require("./schema/admin/restaurantDomains"), exports);
+__exportStar(require("./schema/user/authHandoffCodes"), exports);

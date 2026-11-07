@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.toggleCredential = exports.deleteCredential = exports.updateCredential = exports.getCredentialsByRestaurant = exports.createCredentials = void 0;
+exports.setDefaultCredential = exports.toggleCredential = exports.deleteCredential = exports.updateCredential = exports.getCredentialsByRestaurant = exports.createCredentials = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -8,6 +8,8 @@ const uuid_1 = require("uuid");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const NotFound_1 = require("../../Errors/NotFound");
 const encryption_1 = require("../../utils/encryption");
+const response_1 = require("../../utils/response");
+const restaurantWalletService_1 = require("../../services/restaurantWalletService");
 // Helper to sanitize credential secrets before sending in response
 const sanitizeCredentialRecord = (record) => {
     if (!record)
@@ -44,6 +46,8 @@ const sanitizeCredentialRecord = (record) => {
     return {
         ...record,
         credentials: safeCreds,
+        isDefault: Boolean(record.isDefault),
+        default: Boolean(record.isDefault),
     };
 };
 /**
@@ -83,6 +87,34 @@ const createCredentials = async (req, res) => {
     }
     const newId = (0, uuid_1.v4)();
     const formattedProvider = String(provider).toUpperCase();
+    // Resolve isDefault — accept both "isDefault", "default", and typo "defualt"
+    const isDefaultInput = req.body.isDefault !== undefined
+        ? req.body.isDefault
+        : req.body.default !== undefined
+            ? req.body.default
+            : req.body.defualt;
+    // If this is the first credential for this restaurant, it becomes default automatically
+    const [existingCount] = await connection_1.db
+        .select({ id: schema_1.restaurantPaymentCredentials.id })
+        .from(schema_1.restaurantPaymentCredentials)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId))
+        .limit(1);
+    const resolvedIsDefault = isDefaultInput !== undefined ? Boolean(isDefaultInput) : !existingCount;
+    const resolvedIsActive = isActive !== undefined ? Boolean(isActive) : true;
+    // Enforce SINGLE default per restaurant
+    if (resolvedIsDefault) {
+        await connection_1.db
+            .update(schema_1.restaurantPaymentCredentials)
+            .set({ isDefault: false })
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId));
+    }
+    // Enforce SINGLE active credential per restaurant
+    if (resolvedIsActive) {
+        await connection_1.db
+            .update(schema_1.restaurantPaymentCredentials)
+            .set({ isActive: false })
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId));
+    }
     await connection_1.db.insert(schema_1.restaurantPaymentCredentials).values({
         id: newId,
         restaurantId,
@@ -94,13 +126,47 @@ const createCredentials = async (req, res) => {
         fixedValue: fixedValue !== undefined ? String(parseFloat(fixedValue || "0").toFixed(2)) : "0.00",
         tax: tax !== undefined ? String(parseFloat(tax || "0").toFixed(2)) : "0.00",
         logoUrl: logoUrl || null,
-        isActive: isActive !== undefined ? isActive : true,
+        isActive: resolvedIsActive,
+        isDefault: resolvedIsDefault,
     });
     const [created] = await connection_1.db
         .select()
         .from(schema_1.restaurantPaymentCredentials)
         .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.id, newId))
         .limit(1);
+    // 👈 لو هذي أول credentials للمطعم (مفيش كانت عنده credentials قبل)
+    // والمطعم حالياً على SYSTEM بدون visa switch سبق تطبيقه
+    // ورصيده إيجابي (>= 0) → حوله لـ CUSTOM تلقائياً
+    if (!existingCount) {
+        try {
+            const [currentSettings] = await connection_1.db
+                .select({
+                paymentGatewayType: schema_1.restaurantSettings.paymentGatewayType,
+                visaSwitchApplied: schema_1.restaurantSettings.visaSwitchApplied,
+                visaSwitchConditionType: schema_1.restaurantSettings.visaSwitchConditionType,
+            })
+                .from(schema_1.restaurantSettings)
+                .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
+                .limit(1);
+            const isOnSystemWithNoSwitch = currentSettings?.paymentGatewayType === "SYSTEM" &&
+                currentSettings?.visaSwitchApplied !== true;
+            if (isOnSystemWithNoSwitch) {
+                const [wallet] = await connection_1.db
+                    .select({ balance: schema_1.restaurantWallets.balance })
+                    .from(schema_1.restaurantWallets)
+                    .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId))
+                    .limit(1);
+                const currentBalance = parseFloat(String(wallet?.balance ?? "0"));
+                // لو الرصيد إيجابي → المطعم مش مديون للمنصة، حوله لـ CUSTOM
+                if (currentBalance >= 0) {
+                    await (0, restaurantWalletService_1.restoreCustomGatewayOnDebtSettled)(connection_1.db, restaurantId, currentBalance);
+                }
+            }
+        }
+        catch (err) {
+            console.error("[createCredentials] Failed to auto-switch to CUSTOM:", err);
+        }
+    }
     res.status(201).json({
         success: true,
         message: "Payment credentials created successfully",
@@ -159,8 +225,34 @@ const updateCredential = async (req, res) => {
         updatePayload.tax = String(parseFloat(tax || "0").toFixed(2));
     if (logoUrl !== undefined)
         updatePayload.logoUrl = logoUrl || null;
-    if (isActive !== undefined)
-        updatePayload.isActive = isActive;
+    // Enforce SINGLE active credential per restaurant
+    if (isActive !== undefined) {
+        const isAct = Boolean(isActive);
+        if (isAct) {
+            await connection_1.db
+                .update(schema_1.restaurantPaymentCredentials)
+                .set({ isActive: false })
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId), (0, drizzle_orm_1.ne)(schema_1.restaurantPaymentCredentials.id, credentialId)));
+        }
+        updatePayload.isActive = isAct;
+    }
+    // Handle isDefault — accept both "isDefault", "default", and typo "defualt"
+    const isDefaultInput = req.body.isDefault !== undefined
+        ? req.body.isDefault
+        : req.body.default !== undefined
+            ? req.body.default
+            : req.body.defualt;
+    if (isDefaultInput !== undefined) {
+        const isDefaultVal = Boolean(isDefaultInput);
+        if (isDefaultVal) {
+            // Only ONE credential per restaurant can be default at a time
+            await connection_1.db
+                .update(schema_1.restaurantPaymentCredentials)
+                .set({ isDefault: false })
+                .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId));
+        }
+        updatePayload.isDefault = isDefaultVal;
+    }
     if (credentials !== undefined) {
         let rawCreds = credentials;
         if (typeof rawCreds === "string") {
@@ -239,7 +331,7 @@ const deleteCredential = async (req, res) => {
         throw new BadRequest_1.BadRequest("Restaurant ID and Credential ID are required");
     }
     const [existing] = await connection_1.db
-        .select({ id: schema_1.restaurantPaymentCredentials.id })
+        .select({ id: schema_1.restaurantPaymentCredentials.id, isDefault: schema_1.restaurantPaymentCredentials.isDefault })
         .from(schema_1.restaurantPaymentCredentials)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.id, credentialId), (0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId)))
         .limit(1);
@@ -249,6 +341,20 @@ const deleteCredential = async (req, res) => {
     await connection_1.db
         .delete(schema_1.restaurantPaymentCredentials)
         .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.id, credentialId));
+    // If the deleted credential was the default, assign default to the next active credential (if any)
+    if (existing.isDefault) {
+        const [nextActive] = await connection_1.db
+            .select({ id: schema_1.restaurantPaymentCredentials.id })
+            .from(schema_1.restaurantPaymentCredentials)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.isActive, true)))
+            .limit(1);
+        if (nextActive) {
+            await connection_1.db
+                .update(schema_1.restaurantPaymentCredentials)
+                .set({ isDefault: true })
+                .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.id, nextActive.id));
+        }
+    }
     res.status(200).json({
         success: true,
         message: "Payment credentials deleted successfully",
@@ -257,6 +363,7 @@ const deleteCredential = async (req, res) => {
 exports.deleteCredential = deleteCredential;
 /**
  * 5. Toggle active status of credentials
+ *    Only ONE credential per restaurant can be active at a time.
  */
 const toggleCredential = async (req, res) => {
     const { restaurantId, credentialId } = req.params;
@@ -268,12 +375,19 @@ const toggleCredential = async (req, res) => {
         throw new BadRequest_1.BadRequest("isActive must be a boolean value");
     }
     const [existing] = await connection_1.db
-        .select({ id: schema_1.restaurantPaymentCredentials.id })
+        .select({ id: schema_1.restaurantPaymentCredentials.id, isDefault: schema_1.restaurantPaymentCredentials.isDefault })
         .from(schema_1.restaurantPaymentCredentials)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.id, credentialId), (0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId)))
         .limit(1);
     if (!existing) {
         throw new NotFound_1.NotFound("Payment credentials record not found");
+    }
+    // If setting to active, deactivate all other credentials for this restaurant
+    if (isActive === true) {
+        await connection_1.db
+            .update(schema_1.restaurantPaymentCredentials)
+            .set({ isActive: false })
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId), (0, drizzle_orm_1.ne)(schema_1.restaurantPaymentCredentials.id, credentialId)));
     }
     await connection_1.db
         .update(schema_1.restaurantPaymentCredentials)
@@ -285,3 +399,41 @@ const toggleCredential = async (req, res) => {
     });
 };
 exports.toggleCredential = toggleCredential;
+/**
+ * 6. Set a specific credential as the default for a restaurant
+ *    Only ONE credential per restaurant can be default at a time.
+ */
+const setDefaultCredential = async (req, res) => {
+    const { restaurantId, credentialId } = req.params;
+    if (!restaurantId || !credentialId) {
+        throw new BadRequest_1.BadRequest("Restaurant ID and Credential ID are required");
+    }
+    const [existing] = await connection_1.db
+        .select({ id: schema_1.restaurantPaymentCredentials.id })
+        .from(schema_1.restaurantPaymentCredentials)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.id, credentialId), (0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId)))
+        .limit(1);
+    if (!existing) {
+        throw new NotFound_1.NotFound("Payment credentials record not found");
+    }
+    // Remove default from all credentials for this restaurant
+    await connection_1.db
+        .update(schema_1.restaurantPaymentCredentials)
+        .set({ isDefault: false })
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId));
+    // Set this one as default
+    await connection_1.db
+        .update(schema_1.restaurantPaymentCredentials)
+        .set({ isDefault: true })
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.id, credentialId));
+    const [updated] = await connection_1.db
+        .select()
+        .from(schema_1.restaurantPaymentCredentials)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.id, credentialId))
+        .limit(1);
+    (0, response_1.SuccessResponse)(res, {
+        message: "Payment credential set as default successfully. All other credentials for this restaurant have been unset as default.",
+        data: sanitizeCredentialRecord(updated),
+    });
+};
+exports.setDefaultCredential = setDefaultCredential;

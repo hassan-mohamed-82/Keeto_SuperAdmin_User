@@ -13,14 +13,19 @@ const getActiveRestaurants = async (req, res) => {
             nameAr: schema_1.restaurants.nameAr,
             nameFr: schema_1.restaurants.nameFr,
             orderLink: schema_1.restaurants.orderLink,
+            facebookLink: schema_1.restaurants.facebookLink,
+            andriodLink: schema_1.restaurants.androidApp,
+            iosLink: schema_1.restaurants.iosApp,
             logo: schema_1.restaurants.logo,
-            type: schema_1.restaurants.type
+            type: schema_1.restaurants.type,
         })
             .from(schema_1.restaurants)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"), (0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered")));
+        const totalRestauants = activeRestaurants.length;
         return (0, response_1.SuccessResponse)(res, {
             message: "Active restaurants fetched successfully",
-            data: activeRestaurants
+            data: activeRestaurants,
+            count: totalRestauants
         });
     }
     catch (error) {

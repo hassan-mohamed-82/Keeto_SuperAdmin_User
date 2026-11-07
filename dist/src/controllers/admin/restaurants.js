@@ -15,7 +15,33 @@ const uuid_1 = require("uuid");
 const handleImages_1 = require("../../utils/handleImages");
 const encryption_1 = require("../../utils/encryption");
 const restaurantWalletService_1 = require("../../services/restaurantWalletService");
+const constant_1 = require("../../types/constant");
 // Helper: Parse payment credentials from request body (accepts array, single object, or JSON string)
+// Helper: Generate Action ID for permission action
+const generateActionId = () => {
+    return (0, uuid_1.v4)().replace(/-/g, "").substring(0, 24);
+};
+// Helper: Build default permissions for Manager and Cashier
+const buildManagerPermissions = () => {
+    return constant_1.MODULES.map((module) => ({
+        module: module,
+        actions: constant_1.ACTION_NAMES.map((action) => ({
+            id: generateActionId(),
+            action: action,
+        })),
+    }));
+};
+const buildCashierPermissions = () => {
+    return [
+        {
+            module: "Orders",
+            actions: constant_1.ACTION_NAMES.map((action) => ({
+                id: generateActionId(),
+                action: action,
+            })),
+        },
+    ];
+};
 const parsePaymentCredentialsInput = (input) => {
     if (!input)
         return [];
@@ -218,6 +244,7 @@ const sanitizePaymentCredentialRecord = (record) => {
     return {
         ...record,
         credentials: safeCreds,
+        isDefault: Boolean(record.isDefault),
     };
 };
 // Helper: increment total_restaurants on a cuisine
@@ -291,7 +318,7 @@ const adjustSalesRepPoints = async (tx, salesId, delta) => {
 // ==========================================
 const createRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
-    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, cityId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans, type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, callcenterphone, paymentGatewayType, enableOnlinePayment, slug } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, zoneId, cityId, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, status, lat, lng, deliveryRadiusKm, businessPlans, type, salesId, ownerposition, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, callcenterphone, paymentGatewayType, enableOnlinePayment, slug, operationStatus } = req.body;
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
     if (!name || !nameAr || !nameFr || !logo || !ownerFirstName || !ownerPhone || !email || !password) {
         throw new BadRequest_1.BadRequest("Missing required fields");
@@ -332,10 +359,6 @@ const createRestaurant = async (req, res) => {
     }
     const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
     const parsedPaymentCredentials = parsePaymentCredentialsInput(paymentCredsRaw);
-    // 👈 نوع بوابة الدفع (SYSTEM = حساب المنصة، CUSTOM = حساب خاص بالمطعم)
-    const resolvedPaymentGatewayType = paymentGatewayType && String(paymentGatewayType).trim().toUpperCase() === "CUSTOM"
-        ? "CUSTOM"
-        : "SYSTEM";
     // 👈 تفعيل/تعطيل الدفع أونلاين (افتراضي: مفعّل)
     const resolvedEnableOnlinePayment = enableOnlinePayment === true || enableOnlinePayment === "true" || enableOnlinePayment === undefined
         ? true
@@ -371,6 +394,15 @@ const createRestaurant = async (req, res) => {
             throw new BadRequest_1.BadRequest("visaSwitchDayOfMonth is required and must be between 1 and 31 when visaSwitchConditionType is 'day_of_month'");
         }
     }
+    // 👈 نوع بوابة الدفع:
+    // - لو أرسل CUSTOM صراحةً → CUSTOM
+    // - لو عنده credentials وشرط switch محدد → يبدأ بـ CUSTOM تلقائياً (المطعم الجديد رصيده 0 ≥ 0)
+    // - غير ذلك → SYSTEM
+    const resolvedPaymentGatewayType = paymentGatewayType && String(paymentGatewayType).trim().toUpperCase() === "CUSTOM"
+        ? "CUSTOM"
+        : parsedPaymentCredentials.length > 0 && resolvedVisaSwitchType !== "none"
+            ? "CUSTOM"
+            : "SYSTEM";
     // 👈 لو النوع CUSTOM لازم يبعت بيانات بوابة دفع واحدة على الأقل
     if (resolvedPaymentGatewayType === "CUSTOM" && parsedPaymentCredentials.length === 0) {
         throw new BadRequest_1.BadRequest("paymentCredentials are required when paymentGatewayType is CUSTOM");
@@ -403,6 +435,7 @@ const createRestaurant = async (req, res) => {
             cuisineId: parsedCuisines,
             zoneId: zoneId ? clean(zoneId) : null,
             cityId: cityId ? clean(cityId) : null,
+            operationStatus: operationStatus ? clean(operationStatus) : null,
             type: restaurantType, // 👈 حفظ نوع المطعم (Default C)
             salesId: salesId ? clean(salesId) : null, // 👈 حفظ الـ Sales ID
             ownerposition: ownerposition ? clean(ownerposition) : null, // 👈 حفظ منصب المالك
@@ -497,6 +530,9 @@ const createRestaurant = async (req, res) => {
             visaSwitchDayOfMonth: resolvedVisaSwitchType === "day_of_month"
                 ? parseInt(String(visaSwitchDayOfMonth), 10)
                 : null,
+            // 👈 visaSwitchApplied = false دائماً عند الإنشاء:
+            // لو بدأ بـ CUSTOM → هو الحالة الطبيعية، السويتش لـ SYSTEM لم يُطبَّق بعد
+            // لو بدأ بـ SYSTEM  → مفيش سويتش حصل أصلاً
             visaSwitchApplied: false,
         });
         // 5. بيانات بوابات الدفع (Payment Credentials)
@@ -524,6 +560,7 @@ const createRestaurant = async (req, res) => {
                     tax: credItem.tax !== undefined ? String(parseFloat(credItem.tax || "0").toFixed(2)) : "0.00",
                     logoUrl: credItem.logoUrl || null,
                     isActive: isActiveFlag,
+                    isDefault: (credItem.isDefault !== undefined ? Boolean(credItem.isDefault) : credItem.default !== undefined ? Boolean(credItem.default) : credItem.defualt !== undefined ? Boolean(credItem.defualt) : credentialsToReturn.length === 0),
                 };
                 await tx.insert(schema_1.restaurantPaymentCredentials).values(newRecord);
                 credentialsToReturn.push(sanitizePaymentCredentialRecord(newRecord));
@@ -550,6 +587,23 @@ const createRestaurant = async (req, res) => {
             app: "on",
             notes: [],
         });
+        // 7. Create default restaurant roles: Manager (all permissions) & Cashier (Orders permissions)
+        await tx.insert(schema_1.role_restaurant).values([
+            {
+                id: (0, uuid_1.v4)(),
+                restaurantId,
+                name: "manager",
+                permissions: buildManagerPermissions(),
+                status: "active",
+            },
+            {
+                id: (0, uuid_1.v4)(),
+                restaurantId,
+                name: "cashier",
+                permissions: buildCashierPermissions(),
+                status: "active",
+            },
+        ]);
         await adjustSalesRepPoints(tx, salesId ? clean(salesId) : null, pointsToAward);
     });
     for (const cid of parsedCuisines)
@@ -597,6 +651,7 @@ const getAllRestaurants = async (req, res) => {
         cover: schema_1.restaurants.cover,
         slug: schema_1.restaurants.slug,
         status: schema_1.restaurants.status,
+        operationStatus: schema_1.restaurants.operationStatus,
         isBusy: schema_1.restaurantSettings.isBusy,
         type: schema_1.restaurants.type, // 👈 استرجاع النوع
         salesId: schema_1.restaurants.salesId, // 👈 استرجاع المندوب
@@ -648,7 +703,17 @@ const getAllRestaurants = async (req, res) => {
             paymentCredentialsMap.set(cred.restaurantId, []);
         paymentCredentialsMap.get(cred.restaurantId).push(sanitizePaymentCredentialRecord(cred));
     }
-    const formatted = raw.map(r => {
+    // Deduplicate restaurants if a restaurant has multiple owners in restrauntadmin
+    const seenRestaurantIds = new Set();
+    const uniqueRaw = raw.filter(r => {
+        if (!r.id)
+            return false;
+        if (seenRestaurantIds.has(r.id))
+            return false;
+        seenRestaurantIds.add(r.id);
+        return true;
+    });
+    const formatted = uniqueRaw.map(r => {
         let parsedCuisines = safeParseArray(r.cuisineIds);
         return {
             id: r.id,
@@ -662,6 +727,7 @@ const getAllRestaurants = async (req, res) => {
             cover: r.cover,
             slug: r.slug,
             status: r.status,
+            operationStatus: r.operationStatus,
             isBusy: Boolean(r.isBusy),
             busyStatus: r.isBusy ? "busy" : "available",
             type: r.type,
@@ -742,6 +808,7 @@ const getRestaurantById = async (req, res) => {
     const formattedRestaurant = {
         ...row.restaurantObj,
         type: row.restaurantObj.type,
+        operationStatus: row.restaurantObj.operationStatus,
         ownerposition: row.restaurantObj.ownerposition,
         sales: row.salesObj ? { id: row.salesObj.id, name: row.salesObj.name } : null,
         email: row.ownerEmail || null,
@@ -774,7 +841,7 @@ exports.getRestaurantById = getRestaurantById;
 const updateRestaurant = async (req, res) => {
     const clean = (v) => (typeof v === "string" ? v.trim() : v);
     const { id } = req.params;
-    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm, type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId, callcenterphone, paymentGatewayType, enableOnlinePayment, slug } = req.body;
+    const { name, nameAr, nameFr, address, addressAr, addressFr, lat, lng, logo, cover, minDeliveryTime, maxDeliveryTime, deliveryTimeUnit, ownerFirstName, ownerLastName, ownerPhone, tags, taxNumber, taxExpireDate, taxCertificate, email, password, confirmPassword, status, deliveryRadiusKm, type, salesId, ownerposition, businessPlans, likes, facebookLink, orderLink, deliverystatus, iosApp, androidApp, firstColor, secondColor, firstTextColor, secondTextColor, cityId, zoneId, callcenterphone, paymentGatewayType, enableOnlinePayment, slug, operationStatus } = req.body;
     let cuisineId = req.body.cuisineId || req.body['cuisineId[]'] || req.body.cuisines || req.body['cuisines[]'];
     const [existingRestaurant] = await connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, id)).limit(1);
     if (!existingRestaurant)
@@ -870,6 +937,8 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.addressFr = addressFr;
     if (parsedCuisines !== undefined)
         restaurantUpdateData.cuisineId = parsedCuisines;
+    if (operationStatus !== undefined)
+        restaurantUpdateData.operationStatus = operationStatus;
     if (lat !== undefined)
         restaurantUpdateData.lat = lat;
     if (lng !== undefined)
@@ -1087,6 +1156,14 @@ const updateRestaurant = async (req, res) => {
                         updatePayload.logoUrl = credItem.logoUrl || null;
                     if (credItem.isActive !== undefined)
                         updatePayload.isActive = Boolean(credItem.isActive);
+                    const isDefaultInputUpd = credItem.isDefault !== undefined ? credItem.isDefault : credItem.default !== undefined ? credItem.default : credItem.defualt;
+                    if (isDefaultInputUpd !== undefined) {
+                        const isDefaultValUpd = Boolean(isDefaultInputUpd);
+                        if (isDefaultValUpd) {
+                            await tx.update(schema_1.restaurantPaymentCredentials).set({ isDefault: false }).where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, id));
+                        }
+                        updatePayload.isDefault = isDefaultValUpd;
+                    }
                     await tx
                         .update(schema_1.restaurantPaymentCredentials)
                         .set(updatePayload)
@@ -1108,6 +1185,7 @@ const updateRestaurant = async (req, res) => {
                         tax: credItem.tax !== undefined ? String(parseFloat(credItem.tax || "0").toFixed(2)) : "0.00",
                         logoUrl: credItem.logoUrl || null,
                         isActive: credItem.isActive !== undefined ? Boolean(credItem.isActive) : true,
+                        isDefault: false,
                     });
                     savedRecordId = newId;
                 }

@@ -67,10 +67,15 @@ async function resolveLinkData(linkType, subcategoryId, foodId, discountId) {
     }
     return null;
 }
+const VALID_SOURCES = ["web", "home_web", "home_app", "mykeeto_app"];
 // ─── Get All Active Popups (filtered by date and status) ───
 const getActivePopups = async (req, res) => {
     const now = new Date();
     const { restaurantId } = req.params;
+    const rawSource = req.query.source;
+    const source = VALID_SOURCES.includes(rawSource)
+        ? rawSource
+        : null;
     const activePopups = await connection_1.db
         .select({
         id: popup_1.popup.id,
@@ -93,7 +98,7 @@ const getActivePopups = async (req, res) => {
         endDate: popup_1.popup.endDate,
     })
         .from(popup_1.popup)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(popup_1.popup.status, "active"), (0, drizzle_orm_1.lte)(popup_1.popup.startDate, now), (0, drizzle_orm_1.gte)(popup_1.popup.endDate, now), (0, drizzle_orm_1.eq)(popup_1.popup.restaurantId, restaurantId)));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(popup_1.popup.status, "active"), (0, drizzle_orm_1.lte)(popup_1.popup.startDate, now), (0, drizzle_orm_1.gte)(popup_1.popup.endDate, now), (0, drizzle_orm_1.eq)(popup_1.popup.restaurantId, restaurantId), ...(source ? [(0, drizzle_orm_1.eq)(popup_1.popup.type, source)] : [])));
     // resolve linked entity for each popup
     const result = await Promise.all(activePopups.map(async (p) => {
         const linkData = await resolveLinkData(p.linkType ?? null, p.subcategoryId ?? null, p.foodId ?? null, p.discountId ?? null);
@@ -122,6 +127,10 @@ exports.getActivePopups = getActivePopups;
 // ─── Get Active Popup By ID ───
 const getPopupById = async (req, res) => {
     const { restaurantId, id } = req.params;
+    const rawSource = req.query.source;
+    const source = VALID_SOURCES.includes(rawSource)
+        ? rawSource
+        : null;
     const rows = await connection_1.db
         .select({
         id: popup_1.popup.id,
@@ -144,7 +153,7 @@ const getPopupById = async (req, res) => {
         endDate: popup_1.popup.endDate,
     })
         .from(popup_1.popup)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(popup_1.popup.id, id), (0, drizzle_orm_1.eq)(popup_1.popup.status, "active"), (0, drizzle_orm_1.eq)(popup_1.popup.restaurantId, restaurantId)))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(popup_1.popup.id, id), (0, drizzle_orm_1.eq)(popup_1.popup.status, "active"), (0, drizzle_orm_1.eq)(popup_1.popup.restaurantId, restaurantId), ...(source ? [(0, drizzle_orm_1.eq)(popup_1.popup.type, source)] : [])))
         .limit(1);
     if (!rows[0]) {
         throw new Errors_1.NotFound("Popup not found");

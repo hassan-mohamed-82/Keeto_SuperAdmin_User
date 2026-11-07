@@ -2,12 +2,15 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkoutSchema = exports.guestAddressSchema = exports.guestInfoSchema = void 0;
 const zod_1 = require("zod");
+const phone_1 = require("./phone");
 // ============================================================
 // Guest Info & Address Schemas
 // ============================================================
 exports.guestInfoSchema = zod_1.z.object({
     name: zod_1.z.string().min(2, { message: "Guest name must be at least 2 characters" }),
-    phone: zod_1.z.string().min(7, { message: "Phone number must be at least 7 digits" }).max(20),
+    phone: phone_1.egyptPhoneSchema,
+    alternatePhone: phone_1.optionalEgyptPhoneSchema,
+    alternativePhone: phone_1.optionalEgyptPhoneSchema,
 });
 exports.guestAddressSchema = zod_1.z.object({
     title: zod_1.z.string().optional().default("Guest Address"),

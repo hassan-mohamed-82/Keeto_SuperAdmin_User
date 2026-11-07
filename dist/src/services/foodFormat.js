@@ -31,7 +31,7 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
             additionalPrice: schema_1.variationOptions.additionalPrice,
         })
             .from(schema_1.foodVariations)
-            .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId))
+            .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId), (0, drizzle_orm_1.eq)(schema_1.variationOptions.status, true)))
             .where((0, drizzle_orm_1.inArray)(schema_1.foodVariations.foodId, foodIds))
         : [];
     // 1b. Fetch Food & Variant Pricing Overrides (Branch & Channel Pricing)

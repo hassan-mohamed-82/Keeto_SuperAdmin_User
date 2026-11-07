@@ -13,6 +13,7 @@ const notifications_1 = require("../../utils/notifications");
 const uuid_1 = require("uuid");
 const pdfkit_1 = __importDefault(require("pdfkit"));
 const restaurantWalletService_1 = require("../../services/restaurantWalletService");
+const dispatchEngine_1 = require("../../services/shipping/dispatchEngine");
 // ==========================================
 // Helper: استنتاج الزون من إحداثيات العنوان
 // يُستخدم عندما يكون zoneId في العنوان فارغاً (null) أو لتحديد الزون بدقة
@@ -864,18 +865,67 @@ const updateOrderStatus = async (req, res) => {
         }
     });
     // D9: Fire-and-forget dispatchOrder when order moves to 'accepted' and orderType is delivery
-    // const orderType = existingOrder.orderType || (existingOrder as any).type;
-    // if (status === "accepted" && orderType === "delivery") {
-    //     dispatchOrder(orderId).catch((err) => {
-    //         console.error(`[dispatchOrder:fire-and-forget] failed for order ${orderId}:`, err);
-    //     });
-    // }
-    // // Release courier activeOrdersCount when order completes or cancels
-    // if (["delivered", "cancelled", "refund"].includes(status) && existingOrder.deliveryManId) {
-    //     releaseCourierForOrder(orderId, existingOrder.deliveryManId).catch((err) => {
-    //         console.error(`[releaseCourierForOrder] failed for order ${orderId}:`, err);
-    //     });
-    // }
+    const orderType = existingOrder.orderType || existingOrder.type;
+    const targetDeliveryManId = existingOrder.deliveryManId;
+    if (status === "accepted" && orderType === "delivery" && !existingOrder.deliveryManId) {
+        // فحص مسبق: التحقق أولاً هل الأوردر نفسه يحمل shippingCompanyId أو هل المطعم مسجل لديه شركة شحن في الإعدادات
+        let targetShippingCompanyId = existingOrder.shippingCompanyId;
+        if (!targetShippingCompanyId && existingOrder.restaurantId) {
+            const [settings] = await connection_1.db
+                .select({ shippingCompanyId: schema_1.restaurantSettings.shippingCompanyId })
+                .from(schema_1.restaurantSettings)
+                .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, existingOrder.restaurantId))
+                .limit(1);
+            targetShippingCompanyId = settings?.shippingCompanyId || null;
+        }
+        // الدخول فقط والبدء بالتوزيع إذا كان للأوردر أو للمطعم شركة شحن
+        if (targetShippingCompanyId) {
+            const [company] = await connection_1.db
+                .select({
+                id: schema_1.shippingCompanies.id,
+                name: schema_1.shippingCompanies.name,
+                status: schema_1.shippingCompanies.status,
+            })
+                .from(schema_1.shippingCompanies)
+                .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, targetShippingCompanyId))
+                .limit(1);
+            if (company && company.status === "active") {
+                // ربط شركة الشحن بالأوردر إذا لم تكن مسجلة مسبقاً
+                if (!existingOrder.shippingCompanyId) {
+                    await connection_1.db
+                        .update(schema_1.orders)
+                        .set({
+                        shippingCompanyId: targetShippingCompanyId,
+                        shippingStatus: "pending_dispatch",
+                        updatedAt: new Date(),
+                    })
+                        .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
+                }
+                // D9: Fire-and-forget dispatchOrder
+                (0, dispatchEngine_1.dispatchOrder)(orderId).catch((err) => {
+                    console.error(`[dispatchOrder:fire-and-forget] failed for order ${orderId} (Company: ${company.name}):`, err);
+                });
+            }
+            else {
+                console.warn(`[dispatchOrder] Shipping company ${targetShippingCompanyId} for restaurant ${existingOrder.restaurantId} is inactive or not found`);
+                await connection_1.db
+                    .update(schema_1.orders)
+                    .set({
+                    shippingCompanyId: targetShippingCompanyId,
+                    shippingStatus: "manual_required",
+                    shippingFailReason: "company_inactive",
+                    updatedAt: new Date(),
+                })
+                    .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
+            }
+        }
+    }
+    // Release courier activeOrdersCount when order completes or cancels
+    if (["delivered", "cancelled", "refund"].includes(status) && targetDeliveryManId) {
+        (0, dispatchEngine_1.releaseCourierForOrder)(orderId, targetDeliveryManId).catch((err) => {
+            console.error(`[releaseCourierForOrder] failed for order ${orderId}:`, err);
+        });
+    }
     return (0, response_1.SuccessResponse)(res, { message: `Order status successfully updated to ${status}` });
 };
 exports.updateOrderStatus = updateOrderStatus;

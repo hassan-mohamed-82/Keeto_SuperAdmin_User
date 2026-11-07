@@ -12,4 +12,7 @@ router.get("/:restaurantId", (0, middlewares_1.hasPermission)("restaurantPayment
 router.put("/:restaurantId/:credentialId", (0, middlewares_1.hasPermission)("restaurantPaymentCredentials", "Edit"), (0, validation_1.validate)(restaurantPaymentCredentials_2.updatePaymentCredentialsSchema), (0, catchAsync_1.catchAsync)(restaurantPaymentCredentials_1.updateCredential));
 router.delete("/:restaurantId/:credentialId", (0, middlewares_1.hasPermission)("restaurantPaymentCredentials", "Delete"), (0, catchAsync_1.catchAsync)(restaurantPaymentCredentials_1.deleteCredential));
 router.put("/:restaurantId/:credentialId/toggle", (0, middlewares_1.hasPermission)("restaurantPaymentCredentials", "Status"), (0, validation_1.validate)(restaurantPaymentCredentials_2.toggleCredentialSchema), (0, catchAsync_1.catchAsync)(restaurantPaymentCredentials_1.toggleCredential));
+// PUT /restaurant-payment-credentials/:restaurantId/:credentialId/default
+// Sets a single credential as the default for this restaurant.
+router.put("/:restaurantId/:credentialId/default", (0, middlewares_1.hasPermission)("restaurantPaymentCredentials", "Edit"), (0, validation_1.validate)(restaurantPaymentCredentials_2.setDefaultCredentialSchema), (0, catchAsync_1.catchAsync)(restaurantPaymentCredentials_1.setDefaultCredential));
 exports.default = router;

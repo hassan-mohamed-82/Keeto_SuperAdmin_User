@@ -43,6 +43,7 @@ exports.MODULES = [
     "Sales",
     "Notifications",
     "PlatformPaymentGateways",
+    "Videos",
 ];
 exports.ACTION_NAMES = ["View", "Add", "Edit", "Delete", "Status"];
 exports.BASE64_IMAGE_REGEX = /^data:image\/(jpeg|jpg|png|gif|webp);base64,/;

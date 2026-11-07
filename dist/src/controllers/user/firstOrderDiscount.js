@@ -105,7 +105,7 @@ const getAvailableFirstOrderDiscounts = async (req, res) => {
     const [orderCountRow] = await connection_1.db
         .select({ cnt: (0, drizzle_orm_1.count)(schema_1.orders.id) })
         .from(schema_1.orders)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.sql) `${schema_1.orders.status} NOT IN ('cancelled', 'failed')`));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.ne)(schema_1.orders.status, 'failed'), (0, drizzle_orm_1.sql) `NOT (${schema_1.orders.paymentStatus} = 'pending_payment' AND ${schema_1.orders.status} = 'pending')`, (0, drizzle_orm_1.sql) `NOT (${schema_1.orders.status} = 'cancelled' AND ${schema_1.orders.cancelReasonType} = 'restaurant')`));
     const userOrderCount = Number(orderCountRow?.cnt ?? 0);
     // Filter eligible discounts
     const eligible = discounts.filter(d => {

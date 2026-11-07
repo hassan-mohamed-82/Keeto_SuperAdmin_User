@@ -21,9 +21,6 @@ const router = Router();
 // Subdomain & Custom Domain Auth Handoff (also mounted directly at /api/auth)
 router.use(authHandoffRouter);
 
-// Subdomain & Custom Domain Auth Handoff (also mounted directly at /api/auth)
-router.use(authHandoffRouter);
-
 router.post("/signup", validate(signupSchema), catchAsync(signup));
 router.get("/verify-email", catchAsync(verifyEmail));
 router.post("/login", catchAsync(login));

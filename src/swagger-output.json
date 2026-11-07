@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "http://localhost:3000",
+      "url": "https://Keetobcknd.keeto.org",
       "description": "Main"
     },
     {
@@ -96,6 +96,112 @@
         "tags": [
           "Resolve Domain"
         ]
+      }
+    },
+    "/api/auth/handoff": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Auth / Handoff"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/exchange-code": {
+      "options": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Auth / Exchange Code"
+        ],
+        "security": []
+      },
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Auth / Exchange Code"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
       }
     },
     "/api/superadmin/auth/login": {
@@ -3565,6 +3671,9 @@
                   "offerId": {
                     "type": "string"
                   },
+                  "isBundle": {
+                    "type": "boolean"
+                  },
                   "paymentGateway": {
                     "type": "string",
                     "enum": [
@@ -3849,6 +3958,9 @@
                   "offerId": {
                     "type": "string"
                   },
+                  "isBundle": {
+                    "type": "boolean"
+                  },
                   "paymentGateway": {
                     "type": "string",
                     "enum": [
@@ -4132,6 +4244,9 @@
                   },
                   "offerId": {
                     "type": "string"
+                  },
+                  "isBundle": {
+                    "type": "boolean"
                   },
                   "paymentGateway": {
                     "type": "string",
@@ -9814,6 +9929,9 @@
           }
         ],
         "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -9889,6 +10007,9 @@
                   },
                   "isGlobal": {
                     "type": "boolean"
+                  },
+                  "foodIds": {
+                    "type": "object"
                   }
                 },
                 "required": [
@@ -9977,6 +10098,9 @@
           }
         ],
         "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -10052,6 +10176,9 @@
                   },
                   "isGlobal": {
                     "type": "boolean"
+                  },
+                  "foodIds": {
+                    "type": "object"
                   }
                 }
               }
@@ -10187,6 +10314,9 @@
                   },
                   "isGlobal": {
                     "type": "boolean"
+                  },
+                  "foodIds": {
+                    "type": "object"
                   }
                 }
               }
@@ -12653,6 +12783,34 @@
         }
       }
     },
+    "/api/superadmin/domains/check-subdomain": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Domains"
+        ]
+      }
+    },
     "/api/superadmin/domains/{domainId}/verify": {
       "post": {
         "description": "",
@@ -13093,6 +13251,9 @@
           }
         ],
         "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -13423,6 +13584,112 @@
           }
         ],
         "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "User / Auth"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/user/auth/handoff": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "User / Auth"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/user/auth/exchange-code": {
+      "options": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "User / Auth"
+        ],
+        "security": []
+      },
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -14583,6 +14850,9 @@
           }
         ],
         "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -14963,6 +15233,9 @@
                   "offerId": {
                     "type": "string"
                   },
+                  "isBundle": {
+                    "type": "boolean"
+                  },
                   "paymentGateway": {
                     "type": "string",
                     "enum": [
@@ -15246,6 +15519,9 @@
                   },
                   "offerId": {
                     "type": "string"
+                  },
+                  "isBundle": {
+                    "type": "boolean"
                   },
                   "paymentGateway": {
                     "type": "string",
@@ -15580,6 +15856,9 @@
                   },
                   "offerId": {
                     "type": "string"
+                  },
+                  "isBundle": {
+                    "type": "boolean"
                   },
                   "paymentGateway": {
                     "type": "string",
@@ -16505,6 +16784,9 @@
                   },
                   "isGlobal": {
                     "type": "boolean"
+                  },
+                  "foodIds": {
+                    "type": "object"
                   }
                 },
                 "required": [
@@ -16720,7 +17002,21 @@
             }
           },
           {
+            "name": "paymentStatus",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "order_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "merchantOrderId",
             "in": "query",
             "schema": {
               "type": "string"
@@ -16736,6 +17032,66 @@
           {
             "name": "callbackSlug",
             "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Payments / Kashier"
+        ]
+      }
+    },
+    "/api/payments/kashier/sync": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Payments / Kashier"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
+      },
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
             "schema": {
               "type": "string"
             }
@@ -18627,6 +18983,9 @@
                   "offerId": {
                     "type": "string"
                   },
+                  "isBundle": {
+                    "type": "boolean"
+                  },
                   "paymentGateway": {
                     "type": "string",
                     "enum": [
@@ -18918,6 +19277,9 @@
                   },
                   "offerId": {
                     "type": "string"
+                  },
+                  "isBundle": {
+                    "type": "boolean"
                   },
                   "paymentGateway": {
                     "type": "string",
@@ -19347,6 +19709,9 @@
                   "offerId": {
                     "type": "string"
                   },
+                  "isBundle": {
+                    "type": "boolean"
+                  },
                   "paymentGateway": {
                     "type": "string",
                     "enum": [
@@ -19525,6 +19890,12 @@
     },
     {
       "name": "Resolve Domain"
+    },
+    {
+      "name": "Auth / Handoff"
+    },
+    {
+      "name": "Auth / Exchange Code"
     },
     {
       "name": "Superadmin / Auth"

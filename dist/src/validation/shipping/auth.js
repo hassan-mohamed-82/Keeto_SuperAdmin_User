@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateCompanyUserSchema = exports.createCompanyUserSchema = exports.shippingUpdateProfileSchema = exports.courierLoginSchema = exports.shippingLoginSchema = void 0;
+exports.toggleCompanyUserStatusSchema = exports.updateCompanyUserSchema = exports.createCompanyUserSchema = exports.shippingUpdateProfileSchema = exports.courierLoginSchema = exports.shippingLoginSchema = void 0;
 const zod_1 = require("zod");
 exports.shippingLoginSchema = zod_1.z.object({
     email: zod_1.z.string().email("Invalid email format").min(1, "Email is required"),
@@ -31,5 +31,8 @@ exports.updateCompanyUserSchema = zod_1.z.object({
     password: zod_1.z.string().min(6).optional(),
     phone: zod_1.z.string().max(50).optional(),
     role: zod_1.z.enum(["admin", "dispatcher", "viewer"]).optional(),
+    status: zod_1.z.enum(["active", "inactive"]).optional(),
+});
+exports.toggleCompanyUserStatusSchema = zod_1.z.object({
     status: zod_1.z.enum(["active", "inactive"]).optional(),
 });

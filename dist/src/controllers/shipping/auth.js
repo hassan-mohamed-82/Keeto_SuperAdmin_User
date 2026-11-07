@@ -3,8 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCourierProfile = exports.getMyUserProfile = exports.getProfile = exports.courierLogin = exports.login = void 0;
-exports.updateProfile = updateProfile;
+exports.updateProfile = exports.getMyUserProfile = exports.getProfile = exports.login = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -75,54 +74,7 @@ exports.login = (0, catchAsync_1.catchAsync)(async (req, res) => {
     });
 });
 // =========================================================================
-// 2. Courier login (delivery_man role)
-// =========================================================================
-exports.courierLogin = (0, catchAsync_1.catchAsync)(async (req, res) => {
-    const { phone, password } = req.body;
-    if (!phone || !password) {
-        throw new Errors_1.BadRequest("Phone and password are required");
-    }
-    const dmList = await connection_1.db
-        .select()
-        .from(schema_1.deliveryMen)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.deliveryMen.phone, phone), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.isDeleted, false)))
-        .limit(1);
-    if (dmList.length === 0) {
-        throw new Errors_1.UnauthorizedError("Invalid credentials");
-    }
-    const dm = dmList[0];
-    if (!dm.password) {
-        throw new Errors_1.UnauthorizedError("Account has no password set. Please contact your company.");
-    }
-    const isPasswordValid = await bcrypt_1.default.compare(password, dm.password);
-    if (!isPasswordValid) {
-        throw new Errors_1.UnauthorizedError("Invalid credentials");
-    }
-    if (!dm.isActive) {
-        throw new Errors_1.UnauthorizedError("Your courier account is inactive.");
-    }
-    if (!dm.shippingCompanyId) {
-        throw new Errors_1.UnauthorizedError("Courier is not assigned to a shipping company.");
-    }
-    const token = (0, jwt_1.generateDeliveryManToken)({
-        id: dm.id,
-        name: dm.name,
-        phone: dm.phone,
-        email: dm.email ?? undefined,
-        shippingCompanyId: dm.shippingCompanyId,
-        restaurantId: dm.restaurantId,
-        branchId: dm.branchId,
-        deliveryType: dm.deliveryType,
-    });
-    const { password: _, ...dmData } = dm;
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Courier logged in successfully",
-        token,
-        courier: dmData,
-    });
-});
-// =========================================================================
-// 3. Get Company Profile (for shipping company users)
+// 2. Get Company Profile (for shipping company users)
 // =========================================================================
 exports.getProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const companyId = req.user?.shippingCompanyId;
@@ -159,7 +111,7 @@ exports.getProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
     });
 });
 // =========================================================================
-// 4. Get Current User Profile
+// 3. Get Current User Profile
 // =========================================================================
 exports.getMyUserProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const userId = req.user?.id;
@@ -189,43 +141,9 @@ exports.getMyUserProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
     });
 });
 // =========================================================================
-// 5. Get Courier Profile (delivery_man)
+// 4. Update Company Profile
 // =========================================================================
-exports.getCourierProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
-    const courierId = req.user?.deliveryManId || req.user?.id;
-    if (!courierId) {
-        throw new Errors_1.UnauthorizedError("Unauthorized access");
-    }
-    const [dm] = await connection_1.db
-        .select({
-        id: schema_1.deliveryMen.id,
-        name: schema_1.deliveryMen.name,
-        phone: schema_1.deliveryMen.phone,
-        email: schema_1.deliveryMen.email,
-        image: schema_1.deliveryMen.image,
-        deliveryType: schema_1.deliveryMen.deliveryType,
-        allZones: schema_1.deliveryMen.allZones,
-        shiftStatus: schema_1.deliveryMen.shiftStatus,
-        isOnline: schema_1.deliveryMen.isOnline,
-        isAvailable: schema_1.deliveryMen.isAvailable,
-        activeOrdersCount: schema_1.deliveryMen.activeOrdersCount,
-        currentLat: schema_1.deliveryMen.currentLat,
-        currentLng: schema_1.deliveryMen.currentLng,
-        shippingCompanyId: schema_1.deliveryMen.shippingCompanyId,
-        createdAt: schema_1.deliveryMen.createdAt,
-    })
-        .from(schema_1.deliveryMen)
-        .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, courierId))
-        .limit(1);
-    if (!dm) {
-        throw new Errors_1.NotFound("Courier not found");
-    }
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Courier profile retrieved successfully",
-        data: dm,
-    });
-});
-async function updateProfile(req, res) {
+exports.updateProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const companyId = req.user?.shippingCompanyId || req.user?.id;
     if (!companyId) {
         throw new Errors_1.UnauthorizedError("Unauthorized access");
@@ -252,4 +170,4 @@ async function updateProfile(req, res) {
     return (0, response_1.SuccessResponse)(res, {
         message: "Profile updated successfully",
     });
-}
+});

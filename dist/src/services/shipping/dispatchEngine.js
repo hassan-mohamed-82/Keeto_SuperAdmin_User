@@ -46,6 +46,7 @@ exports.rejectOrderByCourier = rejectOrderByCourier;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
+const uuid_1 = require("uuid");
 const redis_1 = __importDefault(require("../../config/redis"));
 const turf = __importStar(require("@turf/turf"));
 const socketService_1 = require("../socket/socketService");
@@ -177,6 +178,7 @@ async function assignCourierToOrder(orderId, courierId, companyId, attemptNumber
             .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, courierId));
         // Insert assignment audit log
         await tx.insert(schema_1.dispatchAssignments).values({
+            id: (0, uuid_1.v4)(),
             orderId,
             shippingCompanyId: companyId,
             deliveryManId: courierId,
@@ -199,6 +201,7 @@ async function dispatchOrder(orderId) {
     }
     catch {
         // Continue if Redis fails
+        lockAcquired = true;
     }
     if (!lockAcquired) {
         return {
@@ -369,11 +372,19 @@ async function executeDispatch(orderId) {
     const customerPoint = turf.point([customerLng, customerLat]);
     let matchedZoneId = null;
     for (const zone of companyZones) {
-        const coords = zone.coordinates;
-        if (!coords || coords.length < 3)
+        let coords = zone.coordinates;
+        if (typeof coords === "string") {
+            try {
+                coords = JSON.parse(coords);
+            }
+            catch {
+                coords = null;
+            }
+        }
+        if (!coords || !Array.isArray(coords) || coords.length < 3)
             continue;
         try {
-            const polygonCoords = coords.map((c) => [c.lng, c.lat]);
+            const polygonCoords = coords.map((c) => [parseFloat(c.lng), parseFloat(c.lat)]);
             const first = polygonCoords[0];
             const last = polygonCoords[polygonCoords.length - 1];
             if (first[0] !== last[0] || first[1] !== last[1]) {
@@ -570,11 +581,11 @@ async function executeDispatch(orderId) {
         if (rejectedCourierIds.has(c.id)) {
             continue;
         }
-        // Alive key check (must have fresh heartbeat in Redis)
+        // Alive key check (fresh heartbeat in Redis OR online in DB with coordinates)
         try {
             const isAlive = await redis_1.default.get(`${exports.REDIS_ALIVE_KEY_PREFIX}${c.id}`);
-            if (!isAlive) {
-                // Couriers without an alive key are stale / disconnected
+            if (!isAlive && (!c.isOnline || !c.currentLat || !c.currentLng)) {
+                // Couriers without an alive key or DB location are skipped
                 continue;
             }
         }

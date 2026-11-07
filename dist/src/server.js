@@ -18,6 +18,7 @@ const connection_1 = require("./models/connection");
 const socketService_1 = require("./services/socket/socketService");
 const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
 const swagger_output_json_1 = __importDefault(require("./swagger-output.json"));
+const domainHealthCron_1 = require("./services/domainHealthCron");
 // import { initAbandonedCartCron } from "./services/abandonedCartCron";
 // import { initOrderNotificationCron } from "./services/orderNotificationCron";
 dotenv_1.default.config();
@@ -26,17 +27,34 @@ app.set("trust proxy", true);
 (0, connection_1.connectDB)();
 // initAbandonedCartCron();
 // initOrderNotificationCron();
+(0, domainHealthCron_1.initDomainHealthCron)();
+// initKashierSyncCron();
+// initAuthHandoffCron();
 const httpServer = http_1.default.createServer(app);
 // تهيئة Socket.IO مع غرف التتبع اللحظي ومتابعة المناديب والطلبات
 const io = (0, socketService_1.initSocket)(httpServer);
-// إعدادات CORS
+// ========================= CORS =========================
+// Rules:
+// 1. Requests without an Origin header → always allowed.
+// 2. Origins whose hostname ends with keeto.org → always allowed.
+// 3. Other origins → allowed only if the hostname is a verified custom domain in restaurant_domains.
 app.use((0, cors_1.default)({
-    origin: "*",
+    origin: true,
+    // origin: async (origin, callback) => {
+    //   try {
+    //     const allowed = await isAllowedOrigin(origin);
+    //     callback(null, allowed);
+    //   } catch (err) {
+    //     callback(null, false);
+    //   }
+    // },
+    credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
     preflightContinue: false,
     optionsSuccessStatus: 204,
 }));
+// ========================================================
 // إعدادات الحماية Helmet
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: false,

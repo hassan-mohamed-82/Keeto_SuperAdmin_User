@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.toggleCredentialSchema = exports.updatePaymentCredentialsSchema = exports.createPaymentCredentialsSchema = void 0;
+exports.toggleCredentialSchema = exports.setDefaultCredentialSchema = exports.updatePaymentCredentialsSchema = exports.createPaymentCredentialsSchema = void 0;
 const zod_1 = require("zod");
 const paymobCredentialsSchema = zod_1.z.object({
     apiKey: zod_1.z.string().min(1, "Paymob API Key is required"),
@@ -39,6 +39,7 @@ exports.createPaymentCredentialsSchema = zod_1.z.object({
     tax: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).optional(),
     logoUrl: zod_1.z.string().url().optional().or(zod_1.z.literal("")),
     isActive: zod_1.z.boolean().optional().default(true),
+    isDefault: zod_1.z.boolean().optional(),
 });
 exports.updatePaymentCredentialsSchema = zod_1.z.object({
     provider: zod_1.z.enum(["PAYMOB", "KASHIER", "GEIDEA"]).optional(),
@@ -50,6 +51,10 @@ exports.updatePaymentCredentialsSchema = zod_1.z.object({
     tax: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).optional(),
     logoUrl: zod_1.z.string().url().optional().or(zod_1.z.literal("")),
     isActive: zod_1.z.boolean().optional(),
+    isDefault: zod_1.z.boolean().optional(),
+});
+exports.setDefaultCredentialSchema = zod_1.z.object({
+// No body needed — credential and restaurant identified by params
 });
 exports.toggleCredentialSchema = zod_1.z.object({
     isActive: zod_1.z.boolean(),

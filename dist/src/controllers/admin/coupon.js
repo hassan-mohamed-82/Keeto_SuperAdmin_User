@@ -12,8 +12,8 @@ const uuid_1 = require("uuid");
 // 1. Create Coupon (Global or Linked to Selected Restaurants)
 // ========================================================
 const createCoupon = async (req, res) => {
-    const { code, name, nameAr, nameFr, discountType, discountValue, maxDiscount, minOrderAmount, usageLimit, perUserLimit, startDate, endDate, isActive, restaurantIds // مصفوفة اختيارية الآن لتحديد المطاعم
-     } = req.body;
+    const { code, name, nameAr, nameFr, discountType, discountValue, maxDiscount, minOrderAmount, usageLimit, perUserLimit, startDate, endDate, isActive, restaurantIds, // مصفوفة اختيارية الآن لتحديد المطاعم
+    foodIds, foods, } = req.body;
     // التحققات الأساسية
     if (!code)
         throw new BadRequest_1.BadRequest("Coupon code is required");
@@ -48,6 +48,13 @@ const createCoupon = async (req, res) => {
             throw new BadRequest_1.BadRequest("Coupon code conflicts with an active global or restaurant-specific coupon");
     }
     const couponId = (0, uuid_1.v4)();
+    // Resolve foodIds
+    const rawFoodIds = foodIds !== undefined ? foodIds : foods;
+    let resolvedFoodIds = null;
+    if (Array.isArray(rawFoodIds) && rawFoodIds.length > 0) {
+        const filtered = rawFoodIds.map(String).filter(Boolean);
+        resolvedFoodIds = filtered.length > 0 ? filtered : null;
+    }
     // 1. إدخال الكوبون في الجدول الرئيسي
     await connection_1.db.insert(schema_1.coupons).values({
         id: couponId,
@@ -65,6 +72,7 @@ const createCoupon = async (req, res) => {
         endDate: endDate ? new Date(endDate) : null,
         isActive: isActive !== undefined ? isActive : true,
         isGlobal: isGlobal, // ضبط حقل العالمية
+        foodIds: resolvedFoodIds,
     });
     // 2. بناء سجلات الربط فقط إذا لم يكن الكوبون عاماً
     if (!isGlobal) {
@@ -79,30 +87,29 @@ const createCoupon = async (req, res) => {
         message: isGlobal
             ? "Global coupon created successfully for all restaurants"
             : "Coupon created and linked to selected restaurants successfully",
-        data: { id: couponId, isGlobal }
+        data: {
+            id: couponId,
+            isGlobal,
+            foodIds: resolvedFoodIds,
+            foods: resolvedFoodIds,
+        }
     }, 201);
 };
 exports.createCoupon = createCoupon;
 // ========================================================
-// 2. Get All Coupons (Supports Global & Filtering by Restaurant)
+// 2. Get All Coupons (Superadmin Added Coupons)
 // ========================================================
 const getAllCoupons = async (req, res) => {
-    const { restaurantId } = req.query;
-    let allCoupons;
-    if (restaurantId) {
-        // جلب الكوبونات العامة أَوْ المرتبطة بالمطعم الممرر في الـ Query
-        const rawData = await connection_1.db
-            .selectDistinct({ coupons: schema_1.coupons })
-            .from(schema_1.coupons)
-            .leftJoin(schema_1.couponRestaurants, (0, drizzle_orm_1.eq)(schema_1.coupons.id, schema_1.couponRestaurants.couponId))
-            .where((0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.coupons.isGlobal, true), (0, drizzle_orm_1.eq)(schema_1.couponRestaurants.restaurantId, restaurantId)));
-        allCoupons = rawData.map(row => row.coupons);
-    }
-    else {
-        // جلب كافة الكوبونات في السيستم بالكامل
-        allCoupons = await connection_1.db.select().from(schema_1.coupons);
-    }
-    return (0, response_1.SuccessResponse)(res, { message: "Get coupons success", data: allCoupons });
+    const allCoupons = await connection_1.db
+        .select()
+        .from(schema_1.coupons)
+        .where((0, drizzle_orm_1.eq)(schema_1.coupons.isGlobal, true))
+        .orderBy((0, drizzle_orm_1.desc)(schema_1.coupons.createdAt));
+    const couponsWithFoods = allCoupons.map((c) => ({
+        ...c,
+        foods: c.foodIds ?? null,
+    }));
+    return (0, response_1.SuccessResponse)(res, { message: "Get coupons success", data: couponsWithFoods });
 };
 exports.getAllCoupons = getAllCoupons;
 // ========================================================
@@ -128,7 +135,11 @@ const getCouponById = async (req, res) => {
     }
     return (0, response_1.SuccessResponse)(res, {
         message: "Get coupon success",
-        data: { ...coupon, restaurantIds }
+        data: {
+            ...coupon,
+            foods: coupon.foodIds ?? null,
+            restaurantIds,
+        }
     });
 };
 exports.getCouponById = getCouponById;
@@ -144,7 +155,7 @@ const updateCoupon = async (req, res) => {
         .limit(1);
     if (!existing)
         throw new NotFound_1.NotFound("Coupon not found");
-    const { code, name, nameAr, nameFr, discountType, discountValue, maxDiscount, minOrderAmount, usageLimit, perUserLimit, startDate, endDate, isActive, restaurantIds } = req.body;
+    const { code, name, nameAr, nameFr, discountType, discountValue, maxDiscount, minOrderAmount, usageLimit, perUserLimit, startDate, endDate, isActive, restaurantIds, foodIds, foods, } = req.body;
     const normalizedCode = code ? code.toUpperCase().trim() : existing.code;
     const updateData = { updatedAt: new Date() };
     if (code !== undefined)
@@ -173,6 +184,16 @@ const updateCoupon = async (req, res) => {
         updateData.endDate = endDate ? new Date(endDate) : null;
     if (isActive !== undefined)
         updateData.isActive = isActive;
+    if (foodIds !== undefined || foods !== undefined) {
+        const rawFoodIds = foodIds !== undefined ? foodIds : foods;
+        if (rawFoodIds === null) {
+            updateData.foodIds = null;
+        }
+        else if (Array.isArray(rawFoodIds)) {
+            const filtered = rawFoodIds.map(String).filter(Boolean);
+            updateData.foodIds = filtered.length > 0 ? filtered : null;
+        }
+    }
     // إذا تم تمرير مصفوفة المطاعم، نعيد هيكلة الربط والعالمية تماماً مثل الـ Discounts
     if (restaurantIds !== undefined && Array.isArray(restaurantIds)) {
         const isGlobal = restaurantIds.length === 0;
@@ -234,95 +255,6 @@ const toggleCouponStatus = async (req, res) => {
     });
 };
 exports.toggleCouponStatus = toggleCouponStatus;
-// // ========================================================
-// // 7. Validate & Apply Coupon (Internal Core Function)
-// // ========================================================
-// export const validateCoupon = async (
-//     couponCode: string,
-//     userId: string,
-//     restaurantId: string,
-//     subtotal: number
-// ): Promise<{ discountAmount: number; coupon: typeof coupons.$inferSelect }> => {
-//     const now = new Date();
-//     // [تعديل جوهري]: البحث عن الكوبون إذا كان عاماً (isGlobal = true) أَوْ يخص هذا المطعم في جدول الربط
-//     const [rawCoupon] = await db
-//         .selectDistinct({ coupons: coupons })
-//         .from(coupons)
-//         .leftJoin(couponRestaurants, eq(coupons.id, couponRestaurants.couponId))
-//         .where(
-//             and(
-//                 eq(coupons.code, couponCode.toUpperCase().trim()),
-//                 or(
-//                     eq(coupons.isGlobal, true),
-//                     eq(couponRestaurants.restaurantId, restaurantId)
-//                 )
-//             )
-//         )
-//         .limit(1);
-//     if (!rawCoupon) throw new BadRequest("Invalid coupon code for this restaurant");
-//     const coupon = rawCoupon.coupons;
-//     if (!coupon.isActive) throw new BadRequest("This coupon is no longer active");
-//     if (coupon.startDate && now < coupon.startDate) throw new BadRequest("This coupon is not yet valid");
-//     if (coupon.endDate && now > coupon.endDate) throw new BadRequest("This coupon has expired");
-//     const minOrder = parseFloat(coupon.minOrderAmount as string);
-//     if (subtotal < minOrder) throw new BadRequest(`Minimum order amount to use this coupon is ${minOrder}`);
-//     if (coupon.usageLimit !== null && (coupon.usedCount ?? 0) >= coupon.usageLimit)
-//         throw new BadRequest("This coupon has reached its total usage limit");
-//     // التحقق من حد الاستخدام لكل مستخدم فردي
-//     if (coupon.perUserLimit !== null) {
-//         const rows = await db
-//             .select({ count: sql<number>`COUNT(*)` })
-//             .from(couponUsages)
-//             .where(and(
-//                 eq(couponUsages.couponId, coupon.id),
-//                 eq(couponUsages.userId, userId)
-//             ));
-//         const userUsageCount = Number(rows[0]?.count ?? 0);
-//         if (userUsageCount >= coupon.perUserLimit)
-//             throw new BadRequest("You have already used this coupon the maximum number of times");
-//     }
-//     // حساب قيمة الخصم بناءً على النوع
-//     let discountAmount = 0;
-//     if (coupon.discountType === "free_delivery") {
-//         discountAmount = 0; // يتم معالجتها بحذف رسوم التوصيل في الباك إند الخاص بالطلبات
-//     } else if (coupon.discountType === "percentage") {
-//         const pct = parseFloat(coupon.discountValue as string);
-//         discountAmount = (subtotal * pct) / 100;
-//         const maxD = coupon.maxDiscount ? parseFloat(coupon.maxDiscount as string) : null;
-//         if (maxD !== null && discountAmount > maxD) discountAmount = maxD;
-//     } else {
-//         discountAmount = parseFloat(coupon.discountValue as string);
-//         if (discountAmount > subtotal) discountAmount = subtotal;
-//     }
-//     return { discountAmount: parseFloat(discountAmount.toFixed(2)), coupon };
-// };
-// // ========================================================
-// // 8. Validate Coupon Endpoint (For Frontend / Checkout Check)
-// // ========================================================
-// export const validateCouponEndpoint = async (req: Request, res: Response) => {
-//     const { code, subtotal, restaurantId } = req.body;
-//     const userId = req.user?.id; 
-//     if (!code) throw new BadRequest("Coupon code is required");
-//     if (!subtotal) throw new BadRequest("Subtotal is required");
-//     if (!restaurantId) throw new BadRequest("Restaurant ID is required");
-//     if (!userId) throw new BadRequest("Unauthorized");
-//     const { discountAmount, coupon } = await validateCoupon(
-//         code,
-//         userId,
-//         restaurantId,
-//         parseFloat(subtotal)
-//     );
-//     return SuccessResponse(res, {
-//         message: "Coupon is valid",
-//         data: {
-//             code: coupon.code,
-//             name: coupon.name,
-//             discountType: coupon.discountType,
-//             discountValue: coupon.discountValue,
-//             discountAmount,
-//         }
-//     });
-// };
 // ========================================================
 // 9. Get Coupon Usage History
 // ========================================================

@@ -24,4 +24,6 @@ router.put("/:id", (0, middlewares_1.hasPermission)("PlatformPaymentGateways", "
 router.delete("/:id", (0, middlewares_1.hasPermission)("PlatformPaymentGateways", "Delete"), (0, catchAsync_1.catchAsync)(platformPaymentGateways_1.deletePlatformGateway));
 // PUT /admin/platform-gateways/:id/activate
 router.put("/:id/activate", (0, middlewares_1.hasPermission)("PlatformPaymentGateways", "Edit"), (0, catchAsync_1.catchAsync)(platformPaymentGateways_1.activatePlatformGateway));
+// PUT /admin/platform-gateways/:id/default
+router.put("/:id/default", (0, middlewares_1.hasPermission)("PlatformPaymentGateways", "Edit"), (0, validation_1.validate)(platformPaymentGateways_2.setDefaultPlatformGatewaySchema), (0, catchAsync_1.catchAsync)(platformPaymentGateways_1.setDefaultPlatformGateway));
 exports.default = router;

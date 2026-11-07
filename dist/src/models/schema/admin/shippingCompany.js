@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.dispatchAssignmentsRelations = exports.deliveryManZonesRelations = exports.deliveryManShiftsRelations = exports.shippingZonesRelations = exports.shippingCompanyUsersRelations = exports.shippingCompanyRestaurantsRelations = exports.shippingCompaniesRelations = exports.dispatchAssignments = exports.deliveryManZones = exports.deliveryManShifts = exports.shippingCompanyZones = exports.shippingZones = exports.shippingCompanyRestaurants = exports.shippingCompanyUsers = exports.shippingCompanies = void 0;
+exports.dispatchAssignmentsRelations = exports.deliveryManZonesRelations = exports.deliveryManShiftsRelations = exports.shippingZonesRelations = exports.shippingCompanyUsersRelations = exports.shippingCompanyRestaurantsRelations = exports.shippingCompaniesRelations = exports.dispatchAssignments = exports.deliveryManZones = exports.deliveryManShifts = exports.shippingZones = exports.shippingCompanyRestaurants = exports.shippingCompanyUsers = exports.shippingCompanies = void 0;
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 const restaurants_1 = require("./restaurants");
@@ -80,7 +80,6 @@ exports.shippingZones = (0, mysql_core_1.mysqlTable)("shipping_zones", {
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });
-exports.shippingCompanyZones = exports.shippingZones;
 // =========================================================================
 // 4. شفتات المندوب لخدمة مطعم معين (Delivery Man Shifts)
 // للمناديب من نوع: deliveryType = 'restaurant'

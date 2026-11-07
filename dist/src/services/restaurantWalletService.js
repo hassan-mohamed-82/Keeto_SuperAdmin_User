@@ -12,9 +12,11 @@ exports.buildCancellationCounterReversal = buildCancellationCounterReversal;
 exports.chargePendingServiceFee = chargePendingServiceFee;
 exports.resolvePaymentTypeAndGateway = resolvePaymentTypeAndGateway;
 exports.settleDeliveredOrder = settleDeliveredOrder;
+exports.restoreCustomGatewayOnDebtSettled = restoreCustomGatewayOnDebtSettled;
 exports.handleCancelledOrder = handleCancelledOrder;
 exports.buildWalletSummary = buildWalletSummary;
 const connection_1 = require("../models/connection");
+const getActivePlatformGateway_1 = require("../utils/getActivePlatformGateway");
 const schema_1 = require("../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const uuid_1 = require("uuid");
@@ -72,6 +74,17 @@ async function applyGatewaySwitch(executor, { restaurantId, toType, trigger, bal
         createdAt: new Date(),
     });
     if (toType === "SYSTEM") {
+        // Activate the default platform gateway when switching to SYSTEM
+        try {
+            const defaultGateway = await (0, getActivePlatformGateway_1.getDefaultPlatformGateway)();
+            if (defaultGateway) {
+                await connection_1.db.update(schema_1.platformPaymentGateways).set({ isActive: false });
+                await connection_1.db.update(schema_1.platformPaymentGateways).set({ isActive: true }).where((0, drizzle_orm_1.eq)(schema_1.platformPaymentGateways.id, defaultGateway.id));
+            }
+        }
+        catch (err) {
+            console.error("[applyGatewaySwitch] Failed to activate default platform gateway:", err);
+        }
         await executor.insert(schema_1.notifications).values({
             id: (0, uuid_1.v4)(),
             recipientType: "restaurant",
@@ -117,6 +130,20 @@ async function checkAndApplyVisaSwitch(restaurantId, addedServiceFee = 0, execut
         .limit(1);
     if (!settings)
         return;
+    // If currently on SYSTEM (due to visa switch) and the restaurant is now owed money (balance >= 0),
+    // automatically restore CUSTOM and activate the default payment gateway!
+    if (settings.paymentGatewayType === "SYSTEM" && settings.visaSwitchApplied === true) {
+        const [wallet] = await executor
+            .select({ balance: schema_1.restaurantWallets.balance })
+            .from(schema_1.restaurantWallets)
+            .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.restaurantId, restaurantId))
+            .limit(1);
+        const currentBal = parseFloat(String(wallet?.balance ?? "0"));
+        if (currentBal >= 0) {
+            await restoreCustomGatewayOnDebtSettled(executor, restaurantId, currentBal);
+        }
+        return;
+    }
     if (settings.paymentGatewayType !== "CUSTOM")
         return;
     if (settings.visaSwitchApplied === true)
@@ -592,6 +619,51 @@ async function settleDeliveredOrder(orderId, tx) {
         });
     }
 }
+/**
+ * Automatically restores a restaurant's payment gateway to CUSTOM and activates
+ * their default payment gateway when the restaurant's debt is settled (balance >= 0).
+ */
+async function restoreCustomGatewayOnDebtSettled(tx, restaurantId, balance, adminId) {
+    const [settings] = await tx
+        .select({
+        paymentGatewayType: schema_1.restaurantSettings.paymentGatewayType,
+        visaSwitchApplied: schema_1.restaurantSettings.visaSwitchApplied,
+    })
+        .from(schema_1.restaurantSettings)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
+        .limit(1);
+    if (!settings)
+        return false;
+    if (settings.paymentGatewayType !== "SYSTEM")
+        return false;
+    // Check if there are custom credentials for this restaurant
+    const allCreds = await tx
+        .select()
+        .from(schema_1.restaurantPaymentCredentials)
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId));
+    if (allCreds.length === 0)
+        return false;
+    // Identify default credential (fallback to active, then first)
+    const defaultCred = allCreds.find((c) => c.isDefault) || allCreds.find((c) => c.isActive) || allCreds[0];
+    // Activate default credential and deactivate all other credentials
+    await tx
+        .update(schema_1.restaurantPaymentCredentials)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.restaurantId, restaurantId));
+    await tx
+        .update(schema_1.restaurantPaymentCredentials)
+        .set({ isActive: true, isDefault: true, updatedAt: new Date() })
+        .where((0, drizzle_orm_1.eq)(schema_1.restaurantPaymentCredentials.id, defaultCred.id));
+    // Switch settings back to CUSTOM
+    await applyGatewaySwitch(tx, {
+        restaurantId,
+        toType: "CUSTOM",
+        trigger: "manual",
+        balanceAtSwitch: balance,
+        adminId: adminId ?? null,
+    });
+    return true;
+}
 async function notifyDebtSettledToSuperadmin(tx, restaurantId, previousBalance, nextBalance) {
     const [settings] = await tx
         .select({
@@ -603,6 +675,8 @@ async function notifyDebtSettledToSuperadmin(tx, restaurantId, previousBalance, 
         .limit(1);
     if (!shouldNotifyDebtSettled(previousBalance, nextBalance, settings))
         return;
+    // Automatically switch back to CUSTOM and activate the default gateway
+    await restoreCustomGatewayOnDebtSettled(tx, restaurantId, nextBalance);
     await tx.insert(schema_1.notifications).values({
         id: (0, uuid_1.v4)(),
         recipientType: "superadmin",
@@ -739,6 +813,32 @@ async function handleCancelledOrder(params) {
                 createdAt: new Date(),
             });
         }
+        // إذا كان الإلغاء من طرف المطعم: يتم تطبيق الغرامة / رسوم المنصة على المطعم
+        if (cancelReasonType === "restaurant") {
+            const appDues = roundMoney(appCommission + serviceFee);
+            if (appDues > 0) {
+                const balanceBeforePenalty = currentBalance;
+                currentBalance = roundMoney(currentBalance - appDues);
+                currentFees = roundMoney(currentFees + serviceFee);
+                currentCommission = roundMoney(currentCommission + appCommission);
+                await tx.insert(schema_1.restaurantWalletTransactions).values({
+                    id: (0, uuid_1.v4)(),
+                    restaurantId: order.restaurantId,
+                    orderId: order.id,
+                    type: "adjustment",
+                    amount: `-${appDues.toFixed(2)}`,
+                    balanceBefore: balanceBeforePenalty.toFixed(2),
+                    balanceAfter: currentBalance.toFixed(2),
+                    method: "penalty",
+                    reference: order.orderNumber,
+                    serviceFee: serviceFee.toFixed(2),
+                    commission: appCommission.toFixed(2),
+                    orderAmount: totalAmount.toFixed(2),
+                    note: `Restaurant cancellation penalty for order #${order.dailyOrderNumber || order.orderNumber}.`,
+                    createdAt: new Date(),
+                });
+            }
+        }
         await tx.update(schema_1.restaurantWallets)
             .set({
             balance: currentBalance.toFixed(2),
@@ -750,7 +850,7 @@ async function handleCancelledOrder(params) {
             updatedAt: new Date(),
         })
             .where((0, drizzle_orm_1.eq)(schema_1.restaurantWallets.id, wallet.id));
-        if (paymentKind === "visa_system" && order.paymentStatus === "paid") {
+        if (cancelReasonType === "restaurant" && paymentKind === "visa_system" && order.paymentStatus === "paid") {
             const refundFee = settledVisaComm > 0 ? settledVisaComm : parseFloat(order.visaCommission || "0");
             if (refundFee > 0) {
                 await chargeGatewayFeeOnRefund(tx, order, refundFee, {

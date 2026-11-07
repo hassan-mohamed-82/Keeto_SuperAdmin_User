@@ -2,7 +2,7 @@
 // src/validation/admin/platformPaymentGateways.ts
 // Zod validation schemas for the Platform Payment Gateways CRUD endpoints.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.activatePlatformGatewaySchema = exports.updatePlatformGatewaySchema = exports.createPlatformGatewaySchema = void 0;
+exports.activatePlatformGatewaySchema = exports.setDefaultPlatformGatewaySchema = exports.updatePlatformGatewaySchema = exports.createPlatformGatewaySchema = void 0;
 const zod_1 = require("zod");
 // ─────────────────────────────────────────────────────────
 // Per-provider credential schemas (loose — sensitive fields
@@ -47,6 +47,7 @@ exports.createPlatformGatewaySchema = zod_1.z.object({
     credentials: credentialsSchema,
     logoUrl: zod_1.z.string().url().optional().or(zod_1.z.literal("")),
     isActive: zod_1.z.boolean().optional().default(false),
+    isDefault: zod_1.z.boolean().optional(),
 });
 exports.updatePlatformGatewaySchema = zod_1.z.object({
     title: zod_1.z.string().min(1).optional(),
@@ -55,6 +56,10 @@ exports.updatePlatformGatewaySchema = zod_1.z.object({
     credentials: zod_1.z.record(zod_1.z.any()).optional(),
     logoUrl: zod_1.z.string().url().optional().or(zod_1.z.literal("")),
     isActive: zod_1.z.boolean().optional(),
+    isDefault: zod_1.z.boolean().optional(),
+});
+exports.setDefaultPlatformGatewaySchema = zod_1.z.object({
+// No body needed — the gateway to set as default is identified by URL param
 });
 exports.activatePlatformGatewaySchema = zod_1.z.object({
 // No body needed — the gateway to activate is identified by the URL param

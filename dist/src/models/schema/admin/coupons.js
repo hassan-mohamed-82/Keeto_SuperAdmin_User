@@ -38,6 +38,8 @@ exports.coupons = (0, mysql_core_1.mysqlTable)("coupons", {
     endDate: (0, mysql_core_1.timestamp)("end_date"),
     isActive: (0, mysql_core_1.boolean)("is_active").default(true),
     isGlobal: (0, mysql_core_1.boolean)("is_global").default(false).notNull(),
+    // Array of eligible food IDs. If null/empty, coupon applies to cart without checking food
+    foodIds: (0, mysql_core_1.json)("food_ids").$type().default(null),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

@@ -81,7 +81,7 @@ const mergeNotes = (existing, incoming) => {
     });
 };
 const getRestaurantOperations = async (req, res) => {
-    const { search, restaurantId, restaurantType, operationType, status, app, page, limit } = restaurantOperations_1.getRestaurantOperationsQuerySchema.parse(req.query);
+    const { search, restaurantId, restaurantType, operationType, status, startDate, endDate, app, page, limit, } = restaurantOperations_1.getRestaurantOperationsQuerySchema.parse(req.query);
     const offset = (page - 1) * limit;
     const filters = [];
     if (restaurantId)
@@ -121,6 +121,7 @@ const getRestaurantOperations = async (req, res) => {
                 cover: schema_1.restaurants.cover,
                 type: schema_1.restaurants.type,
                 status: schema_1.restaurants.status,
+                operationStatus: schema_1.restaurants.operationStatus,
                 ownerFirstName: schema_1.restaurants.ownerFirstName,
                 ownerLastName: schema_1.restaurants.ownerLastName,
                 ownerPhone: schema_1.restaurants.ownerPhone,
@@ -157,7 +158,48 @@ const getRestaurantOperations = async (req, res) => {
     const totalItems = Number(totalRows[0]?.total ?? 0);
     const restaurantIds = rows.map((row) => row.restaurant.id);
     const cuisineIds = Array.from(new Set(rows.flatMap((row) => parseCuisineIds(row.restaurant.cuisineId))));
-    const [branchRows, cuisineRows] = await Promise.all([
+    const activeRestaurantIds = Array.from(new Set(rows
+        .filter((row) => row.restaurant.operationStatus === "active")
+        .map((row) => row.restaurant.id)));
+    const orderConditions = [
+        (0, drizzle_orm_1.inArray)(schema_1.orders.restaurantId, activeRestaurantIds),
+        (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.orders.paymentStatus), (0, drizzle_orm_1.ne)(schema_1.orders.paymentStatus, "payment_failed")),
+        (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"),
+    ];
+    // Default to current date if neither startDate nor endDate is provided
+    let start;
+    let end;
+    if (startDate) {
+        start = new Date(startDate);
+        if (!startDate.includes("T")) {
+            start.setHours(0, 0, 0, 0);
+        }
+    }
+    if (endDate) {
+        end = new Date(endDate);
+        if (!endDate.includes("T")) {
+            end.setHours(23, 59, 59, 999);
+        }
+        else if (end.getHours() === 0 &&
+            end.getMinutes() === 0 &&
+            end.getSeconds() === 0 &&
+            end.getMilliseconds() === 0) {
+            end.setHours(23, 59, 59, 999);
+        }
+    }
+    if (!startDate && !endDate) {
+        start = new Date();
+        start.setHours(0, 0, 0, 0);
+        end = new Date();
+        end.setHours(23, 59, 59, 999);
+    }
+    if (start) {
+        orderConditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, start));
+    }
+    if (end) {
+        orderConditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
+    }
+    const [branchRows, cuisineRows, orderStatsRows] = await Promise.all([
         restaurantIds.length > 0
             ? connection_1.db
                 .select({
@@ -192,6 +234,17 @@ const getRestaurantOperations = async (req, res) => {
                 .from(schema_1.cuisines)
                 .where((0, drizzle_orm_1.inArray)(schema_1.cuisines.id, cuisineIds))
             : Promise.resolve([]),
+        activeRestaurantIds.length > 0
+            ? connection_1.db
+                .select({
+                restaurantId: schema_1.orders.restaurantId,
+                totalOrders: (0, drizzle_orm_1.count)(schema_1.orders.id),
+                canceledOrders: (0, drizzle_orm_1.sql) `COALESCE(SUM(CASE WHEN ${schema_1.orders.status} = 'cancelled' THEN 1 ELSE 0 END), 0)`,
+            })
+                .from(schema_1.orders)
+                .where((0, drizzle_orm_1.and)(...orderConditions))
+                .groupBy(schema_1.orders.restaurantId)
+            : Promise.resolve([]),
     ]);
     const branchMap = new Map();
     for (const branchRow of branchRows) {
@@ -200,15 +253,33 @@ const getRestaurantOperations = async (req, res) => {
         branchMap.set(branchRow.branch.restaurantId, restaurantBranches);
     }
     const cuisineMap = new Map(cuisineRows.map((cuisine) => [cuisine.id, cuisine]));
+    const orderStatsMap = new Map();
+    for (const stat of orderStatsRows) {
+        orderStatsMap.set(stat.restaurantId, {
+            totalOrders: Number(stat.totalOrders || 0),
+            canceledOrders: Number(stat.canceledOrders || 0),
+        });
+    }
     return (0, response_1.SuccessResponse)(res, {
         data: rows.map(({ operation, restaurant, city, sales: salesRep }) => {
             const parsedCuisineIds = parseCuisineIds(restaurant.cuisineId);
             const { cuisineId: _, ...restRestaurant } = restaurant;
+            const isOperationActive = restaurant.operationStatus === "active";
+            const stats = isOperationActive
+                ? orderStatsMap.get(restaurant.id) ?? { totalOrders: 0, canceledOrders: 0 }
+                : null;
+            const orderMetrics = stats
+                ? {
+                    totalOrders: stats.totalOrders,
+                    canceledOrders: stats.canceledOrders,
+                }
+                : {};
             return {
                 ...operation,
                 notes: parseNotes(operation.notes, operation.createdAt),
                 restaurant: {
                     ...restRestaurant,
+                    ...orderMetrics,
                     city: city?.id ? city : null,
                     sales: salesRep?.id ? salesRep : null,
                     branches: (branchMap.get(restaurant.id) ?? []).map(({ branch, city: branchCity }) => ({

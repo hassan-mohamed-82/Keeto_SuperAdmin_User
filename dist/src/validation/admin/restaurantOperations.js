@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateRestaurantOperationSchema = exports.updateRestaurantOperationParamsSchema = exports.getRestaurantOperationsQuerySchema = exports.restaurantTypeSchema = exports.restaurantOperationStatusSchema = void 0;
+exports.updateRestaurantOperationSchema = exports.updateRestaurantOperationParamsSchema = exports.getRestaurantOperationsQuerySchema = exports.optionalDateQuerySchema = exports.restaurantTypeSchema = exports.restaurantOperationStatusSchema = void 0;
 const zod_1 = require("zod");
 exports.restaurantOperationStatusSchema = zod_1.z.enum([
     "demo",
@@ -22,15 +22,35 @@ exports.restaurantTypeSchema = zod_1.z.enum([
     "C-",
     "test",
 ]);
-exports.getRestaurantOperationsQuerySchema = zod_1.z.object({
+exports.optionalDateQuerySchema = zod_1.z
+    .string()
+    .trim()
+    .transform((val) => (val === "" ? undefined : val))
+    .refine((val) => val === undefined || !isNaN(Date.parse(val)), {
+    message: "Invalid date format",
+})
+    .optional();
+exports.getRestaurantOperationsQuerySchema = zod_1.z
+    .object({
     search: zod_1.z.string().trim().optional(),
     restaurantId: zod_1.z.string().uuid("Invalid Restaurant ID").optional(),
     restaurantType: exports.restaurantTypeSchema.optional(),
     operationType: zod_1.z.enum(["callcenter", "branch"]).optional(),
     status: exports.restaurantOperationStatusSchema.optional(),
+    startDate: exports.optionalDateQuerySchema,
+    endDate: exports.optionalDateQuerySchema,
     app: zod_1.z.enum(["on", "off"]).optional(),
     page: zod_1.z.coerce.number().int().min(1).default(1),
     limit: zod_1.z.coerce.number().int().min(1).max(100).default(20),
+})
+    .refine((data) => {
+    if (data.startDate && data.endDate) {
+        return new Date(data.startDate) <= new Date(data.endDate);
+    }
+    return true;
+}, {
+    message: "startDate must be before or equal to endDate",
+    path: ["startDate"],
 });
 const noteTextSchema = zod_1.z.string().trim().min(1).max(2000);
 // Accepts plain strings (old clients) or objects (new clients that send back the note id)

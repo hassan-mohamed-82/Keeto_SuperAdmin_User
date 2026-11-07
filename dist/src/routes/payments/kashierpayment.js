@@ -23,4 +23,11 @@ router.post("/webhook", (0, validation_1.validate)(kashier_validation_1.webhookS
  * @access  Public (Redirect only)
  */
 router.get("/callback", kashierpayment_1.handleKashierRedirect);
+/**
+ * @route   POST & GET /api/payments/kashier/sync
+ * @desc    Manually trigger sync for pending Kashier orders (supports POST & GET for easy browser/Postman testing)
+ * @access  Public / Admin
+ */
+router.post("/sync", kashierpayment_1.triggerKashierSync);
+router.get("/sync", kashierpayment_1.triggerKashierSync);
 exports.default = router;

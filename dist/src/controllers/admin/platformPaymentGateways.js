@@ -1,9 +1,6 @@
 "use strict";
-// src/controllers/admin/platformPaymentGateways.ts
-// Super Admin CRUD for platform-level payment gateways.
-// Keys are stored encrypted in `platform_payment_gateways` table (never in .env).
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getActivePlatformGateway = exports.activatePlatformGateway = exports.deletePlatformGateway = exports.updatePlatformGateway = exports.createPlatformGateway = exports.getPlatformGateway = exports.listPlatformGateways = void 0;
+exports.setDefaultPlatformGateway = exports.getActivePlatformGateway = exports.activatePlatformGateway = exports.deletePlatformGateway = exports.updatePlatformGateway = exports.createPlatformGateway = exports.getPlatformGateway = exports.listPlatformGateways = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -36,7 +33,11 @@ function sanitize(record) {
         if (safe[f])
             safe[f] = "******";
     }
-    return { ...record, credentials: safe };
+    return {
+        ...record,
+        credentials: safe,
+        isDefault: Boolean(record.isDefault),
+    };
 }
 // ─────────────────────────────────────────────────────────
 // Encrypt incoming sensitive fields
@@ -49,6 +50,18 @@ function encryptCredentials(raw) {
         }
     }
     return encrypted;
+}
+// ─────────────────────────────────────────────────────────
+// Validate that a logo value is a proper base64 data URI.
+// Plain URLs (http/https) are rejected — only data URIs are accepted.
+// ─────────────────────────────────────────────────────────
+function validateLogoBase64(value) {
+    if (!value)
+        return;
+    const base64DataUriPattern = /^data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/;
+    if (!base64DataUriPattern.test(value)) {
+        throw new BadRequest_1.BadRequest("logoUrl must be a valid base64 image data URI (e.g. \"data:image/png;base64,...\"). Plain URLs are not accepted.");
+    }
 }
 // ─────────────────────────────────────────────────────────
 // Merge update credentials — keep existing encrypted values
@@ -110,13 +123,33 @@ const createPlatformGateway = async (req, res) => {
     const { title, provider, environment, credentials, logoUrl, isActive } = req.body;
     if (!credentials)
         throw new BadRequest_1.BadRequest("credentials are required");
-    const rawCreds = typeof credentials === "string" ? JSON.parse(credentials) : credentials;
+    let rawCreds = credentials;
+    if (typeof credentials === "string") {
+        try {
+            rawCreds = JSON.parse(credentials);
+        }
+        catch {
+            throw new BadRequest_1.BadRequest("Invalid JSON format in credentials");
+        }
+    }
     const encryptedCreds = encryptCredentials(rawCreds);
+    // Validate logo is base64 (not a URL)
+    if (logoUrl)
+        validateLogoBase64(logoUrl);
     // If this gateway is being set as active, deactivate all others first
     if (isActive) {
         await connection_1.db
             .update(schema_1.platformPaymentGateways)
             .set({ isActive: false });
+    }
+    const isDefaultInput = req.body.isDefault !== undefined ? req.body.isDefault : (req.body.default !== undefined ? req.body.default : req.body.defualt);
+    let resolvedIsDefault = isDefaultInput !== undefined ? Boolean(isDefaultInput) : false;
+    const existingGateways = await connection_1.db.select({ id: schema_1.platformPaymentGateways.id }).from(schema_1.platformPaymentGateways).limit(1);
+    if (existingGateways.length === 0) {
+        resolvedIsDefault = true;
+    }
+    if (resolvedIsDefault) {
+        await connection_1.db.update(schema_1.platformPaymentGateways).set({ isDefault: false });
     }
     const newId = (0, uuid_1.v4)();
     await connection_1.db.insert(schema_1.platformPaymentGateways).values({
@@ -127,14 +160,14 @@ const createPlatformGateway = async (req, res) => {
         credentials: encryptedCreds,
         logoUrl: logoUrl || null,
         isActive: isActive ?? false,
+        isDefault: resolvedIsDefault,
     });
     const [created] = await connection_1.db
         .select()
         .from(schema_1.platformPaymentGateways)
         .where((0, drizzle_orm_1.eq)(schema_1.platformPaymentGateways.id, newId))
         .limit(1);
-    res.status(201).json({
-        success: true,
+    (0, response_1.SuccessResponse)(res, {
         message: "Platform gateway created successfully",
         data: sanitize(created),
     });
@@ -160,10 +193,21 @@ const updatePlatformGateway = async (req, res) => {
         updatePayload.provider = String(provider).toUpperCase();
     if (environment !== undefined)
         updatePayload.environment = environment;
-    if (logoUrl !== undefined)
+    if (logoUrl !== undefined) {
+        if (logoUrl)
+            validateLogoBase64(logoUrl);
         updatePayload.logoUrl = logoUrl || null;
+    }
     if (credentials !== undefined) {
-        let incomingCreds = typeof credentials === "string" ? JSON.parse(credentials) : credentials;
+        let incomingCreds = credentials;
+        if (typeof credentials === "string") {
+            try {
+                incomingCreds = JSON.parse(credentials);
+            }
+            catch {
+                incomingCreds = {};
+            }
+        }
         let existingCreds = existing.credentials;
         if (typeof existingCreds === "string") {
             try {
@@ -183,6 +227,14 @@ const updatePlatformGateway = async (req, res) => {
                 .set({ isActive: false });
         }
         updatePayload.isActive = isActive;
+    }
+    const isDefaultInput = req.body.isDefault !== undefined ? req.body.isDefault : (req.body.default !== undefined ? req.body.default : req.body.defualt);
+    if (isDefaultInput !== undefined) {
+        const isDefaultVal = Boolean(isDefaultInput);
+        if (isDefaultVal) {
+            await connection_1.db.update(schema_1.platformPaymentGateways).set({ isDefault: false });
+        }
+        updatePayload.isDefault = isDefaultVal;
     }
     if (Object.keys(updatePayload).length > 0) {
         await connection_1.db
@@ -256,3 +308,34 @@ const getActivePlatformGateway = async (_req, res) => {
     });
 };
 exports.getActivePlatformGateway = getActivePlatformGateway;
+// ═══════════════════════════════════════════════════════════
+// 8. PUT /admin/platform-gateways/:id/default
+//    Sets a gateway as the single default platform gateway.
+// ═══════════════════════════════════════════════════════════
+const setDefaultPlatformGateway = async (req, res) => {
+    const { id } = req.params;
+    const [existing] = await connection_1.db
+        .select({ id: schema_1.platformPaymentGateways.id })
+        .from(schema_1.platformPaymentGateways)
+        .where((0, drizzle_orm_1.eq)(schema_1.platformPaymentGateways.id, id))
+        .limit(1);
+    if (!existing)
+        throw new NotFound_1.NotFound("Platform gateway not found");
+    // Remove default from all gateways first
+    await connection_1.db.update(schema_1.platformPaymentGateways).set({ isDefault: false });
+    // Mark selected one as default
+    await connection_1.db
+        .update(schema_1.platformPaymentGateways)
+        .set({ isDefault: true })
+        .where((0, drizzle_orm_1.eq)(schema_1.platformPaymentGateways.id, id));
+    const [updated] = await connection_1.db
+        .select()
+        .from(schema_1.platformPaymentGateways)
+        .where((0, drizzle_orm_1.eq)(schema_1.platformPaymentGateways.id, id))
+        .limit(1);
+    (0, response_1.SuccessResponse)(res, {
+        message: "Platform gateway set as default successfully. All other platform gateways have been unset as default.",
+        data: sanitize(updated),
+    });
+};
+exports.setDefaultPlatformGateway = setDefaultPlatformGateway;

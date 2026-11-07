@@ -112,7 +112,8 @@ async function confirmOrderPayment({ orderId, gateway, transactionId, gatewayOrd
             rawResponse: rawPayload || null,
             createdAt: now,
         });
-        await (0, restaurantWalletService_1.chargePendingServiceFee)(order.id, tx, "custom_paid");
+        // تسوية الأوردر في محفظة المطعم فوراً بمجرد تأكيد الدفع الإلكتروني
+        await (0, restaurantWalletService_1.settleDeliveredOrder)(order.id, tx);
         // تسجيل استخدام خصم الطلبات الأولى للدفع الإلكتروني إذا تم تطبيقه
         if (order.firstOrderDiscountId) {
             const discAmount = parseFloat(order.discountAmount || "0");
@@ -217,7 +218,7 @@ async function recordFailedPayment({ orderId, gateway, transactionId, gatewayOrd
     try {
         const claimed = await (0, orderNotificationCron_1.claimPaymentIssueNotification)(order.id, "payment_failed", "payment_failed");
         if (!claimed) {
-            console.log(`[RecordFailedPayment]: Order ${order.dailyOrderNumber} already claimed or not eligible for payment issue notification.`);
+            console.log(`[RecordFailedPayment]: Order ${order.orderNumber} already claimed or not eligible for payment issue notification.`);
             return { success: true };
         }
         const [customer] = await connection_1.db
@@ -226,8 +227,8 @@ async function recordFailedPayment({ orderId, gateway, transactionId, gatewayOrd
             .where((0, drizzle_orm_1.eq)(schema_1.users.id, order.userId))
             .limit(1);
         const customerName = customer?.name || "Customer";
-        const issueBodyAr = `فشلت عملية الدفع بالفيزا للطلب رقم ${order.dailyOrderNumber} (العميل: ${customerName}). تواصل مع العميل.`;
-        const issueBodyEn = `Card payment failed for order ${order.dailyOrderNumber}. Contact the customer.`;
+        const issueBodyAr = `فشلت عملية الدفع بالفيزا للطلب رقم ${order.orderNumber} (العميل: ${customerName}). تواصل مع العميل.`;
+        const issueBodyEn = `Card payment failed for order ${order.orderNumber}. Contact the customer.`;
         try {
             await (0, notifications_1.sendPushNotification)({
                 recipientType: "restaurant",

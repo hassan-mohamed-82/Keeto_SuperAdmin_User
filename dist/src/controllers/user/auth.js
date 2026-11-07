@@ -26,6 +26,7 @@ const generateOTP = (length = 6) => {
 // ===================================
 const signup = async (req, res) => {
     const { name, email, phone, alternatePhone, password, photo, restaurantId } = req.body;
+    const resolvedAlternatePhone = alternatePhone || null;
     if (!name || !email || !phone || !password) {
         throw new BadRequest_1.BadRequest("Please provide all required fields");
     }
@@ -44,8 +45,8 @@ const signup = async (req, res) => {
             }
             await tx.update(schema_1.users).set({
                 name,
-                phone,
-                alternatePhone,
+                phone: phone.trim(),
+                alternatePhone: resolvedAlternatePhone ? resolvedAlternatePhone.trim() : null,
                 password: hashedPassword,
                 photo,
                 isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
@@ -58,8 +59,8 @@ const signup = async (req, res) => {
                 id: userId,
                 name,
                 email,
-                phone,
-                alternatePhone,
+                phone: phone.trim(),
+                alternatePhone: resolvedAlternatePhone ? resolvedAlternatePhone.trim() : null,
                 password: hashedPassword,
                 photo,
                 isVerified: false,
@@ -88,6 +89,8 @@ const signup = async (req, res) => {
             purpose: "verify_email",
             expiresAt
         });
+    });
+    try {
         await (0, sendEmails_1.sendEmail)({
             to: email,
             subject: "Verify Your Keeto Account",
@@ -150,7 +153,10 @@ const signup = async (req, res) => {
 </html>
             `
         });
-    });
+    }
+    catch (emailErr) {
+        console.error("⚠️ Failed to send verification email:", emailErr);
+    }
     const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
     return (0, response_1.SuccessResponse)(res, {
         message: "Account created successfully. Please check your email.",

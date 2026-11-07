@@ -72,7 +72,14 @@ const getProfile = async (req, res) => {
         .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.zones.cityId, schema_1.cities.id))
         .where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId));
     // 🟢 2.1 Check which addresses are linked to existing orders
-    const orderConditions = [(0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.isNotNull)(schema_1.orders.addressId), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")];
+    // Cash orders have paymentStatus = NULL or 'pending_payment'; visa orders have 'paid'
+    // Only 'payment_failed' means a real failed online payment — exclude that
+    const orderConditions = [
+        (0, drizzle_orm_1.eq)(schema_1.orders.userId, userId),
+        (0, drizzle_orm_1.isNotNull)(schema_1.orders.addressId),
+        (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"),
+        (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.orders.paymentStatus), (0, drizzle_orm_1.eq)(schema_1.orders.paymentStatus, "pending_payment"), (0, drizzle_orm_1.eq)(schema_1.orders.paymentStatus, "paid")),
+    ];
     if (restaurantId && restaurantId.trim() !== "") {
         orderConditions.push((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId.trim()));
     }
@@ -87,7 +94,10 @@ const getProfile = async (req, res) => {
         // hasOrders: usedAddressIds.has(addr.id),
     }));
     // 3. Fetch Orders Count (scoped to a restaurant if restaurantId query param is provided)
-    const ordersCountCondition = (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"), (0, drizzle_orm_1.ne)(schema_1.orders.paymentStatus, "pending_payment"), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId) : undefined);
+    // Cash orders → paymentStatus IS NULL or 'pending_payment'
+    // Visa orders  → paymentStatus = 'paid'
+    // Only 'payment_failed' means a real failed online payment — exclude that
+    const ordersCountCondition = (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.orders.paymentStatus), (0, drizzle_orm_1.eq)(schema_1.orders.paymentStatus, "pending_payment"), (0, drizzle_orm_1.eq)(schema_1.orders.paymentStatus, "paid")), restaurantId ? (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId) : undefined);
     const [ordersCount] = await connection_1.db
         .select({ count: (0, drizzle_orm_1.sql) `COUNT(*)` })
         .from(schema_1.orders)
@@ -170,10 +180,18 @@ const updateProfile = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user?.id || req.user?._id;
-    const { name, phone, email, photo, alternatePhone } = req.body;
+    const { name, phone, email, photo, alternatePhone, alternativePhone } = req.body;
+    const resolvedAlternatePhone = alternatePhone !== undefined ? alternatePhone : alternativePhone;
     const isProfileComplete = !(email && email.endsWith("@privaterelay.appleid.com"));
     await connection_1.db.update(schema_1.users)
-        .set({ name, phone, email, photo, alternatePhone, isProfileComplete })
+        .set({
+        ...(name !== undefined && { name }),
+        ...(phone !== undefined && { phone: phone ? phone.trim() : null }),
+        ...(email !== undefined && { email }),
+        ...(photo !== undefined && { photo }),
+        ...(resolvedAlternatePhone !== undefined && { alternatePhone: resolvedAlternatePhone ? resolvedAlternatePhone.trim() : null }),
+        isProfileComplete
+    })
         .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
     return (0, response_1.SuccessResponse)(res, { message: "Profile updated successfully", data: { isProfileComplete } });
 };

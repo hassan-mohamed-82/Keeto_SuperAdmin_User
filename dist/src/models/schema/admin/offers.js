@@ -28,6 +28,7 @@ exports.offerFoods = (0, mysql_core_1.mysqlTable)("offer_foods", {
         .notNull(),
     variations: (0, mysql_core_1.json)("variations").$type().default([]).notNull(),
     optionIds: (0, mysql_core_1.json)("option_ids").$type().default([]).notNull(),
+    addonIds: (0, mysql_core_1.json)("addon_ids").$type().default([]).notNull(),
     quantity: (0, mysql_core_1.int)("quantity").default(1).notNull(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),

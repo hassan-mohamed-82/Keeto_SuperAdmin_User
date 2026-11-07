@@ -365,6 +365,9 @@ const collectCashFromRestaurant = async (req, res) => {
             method: "cash",
             note: "Super admin collected cash (Debt settled)",
         });
+        if (currentBalance < 0 && newBalance >= 0) {
+            await (0, restaurantWalletService_1.restoreCustomGatewayOnDebtSettled)(tx, restaurantId, newBalance, req.user?.id || req.admin?.id || null);
+        }
     });
     return (0, response_1.SuccessResponse)(res, { message: "Cash collected and balance settled successfully" });
 };

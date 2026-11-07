@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.notifyOrderTracking = exports.notifyAdmins = exports.notifyRestaurant = exports.notifyShippingCompany = exports.notifyDeliveryMan = exports.getIO = exports.initSocket = void 0;
+exports.notifyOrderTracking = exports.notifyAdmins = exports.notifyRestaurant = exports.notifyShippingCompany = exports.notifyDeliveryMan = exports.getIO = exports.initSocket = exports.invalidateCourierCache = void 0;
 const socket_io_1 = require("socket.io");
 const auth_1 = require("../../utils/auth");
 const connection_1 = require("../../models/connection");
@@ -13,6 +13,54 @@ let io = null;
 const lastDbWriteTimeMap = new Map();
 // Grace period timers upon disconnect (30s grace)
 const disconnectGraceTimers = new Map();
+const courierMetaCache = new Map();
+const courierOrdersCache = new Map();
+const invalidateCourierCache = (deliveryManId) => {
+    courierOrdersCache.delete(deliveryManId);
+    courierMetaCache.delete(deliveryManId);
+};
+exports.invalidateCourierCache = invalidateCourierCache;
+const getCourierMeta = async (deliveryManId) => {
+    const cached = courierMetaCache.get(deliveryManId);
+    const now = Date.now();
+    if (cached && now - cached.cachedAt < 5 * 60 * 1000) {
+        return cached;
+    }
+    const [dm] = await connection_1.db
+        .select({
+        shippingCompanyId: schema_1.deliveryMen.shippingCompanyId,
+        name: schema_1.deliveryMen.name,
+        phone: schema_1.deliveryMen.phone,
+    })
+        .from(schema_1.deliveryMen)
+        .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, deliveryManId))
+        .limit(1);
+    const meta = {
+        shippingCompanyId: dm?.shippingCompanyId || null,
+        name: dm?.name || null,
+        phone: dm?.phone || null,
+        cachedAt: now,
+    };
+    courierMetaCache.set(deliveryManId, meta);
+    return meta;
+};
+const getCourierActiveOrders = async (deliveryManId) => {
+    const cached = courierOrdersCache.get(deliveryManId);
+    const now = Date.now();
+    if (cached && now - cached.cachedAt < 15 * 1000) {
+        return cached.orders;
+    }
+    const activeOrders = await connection_1.db
+        .select({
+        id: schema_1.orders.id,
+        orderNumber: schema_1.orders.orderNumber,
+        shippingStatus: schema_1.orders.shippingStatus,
+    })
+        .from(schema_1.orders)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.deliveryManId, deliveryManId), (0, drizzle_orm_1.inArray)(schema_1.orders.shippingStatus, ["assigned", "picked_up"])));
+    courierOrdersCache.set(deliveryManId, { orders: activeOrders, cachedAt: now });
+    return activeOrders;
+};
 const initSocket = (httpServer) => {
     io = new socket_io_1.Server(httpServer, {
         cors: {
@@ -25,12 +73,15 @@ const initSocket = (httpServer) => {
     // -------------------------------------------------------------
     const authMiddleware = (socket, next) => {
         try {
-            const token = socket.handshake.auth?.token ||
-                socket.handshake.headers?.authorization?.replace("Bearer ", "") ||
+            let rawToken = socket.handshake.auth?.token ||
+                socket.handshake.headers?.authorization ||
                 socket.handshake.query?.token;
-            if (!token) {
+            if (!rawToken) {
                 return next(new Error("Authentication error: No token provided"));
             }
+            const token = typeof rawToken === "string" && rawToken.startsWith("Bearer ")
+                ? rawToken.slice(7).trim()
+                : String(rawToken).trim();
             const decoded = (0, auth_1.verifyToken)(token);
             if (!decoded || !decoded.id || !decoded.role) {
                 return next(new Error("Authentication error: Invalid token"));
@@ -64,17 +115,17 @@ const initSocket = (httpServer) => {
         // Event: courier:online
         socket.on(socketEvents_1.SOCKET_EVENTS.COURIER_ONLINE, async () => {
             try {
+                if (disconnectGraceTimers.has(deliveryManId)) {
+                    clearTimeout(disconnectGraceTimers.get(deliveryManId));
+                    disconnectGraceTimers.delete(deliveryManId);
+                }
                 await connection_1.db
                     .update(schema_1.deliveryMen)
                     .set({ isOnline: true })
                     .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, deliveryManId));
-                const [dm] = await connection_1.db
-                    .select({ shippingCompanyId: schema_1.deliveryMen.shippingCompanyId })
-                    .from(schema_1.deliveryMen)
-                    .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, deliveryManId))
-                    .limit(1);
-                if (dm?.shippingCompanyId) {
-                    (0, exports.notifyShippingCompany)(dm.shippingCompanyId, "courier:status_changed", {
+                const meta = await getCourierMeta(deliveryManId);
+                if (meta.shippingCompanyId) {
+                    (0, exports.notifyShippingCompany)(meta.shippingCompanyId, "courier:status_changed", {
                         deliveryManId,
                         isOnline: true,
                     });
@@ -84,7 +135,7 @@ const initSocket = (httpServer) => {
                 console.error("Error setting courier online:", err);
             }
         });
-        // Event: courier:location
+        // Event: courier:location (Optimized with In-Memory Caching)
         socket.on(socketEvents_1.SOCKET_EVENTS.COURIER_LOCATION, async (payload) => {
             try {
                 const { lat, lng } = payload;
@@ -92,36 +143,37 @@ const initSocket = (httpServer) => {
                     return;
                 // 1. Update Redis GEO & alive key (TTL 60s)
                 await (0, dispatchEngine_1.updateCourierRedisLocation)(deliveryManId, lat, lng);
-                const [dm] = await connection_1.db
-                    .select({
-                    shippingCompanyId: schema_1.deliveryMen.shippingCompanyId,
-                    activeOrdersCount: schema_1.deliveryMen.activeOrdersCount,
-                })
-                    .from(schema_1.deliveryMen)
-                    .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, deliveryManId))
-                    .limit(1);
-                // 2. Broadcast to company dashboard live map
-                if (dm?.shippingCompanyId) {
-                    (0, exports.notifyShippingCompany)(dm.shippingCompanyId, socketEvents_1.SOCKET_EVENTS.DELIVERY_LOCATION_CHANGED, {
+                // 2. Fetch cached profile and active orders (0-1 DB queries instead of 2 on every ping)
+                const [meta, activeOrders] = await Promise.all([
+                    getCourierMeta(deliveryManId),
+                    getCourierActiveOrders(deliveryManId),
+                ]);
+                // Broadcast to company dashboard live map (includes courier details & active orders)
+                if (meta.shippingCompanyId) {
+                    (0, exports.notifyShippingCompany)(meta.shippingCompanyId, socketEvents_1.SOCKET_EVENTS.DELIVERY_LOCATION_CHANGED, {
                         deliveryManId,
+                        deliveryManName: meta.name || null,
+                        deliveryManPhone: meta.phone || null,
                         lat,
                         lng,
+                        activeOrders: activeOrders.map((o) => ({
+                            orderId: o.id,
+                            orderNumber: o.orderNumber,
+                            shippingStatus: o.shippingStatus,
+                        })),
                         updatedAt: new Date(),
                     });
                 }
                 // 3. Broadcast to active assigned orders tracking rooms
-                if (dm && dm.activeOrdersCount > 0) {
-                    const activeOrders = await connection_1.db
-                        .select({ id: schema_1.orders.id })
-                        .from(schema_1.orders)
-                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.deliveryManId, deliveryManId), (0, drizzle_orm_1.eq)(schema_1.orders.shippingStatus, "assigned")));
-                    for (const ord of activeOrders) {
-                        (0, exports.notifyOrderTracking)(ord.id, socketEvents_1.SOCKET_EVENTS.ORDER_COURIER_LOCATION, {
-                            deliveryManId,
-                            lat,
-                            lng,
-                        });
-                    }
+                for (const ord of activeOrders) {
+                    (0, exports.notifyOrderTracking)(ord.id, socketEvents_1.SOCKET_EVENTS.ORDER_COURIER_LOCATION, {
+                        orderId: ord.id,
+                        deliveryManId,
+                        deliveryManName: meta.name || null,
+                        deliveryManPhone: meta.phone || null,
+                        lat,
+                        lng,
+                    });
                 }
                 // 4. Save to MySQL every 30s as backup
                 const lastWrite = lastDbWriteTimeMap.get(deliveryManId) || 0;
@@ -151,32 +203,43 @@ const initSocket = (httpServer) => {
                     return;
                 }
                 const result = await (0, dispatchEngine_1.rejectOrderByCourier)(orderId, deliveryManId, reason);
+                (0, exports.invalidateCourierCache)(deliveryManId);
                 socket.emit("order:reject_ack", { success: true, orderId, result });
             }
             catch (err) {
                 socket.emit("error", { message: err.message });
             }
         });
-        // Event: courier:offline / disconnect with 30s grace period
+        // Event: courier:offline / disconnect with 30s grace period & multi-device check
         const handleOffline = () => {
+            // Cancel existing timer if any (prevents double callbacks / race condition)
+            if (disconnectGraceTimers.has(deliveryManId)) {
+                clearTimeout(disconnectGraceTimers.get(deliveryManId));
+                disconnectGraceTimers.delete(deliveryManId);
+            }
             const timer = setTimeout(async () => {
                 try {
+                    // Check if courier still has other active sockets (multi-device support)
+                    if (io) {
+                        const activeSockets = await io.in(`courier:${deliveryManId}`).fetchSockets();
+                        if (activeSockets.length > 0) {
+                            disconnectGraceTimers.delete(deliveryManId);
+                            return;
+                        }
+                    }
                     await (0, dispatchEngine_1.removeCourierFromRedis)(deliveryManId);
                     await connection_1.db
                         .update(schema_1.deliveryMen)
                         .set({ isOnline: false })
                         .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, deliveryManId));
-                    const [dm] = await connection_1.db
-                        .select({ shippingCompanyId: schema_1.deliveryMen.shippingCompanyId })
-                        .from(schema_1.deliveryMen)
-                        .where((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, deliveryManId))
-                        .limit(1);
-                    if (dm?.shippingCompanyId) {
-                        (0, exports.notifyShippingCompany)(dm.shippingCompanyId, "courier:status_changed", {
+                    const meta = await getCourierMeta(deliveryManId);
+                    if (meta.shippingCompanyId) {
+                        (0, exports.notifyShippingCompany)(meta.shippingCompanyId, "courier:status_changed", {
                             deliveryManId,
                             isOnline: false,
                         });
                     }
+                    (0, exports.invalidateCourierCache)(deliveryManId);
                     disconnectGraceTimers.delete(deliveryManId);
                 }
                 catch (err) {

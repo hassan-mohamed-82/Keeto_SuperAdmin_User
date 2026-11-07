@@ -12,9 +12,8 @@ const drizzle_orm_1 = require("drizzle-orm");
  * Eligibility rules (all must pass):
  *  1. discount.status === 'active'
  *  2. within startDate / endDate window
- *  3. global usage (usedCount < maxUsage) not exceeded
- *  4. user's per-usage (usages for this discount < maxUsagePerUser)
- *  5. user's total COMPLETED orders at this restaurant < firstOrderCount
+ *  3. global usage (usedCount < maxUsage) not exceeded (if maxUsage is set)
+ *  4. user's total active/completed orders at this restaurant < firstOrderCount (أول N طلبات للعميل في هذا المطعم)
  *
  * If multiple discounts qualify, we return the one giving the MAXIMUM discount.
  *
@@ -37,37 +36,20 @@ const resolveFirstOrderDiscount = async (userId, restaurantId, subtotal) => {
         .select({ cnt: (0, drizzle_orm_1.count)(schema_1.orders.id) })
         .from(schema_1.orders)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), 
-    // Only count successfully placed orders (not cancelled / failed)
-    (0, drizzle_orm_1.sql) `${schema_1.orders.status} NOT IN ('cancelled', 'failed')`));
+    // Exclude failed orders, pending visa payments, and orders cancelled by restaurant
+    (0, drizzle_orm_1.ne)(schema_1.orders.status, 'failed'), (0, drizzle_orm_1.sql) `NOT (${schema_1.orders.paymentStatus} = 'pending_payment' AND ${schema_1.orders.status} = 'pending')`, (0, drizzle_orm_1.sql) `NOT (${schema_1.orders.status} = 'cancelled' AND ${schema_1.orders.cancelReasonType} = 'restaurant')`));
     const userOrderCount = Number(orderCountRow?.cnt ?? 0);
-    // 3. Fetch per-discount usage counts for this user (in one batch)
-    const discountIds = candidates.map(d => d.id);
-    const userUsages = discountIds.length > 0
-        ? await connection_1.db
-            .select({
-            firstOrderDiscountId: schema_1.firstOrderDiscountUsages.firstOrderDiscountId,
-            usageCount: (0, drizzle_orm_1.count)(schema_1.firstOrderDiscountUsages.id),
-        })
-            .from(schema_1.firstOrderDiscountUsages)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.firstOrderDiscountUsages.userId, userId), (0, drizzle_orm_1.sql) `${schema_1.firstOrderDiscountUsages.firstOrderDiscountId} IN (${drizzle_orm_1.sql.join(discountIds.map(id => (0, drizzle_orm_1.sql) `${id}`), (0, drizzle_orm_1.sql) `, `)})`))
-            .groupBy(schema_1.firstOrderDiscountUsages.firstOrderDiscountId)
-        : [];
-    const userUsageMap = new Map(userUsages.map(u => [u.firstOrderDiscountId, Number(u.usageCount)]));
-    // 4. Filter to eligible discounts and calculate each discount amount
+    // 3. Filter to eligible discounts and calculate each discount amount
     let bestResult = null;
     for (const discount of candidates) {
-        // a) Global usage limit
+        // a) Global campaign usage limit (if set by restaurant)
         if (discount.maxUsage !== null && (discount.usedCount ?? 0) >= discount.maxUsage)
             continue;
-        // b) Per-user usage limit
-        const userUsed = userUsageMap.get(discount.id) ?? 0;
-        if (userUsed >= discount.maxUsagePerUser)
-            continue;
-        // c) User's order count must be < firstOrderCount
-        //    (i.e. this is one of their first N orders, NOT already placed)
+        // b) User qualifies as long as their completed/active orders at this restaurant < firstOrderCount
+        // (i.e. this is one of their first N orders at this specific restaurant)
         if (userOrderCount >= discount.firstOrderCount)
             continue;
-        // d) Compute discount amount
+        // c) Compute discount amount
         const value = Math.max(0, Number(discount.discountValue ?? 0));
         let discountAmount = 0;
         if (discount.discountType === "percentage") {

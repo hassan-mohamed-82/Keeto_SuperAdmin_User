@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteCompanyUser = exports.updateCompanyUser = exports.createCompanyUser = exports.getCompanyUsers = void 0;
+exports.toggleCompanyUserStatus = exports.deleteCompanyUser = exports.updateCompanyUser = exports.createCompanyUser = exports.getUserById = exports.getCompanyUsers = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -39,7 +39,39 @@ exports.getCompanyUsers = (0, catchAsync_1.catchAsync)(async (req, res) => {
     });
 });
 // =========================================================================
-// 2. Create company user (admin only)
+// 2. Get user by ID
+// =========================================================================
+exports.getUserById = (0, catchAsync_1.catchAsync)(async (req, res) => {
+    const companyId = req.user?.shippingCompanyId;
+    const { id } = req.params;
+    if (!companyId) {
+        throw new Errors_1.UnauthorizedError("Unauthorized access");
+    }
+    const [user] = await connection_1.db
+        .select({
+        id: schema_1.shippingCompanyUsers.id,
+        shippingCompanyId: schema_1.shippingCompanyUsers.shippingCompanyId,
+        name: schema_1.shippingCompanyUsers.name,
+        email: schema_1.shippingCompanyUsers.email,
+        phone: schema_1.shippingCompanyUsers.phone,
+        role: schema_1.shippingCompanyUsers.role,
+        status: schema_1.shippingCompanyUsers.status,
+        createdAt: schema_1.shippingCompanyUsers.createdAt,
+        updatedAt: schema_1.shippingCompanyUsers.updatedAt,
+    })
+        .from(schema_1.shippingCompanyUsers)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyUsers.id, id), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyUsers.shippingCompanyId, companyId)))
+        .limit(1);
+    if (!user) {
+        throw new Errors_1.NotFound("User not found");
+    }
+    return (0, response_1.SuccessResponse)(res, {
+        message: "Shipping company user retrieved successfully",
+        data: user,
+    });
+});
+// =========================================================================
+// 3. Create company user (admin only)
 // =========================================================================
 exports.createCompanyUser = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const companyId = req.user?.shippingCompanyId;
@@ -87,7 +119,7 @@ exports.createCompanyUser = (0, catchAsync_1.catchAsync)(async (req, res) => {
     }, 201);
 });
 // =========================================================================
-// 3. Update company user (admin only)
+// 4. Update company user (admin only)
 // =========================================================================
 exports.updateCompanyUser = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const companyId = req.user?.shippingCompanyId;
@@ -143,7 +175,7 @@ exports.updateCompanyUser = (0, catchAsync_1.catchAsync)(async (req, res) => {
     });
 });
 // =========================================================================
-// 4. Delete company user (admin only, cannot delete oneself)
+// 5. Delete company user (admin only, cannot delete oneself)
 // =========================================================================
 exports.deleteCompanyUser = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const companyId = req.user?.shippingCompanyId;
@@ -168,5 +200,47 @@ exports.deleteCompanyUser = (0, catchAsync_1.catchAsync)(async (req, res) => {
         .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyUsers.id, id));
     return (0, response_1.SuccessResponse)(res, {
         message: "User deleted successfully",
+    });
+});
+// =========================================================================
+// 6. Toggle company user status (admin only, cannot toggle oneself)
+// =========================================================================
+exports.toggleCompanyUserStatus = (0, catchAsync_1.catchAsync)(async (req, res) => {
+    const companyId = req.user?.shippingCompanyId;
+    const currentUserId = req.user?.id;
+    const { id } = req.params;
+    if (!companyId) {
+        throw new Errors_1.UnauthorizedError("Unauthorized access");
+    }
+    if (id === currentUserId) {
+        throw new Errors_1.BadRequest("You cannot change your own status");
+    }
+    const [user] = await connection_1.db
+        .select()
+        .from(schema_1.shippingCompanyUsers)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyUsers.id, id), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyUsers.shippingCompanyId, companyId)))
+        .limit(1);
+    if (!user) {
+        throw new Errors_1.NotFound("User not found");
+    }
+    const { status } = req.body || {};
+    const newStatus = status ? status : (user.status === "active" ? "inactive" : "active");
+    const updateData = {
+        status: newStatus,
+    };
+    // Invalidate tokens when user is deactivated
+    if (newStatus === "inactive") {
+        updateData.tokenVersion = user.tokenVersion + 1;
+    }
+    await connection_1.db
+        .update(schema_1.shippingCompanyUsers)
+        .set(updateData)
+        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanyUsers.id, id));
+    return (0, response_1.SuccessResponse)(res, {
+        message: `User status changed to ${newStatus} successfully`,
+        data: {
+            id: user.id,
+            status: newStatus,
+        },
     });
 });

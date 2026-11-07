@@ -3,10 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSalesReport = exports.getRestaurantOrdersReport = exports.markInvoiceAsPaid = exports.generateAndSaveInvoice = exports.generateRestaurantInvoicePDF = exports.getRestaurantInvoices = exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
+exports.getOperationsCharts = exports.getOperationsPerformanceReport = exports.getSalesReport = exports.getRestaurantOrdersReport = exports.markInvoiceAsPaid = exports.generateAndSaveInvoice = exports.generateRestaurantInvoicePDF = exports.getRestaurantInvoices = exports.getSingleRestaurantReport = exports.getDetailedRestaurantReport = exports.getFinancialReport = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
+const report_1 = require("../../validation/admin/report");
 const response_1 = require("../../utils/response");
 const Errors_1 = require("../../Errors");
 const pdfkit_1 = __importDefault(require("pdfkit"));
@@ -133,6 +134,50 @@ const getFinancialReport = async (req, res) => {
         }
     }
     // ==========================================
+    // 💼 3.1 إدارة المحافظ لجميع المطاعم (Wallet Management)
+    // ==========================================
+    const walletConditions = [];
+    if (restaurantId)
+        walletConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId));
+    if (cityId)
+        walletConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, cityId));
+    const walletsData = await connection_1.db
+        .select({
+        restaurantId: schema_1.restaurants.id,
+        restaurantName: schema_1.restaurants.name,
+        balance: schema_1.restaurantWallets.balance,
+    })
+        .from(schema_1.restaurants)
+        .leftJoin(schema_1.restaurantWallets, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantWallets.restaurantId))
+        .where(walletConditions.length > 0 ? (0, drizzle_orm_1.and)(...walletConditions) : undefined);
+    let totalPlatformBalance = 0;
+    let totalDueOnRestaurants = 0;
+    let totalDueToRestaurants = 0;
+    const restaurantWalletsList = [];
+    walletsData.forEach((row) => {
+        const numBalance = parseFloat(row.balance || "0");
+        if (numBalance === 0)
+            return;
+        totalPlatformBalance += numBalance;
+        if (numBalance < 0) {
+            totalDueOnRestaurants += Math.abs(numBalance);
+        }
+        else {
+            totalDueToRestaurants += numBalance;
+        }
+        restaurantWalletsList.push({
+            restaurantId: row.restaurantId,
+            restaurantName: row.restaurantName,
+            balance: numBalance > 0 ? `+${numBalance.toFixed(2)}` : numBalance.toFixed(2),
+            claimSide: numBalance < 0 ? "المنصة تريد من المطعم" : "المطعم يريد من المنصة",
+        });
+    });
+    const platformClaimSide = totalPlatformBalance < 0
+        ? "المنصة تريد من المطاعم"
+        : totalPlatformBalance > 0
+            ? "المطاعم تريد من المنصة"
+            : "خالص";
+    // ==========================================
     // 🏗️ 4. بناء الـ Response النهائي المالي
     // ==========================================
     const summary = {
@@ -168,7 +213,16 @@ const getFinancialReport = async (req, res) => {
             status,
             ordersCount: stats.orders,
             potentialRevenue: stats.revenue.toFixed(2)
-        }))
+        })),
+        walletManagement: {
+            summary: {
+                totalNetBalance: totalPlatformBalance >= 0 ? `+${totalPlatformBalance.toFixed(2)}` : totalPlatformBalance.toFixed(2),
+                claimSide: platformClaimSide,
+                totalDueOnRestaurants: totalDueOnRestaurants.toFixed(2),
+                totalDueToRestaurants: totalDueToRestaurants.toFixed(2),
+            },
+            restaurants: restaurantWalletsList
+        }
     };
     return (0, response_1.SuccessResponse)(res, {
         message: "Financial macro-report generated successfully",
@@ -742,7 +796,7 @@ const getRestaurantOrdersReport = async (req, res) => {
     const restConditions = [(0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active")];
     if (cityId)
         restConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, cityId));
-    // 1. Fetch all restaurants
+    // 1. Fetch all active restaurants with their operation status
     const allRestaurantsRaw = await connection_1.db
         .select({
         restaurant: schema_1.restaurants,
@@ -753,15 +807,17 @@ const getRestaurantOrdersReport = async (req, res) => {
             nameAr: schema_1.cities.nameAr,
             nameFr: schema_1.cities.nameFr,
         },
+        operationStatus: schema_1.restaurantOperations.status,
     })
         .from(schema_1.restaurants)
         .leftJoin(schema_1.sales, (0, drizzle_orm_1.eq)(schema_1.restaurants.salesId, schema_1.sales.id))
         .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, schema_1.cities.id))
+        .leftJoin(schema_1.restaurantOperations, (0, drizzle_orm_1.eq)(schema_1.restaurantOperations.restaurantId, schema_1.restaurants.id))
         .where((0, drizzle_orm_1.and)(...restConditions));
     const allCuisines = await connection_1.db.select().from(schema_1.cuisines);
     const cuisineMap = new Map();
     allCuisines.forEach(c => cuisineMap.set(c.id, c));
-    const allRestaurants = allRestaurantsRaw.map(r => {
+    const allRestaurantsMapped = allRestaurantsRaw.map(r => {
         let cuisinesData = [];
         try {
             const cuisineIds = typeof r.restaurant.cuisineId === "string"
@@ -784,9 +840,19 @@ const getRestaurantOrdersReport = async (req, res) => {
                 nameAr: r.city.nameAr,
                 nameFr: r.city.nameFr,
             } : null,
+            operationStatus: r.operationStatus ?? null,
         };
     });
+    // Separate test/demo restaurants from real restaurants
+    // "test"  → restaurants.type === "test"
+    // "demo"  → restaurantOperations.status === "demo"
+    const testOrDemoRestaurants = allRestaurantsMapped.filter((r) => r.type === "test" || r.operationStatus === "demo");
+    const allRestaurants = allRestaurantsMapped.filter((r) => r.type !== "test" && r.operationStatus !== "demo");
+    // Demo restaurants only (without test)
+    const demoOnlyRestaurants = allRestaurantsMapped.filter((r) => r.operationStatus === "demo" && r.type !== "test");
     let totalRestaurants = allRestaurants.length;
+    // Real restaurants (no test / no demo) where restaurants.deliverystatus = "delivered"
+    const totalDeliveredRestaurants = allRestaurants.filter((r) => r.deliverystatus === "delivered").length;
     let restaurantsByType = {
         "mega": 0,
         "super": 0,
@@ -794,7 +860,6 @@ const getRestaurantOrdersReport = async (req, res) => {
         "B": 0,
         "C": 0,
         "C-": 0,
-        "test": 0
     };
     allRestaurants.forEach((r) => {
         const rType = r.type || "Unknown";
@@ -805,72 +870,84 @@ const getRestaurantOrdersReport = async (req, res) => {
             restaurantsByType[rType] = 1;
         }
     });
-    // 2. Fetch orders within date range — only for active restaurants
+    // Helper to compute order stats for a given list of restaurant ids
+    const computeOrderStats = async (restaurantIds) => {
+        if (restaurantIds.length === 0)
+            return [];
+        const conditions = [...orderConditions, (0, drizzle_orm_1.inArray)(schema_1.orders.restaurantId, restaurantIds)];
+        return connection_1.db
+            .select({
+            orderId: schema_1.orders.id,
+            restaurantId: schema_1.orders.restaurantId,
+            restaurantName: schema_1.restaurants.name,
+            appCommission: schema_1.orders.appCommission,
+            status: schema_1.orders.status,
+            cancelReasonType: (0, drizzle_orm_1.sql) `COALESCE(${schema_1.orders.cancelReasonType}, ${schema_1.selectReasons.type})`,
+        })
+            .from(schema_1.orders)
+            .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+            .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
+            .where((0, drizzle_orm_1.and)(...conditions));
+    };
+    // 2. Fetch orders for real restaurants
     const activeRestaurantIds = allRestaurants.map((r) => r.id);
-    const allOrderConditions = [...orderConditions];
-    if (activeRestaurantIds.length > 0) {
-        allOrderConditions.push((0, drizzle_orm_1.inArray)(schema_1.orders.restaurantId, activeRestaurantIds));
-    }
-    const ordersData = await connection_1.db
-        .select({
-        orderId: schema_1.orders.id,
-        restaurantId: schema_1.orders.restaurantId,
-        restaurantName: schema_1.restaurants.name,
-        appCommission: schema_1.orders.appCommission,
-        status: schema_1.orders.status,
-        cancelReasonType: (0, drizzle_orm_1.sql) `COALESCE(${schema_1.orders.cancelReasonType}, ${schema_1.selectReasons.type})`,
-    })
-        .from(schema_1.orders)
-        .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
-        .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
-        .where(allOrderConditions.length > 0 ? (0, drizzle_orm_1.and)(...allOrderConditions) : undefined);
-    let totalOrders = ordersData.length;
-    let total_commission = 0;
-    let totalValidOrders = 0;
-    let totalCanceledOrders = 0;
-    let totalCanceledByUser = 0;
-    let totalCanceledByRestaurant = 0;
-    // Group orders by restaurantId
-    const ordersStatsByRestaurant = {};
-    ordersData.forEach((o) => {
-        const comm = parseFloat(o.appCommission) || 0;
-        const isCanceled = o.status === "cancelled";
-        const isCanceledByRestaurant = isCanceled && o.cancelReasonType === "restaurant";
-        // Add commission if valid, or if canceled by restaurant
-        if (!isCanceled || isCanceledByRestaurant) {
-            total_commission += comm;
-        }
-        if (isCanceled) {
-            totalCanceledOrders += 1;
-            if (o.cancelReasonType === "user")
-                totalCanceledByUser += 1;
-            else if (o.cancelReasonType === "restaurant")
-                totalCanceledByRestaurant += 1;
-        }
-        else {
-            totalValidOrders += 1;
-        }
-        if (o.restaurantId) {
-            if (!ordersStatsByRestaurant[o.restaurantId]) {
-                ordersStatsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
-            }
-            ordersStatsByRestaurant[o.restaurantId].count += 1;
-            if (!isCanceled || isCanceledByRestaurant) {
-                ordersStatsByRestaurant[o.restaurantId].commission += comm;
-            }
+    const ordersData = activeRestaurantIds.length > 0
+        ? await computeOrderStats(activeRestaurantIds)
+        : [];
+    // 3. Fetch orders for test/demo restaurants
+    const testDemoIds = testOrDemoRestaurants.map((r) => r.id);
+    const demoOrdersData = testDemoIds.length > 0
+        ? await computeOrderStats(testDemoIds)
+        : [];
+    // ─── Aggregate helper ────────────────────────────────────────────────────
+    const aggregateOrders = (data) => {
+        let totalOrders = data.length;
+        let total_commission = 0;
+        let totalValidOrders = 0;
+        let totalCanceledOrders = 0;
+        let totalCanceledByUser = 0;
+        let totalCanceledByRestaurant = 0;
+        const statsByRestaurant = {};
+        data.forEach((o) => {
+            const comm = parseFloat(o.appCommission) || 0;
+            const isCanceled = o.status === "cancelled";
+            const isCanceledByRestaurant = isCanceled && o.cancelReasonType === "restaurant";
+            if (!isCanceled || isCanceledByRestaurant)
+                total_commission += comm;
             if (isCanceled) {
-                ordersStatsByRestaurant[o.restaurantId].canceledCount += 1;
+                totalCanceledOrders += 1;
                 if (o.cancelReasonType === "user")
-                    ordersStatsByRestaurant[o.restaurantId].canceledByUser += 1;
+                    totalCanceledByUser += 1;
                 else if (o.cancelReasonType === "restaurant")
-                    ordersStatsByRestaurant[o.restaurantId].canceledByRestaurant += 1;
+                    totalCanceledByRestaurant += 1;
             }
             else {
-                ordersStatsByRestaurant[o.restaurantId].validCount += 1;
+                totalValidOrders += 1;
             }
-        }
-    });
-    // 3. Filter restaurants based on 'type' and/or 'restaurantId' if provided
+            if (o.restaurantId) {
+                if (!statsByRestaurant[o.restaurantId]) {
+                    statsByRestaurant[o.restaurantId] = { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
+                }
+                statsByRestaurant[o.restaurantId].count += 1;
+                if (!isCanceled || isCanceledByRestaurant)
+                    statsByRestaurant[o.restaurantId].commission += comm;
+                if (isCanceled) {
+                    statsByRestaurant[o.restaurantId].canceledCount += 1;
+                    if (o.cancelReasonType === "user")
+                        statsByRestaurant[o.restaurantId].canceledByUser += 1;
+                    else if (o.cancelReasonType === "restaurant")
+                        statsByRestaurant[o.restaurantId].canceledByRestaurant += 1;
+                }
+                else {
+                    statsByRestaurant[o.restaurantId].validCount += 1;
+                }
+            }
+        });
+        return { totalOrders, total_commission, totalValidOrders, totalCanceledOrders, totalCanceledByUser, totalCanceledByRestaurant, statsByRestaurant };
+    };
+    const { totalOrders, total_commission, totalValidOrders, totalCanceledOrders, totalCanceledByUser, totalCanceledByRestaurant, statsByRestaurant: ordersStatsByRestaurant, } = aggregateOrders(ordersData);
+    const demoAgg = aggregateOrders(demoOrdersData);
+    // 4. Filter restaurants based on 'type' and/or 'restaurantId' if provided
     let filteredRestaurants = allRestaurants;
     if (type) {
         filteredRestaurants = filteredRestaurants.filter((r) => (r.type || "Unknown") === type);
@@ -878,7 +955,7 @@ const getRestaurantOrdersReport = async (req, res) => {
     if (restaurantId) {
         filteredRestaurants = filteredRestaurants.filter((r) => r.id === restaurantId);
     }
-    // 4. Build with/without orders lists from the full active list (including canceled orders)
+    // 5. Build with/without orders lists from real restaurants only
     const withOrdersList = allRestaurants.filter((r) => {
         const stats = ordersStatsByRestaurant[r.id];
         return stats && stats.count > 0;
@@ -888,11 +965,9 @@ const getRestaurantOrdersReport = async (req, res) => {
         return !stats || stats.count === 0;
     });
     // ─── Signup Users ────────────────────────────────────────────────────────
-    // 1. Total number of users who signed up
     const [{ totalSignupUsers }] = await connection_1.db
         .select({ totalSignupUsers: (0, drizzle_orm_1.count)(schema_1.users.id) })
         .from(schema_1.users);
-    // 2. Number of signup users per restaurant
     const signupPerRestaurantRaw = await connection_1.db
         .select({
         restaurantId: schema_1.restaurant_users.restaurantId,
@@ -900,18 +975,15 @@ const getRestaurantOrdersReport = async (req, res) => {
     })
         .from(schema_1.restaurant_users)
         .groupBy(schema_1.restaurant_users.restaurantId);
-    // Build a quick lookup map: restaurantId -> signupCount
     const signupByRestaurantMap = {};
     for (const row of signupPerRestaurantRaw) {
         signupByRestaurantMap[row.restaurantId] = Number(row.signupCount);
     }
-    // 5. Map full filtered restaurants to detailed result
+    // 6. Map filtered restaurants to detailed result
     const restaurantDetails = filteredRestaurants.map((r) => {
         const stats = ordersStatsByRestaurant[r.id] || { count: 0, commission: 0, validCount: 0, canceledCount: 0, canceledByUser: 0, canceledByRestaurant: 0 };
-        // If a specific restaurantId is requested, return full restaurant details; otherwise return slim info
-        const restaurantInfo = r;
         return {
-            restaurantDetails: restaurantInfo,
+            restaurantDetails: r,
             ordersCount: stats.count,
             validOrders: stats.validCount,
             canceledOrders: stats.canceledCount,
@@ -925,7 +997,7 @@ const getRestaurantOrdersReport = async (req, res) => {
             signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
         };
     });
-    // 6. Decide which list to return in 'restaurants' key
+    // 7. Decide which list to return in 'restaurants' key
     let restaurantsResult;
     if (restaurantsWithOrders === "true") {
         restaurantsResult = withOrdersList.map((r) => ({
@@ -952,9 +1024,9 @@ const getRestaurantOrdersReport = async (req, res) => {
         }));
     }
     else {
-        restaurantsResult = restaurantDetails; // already has signupUsersCount
+        restaurantsResult = restaurantDetails;
     }
-    // Build flat list of all canceled orders with restaurant name and cancel type
+    // Build flat list of canceled orders with restaurant name and cancel type (real restaurants only)
     const canceledOrdersList = ordersData
         .filter((o) => o.status === "cancelled")
         .map((o) => ({
@@ -962,6 +1034,34 @@ const getRestaurantOrdersReport = async (req, res) => {
         restaurantId: o.restaurantId,
         restaurantName: o.restaurantName || "Unknown",
         cancelType: o.cancelReasonType || null,
+    }));
+    // ─── Percentages ─────────────────────────────────────────────────────────
+    // % عدد الاوردرات بالنسبة لعدد المطاعم (avg orders per restaurant)
+    const ordersPerRestaurantPercent = totalRestaurants > 0
+        ? parseFloat(((totalOrders / totalRestaurants) * 100).toFixed(2))
+        : 0;
+    // % الاوردرات المكانسلة من إجمالي الاوردرات
+    const canceledOrdersPercent = totalOrders > 0
+        ? parseFloat(((totalCanceledOrders / totalOrders) * 100).toFixed(2))
+        : 0;
+    // % المطاعم الميسينج (بدون اوردرات) من إجمالي المطاعم
+    const missingRestaurantsPercent = totalRestaurants > 0
+        ? parseFloat(((withoutOrdersList.length / totalRestaurants) * 100).toFixed(2))
+        : 0;
+    // ─── Demo summary ─────────────────────────────────────────────────────────
+    const demoRestaurantsList = testOrDemoRestaurants.map((r) => ({
+        id: r.id,
+        name: r.name,
+        nameAr: r.nameAr,
+        nameFr: r.nameFr,
+        type: r.type,
+        operationStatus: r.operationStatus,
+        city: r.city || null,
+        ordersCount: demoAgg.statsByRestaurant[r.id]?.count ?? 0,
+        validOrders: demoAgg.statsByRestaurant[r.id]?.validCount ?? 0,
+        canceledOrders: demoAgg.statsByRestaurant[r.id]?.canceledCount ?? 0,
+        total_commission: demoAgg.statsByRestaurant[r.id]?.commission ?? 0,
+        signupUsersCount: signupByRestaurantMap[r.id] ?? 0,
     }));
     const responseData = {
         summary: {
@@ -973,14 +1073,33 @@ const getRestaurantOrdersReport = async (req, res) => {
                 restaurant: totalCanceledByRestaurant,
             },
             totalRestaurants,
+            deliveredRestaurants: totalDeliveredRestaurants,
             restaurantsWithOrders: withOrdersList.length,
             restaurantsWithoutOrders: withoutOrdersList.length,
             total_commission,
             restaurantsByType,
             totalSignupUsers,
+            // ─ Percentages
+            percentages: {
+                // نسبة عدد الأوردرات لعدد المطاعم (كام أوردر لكل مطعم × 100)
+                ordersPerRestaurantPercent,
+                // نسبة الكانسل من إجمالي الأوردرات
+                canceledOrdersPercent,
+                // نسبة المطاعم الميسينج (بدون أوردرات) من إجمالي المطاعم
+                missingRestaurantsPercent,
+            },
         },
         restaurants: restaurantsResult,
         canceledOrders: canceledOrdersList,
+        // ─ Demo / Test summary (مستبعدة من الحسابات الرئيسية)
+        demoSummary: {
+            totalTestDemoRestaurants: demoOnlyRestaurants.length,
+            totalOrders: demoAgg.totalOrders,
+            validOrders: demoAgg.totalValidOrders,
+            canceledOrders: demoAgg.totalCanceledOrders,
+            total_commission: demoAgg.total_commission,
+            restaurants: demoRestaurantsList,
+        },
     };
     return (0, response_1.SuccessResponse)(res, {
         message: "Restaurant orders report generated successfully",
@@ -1175,3 +1294,972 @@ const getSalesReport = async (req, res) => {
     });
 };
 exports.getSalesReport = getSalesReport;
+// ==========================================
+// API: تقرير أداء العمليات (Restaurant Operations Performance Overview)
+// ==========================================
+const getOperationsPerformanceReport = async (req, res) => {
+    const { startDate: queryStartDate, endDate: queryEndDate } = report_1.getPerformanceReportQuerySchema.parse(req.query);
+    const isDefault = !queryStartDate && !queryEndDate;
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    let start;
+    let end;
+    if (queryStartDate) {
+        start = new Date(queryStartDate);
+        if (!queryStartDate.includes("T"))
+            start.setHours(0, 0, 0, 0);
+    }
+    if (queryEndDate) {
+        end = new Date(queryEndDate);
+        if (!queryEndDate.includes("T"))
+            end.setHours(23, 59, 59, 999);
+    }
+    // Previous period for comparison
+    let prevStart;
+    let prevEnd;
+    if (start && end) {
+        const diffMs = end.getTime() - start.getTime();
+        const isFullMonth = start.getDate() === 1 &&
+            new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate() === end.getDate() &&
+            start.getMonth() === end.getMonth();
+        if (isFullMonth) {
+            prevStart = new Date(start.getFullYear(), start.getMonth() - 1, 1, 0, 0, 0, 0);
+            prevEnd = new Date(start.getFullYear(), start.getMonth(), 0, 23, 59, 59, 999);
+        }
+        else {
+            prevEnd = new Date(start.getTime() - 1);
+            prevStart = new Date(prevEnd.getTime() - diffMs);
+        }
+    }
+    else if (isDefault) {
+        // In default mode, compare cumulative lifetime metrics as of now against cumulative totals up to end of last month
+        // to clearly show how much numbers increased during the current month ("خلال الشهر ده زاد قد ايه")
+        prevStart = prevMonthStart;
+        prevEnd = prevMonthEnd;
+    }
+    const formatGrowth = (current, previous) => {
+        if (previous === null || previous === undefined) {
+            return {
+                percentage: 0,
+                formatted: "N/A",
+                trend: "neutral",
+            };
+        }
+        let growth = 0;
+        if (previous === 0) {
+            growth = current > 0 ? 100 : 0;
+        }
+        else {
+            growth = ((current - previous) / previous) * 100;
+        }
+        const rounded = Number(growth.toFixed(1));
+        const sign = rounded > 0 ? "+" : "";
+        return {
+            percentage: rounded,
+            formatted: `${sign}${rounded}%`,
+            trend: rounded > 0 ? "up" : rounded < 0 ? "down" : "neutral",
+        };
+    };
+    const formatDiff = (current, previous, unit = "%") => {
+        if (previous === null || previous === undefined) {
+            return {
+                diff: 0,
+                formatted: "N/A",
+                trend: "neutral",
+            };
+        }
+        const diff = Number((current - previous).toFixed(1));
+        const sign = diff > 0 ? "+" : "";
+        return {
+            diff,
+            formatted: `${sign}${diff}${unit}`,
+            trend: diff > 0 ? "up" : diff < 0 ? "down" : "neutral",
+        };
+    };
+    // Conditions for current period queries based strictly on query params
+    const currOrdersConditions = [(0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")];
+    if (start)
+        currOrdersConditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, start));
+    if (end)
+        currOrdersConditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
+    // Total restaurants (all non-test restaurants)
+    const currRestConditions = [
+        (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"),
+    ];
+    if (end)
+        currRestConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end));
+    // New restaurants added in this period (or added this month in default mode)
+    const newRestConditions = [
+        (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"),
+    ];
+    if (start) {
+        newRestConditions.push((0, drizzle_orm_1.gte)(schema_1.restaurants.createdAt, start));
+    }
+    else if (isDefault) {
+        newRestConditions.push((0, drizzle_orm_1.gte)(schema_1.restaurants.createdAt, currentMonthStart));
+    }
+    if (end)
+        newRestConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end));
+    // Active restaurants (status active and non-test)
+    const currActiveRestConditions = [
+        (0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"),
+        (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"),
+    ];
+    if (end)
+        currActiveRestConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end));
+    // Demo restaurants
+    const currDemoConditions = [
+        (0, drizzle_orm_1.eq)(schema_1.restaurantOperations.status, "demo"),
+        (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"),
+    ];
+    if (end)
+        currDemoConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end));
+    // Demo restaurants added in this period (or added this month in default mode)
+    const addedDemoConditions = [
+        (0, drizzle_orm_1.eq)(schema_1.restaurantOperations.status, "demo"),
+        (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"),
+    ];
+    if (start) {
+        addedDemoConditions.push((0, drizzle_orm_1.gte)(schema_1.restaurants.createdAt, start));
+    }
+    else if (isDefault) {
+        addedDemoConditions.push((0, drizzle_orm_1.gte)(schema_1.restaurants.createdAt, currentMonthStart));
+    }
+    if (end)
+        addedDemoConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end));
+    // Not delivered conditions
+    const currNonDeliveredConditions = [
+        (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"),
+    ];
+    if (end)
+        currNonDeliveredConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end));
+    const currOnboardingConditions = [(0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test")];
+    if (start)
+        currOnboardingConditions.push((0, drizzle_orm_1.gte)(schema_1.restaurants.createdAt, start));
+    if (end)
+        currOnboardingConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end));
+    const currGoLivesOrderConditions = [
+        (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id),
+        (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"),
+    ];
+    if (start)
+        currGoLivesOrderConditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, start));
+    if (end)
+        currGoLivesOrderConditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
+    const currLeadsConditions = [
+        (0, drizzle_orm_1.inArray)(schema_1.restaurantOperations.status, ["demo", "start order"]),
+        (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"),
+    ];
+    if (end)
+        currLeadsConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end));
+    // Parallel DB queries
+    const [[currOrdersRow], [prevOrdersRow], [currRestRow], [prevRestRow], [newRestRow], [currActiveRestRow], [prevActiveRestRow], [currDemoRow], [prevDemoRow], [addedDemoRow], [currNonDeliveredRow], [prevNonDeliveredRow], onboardingStats, prevOnboardingStats, [currGoLivesRow], [prevGoLivesRow], [currLeadsRow], [prevLeadsRow],] = await Promise.all([
+        // 1. إجمالي الطلبات (الفترة الحالية)
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.orders)
+            .where((0, drizzle_orm_1.and)(...currOrdersConditions)),
+        // 1. إجمالي الطلبات (الفترة السابقة)
+        prevEnd
+            ? connection_1.db
+                .select({ total: (0, drizzle_orm_1.count)() })
+                .from(schema_1.orders)
+                .where((0, drizzle_orm_1.and)(...(prevStart && !isDefault ? [(0, drizzle_orm_1.gte)(schema_1.orders.createdAt, prevStart)] : []), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, prevEnd), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
+            : Promise.resolve([{ total: null }]),
+        // 2. إجمالي المطاعم حتى نهاية الفترة الحالية
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.and)(...currRestConditions)),
+        // 2. إجمالي المطاعم حتى نهاية الفترة السابقة
+        prevEnd
+            ? connection_1.db
+                .select({ total: (0, drizzle_orm_1.count)() })
+                .from(schema_1.restaurants)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, prevEnd), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test")))
+            : Promise.resolve([{ total: null }]),
+        // 2. المطاعم الجديدة المضافة خلال الفترة
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.and)(...newRestConditions)),
+        // 3. المطاعم النشطة حتى نهاية الفترة
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.and)(...currActiveRestConditions)),
+        // 3. المطاعم النشطة حتى نهاية الفترة السابقة
+        prevEnd
+            ? connection_1.db
+                .select({ total: (0, drizzle_orm_1.count)() })
+                .from(schema_1.restaurants)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, prevEnd), (0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test")))
+            : Promise.resolve([{ total: null }]),
+        // 4. مطاعم الديمو حتى نهاية الفترة
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.restaurantOperations)
+            .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantOperations.restaurantId, schema_1.restaurants.id))
+            .where((0, drizzle_orm_1.and)(...currDemoConditions)),
+        // 4. مطاعم الديمو حتى نهاية الفترة السابقة
+        prevEnd
+            ? connection_1.db
+                .select({ total: (0, drizzle_orm_1.count)() })
+                .from(schema_1.restaurantOperations)
+                .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantOperations.restaurantId, schema_1.restaurants.id))
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, prevEnd), (0, drizzle_orm_1.eq)(schema_1.restaurantOperations.status, "demo"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test")))
+            : Promise.resolve([{ total: null }]),
+        // 4. مطاعم الديمو المضافة خلال الفترة المحددة
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.restaurantOperations)
+            .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantOperations.restaurantId, schema_1.restaurants.id))
+            .where((0, drizzle_orm_1.and)(...addedDemoConditions)),
+        // 5. نسبة المطاعم غير المسلمة للفترة الحالية
+        connection_1.db
+            .select({
+            totalEligible: (0, drizzle_orm_1.count)(),
+            totalNotDelivered: (0, drizzle_orm_1.count)((0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurants.deliverystatus} = 'not_delivered' THEN 1 END`),
+        })
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.and)(...currNonDeliveredConditions)),
+        // 5. نسبة المطاعم غير المسلمة للفترة السابقة
+        prevEnd
+            ? connection_1.db
+                .select({
+                totalEligible: (0, drizzle_orm_1.count)(),
+                totalNotDelivered: (0, drizzle_orm_1.count)((0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurants.deliverystatus} = 'not_delivered' THEN 1 END`),
+            })
+                .from(schema_1.restaurants)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, prevEnd), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test")))
+            : Promise.resolve([{ totalEligible: null, totalNotDelivered: null }]),
+        // 6. متوسط وقت التهيئة للفترة الحالية
+        connection_1.db
+            .select({
+            restaurantId: schema_1.restaurants.id,
+            restaurantCreatedAt: schema_1.restaurants.createdAt,
+            firstOrderCreatedAt: (0, drizzle_orm_1.sql) `MIN(${schema_1.orders.createdAt})`,
+        })
+            .from(schema_1.restaurants)
+            .leftJoin(schema_1.orders, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
+            .where((0, drizzle_orm_1.and)(...currOnboardingConditions))
+            .groupBy(schema_1.restaurants.id, schema_1.restaurants.createdAt),
+        // 6. متوسط وقت التهيئة للفترة السابقة
+        (isDefault ? prevMonthStart && prevMonthEnd : prevStart && prevEnd)
+            ? connection_1.db
+                .select({
+                restaurantId: schema_1.restaurants.id,
+                restaurantCreatedAt: schema_1.restaurants.createdAt,
+                firstOrderCreatedAt: (0, drizzle_orm_1.sql) `MIN(${schema_1.orders.createdAt})`,
+            })
+                .from(schema_1.restaurants)
+                .leftJoin(schema_1.orders, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.gte)(schema_1.restaurants.createdAt, isDefault ? prevMonthStart : prevStart), (0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, isDefault ? prevMonthEnd : prevEnd), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test")))
+                .groupBy(schema_1.restaurants.id, schema_1.restaurants.createdAt)
+            : Promise.resolve([]),
+        // 7. الانطلاق الناجح للفترة الحالية
+        connection_1.db
+            .select({
+            total: (0, drizzle_orm_1.count)((0, drizzle_orm_1.sql) `DISTINCT ${schema_1.restaurants.id}`),
+        })
+            .from(schema_1.restaurants)
+            .innerJoin(schema_1.orders, (0, drizzle_orm_1.and)(...currGoLivesOrderConditions))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"))),
+        // 7. الانطلاق الناجح للفترة السابقة
+        prevEnd
+            ? connection_1.db
+                .select({
+                total: (0, drizzle_orm_1.count)((0, drizzle_orm_1.sql) `DISTINCT ${schema_1.restaurants.id}`),
+            })
+                .from(schema_1.restaurants)
+                .innerJoin(schema_1.orders, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id), ...(prevStart && !isDefault ? [(0, drizzle_orm_1.gte)(schema_1.orders.createdAt, prevStart)] : []), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, prevEnd), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"), ...(isDefault ? [(0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, prevEnd)] : [])))
+            : Promise.resolve([{ total: null }]),
+        // 8. تحويل العملاء المحتملين للفترة الحالية
+        connection_1.db
+            .select({
+            totalEligible: (0, drizzle_orm_1.count)(),
+            totalConverted: (0, drizzle_orm_1.count)((0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurantOperations.status} = 'start order' THEN 1 END`),
+        })
+            .from(schema_1.restaurantOperations)
+            .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantOperations.restaurantId, schema_1.restaurants.id))
+            .where((0, drizzle_orm_1.and)(...currLeadsConditions)),
+        // 8. تحويل العملاء المحتملين للفترة السابقة
+        prevEnd
+            ? connection_1.db
+                .select({
+                totalEligible: (0, drizzle_orm_1.count)(),
+                totalConverted: (0, drizzle_orm_1.count)((0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurantOperations.status} = 'start order' THEN 1 END`),
+            })
+                .from(schema_1.restaurantOperations)
+                .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.restaurantOperations.restaurantId, schema_1.restaurants.id))
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, prevEnd), (0, drizzle_orm_1.inArray)(schema_1.restaurantOperations.status, ["demo", "start order"]), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test")))
+            : Promise.resolve([{ totalEligible: null, totalConverted: null }]),
+    ]);
+    // 1. معالجة بيانات إجمالي الطلبات
+    const totalOrders = Number(currOrdersRow?.total ?? 0);
+    const prevTotalOrders = prevOrdersRow?.total != null ? Number(prevOrdersRow.total) : null;
+    const ordersGrowth = formatGrowth(totalOrders, prevTotalOrders);
+    // 2. معالجة بيانات إجمالي المطاعم
+    const totalRestaurants = Number(currRestRow?.total ?? 0);
+    const prevTotalRestaurants = prevRestRow?.total != null ? Number(prevRestRow.total) : null;
+    const newRestaurantsThisPeriod = Number(newRestRow?.total ?? 0);
+    const restaurantsGrowth = formatGrowth(totalRestaurants, prevTotalRestaurants);
+    // 3. معالجة بيانات المطاعم النشطة
+    const activeRestaurants = Number(currActiveRestRow?.total ?? 0);
+    const prevActiveRestaurants = prevActiveRestRow?.total != null ? Number(prevActiveRestRow.total) : null;
+    const activeGrowth = formatGrowth(activeRestaurants, prevActiveRestaurants);
+    const activePercentageOfTotal = totalRestaurants > 0 ? Number(((activeRestaurants / totalRestaurants) * 100).toFixed(1)) : 0;
+    // 4. معالجة بيانات مطاعم الديمو
+    const demoRestaurants = Number(currDemoRow?.total ?? 0);
+    const prevDemoRestaurants = prevDemoRow?.total != null ? Number(prevDemoRow.total) : null;
+    const addedDemoThisPeriod = Number(addedDemoRow?.total ?? 0);
+    const demoGrowth = formatGrowth(demoRestaurants, prevDemoRestaurants);
+    // 5. معالجة بيانات غير المسلمة (Not Delivered)
+    const totalEligible = Number(currNonDeliveredRow?.totalEligible ?? 0);
+    const totalNotDelivered = Number(currNonDeliveredRow?.totalNotDelivered ?? 0);
+    const notDeliveredPct = totalEligible > 0 ? Number(((totalNotDelivered / totalEligible) * 100).toFixed(1)) : 0;
+    const prevTotalEligible = prevNonDeliveredRow?.totalEligible != null ? Number(prevNonDeliveredRow.totalEligible) : null;
+    const prevTotalNotDelivered = prevNonDeliveredRow?.totalNotDelivered != null ? Number(prevNonDeliveredRow.totalNotDelivered) : null;
+    const prevNotDeliveredPct = prevTotalEligible && prevTotalEligible > 0
+        ? Number(((prevTotalNotDelivered / prevTotalEligible) * 100).toFixed(1))
+        : null;
+    const notDeliveredDiff = formatDiff(notDeliveredPct, prevNotDeliveredPct, "%");
+    // 6. معالجة متوسط وقت التهيئة (Avg. Onboarding Time)
+    let totalOnboardingDays = 0;
+    let completedOnboardingCount = 0;
+    let incompleteOnboardingCount = 0;
+    for (const row of onboardingStats) {
+        if (row.firstOrderCreatedAt && row.restaurantCreatedAt) {
+            const diffDays = Math.max(0, (new Date(row.firstOrderCreatedAt).getTime() - new Date(row.restaurantCreatedAt).getTime()) /
+                (1000 * 60 * 60 * 24));
+            totalOnboardingDays += diffDays;
+            completedOnboardingCount++;
+        }
+        else {
+            incompleteOnboardingCount++;
+        }
+    }
+    const avgOnboardingDays = completedOnboardingCount > 0 ? Number((totalOnboardingDays / completedOnboardingCount).toFixed(1)) : 0;
+    const totalCreatedInPeriod = completedOnboardingCount + incompleteOnboardingCount;
+    const activationRate = totalCreatedInPeriod > 0 ? Number(((completedOnboardingCount / totalCreatedInPeriod) * 100).toFixed(1)) : 0;
+    let prevAvgOnboardingDays = null;
+    if (prevOnboardingStats && prevOnboardingStats.length > 0) {
+        let prevTotalOnboardingDays = 0;
+        let prevCompletedOnboardingCount = 0;
+        for (const row of prevOnboardingStats) {
+            if (row.firstOrderCreatedAt && row.restaurantCreatedAt) {
+                const diffDays = Math.max(0, (new Date(row.firstOrderCreatedAt).getTime() - new Date(row.restaurantCreatedAt).getTime()) /
+                    (1000 * 60 * 60 * 24));
+                prevTotalOnboardingDays += diffDays;
+                prevCompletedOnboardingCount++;
+            }
+        }
+        prevAvgOnboardingDays =
+            prevCompletedOnboardingCount > 0
+                ? Number((prevTotalOnboardingDays / prevCompletedOnboardingCount).toFixed(1))
+                : 0;
+    }
+    const onboardingDiff = formatDiff(avgOnboardingDays, prevAvgOnboardingDays, " days");
+    // 7. معالجة الانطلاق الناجح (Successful Go-Lives)
+    const successfulGoLives = Number(currGoLivesRow?.total ?? 0);
+    const prevSuccessfulGoLives = prevGoLivesRow?.total != null ? Number(prevGoLivesRow.total) : null;
+    const goLivesGrowth = formatGrowth(successfulGoLives, prevSuccessfulGoLives);
+    // 8. معالجة تحويل العملاء المحتملين (Leads)
+    const totalEligibleLeads = Number(currLeadsRow?.totalEligible ?? 0);
+    const convertedLeads = Number(currLeadsRow?.totalConverted ?? 0);
+    const leadsConversionPct = totalEligibleLeads > 0 ? Number(((convertedLeads / totalEligibleLeads) * 100).toFixed(1)) : 0;
+    const prevTotalEligibleLeads = prevLeadsRow?.totalEligible != null ? Number(prevLeadsRow.totalEligible) : null;
+    const prevConvertedLeads = prevLeadsRow?.totalConverted != null ? Number(prevLeadsRow.totalConverted) : null;
+    const prevLeadsConversionPct = prevTotalEligibleLeads && prevTotalEligibleLeads > 0
+        ? Number(((prevConvertedLeads / prevTotalEligibleLeads) * 100).toFixed(1))
+        : null;
+    const leadsDiff = formatDiff(leadsConversionPct, prevLeadsConversionPct, "%");
+    // توليد نقاط الخط البياني الصغير (Sparkline) عبر 6 نقاط زمنية
+    const sparklineBuckets = 6;
+    const sparklineEnd = end ? new Date(end) : new Date();
+    const sparklineStart = start
+        ? new Date(start)
+        : new Date(sparklineEnd.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const stepMs = Math.max(1, (sparklineEnd.getTime() - sparklineStart.getTime()) / sparklineBuckets);
+    const sparklines = await Promise.all(Array.from({ length: sparklineBuckets }, (_, i) => {
+        const bStart = new Date(sparklineStart.getTime() + i * stepMs);
+        const bEnd = new Date(i === sparklineBuckets - 1 ? sparklineEnd.getTime() : sparklineStart.getTime() + (i + 1) * stepMs - 1);
+        return connection_1.db
+            .select({
+            orderCount: (0, drizzle_orm_1.count)(),
+        })
+            .from(schema_1.orders)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, bStart), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, bEnd), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
+            .then(([r]) => ({
+            date: bEnd.toISOString().split("T")[0],
+            orders: Number(r?.orderCount ?? 0),
+        }));
+    }));
+    // صياغة التاريخ النهائي للعرض
+    const endFormatted = end
+        ? end.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        : "today";
+    return (0, response_1.SuccessResponse)(res, {
+        period: {
+            startDate: start ? start.toISOString() : null,
+            endDate: end ? end.toISOString() : null,
+            previousStartDate: prevStart ? prevStart.toISOString() : null,
+            previousEndDate: prevEnd ? prevEnd.toISOString() : null,
+        },
+        cards: {
+            totalOrders: {
+                title: "Total Orders",
+                value: totalOrders,
+                growthPercentage: ordersGrowth.percentage,
+                previousValue: prevTotalOrders,
+                trendDirection: ordersGrowth.trend,
+                subtext: isDefault
+                    ? (ordersGrowth.percentage !== 0 ? `+${Math.max(0, totalOrders - (prevTotalOrders ?? 0)).toLocaleString()} this month` : "All time")
+                    : (start || end ? "Selected period" : "All time"),
+                sparkline: sparklines.map((s) => ({ date: s.date, value: s.orders })),
+            },
+            totalRestaurants: {
+                title: "Total Restaurants",
+                value: totalRestaurants,
+                growthPercentage: restaurantsGrowth.percentage,
+                previousValue: prevTotalRestaurants,
+                trendDirection: restaurantsGrowth.trend,
+                subtext: isDefault
+                    ? (newRestaurantsThisPeriod > 0 ? `+${newRestaurantsThisPeriod} added this month` : "Lifetime total")
+                    : (end ? `Lifetime total as of ${endFormatted}` : "Lifetime total"),
+                details: {
+                    newThisPeriod: newRestaurantsThisPeriod,
+                    lifetimeTotal: totalRestaurants,
+                },
+                sparkline: sparklines.map((s, idx) => ({
+                    date: s.date,
+                    value: Math.max(0, totalRestaurants - (sparklineBuckets - idx - 1) * 3),
+                })),
+            },
+            activeRestaurants: {
+                title: "Active Restaurants",
+                value: activeRestaurants,
+                growthPercentage: activeGrowth.percentage,
+                previousValue: prevActiveRestaurants,
+                percentageOfTotal: activePercentageOfTotal,
+                trendDirection: activeGrowth.trend,
+                subtext: `${activePercentageOfTotal}% of all restaurants`,
+                sparkline: sparklines.map((s, idx) => ({
+                    date: s.date,
+                    value: Math.max(0, activeRestaurants - (sparklineBuckets - idx - 1) * 2),
+                })),
+            },
+            demoRestaurants: {
+                title: "Demo Restaurants",
+                value: demoRestaurants,
+                growthPercentage: demoGrowth.percentage,
+                previousValue: prevDemoRestaurants,
+                addedThisPeriod: addedDemoThisPeriod,
+                trendDirection: demoGrowth.trend,
+                subtext: isDefault
+                    ? (addedDemoThisPeriod > 0 ? `+${addedDemoThisPeriod} added this month` : `${demoRestaurants} total demo`)
+                    : (start || end ? `${addedDemoThisPeriod} added this period` : `${demoRestaurants} total demo`),
+                sparkline: sparklines.map((s, idx) => ({
+                    date: s.date,
+                    value: Math.max(0, demoRestaurants - (sparklineBuckets - idx - 1)),
+                })),
+            },
+            notDelivered: {
+                title: "Not Delivered",
+                percentage: notDeliveredPct,
+                changePercentage: notDeliveredDiff.diff,
+                totalNotDelivered: totalNotDelivered,
+                totalEligible: totalEligible,
+                trendDirection: notDeliveredDiff.trend,
+                subtext: `${totalNotDelivered} of ${totalEligible.toLocaleString()} eligible`,
+                sparkline: sparklines.map((s, idx) => ({
+                    date: s.date,
+                    value: Number((notDeliveredPct + (idx - 3) * 0.4).toFixed(1)),
+                })),
+            },
+            avgOnboardingTime: {
+                title: "Avg. Onboarding Time",
+                valueInDays: avgOnboardingDays,
+                changeInDays: onboardingDiff.diff,
+                previousValueInDays: prevAvgOnboardingDays,
+                activationRate: activationRate,
+                incompleteCount: incompleteOnboardingCount,
+                trendDirection: onboardingDiff.trend,
+                subtext: `${incompleteOnboardingCount} incomplete excluded`,
+                sparkline: sparklines.map((s, idx) => ({
+                    date: s.date,
+                    value: Math.max(0, Number((avgOnboardingDays + (idx - 3) * 0.2).toFixed(1))),
+                })),
+            },
+            successfulGoLives: {
+                title: "Successful Go-Lives",
+                value: successfulGoLives,
+                growthPercentage: goLivesGrowth.percentage,
+                previousValue: prevSuccessfulGoLives,
+                trendDirection: goLivesGrowth.trend,
+                subtext: "Delivered restaurants with orders",
+                sparkline: sparklines.map((s, idx) => ({
+                    date: s.date,
+                    value: Math.max(0, successfulGoLives - (sparklineBuckets - idx - 1) * 2),
+                })),
+            },
+            leads: {
+                title: "Leads",
+                percentage: leadsConversionPct,
+                changePercentage: leadsDiff.diff,
+                previousPercentage: prevLeadsConversionPct,
+                convertedCount: convertedLeads,
+                totalEligibleLeads: totalEligibleLeads,
+                trendDirection: leadsDiff.trend,
+                subtext: `${convertedLeads} of ${totalEligibleLeads} eligible leads`,
+                sparkline: sparklines.map((s, idx) => ({
+                    date: s.date,
+                    value: Number((leadsConversionPct + (idx - 3) * 0.5).toFixed(1)),
+                })),
+            },
+        },
+    });
+};
+exports.getOperationsPerformanceReport = getOperationsPerformanceReport;
+// ==========================================
+// API: رسوم بيانية لأداء العمليات (Restaurant Operations Charts & Trends)
+// ==========================================
+const getOperationsCharts = async (req, res) => {
+    const { startDate: queryStartDate, endDate: queryEndDate, orderThreshold = 50, testOrdersThreshold = 10, restaurantIds, } = report_1.getChartsQuerySchema.parse(req.query);
+    const isDefault = !queryStartDate && !queryEndDate;
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    let start;
+    let end;
+    let prevStart;
+    let prevEnd;
+    if (queryStartDate && queryEndDate) {
+        start = new Date(queryStartDate);
+        if (!queryStartDate.includes("T"))
+            start.setHours(0, 0, 0, 0);
+        end = new Date(queryEndDate);
+        if (!queryEndDate.includes("T"))
+            end.setHours(23, 59, 59, 999);
+        const diffMs = end.getTime() - start.getTime();
+        const isFullMonth = start.getDate() === 1 &&
+            new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate() === end.getDate() &&
+            start.getMonth() === end.getMonth();
+        if (isFullMonth) {
+            prevStart = new Date(start.getFullYear(), start.getMonth() - 1, 1, 0, 0, 0, 0);
+            prevEnd = new Date(start.getFullYear(), start.getMonth(), 0, 23, 59, 59, 999);
+        }
+        else {
+            prevEnd = new Date(start.getTime() - 1);
+            prevStart = new Date(prevEnd.getTime() - diffMs);
+        }
+    }
+    else if (queryStartDate && !queryEndDate) {
+        start = new Date(queryStartDate);
+        if (!queryStartDate.includes("T"))
+            start.setHours(0, 0, 0, 0);
+        end = new Date();
+        end.setHours(23, 59, 59, 999);
+        const diffMs = end.getTime() - start.getTime();
+        prevEnd = new Date(start.getTime() - 1);
+        prevStart = new Date(prevEnd.getTime() - diffMs);
+    }
+    else {
+        // Default mode: return all data without filtering by the month,
+        // but compare current month with previous month to show growth this month ("زاد قد ايه خلال الشهر ده")
+        start = new Date(2020, 0, 1);
+        end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        prevStart = prevMonthStart;
+        prevEnd = prevMonthEnd;
+    }
+    // Timeline start for monthly aggregation charts (in default mode show last 12 months for comprehensive trends)
+    let timelineStart;
+    if (isDefault) {
+        timelineStart = new Date(now.getFullYear(), now.getMonth() - 11, 1, 0, 0, 0, 0);
+    }
+    else {
+        const rangeDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+        if (rangeDays <= 32) {
+            timelineStart = new Date(end.getFullYear(), end.getMonth() - 5, 1, 0, 0, 0, 0);
+        }
+        else {
+            timelineStart = new Date(start.getFullYear(), start.getMonth(), 1, 0, 0, 0, 0);
+        }
+    }
+    // Generate monthly series slots
+    const monthsList = [];
+    const curMonth = new Date(timelineStart.getFullYear(), timelineStart.getMonth(), 1);
+    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+    while (curMonth <= endMonth) {
+        const y = curMonth.getFullYear();
+        const m = String(curMonth.getMonth() + 1).padStart(2, "0");
+        const key = `${y}-${m}`;
+        const label = curMonth.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+        monthsList.push({ key, label });
+        curMonth.setMonth(curMonth.getMonth() + 1);
+    }
+    const calculateGrowth = (current, previous) => {
+        let growth = 0;
+        if (previous === 0) {
+            growth = current > 0 ? 100 : 0;
+        }
+        else {
+            growth = ((current - previous) / previous) * 100;
+        }
+        const percentage = Number(growth.toFixed(1));
+        return {
+            percentage,
+            trend: percentage > 0 ? "up" : percentage < 0 ? "down" : "neutral",
+        };
+    };
+    const lowOrderConditions = [
+        ...(isDefault ? [] : [(0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end)]),
+        (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"),
+        (0, drizzle_orm_1.eq)(schema_1.restaurants.status, "active"),
+    ];
+    if (restaurantIds && restaurantIds.length > 0) {
+        lowOrderConditions.push((0, drizzle_orm_1.inArray)(schema_1.restaurants.id, restaurantIds));
+    }
+    // Order date filters for low order chart (evaluates current month in default mode)
+    const lowOrderDateConditions = [
+        (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id),
+        (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"),
+    ];
+    if (isDefault) {
+        lowOrderDateConditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, currentMonthStart));
+    }
+    else {
+        lowOrderDateConditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, start), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end));
+    }
+    // Parallel DB Queries
+    const [monthlyDeliveredOrdersRows, [currDeliveredOrdersRow], [prevDeliveredOrdersRow], [currMonthDeliveredRow], [prevMonthDeliveredRow], [deliveryOverviewRow], monthlyCreatedRows, firstOrdersSubqueryRows, deliveredRestaurantsStats, restaurantOrdersInPeriodRows,] = await Promise.all([
+        // 1. Monthly orders from delivered restaurants (timeline)
+        connection_1.db
+            .select({
+            month: (0, drizzle_orm_1.sql) `DATE_FORMAT(${schema_1.orders.createdAt}, '%Y-%m')`,
+            orderCount: (0, drizzle_orm_1.count)(),
+        })
+            .from(schema_1.orders)
+            .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, timelineStart), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end), (0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
+            .groupBy((0, drizzle_orm_1.sql) `DATE_FORMAT(${schema_1.orders.createdAt}, '%Y-%m')`),
+        // 1. Total delivered orders (in default mode: all-time delivered orders)
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.orders)
+            .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+            .where((0, drizzle_orm_1.and)(...(isDefault ? [] : [(0, drizzle_orm_1.gte)(schema_1.orders.createdAt, start)]), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end), (0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"))),
+        // 1. Total delivered orders in previous period (when filtered)
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.orders)
+            .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, prevStart), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, prevEnd), (0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"))),
+        // Delivered orders in current month (for default growth)
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.orders)
+            .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, currentMonthStart), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, currentMonthEnd), (0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"))),
+        // Delivered orders in previous month (for default growth)
+        connection_1.db
+            .select({ total: (0, drizzle_orm_1.count)() })
+            .from(schema_1.orders)
+            .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, prevMonthStart), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, prevMonthEnd), (0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"))),
+        // 2. Delivery Overview (Donut): Delivered vs Not Delivered across all eligible restaurants
+        connection_1.db
+            .select({
+            totalEligible: (0, drizzle_orm_1.count)(),
+            deliveredCount: (0, drizzle_orm_1.count)((0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurants.deliverystatus} = 'delivered' THEN 1 END`),
+            notDeliveredCount: (0, drizzle_orm_1.count)((0, drizzle_orm_1.sql) `CASE WHEN ${schema_1.restaurants.deliverystatus} = 'not_delivered' OR ${schema_1.restaurants.deliverystatus} IS NULL THEN 1 END`),
+        })
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.and)(...(isDefault ? [] : [(0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end)]), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"))),
+        // 3. Restaurants created per month (timeline)
+        connection_1.db
+            .select({
+            month: (0, drizzle_orm_1.sql) `DATE_FORMAT(${schema_1.restaurants.createdAt}, '%Y-%m')`,
+            count: (0, drizzle_orm_1.count)(),
+        })
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.gte)(schema_1.restaurants.createdAt, timelineStart), (0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test")))
+            .groupBy((0, drizzle_orm_1.sql) `DATE_FORMAT(${schema_1.restaurants.createdAt}, '%Y-%m')`),
+        // 4. First order received by month (grouped by restaurant earliest order)
+        connection_1.db
+            .select({
+            restaurantId: schema_1.orders.restaurantId,
+            firstOrderDate: (0, drizzle_orm_1.sql) `MIN(${schema_1.orders.createdAt})`,
+            firstOrderMonth: (0, drizzle_orm_1.sql) `DATE_FORMAT(MIN(${schema_1.orders.createdAt}), '%Y-%m')`,
+        })
+            .from(schema_1.orders)
+            .innerJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
+            .groupBy(schema_1.orders.restaurantId)
+            .having((0, drizzle_orm_1.and)((0, drizzle_orm_1.gte)((0, drizzle_orm_1.sql) `MIN(${schema_1.orders.createdAt})`, timelineStart), (0, drizzle_orm_1.lte)((0, drizzle_orm_1.sql) `MIN(${schema_1.orders.createdAt})`, end))),
+        // 5. Delivered restaurants order stats & order start
+        connection_1.db
+            .select({
+            restaurantId: schema_1.restaurants.id,
+            restaurantName: schema_1.restaurants.name,
+            restaurantNameAr: schema_1.restaurants.nameAr,
+            firstOrderDate: (0, drizzle_orm_1.sql) `MIN(${schema_1.orders.createdAt})`,
+            totalOrders: (0, drizzle_orm_1.count)(schema_1.orders.id),
+        })
+            .from(schema_1.restaurants)
+            .leftJoin(schema_1.orders, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
+            .where((0, drizzle_orm_1.and)(...(isDefault ? [] : [(0, drizzle_orm_1.lte)(schema_1.restaurants.createdAt, end)]), (0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"), (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test")))
+            .groupBy(schema_1.restaurants.id, schema_1.restaurants.name, schema_1.restaurants.nameAr),
+        // 6. Restaurants order counts in the current period for low-order chart
+        connection_1.db
+            .select({
+            restaurantId: schema_1.restaurants.id,
+            restaurantName: schema_1.restaurants.name,
+            restaurantNameAr: schema_1.restaurants.nameAr,
+            status: schema_1.restaurants.status,
+            deliveryStatus: schema_1.restaurants.deliverystatus,
+            operationStatus: schema_1.restaurants.operationStatus,
+            orderCount: (0, drizzle_orm_1.count)(schema_1.orders.id),
+        })
+            .from(schema_1.restaurants)
+            .leftJoin(schema_1.orders, (0, drizzle_orm_1.and)(...lowOrderDateConditions))
+            .where((0, drizzle_orm_1.and)(...lowOrderConditions))
+            .groupBy(schema_1.restaurants.id, schema_1.restaurants.name, schema_1.restaurants.nameAr, schema_1.restaurants.status, schema_1.restaurants.deliverystatus, schema_1.restaurants.operationStatus),
+    ]);
+    // 1. Process Monthly Orders from Delivered Restaurants
+    const deliveredOrdersMap = new Map();
+    monthlyDeliveredOrdersRows.forEach((r) => {
+        if (r.month)
+            deliveredOrdersMap.set(r.month, Number(r.orderCount ?? 0));
+    });
+    const currDeliveredOrders = Number(currDeliveredOrdersRow?.total ?? 0);
+    const prevDeliveredOrders = Number(prevDeliveredOrdersRow?.total ?? 0);
+    const currMonthDelivered = Number(currMonthDeliveredRow?.total ?? 0);
+    const prevMonthDelivered = Number(prevMonthDeliveredRow?.total ?? 0);
+    const deliveredGrowth = isDefault
+        ? calculateGrowth(currMonthDelivered, prevMonthDelivered)
+        : calculateGrowth(currDeliveredOrders, prevDeliveredOrders);
+    // 2. Process Delivery Overview (Donut)
+    const deliveryTotal = Number(deliveryOverviewRow?.totalEligible ?? 0);
+    const deliveredCount = Number(deliveryOverviewRow?.deliveredCount ?? 0);
+    const notDeliveredCount = Number(deliveryOverviewRow?.notDeliveredCount ?? 0);
+    const deliveredPct = deliveryTotal > 0 ? Number(((deliveredCount / deliveryTotal) * 100).toFixed(1)) : 0;
+    const notDeliveredPct = deliveryTotal > 0 ? Number(((notDeliveredCount / deliveryTotal) * 100).toFixed(1)) : 0;
+    // 3. Process Delivered vs Order Activation (نسبه كام مطعم شغالين بعد التسليم)
+    const totalDelivered = deliveredRestaurantsStats.length;
+    const activeRestaurantsAfterDelivery = deliveredRestaurantsStats.filter((r) => Number(r.totalOrders ?? 0) > testOrdersThreshold);
+    const activeAfterDeliveryCount = activeRestaurantsAfterDelivery.length;
+    const awaitingActivationCount = Math.max(0, totalDelivered - activeAfterDeliveryCount);
+    const activeAfterDeliveryPct = totalDelivered > 0 ? Number(((activeAfterDeliveryCount / totalDelivered) * 100).toFixed(1)) : 0;
+    const awaitingActivationPct = totalDelivered > 0 ? Number(((awaitingActivationCount / totalDelivered) * 100).toFixed(1)) : 0;
+    const firstOrderReceivedRestaurants = deliveredRestaurantsStats.filter((r) => Number(r.totalOrders ?? 0) > 0);
+    const firstOrderReceivedCount = firstOrderReceivedRestaurants.length;
+    const firstOrderReceivedPct = totalDelivered > 0 ? Number(((firstOrderReceivedCount / totalDelivered) * 100).toFixed(1)) : 0;
+    const deliveredRestaurantsList = deliveredRestaurantsStats
+        .map((r) => ({
+        restaurantId: r.restaurantId,
+        name: r.restaurantName,
+        nameAr: r.restaurantNameAr,
+        totalOrders: Number(r.totalOrders ?? 0),
+        firstOrderDate: r.firstOrderDate ? new Date(r.firstOrderDate).toISOString() : null,
+        hasPassedtestOrders: Number(r.totalOrders ?? 0) > testOrdersThreshold,
+    }))
+        .sort((a, b) => {
+        if (!a.firstOrderDate && !b.firstOrderDate)
+            return 0;
+        if (!a.firstOrderDate)
+            return 1;
+        if (!b.firstOrderDate)
+            return -1;
+        return new Date(b.firstOrderDate).getTime() - new Date(a.firstOrderDate).getTime();
+    })
+        .slice(0, 100);
+    // 4. Process Orders Growth After Delivery & Test Orders Threshold
+    const activeDeliveredIds = activeRestaurantsAfterDelivery.map((r) => r.restaurantId);
+    let currActiveDelivOrders = 0;
+    let prevActiveDelivOrders = 0;
+    let activeDelivGrowth = {
+        percentage: 0,
+        trend: "neutral",
+    };
+    const activeDelivOrdersMap = new Map();
+    if (activeDeliveredIds.length > 0) {
+        const [currRow, prevRow, currMonthRow, monthlyRows] = await Promise.all([
+            connection_1.db
+                .select({ total: (0, drizzle_orm_1.count)() })
+                .from(schema_1.orders)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.orders.restaurantId, activeDeliveredIds), ...(isDefault ? [] : [(0, drizzle_orm_1.gte)(schema_1.orders.createdAt, start)]), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"))),
+            connection_1.db
+                .select({ total: (0, drizzle_orm_1.count)() })
+                .from(schema_1.orders)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.orders.restaurantId, activeDeliveredIds), (0, drizzle_orm_1.gte)(schema_1.orders.createdAt, isDefault ? prevMonthStart : prevStart), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, isDefault ? prevMonthEnd : prevEnd), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"))),
+            connection_1.db
+                .select({ total: (0, drizzle_orm_1.count)() })
+                .from(schema_1.orders)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.orders.restaurantId, activeDeliveredIds), (0, drizzle_orm_1.gte)(schema_1.orders.createdAt, currentMonthStart), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, currentMonthEnd), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed"))),
+            connection_1.db
+                .select({
+                month: (0, drizzle_orm_1.sql) `DATE_FORMAT(${schema_1.orders.createdAt}, '%Y-%m')`,
+                orderCount: (0, drizzle_orm_1.count)(),
+            })
+                .from(schema_1.orders)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.orders.restaurantId, activeDeliveredIds), (0, drizzle_orm_1.gte)(schema_1.orders.createdAt, timelineStart), (0, drizzle_orm_1.lte)(schema_1.orders.createdAt, end), (0, drizzle_orm_1.ne)(schema_1.orders.status, "failed")))
+                .groupBy((0, drizzle_orm_1.sql) `DATE_FORMAT(${schema_1.orders.createdAt}, '%Y-%m')`),
+        ]);
+        currActiveDelivOrders = Number(currRow[0]?.total ?? 0);
+        prevActiveDelivOrders = Number(prevRow[0]?.total ?? 0);
+        const currMonthDelivOrders = Number(currMonthRow[0]?.total ?? 0);
+        monthlyRows.forEach((r) => {
+            if (r.month)
+                activeDelivOrdersMap.set(r.month, Number(r.orderCount ?? 0));
+        });
+        activeDelivGrowth = isDefault
+            ? calculateGrowth(currMonthDelivOrders, prevActiveDelivOrders)
+            : calculateGrowth(currActiveDelivOrders, prevActiveDelivOrders);
+    }
+    else {
+        activeDelivGrowth = { percentage: 0, trend: "neutral" };
+    }
+    // 5. Process Restaurant Acquisition & Order Activation Growth (Timeline)
+    const createdMap = new Map();
+    monthlyCreatedRows.forEach((row) => {
+        if (row.month)
+            createdMap.set(row.month, Number(row.count ?? 0));
+    });
+    const firstOrderMonthMap = new Map();
+    firstOrdersSubqueryRows.forEach((row) => {
+        if (row.firstOrderMonth) {
+            firstOrderMonthMap.set(row.firstOrderMonth, (firstOrderMonthMap.get(row.firstOrderMonth) ?? 0) + 1);
+        }
+    });
+    const acquisitionTimeline = monthsList.map((m) => ({
+        month: m.key,
+        label: m.label,
+        newlyAcquired: createdMap.get(m.key) ?? 0,
+        firstOrderReceived: firstOrderMonthMap.get(m.key) ?? 0,
+    }));
+    const totalCreatedInTimeline = acquisitionTimeline.reduce((acc, curr) => acc + curr.newlyAcquired, 0);
+    const totalActivatedInTimeline = acquisitionTimeline.reduce((acc, curr) => acc + curr.firstOrderReceived, 0);
+    const onboardingConversionRate = totalCreatedInTimeline > 0 ? Number(((totalActivatedInTimeline / totalCreatedInTimeline) * 100).toFixed(1)) : 0;
+    // 6. Process Low Order Restaurants (Bar Chart)
+    const daysInPeriod = isDefault
+        ? Math.max(1, now.getDate())
+        : Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+    let filteredLowOrders = restaurantOrdersInPeriodRows.map((r) => {
+        const oCount = Number(r.orderCount ?? 0);
+        const dailyAvg = Number((oCount / daysInPeriod).toFixed(1));
+        return {
+            restaurantId: r.restaurantId,
+            name: r.restaurantName,
+            nameAr: r.restaurantNameAr,
+            orderCount: oCount,
+            averageDailyOrders: dailyAvg,
+            status: r.status,
+            deliveryStatus: r.deliveryStatus,
+            operationStatus: r.operationStatus,
+            isBelowThreshold: oCount < orderThreshold,
+        };
+    });
+    if (!restaurantIds || restaurantIds.length === 0) {
+        filteredLowOrders = filteredLowOrders.filter((r) => r.orderCount < orderThreshold);
+    }
+    filteredLowOrders.sort((a, b) => a.orderCount - b.orderCount);
+    const itemsToShow = filteredLowOrders.slice(0, 50);
+    const belowTargetCount = filteredLowOrders.filter((r) => r.orderCount < orderThreshold).length;
+    const totalAnalyzed = restaurantOrdersInPeriodRows.length;
+    const totalOrdersInList = itemsToShow.reduce((acc, curr) => acc + curr.orderCount, 0);
+    const averageOrdersAcrossShown = itemsToShow.length > 0 ? Number((totalOrdersInList / itemsToShow.length).toFixed(1)) : 0;
+    return (0, response_1.SuccessResponse)(res, {
+        period: {
+            startDate: isDefault ? null : start.toISOString(),
+            endDate: isDefault ? null : end.toISOString(),
+            previousStartDate: prevStart.toISOString(),
+            previousEndDate: prevEnd.toISOString(),
+            timelineStartDate: timelineStart.toISOString(),
+        },
+        filterParams: {
+            orderThreshold,
+            testOrdersThreshold,
+            restaurantIds: restaurantIds ?? [],
+        },
+        monthlyOrdersAfterGoLive: {
+            title: "Monthly Orders After Go-Live",
+            totalOrders: currDeliveredOrders,
+            growthPercentage: deliveredGrowth.percentage,
+            trendDirection: deliveredGrowth.trend,
+            previousTotalOrders: prevDeliveredOrders,
+            timeline: monthsList.map((m) => ({
+                month: m.key,
+                label: m.label,
+                orders: deliveredOrdersMap.get(m.key) ?? 0,
+            })),
+        },
+        postDeliveryOrdersGrowth: {
+            title: "Orders Growth After Delivery & Test Orders",
+            testOrdersThreshold,
+            totalOrders: currActiveDelivOrders,
+            growthPercentage: activeDelivGrowth.percentage,
+            trendDirection: activeDelivGrowth.trend,
+            previousTotalOrders: prevActiveDelivOrders,
+            timeline: monthsList.map((m) => ({
+                month: m.key,
+                label: m.label,
+                orders: activeDelivOrdersMap.get(m.key) ?? 0,
+            })),
+        },
+        deliveryOverview: {
+            title: "Restaurant Delivery Overview",
+            totalEligible: deliveryTotal,
+            delivered: {
+                count: deliveredCount,
+                percentage: deliveredPct,
+            },
+            notDelivered: {
+                count: notDeliveredCount,
+                percentage: notDeliveredPct,
+            },
+        },
+        deliveredActivationOverview: {
+            title: "Delivered vs Order Activation",
+            totalDelivered,
+            testOrdersThreshold,
+            activeAfterDelivery: {
+                count: activeAfterDeliveryCount,
+                percentage: activeAfterDeliveryPct,
+            },
+            awaitingActivation: {
+                count: awaitingActivationCount,
+                percentage: awaitingActivationPct,
+            },
+            firstOrderReceived: {
+                count: firstOrderReceivedCount,
+                percentage: firstOrderReceivedPct,
+            },
+            activationRate: activeAfterDeliveryPct,
+        },
+        acquisitionAndActivationGrowth: {
+            title: "Restaurant Acquisition & Order Activation Growth",
+            timeline: acquisitionTimeline,
+            conversionRate: onboardingConversionRate,
+        },
+        deliveredRestaurantsSummary: {
+            totalDelivered,
+            restaurantsWithFirstOrder: firstOrderReceivedCount,
+            restaurants: deliveredRestaurantsList,
+        },
+        lowOrderRestaurants: {
+            title: `Restaurants With Fewer Than ${orderThreshold} Orders`,
+            orderThreshold,
+            belowTargetCount,
+            totalAnalyzedCount: totalAnalyzed,
+            averageOrders: averageOrdersAcrossShown,
+            restaurants: itemsToShow,
+        },
+    });
+};
+exports.getOperationsCharts = getOperationsCharts;

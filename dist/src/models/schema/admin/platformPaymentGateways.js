@@ -20,10 +20,11 @@ exports.platformPaymentGateways = (0, mysql_core_1.mysqlTable)("platform_payment
     environment: (0, mysql_core_1.mysqlEnum)("environment", ["LIVE", "TEST"]).default("LIVE"),
     // AES-256-GCM encrypted credentials stored as JSON
     credentials: (0, mysql_core_1.json)("credentials").$type().notNull(),
-    // Optional logo URL displayed on dashboard
-    logoUrl: (0, mysql_core_1.varchar)("logo_url", { length: 500 }),
+    // Optional logo image stored as a base64 data URI (e.g. "data:image/png;base64,...")
+    logoUrl: (0, mysql_core_1.text)("logo_url"),
     // Only ONE gateway can be active at a time (enforced at application level)
     isActive: (0, mysql_core_1.boolean)("is_active").default(false),
+    isDefault: (0, mysql_core_1.boolean)("is_default").default(false),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

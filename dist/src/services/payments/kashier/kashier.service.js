@@ -9,7 +9,6 @@ const connection_1 = require("../../../models/connection");
 const schema_1 = require("../../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const Errors_1 = require("../../../Errors");
-const kashier_1 = require("./kashier");
 class KashierService {
     /**
      * Creates a hosted payment session via Kashier Payment Sessions API.
@@ -22,16 +21,20 @@ class KashierService {
      * so the session is never lost even if the client disconnects.
      */
     static async createPaymentSession(input) {
-        const sysConfig = (0, kashier_1.getKashierConfig)();
-        const mid = input.credentials?.mid || sysConfig.mid;
-        const apiKey = input.credentials?.apiKey || sysConfig.apiKey;
-        const secretKey = input.credentials?.secretKey || sysConfig.secretKey;
-        const baseUrl = input.credentials?.baseUrl || sysConfig.baseUrl;
-        const currency = (input.currency || "EGP").toUpperCase();
-        const amount = input.amount.toFixed(2);
-        if (!mid || !apiKey) {
-            throw new Errors_1.BadRequest("Kashier credentials (KASHIER_MID or KASHIER_API_KEY) are missing or incomplete.");
+        // Credentials MUST be provided from the DB (restaurant's gateway or platform gateway).
+        // We do NOT fall back to .env so that each restaurant/account always uses its own correct keys.
+        const creds = input.credentials;
+        if (!creds?.mid || !creds?.apiKey) {
+            throw new Errors_1.BadRequest("Kashier credentials (mid / apiKey) are missing. Ensure the active platform or custom gateway is configured correctly in the database.");
         }
+        const mid = creds.mid;
+        const apiKey = creds.apiKey;
+        const secretKey = creds.secretKey;
+        const amount = String(input.amount);
+        const currency = input.currency || "EGP";
+        // Use baseUrl from DB creds if present, otherwise derive from environment field stored in DB.
+        // Default: test sandbox.
+        const baseUrl = creds.baseUrl || "https://api.kashier.io";
         // Session expires in 24 hours from now
         const expireAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         // Redirect URL after Kashier hosted checkout completes
@@ -51,7 +54,7 @@ class KashierService {
             type: "one-time",
             display: "en",
             maxFailureAttempts: 3,
-            allowedMethods: "card,wallet",
+            allowedMethods: "card",
             // Kashier requires customer field on every session
             customer: {
                 email: input.customerEmail || "customer@example.com",

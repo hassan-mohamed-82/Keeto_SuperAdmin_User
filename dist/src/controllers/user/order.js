@@ -1,9 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rateOrder = exports.getCancelReasons = exports.cancelOrder = exports.getOrderPrerequisites = exports.getOrderDetails = exports.getOrderHistory = exports.getActiveOrders = exports.checkout = void 0;
+exports.rateOrder = exports.getCancelReasons = exports.cancelOrder = exports.getOrderPrerequisites = exports.getOrderDetails = exports.getOrderHistory = exports.getActiveOrders = exports.checkout = exports.normalizeEgPhone = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
-// import { releaseCourierForOrder } from "../../services/shipping/dispatchEngine";
+const dispatchEngine_1 = require("../../services/shipping/dispatchEngine");
 const drizzle_orm_1 = require("drizzle-orm");
 const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
@@ -51,6 +51,20 @@ const formatDate = (date) => {
         second: "2-digit",
         hour12: true,
     }).format(new Date(date));
+};
+const parseJsonArray = (val) => {
+    if (!val)
+        return [];
+    if (typeof val === "string") {
+        try {
+            const parsed = JSON.parse(val);
+            return typeof parsed === "string" ? JSON.parse(parsed) : (Array.isArray(parsed) ? parsed : []);
+        }
+        catch {
+            return [];
+        }
+    }
+    return Array.isArray(val) ? val : [];
 };
 // Helper to format order items variations, supporting both snapshot-stored variations and old database lookup fallback
 const formatOrderItemsVariations = async (items) => {
@@ -157,80 +171,99 @@ const formatOrderItemsVariations = async (items) => {
 // ==========================================
 // دالة مساعدة لضمان سلامة العمليات الحسابية المالية
 const roundMoney = (amount) => Math.round(amount * 100) / 100;
+// ==========================================================================
+// ✏️ NEW HELPERS (put them in a utils file and import them if you prefer)
+// ==========================================================================
+/**
+ * Normalizes an Egyptian mobile number to E.164 (+201XXXXXXXXX).
+ * Accepts: 01012345678 / +201012345678 / 00201012345678 / 201012345678
+ * Throws BadRequest if the format is invalid.
+ */
+const normalizeEgPhone = (raw) => {
+    if (typeof raw !== "string")
+        throw new BadRequest_1.BadRequest("Phone number is required.");
+    const trimmed = raw.trim();
+    if (!/^01[0125][0-9]{8}$/.test(trimmed)) {
+        throw new BadRequest_1.BadRequest("Phone number must be 11 digits and start with 01.");
+    }
+    return trimmed;
+};
+exports.normalizeEgPhone = normalizeEgPhone;
+/** All formats a phone may have been stored in (for matching legacy data). */
+const phoneVariants = (phone11) => {
+    const withoutZero = phone11.startsWith("0") ? phone11.slice(1) : phone11;
+    return [phone11, `+20${withoutZero}`, `20${withoutZero}`, `0020${withoutZero}`];
+};
+/** Validates + builds the guest address row. It is NOT inserted here — it is inserted inside the transaction. */
+const buildGuestAddress = (guestAddress, userId) => {
+    if (!guestAddress || typeof guestAddress !== "object") {
+        throw new BadRequest_1.BadRequest("Delivery address is required.");
+    }
+    const lat = Number(guestAddress.lat);
+    const lng = Number(guestAddress.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !lat || !lng || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        throw new BadRequest_1.BadRequest("Delivery address requires valid latitude and longitude coordinates.");
+    }
+    if (!guestAddress.street || String(guestAddress.street).trim() === "") {
+        throw new BadRequest_1.BadRequest("Street is required for the delivery address.");
+    }
+    const number = guestAddress.number != null ? String(guestAddress.number).trim() : "";
+    return {
+        id: (0, uuid_1.v4)(),
+        userId,
+        title: guestAddress.title || "Guest Address",
+        street: String(guestAddress.street).trim(),
+        number: number || "-",
+        floor: guestAddress.floor ? String(guestAddress.floor) : null,
+        apartment: guestAddress.apartment ? String(guestAddress.apartment) : null,
+        landmark: guestAddress.landmark || null,
+        location: guestAddress.location || null,
+        fulladdress: guestAddress.fulladdress || `${number} ${String(guestAddress.street).trim()}`.trim(),
+        lat: String(lat),
+        lng: String(lng),
+    };
+};
 const checkout = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const isGuestUser = Boolean(req.user.isGuest);
     const { orderSource, paymentMethod, orderType, idempotencyKey, zoneId, branchId, addressId: inputAddressId, note, couponCode, guestInfo, guestAddress, restaurantName } = req.body;
     let addressId = inputAddressId || null;
-    let effectiveUserId = req.user.id;
+    // ✏️ CHANGED: no more identity merge. The user id is always the authenticated one.
+    const userId = req.user.id;
     // ==========================================
-    // 🛡️ Guest Checkout & Phone Deduplication (Find-or-Create)
+    // 🛡️ Guest Checkout — validation only (NO DB writes here)
+    // ✏️ CHANGED: only runs for real guest sessions. `guestInfo` is ignored for registered users,
+    // so a registered account can never be renamed / re-phoned / soft-deleted through this endpoint.
+    // All writes happen later inside the transaction.
     // ==========================================
-    if (isGuestUser || guestInfo) {
-        const guestName = guestInfo?.name || req.user.name || "Guest";
-        const rawPhone = guestInfo?.phone;
-        if (!rawPhone && isGuestUser) {
-            throw new BadRequest_1.BadRequest("Phone number is required for guest checkout.");
+    let guestName = null;
+    let guestPhone = null;
+    if (isGuestUser) {
+        guestName = String(guestInfo?.name || req.user.name || "Guest").trim().slice(0, 100) || "Guest";
+        guestPhone = (0, exports.normalizeEgPhone)(guestInfo?.phone); // throws BadRequest if missing / invalid
+        const altPhone = guestInfo?.alternatePhone || guestInfo?.alternativePhone;
+        if (altPhone) {
+            (0, exports.normalizeEgPhone)(altPhone);
         }
-        if (rawPhone) {
-            const normalizedPhone = rawPhone.replace(/[\s\-\(\)]/g, "");
-            const [existingUser] = await connection_1.db
-                .select()
-                .from(schema_1.users)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.users.phone, normalizedPhone), (0, drizzle_orm_1.eq)(schema_1.users.isDeleted, false)))
-                .limit(1);
-            if (existingUser && existingUser.id !== effectiveUserId) {
-                const isFullyRegistered = Boolean(existingUser.password); // عنده باسورد = حساب حقيقي
-                if (isFullyRegistered) {
-                    // ✅ حساب حقيقي: منعمل merge تلقائي، نطلب تأكيد
-                    throw new BadRequest_1.BadRequest("An account already exists with this phone number. Please log in with your email to continue, or use a different phone number.");
-                }
-                else {
-                    // ✅ يوزر تاني كان guest قبل كده بنفس الرقم: دمج آمن
-                    const guestSessionId = req.user.id;
-                    effectiveUserId = existingUser.id;
-                    await connection_1.db
-                        .update(schema_1.cartItems)
-                        .set({ userId: effectiveUserId })
-                        .where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, guestSessionId));
-                    await connection_1.db.update(schema_1.users)
-                        .set({ isDeleted: true, status: "blocked" })
-                        .where((0, drizzle_orm_1.eq)(schema_1.users.id, guestSessionId));
-                }
-            }
-            else {
-                await connection_1.db
-                    .update(schema_1.users)
-                    .set({
-                    name: guestName,
-                    phone: normalizedPhone,
-                })
-                    .where((0, drizzle_orm_1.eq)(schema_1.users.id, effectiveUserId));
-            }
+        // A phone that belongs to a registered account can't be used by a guest (no silent merge, no takeover).
+        const [registered] = await connection_1.db
+            .select({ id: schema_1.users.id })
+            .from(schema_1.users)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.users.phone, phoneVariants(guestPhone)), (0, drizzle_orm_1.eq)(schema_1.users.isGuest, false), (0, drizzle_orm_1.eq)(schema_1.users.isDeleted, false)))
+            .limit(1);
+        if (registered) {
+            throw new BadRequest_1.BadRequest("An account already exists with this phone number. Please log in to continue, or use a different phone number.");
         }
     }
-    const userId = effectiveUserId;
     // ==========================================
-    // 🏠 Guest Address Creation (Delivery)
+    // 🏠 Guest Address (Delivery) — built in memory, inserted inside the transaction
+    // ✏️ CHANGED: validated, and not inserted before the order is validated.
     // ==========================================
-    if (orderType === "delivery" && !addressId && guestAddress) {
-        const newAddressId = (0, uuid_1.v4)();
-        await connection_1.db.insert(schema_1.addresses).values({
-            id: newAddressId,
-            userId,
-            title: guestAddress.title || "Guest Address",
-            street: guestAddress.street,
-            number: String(guestAddress.number),
-            floor: guestAddress.floor ? String(guestAddress.floor) : null,
-            apartment: guestAddress.apartment ? String(guestAddress.apartment) : null,
-            landmark: guestAddress.landmark || null,
-            location: guestAddress.location || null,
-            fulladdress: guestAddress.fulladdress || `${guestAddress.number} ${guestAddress.street}`,
-            lat: String(guestAddress.lat),
-            lng: String(guestAddress.lng),
-        });
-        addressId = newAddressId;
+    let pendingGuestAddress = null;
+    if (isGuestUser && orderType === "delivery" && !addressId) {
+        pendingGuestAddress = buildGuestAddress(guestAddress, userId);
+        addressId = pendingGuestAddress.id;
     }
     // ==========================================
     // 🛡️ 1. Validation
@@ -247,30 +280,34 @@ const checkout = async (req, res) => {
     const paymentMethodNameAr = selectedPayment.nameAr;
     const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
     const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
-    // 🛡️ Prevent wallet payment for unverified guest accounts
+    // 🛡️ Prevent wallet payment for guest accounts
     if (isGuestUser && isWalletPayment) {
         throw new BadRequest_1.BadRequest("Wallet payment is only available for registered accounts.");
     }
-    // Visa payment check using VISA_PAYMENT_METHOD_ID from database schema
     const isVisaPayment = paymentMethodName?.toLowerCase() === "visa" ||
         paymentMethodNameAr === "بطاقة";
     // ==========================================
     // 2. Idempotency Check
+    // ✏️ CHANGED: scoped by userId so one user can never receive another user's order.
+    // (Also add a unique index on (user_id, idempotency_key).)
     // ==========================================
     if (idempotencyKey) {
-        const [existing] = await connection_1.db.select().from(schema_1.orders).where((0, drizzle_orm_1.eq)(schema_1.orders.idempotencyKey, idempotencyKey)).limit(1);
+        const [existing] = await connection_1.db
+            .select()
+            .from(schema_1.orders)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.idempotencyKey, idempotencyKey), (0, drizzle_orm_1.eq)(schema_1.orders.userId, userId)))
+            .limit(1);
         if (existing)
             return (0, response_1.SuccessResponse)(res, { message: "Order already processed", data: existing });
     }
     // ==========================================
-    // 3. Get Cart Items & User Verification (Parallelized)
+    // 3. Get Cart Items & User Verification
     // ==========================================
     const userCart = await connection_1.db.select().from(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
     if (!userCart.length)
         throw new BadRequest_1.BadRequest("Your cart is empty");
     const restaurantId = userCart[0].restaurantId;
     const storedOrderSource = orderSource === "mykeeto" ? "my_keeto" : orderSource;
-    // Run block check in parallel with cart retrieval setup
     await (0, userBlockCheck_1.validateUserNotBlocked)(userId, restaurantId);
     // ==========================================
     // 4. Get Restaurant, Business Plan, Schedules & Settings (Parallelized)
@@ -312,7 +349,7 @@ const checkout = async (req, res) => {
         throw new BadRequest_1.BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
     if (resolvedOrderType === "takeaway" && !status.canTakeawayNow)
         throw new BadRequest_1.BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
-    // 🛡️ Cash payment guard: reject CASH orders if the restaurant has disabled cash
+    // 🛡️ Cash payment guard
     if (isCashPayment && settings?.cashEnabled === false) {
         throw new BadRequest_1.BadRequest("Cash payment is not accepted by this restaurant. Please choose a different payment method.");
     }
@@ -331,20 +368,56 @@ const checkout = async (req, res) => {
     // orderType IS the serviceModule (they are the same concept)
     // ==========================================
     const serviceModule = resolvedOrderType;
-    // We need the resolvedBranchId from step 6, but step 6 runs after step 5 in the
-    // original flow. We pre-resolve it here so the pricing engine can run first.
-    // Branch resolution for pricing purposes (full resolution happens again in step 6 for delivery fee).
     let pricingBranchId = branchId || null;
     if (resolvedOrderType === "delivery") {
         if (!addressId)
             throw new BadRequest_1.BadRequest("Delivery address is required.");
         if (!pricingBranchId) {
             try {
+                // ✏️ CHANGED: a pending guest address isn't in the DB yet, so skip the DB-based resolver
+                // and go straight to the coordinate-based fallback below.
+                if (pendingGuestAddress)
+                    throw new Error("GUEST_ADDRESS_NOT_SAVED_YET");
                 pricingBranchId = await (0, pricing_helper_1.resolveBranchIdFromAddress)(addressId, restaurantId);
             }
             catch (err) {
                 const storedBranch = userCart.find(c => c.branchId);
                 pricingBranchId = storedBranch?.branchId || null;
+                if (!pricingBranchId && (settings?.shippingCompanyId || pendingGuestAddress)) {
+                    let addr;
+                    if (pendingGuestAddress) {
+                        addr = { lat: pendingGuestAddress.lat, lng: pendingGuestAddress.lng };
+                    }
+                    else {
+                        [addr] = await connection_1.db
+                            .select({ lat: schema_1.addresses.lat, lng: schema_1.addresses.lng })
+                            .from(schema_1.addresses)
+                            .where((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId))
+                            .limit(1);
+                    }
+                    const cLat = parseFloat(addr?.lat || "0");
+                    const cLng = parseFloat(addr?.lng || "0");
+                    const activeBranches = await connection_1.db
+                        .select({ id: schema_1.branches.id, lat: schema_1.branches.lat, lng: schema_1.branches.lng })
+                        .from(schema_1.branches)
+                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")));
+                    if (activeBranches.length > 0) {
+                        let closest = activeBranches[0];
+                        let minDist = Infinity;
+                        for (const b of activeBranches) {
+                            const bLat = parseFloat(b.lat || "0");
+                            const bLng = parseFloat(b.lng || "0");
+                            if (bLat && bLng && cLat && cLng) {
+                                const dist = (0, geo_1.calculateDistance)(cLat, cLng, bLat, bLng);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    closest = b;
+                                }
+                            }
+                        }
+                        pricingBranchId = closest.id;
+                    }
+                }
             }
         }
     }
@@ -354,8 +427,6 @@ const checkout = async (req, res) => {
             throw new BadRequest_1.BadRequest("Branch is required for takeaway or dine-in orders.");
     }
     // ─── Subcategory-branch availability guard ──────────────────────────
-    // Block checkout if any cart item belongs to a subcategory that is
-    // inactive at the resolved branch (independent of food-level locks)
     if (pricingBranchId) {
         const cartFoodIds = userCart.filter(c => !c.offerId).map(c => c.foodId).filter(Boolean);
         const cartFoods = cartFoodIds.length > 0
@@ -466,6 +537,57 @@ const checkout = async (req, res) => {
         }
         checkoutOfferFoodsMap.get(ofRow.offerId).push(ofRow);
     }
+    if (dbOfferFoodsForCheckout.length > 0) {
+        const bundleOptionIds = new Set();
+        const bundleAddonIds = new Set();
+        for (const ofRow of dbOfferFoodsForCheckout) {
+            const rawOpts = parseJsonArray(ofRow.optionIds);
+            rawOpts.forEach((id) => id && bundleOptionIds.add(String(id)));
+            const rawVars = parseJsonArray(ofRow.variations);
+            for (const pv of rawVars) {
+                if (pv?.optionId)
+                    bundleOptionIds.add(String(pv.optionId));
+                if (Array.isArray(pv?.options)) {
+                    pv.options.forEach((id) => id && bundleOptionIds.add(String(id)));
+                }
+            }
+            const rawAddonIds = parseJsonArray(ofRow.addonIds);
+            rawAddonIds.forEach((id) => id && bundleAddonIds.add(String(id)));
+        }
+        const missingOptionIds = Array.from(bundleOptionIds).filter((id) => !optionsWithParentMap.has(id));
+        if (missingOptionIds.length > 0) {
+            const extraOptions = await connection_1.db
+                .select({
+                optionId: schema_1.variationOptions.id,
+                optionName: schema_1.variationOptions.optionName,
+                optionNameAr: schema_1.variationOptions.optionNameAr,
+                optionNameFr: schema_1.variationOptions.optionNameFr,
+                additionalPrice: schema_1.variationOptions.additionalPrice,
+                status: schema_1.variationOptions.status,
+                variationId: schema_1.foodVariations.id,
+                variationName: schema_1.foodVariations.name,
+                variationNameAr: schema_1.foodVariations.nameAr,
+                variationNameFr: schema_1.foodVariations.nameFr,
+                variationStatus: schema_1.foodVariations.status,
+            })
+                .from(schema_1.variationOptions)
+                .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, schema_1.foodVariations.id))
+                .where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.id, missingOptionIds));
+            for (const opt of extraOptions) {
+                optionsWithParentMap.set(opt.optionId, opt);
+            }
+        }
+        const missingAddonIds = Array.from(bundleAddonIds).filter((id) => !addonsMap.has(id));
+        if (missingAddonIds.length > 0) {
+            const extraAddons = await connection_1.db
+                .select({ id: schema_1.addons.id, name: schema_1.addons.name, nameAr: schema_1.addons.nameAr, nameFr: schema_1.addons.nameFr, price: schema_1.addons.price })
+                .from(schema_1.addons)
+                .where((0, drizzle_orm_1.inArray)(schema_1.addons.id, missingAddonIds));
+            for (const a of extraAddons) {
+                addonsMap.set(a.id, a);
+            }
+        }
+    }
     // ─── Calculate pricing per item ───
     let subtotal = 0;
     let initialSubtotal = 0;
@@ -543,7 +665,6 @@ const checkout = async (req, res) => {
         let channelBasePrice;
         let varPrice;
         let itemIsAvailable = true;
-        // if (pricingBranchId) {
         const priceResult = await (0, pricing_helper_1.calculateCalculatedPrice)(cartItem.foodId, optionIds, pricingBranchId || null, serviceModule);
         channelBasePrice = priceResult.basePrice;
         varPrice = priceResult.variants.reduce((s, v) => s + v.price, 0);
@@ -582,7 +703,7 @@ const checkout = async (req, res) => {
         initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * cartItem.quantity;
         const detailedVariations = parsedVariations.map((v) => {
             const optDetails = optionsWithParentMap.get(v.optionId);
-            const resolvedPrice = (optDetails?.additionalPrice ?? v.additionalPrice ?? v.price ?? "0.00");
+            const resolvedPrice = (v.additionalPrice ?? optDetails?.additionalPrice ?? v.price ?? "0.00");
             return {
                 variationId: optDetails?.variationId ?? v.variationId ?? null,
                 variationName: optDetails?.variationName ?? v.variationName ?? null,
@@ -650,17 +771,62 @@ const checkout = async (req, res) => {
             const bFoods = checkoutOfferFoodsMap.get(offer.id) || [];
             const perFoodPrice = bFoods.length > 0 ? roundMoney(offerUnitPrice / bFoods.length) : offerUnitPrice;
             for (const bf of bFoods) {
+                const rawOpts = parseJsonArray(bf.optionIds);
+                const rawVars = parseJsonArray(bf.variations);
+                const bfOptionIds = new Set(rawOpts.map((id) => String(id)).filter(Boolean));
+                for (const pv of rawVars) {
+                    if (pv?.optionId)
+                        bfOptionIds.add(String(pv.optionId));
+                    if (Array.isArray(pv?.options)) {
+                        pv.options.forEach((id) => id && bfOptionIds.add(String(id)));
+                    }
+                }
+                const bundleDetailedVariations = Array.from(bfOptionIds).map((optId) => {
+                    const optDetails = optionsWithParentMap.get(optId);
+                    const resolvedPrice = optDetails?.additionalPrice ?? "0.00";
+                    return {
+                        variationId: optDetails?.variationId ?? null,
+                        variationName: optDetails?.variationName ?? null,
+                        variationNameAr: optDetails?.variationNameAr ?? null,
+                        variationNameFr: optDetails?.variationNameFr ?? null,
+                        optionId: optDetails?.optionId ?? optId,
+                        optionName: optDetails?.optionName ?? null,
+                        optionNameAr: optDetails?.optionNameAr ?? null,
+                        optionNameFr: optDetails?.optionNameFr ?? null,
+                        price: Number(resolvedPrice).toFixed(2),
+                        additionalPrice: Number(resolvedPrice).toFixed(2),
+                    };
+                });
+                const rawBfAddonIds = parseJsonArray(bf.addonIds);
+                const bundleDetailedAddons = [];
+                let bundleAddonsPrice = 0;
+                for (const addonId of rawBfAddonIds) {
+                    const dbAddon = addonsMap.get(String(addonId));
+                    if (dbAddon) {
+                        const addonPrice = Number(dbAddon.price || 0);
+                        bundleAddonsPrice += addonPrice;
+                        bundleDetailedAddons.push({
+                            addonId: dbAddon.id,
+                            name: dbAddon.name,
+                            nameAr: dbAddon.nameAr,
+                            nameFr: dbAddon.nameFr,
+                            price: addonPrice.toFixed(2),
+                        });
+                    }
+                }
+                const bundleItemTotal = roundMoney(perFoodPrice * cartItem.quantity + bundleAddonsPrice);
                 itemsToInsert.push({
                     id: (0, uuid_1.v4)(),
                     foodId: bf.foodId,
                     quantity: bf.quantity * cartItem.quantity,
                     basePrice: perFoodPrice.toFixed(2),
                     variationsPrice: "0.00",
-                    addonsPrice: "0.00",
-                    totalPrice: (perFoodPrice * cartItem.quantity).toFixed(2),
-                    variations: bf.variations || [],
-                    addons: [],
+                    addonsPrice: bundleAddonsPrice.toFixed(2),
+                    totalPrice: bundleItemTotal.toFixed(2),
+                    variations: bundleDetailedVariations,
+                    addons: bundleDetailedAddons,
                     note: cartItem.note || null,
+                    isBundle: true,
                 });
             }
             continue;
@@ -681,6 +847,7 @@ const checkout = async (req, res) => {
             variations: vars,
             addons: addonsList,
             note: cartItem.note || null,
+            isBundle: false,
         });
     }
     subtotal = roundMoney(subtotal);
@@ -714,13 +881,11 @@ const checkout = async (req, res) => {
         orderDiscountSource = "food_level";
         orderDiscountValue = roundMoney(initialSubtotal - subtotal).toFixed(2);
     }
-    // 2️⃣ فحص وتطبيق خصم أول طلبات (First Orders Discount) وتطبيق الخصم الأكبر (Maximum Discount)
+    // First Orders Discount — applies the maximum discount available
     let appliedFirstOrderDiscount = null;
     let firstOrderDiscountAmount = 0;
     let orderFirstOrderDiscountId = null;
-    // نحسب الخصم الأساسي القائم حالياً (سواء على المنتجات أو العروض)
     const existingProductDiscountAmount = roundMoney(Math.max(0, initialSubtotal - subtotal));
-    // فحص إمكانية تطبيق خصم أول طلبات للمستخدم على هذا المطعم
     // First-order discount is only for registered (non-guest) users
     if (!isGuestUser) {
         const eligibleFirstOrder = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, restaurantId, initialSubtotal > 0 ? initialSubtotal : subtotal);
@@ -729,11 +894,7 @@ const checkout = async (req, res) => {
             appliedFirstOrderDiscount = eligibleFirstOrder.discount;
         }
     }
-    // مقارنة: إذا كان خصم أول طلبات متاحاً وكان أكبر من الخصومات القائمة على المنتجات
-    // "if it already the product has discount or offer discount or any discount so apply the maximum discount exist"
     if (appliedFirstOrderDiscount && firstOrderDiscountAmount > existingProductDiscountAmount) {
-        // خصم أول طلبات أكبر -> يتم تطبيق خصم أول طلبات كخصم رئيسي بالأعلى قيمة
-        // إعادة ضبط الخصم ليأخذ الفرق الإضافي ليصبح إجمالي خصم الطلب = firstOrderDiscountAmount
         const additionalDiscount = roundMoney(firstOrderDiscountAmount - existingProductDiscountAmount);
         totalDiscount += additionalDiscount;
         orderFirstOrderDiscountId = appliedFirstOrderDiscount.id;
@@ -742,20 +903,20 @@ const checkout = async (req, res) => {
         orderDiscountValue = appliedFirstOrderDiscount.discountValue ? String(appliedFirstOrderDiscount.discountValue) : String(firstOrderDiscountAmount);
     }
     else {
-        // الخصم القائم على المنتجات أو العروض مساوي أو أكبر، أو لا يوجد خصم أول طلبات
         appliedFirstOrderDiscount = null;
     }
-    // 3️⃣ تطبيق الكوبون وتجميعه مع الخصم (بدون إلغاء بيانات الخصم الأصلي)
+    // Coupon
     if (couponCode) {
-        const couponResult = await (0, coupon_helper_1.validateAndCalculateCoupon)(couponCode, userId, restaurantId, subtotal, 0);
+        const couponResult = await (0, coupon_helper_1.validateAndCalculateCoupon)(couponCode, userId, restaurantId, subtotal, 0, itemsToInsert.map((c) => c.foodId).filter(Boolean), itemsToInsert.map((c) => ({
+            foodId: c.foodId,
+            totalPrice: parseFloat(c.totalPrice || "0"),
+        })));
         appliedCoupon = couponResult.coupon;
         const couponDiscountAmount = couponResult.discountAmount;
         isFreeDelivery = couponResult.isFreeDelivery;
         if (appliedCoupon) {
             orderCouponId = appliedCoupon.id || null;
-            // إضافة قيمة خصم الكوبون على المجموع الكلي للخصومات
             totalDiscount += couponDiscountAmount;
-            // إذا لم يكن هناك خصم سابق على الأصناف أو أول طلبات، يتم تعيين الكوبون كمصدر رئيسي للخصم
             if (!orderDiscountSource) {
                 orderDiscountSource = "coupon";
                 orderDiscountType = appliedCoupon.discountType === "percentage" ? "percentage" : "fixed_amount";
@@ -765,18 +926,27 @@ const checkout = async (req, res) => {
     }
     totalDiscount = roundMoney(totalDiscount);
     // ==========================================
-    // 6. Dynamic Delivery & Turf Zone Logic (Optimized Single Fetch)
+    // 6. Dynamic Delivery & Turf Zone Logic
     // ==========================================
     let deliveryFee = 0;
     let resolvedZoneId = zoneId || null;
     let resolvedBranchId = branchId || null;
     let deliveryGenericZoneId = null;
     let shippingAddressSnapshot = null;
+    let targetShippingCompanyId = null;
+    let isCompanyActive = false; // ✏️ CHANGED: hoisted so it's visible outside the delivery block
     if (resolvedOrderType === "delivery") {
         if (!addressId)
             throw new BadRequest_1.BadRequest("Delivery address is required");
-        const [userAddress] = await connection_1.db.select().from(schema_1.addresses)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId), (0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId))).limit(1);
+        // ✏️ CHANGED: use the in-memory guest address if it hasn't been saved yet
+        let userAddress;
+        if (pendingGuestAddress) {
+            userAddress = pendingGuestAddress;
+        }
+        else {
+            [userAddress] = await connection_1.db.select().from(schema_1.addresses)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId), (0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId))).limit(1);
+        }
         if (!userAddress)
             throw new BadRequest_1.BadRequest("Invalid delivery address");
         const lat = parseFloat(userAddress.lat || "0");
@@ -784,30 +954,110 @@ const checkout = async (req, res) => {
         if (!lat || !lng) {
             throw new BadRequest_1.BadRequest("Delivery address requires valid latitude and longitude coordinates.");
         }
-        const restaurantFees = await connection_1.db.select({
-            id: schema_1.restaurantZoneDeliveryFees.id,
-            zoneId: schema_1.restaurantZoneDeliveryFees.zoneId,
-            branchId: schema_1.restaurantZoneDeliveryFees.branchId,
-            deliveryFee: schema_1.restaurantZoneDeliveryFees.deliveryFee,
-            coverageType: schema_1.restaurantZoneDeliveryFees.coverageType,
-            customCoordinates: schema_1.restaurantZoneDeliveryFees.customCoordinates,
-            customRadiusKm: schema_1.restaurantZoneDeliveryFees.customRadiusKm,
-            defaultCoordinates: schema_1.zones.coordinates,
-            defaultRadiusKm: schema_1.zones.coverageAreaRadiusKm,
-            zoneName: schema_1.zones.name,
-            zoneNameAr: schema_1.zones.nameAr
-        })
-            .from(schema_1.restaurantZoneDeliveryFees)
-            .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, schema_1.zones.id))
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.status, "active"), branchId ? (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.branchId, branchId) : undefined));
+        targetShippingCompanyId = settings?.shippingCompanyId || null;
+        if (!targetShippingCompanyId) {
+            const [junctionLink] = await connection_1.db
+                .select({
+                shippingCompanyId: schema_1.shippingCompanyRestaurants.shippingCompanyId,
+                shippingCompanyStatus: schema_1.shippingCompanies.status,
+            })
+                .from(schema_1.shippingCompanyRestaurants)
+                .innerJoin(schema_1.shippingCompanies, (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, schema_1.shippingCompanies.id))
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.status, "active"), (0, drizzle_orm_1.eq)(schema_1.shippingCompanies.status, "active")))
+                .limit(1);
+            if (junctionLink) {
+                targetShippingCompanyId = junctionLink.shippingCompanyId;
+                isCompanyActive = true;
+            }
+        }
+        else {
+            const [company] = await connection_1.db
+                .select({ id: schema_1.shippingCompanies.id, status: schema_1.shippingCompanies.status })
+                .from(schema_1.shippingCompanies)
+                .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, targetShippingCompanyId))
+                .limit(1);
+            if (company && company.status === "active") {
+                isCompanyActive = true;
+            }
+            else {
+                targetShippingCompanyId = null;
+            }
+        }
         let applicableFee = null;
         let maxDeliveryFee = -1;
-        for (const fee of restaurantFees) {
-            if ((0, geo_1.isLocationInZone)(lat, lng, fee.zoneId, fee)) {
-                const currentFee = parseFloat(fee.deliveryFee || "0");
-                if (currentFee > maxDeliveryFee) {
-                    maxDeliveryFee = currentFee;
-                    applicableFee = fee;
+        if (targetShippingCompanyId && isCompanyActive) {
+            const companyZones = await connection_1.db
+                .select({
+                id: schema_1.shippingZones.id,
+                name: schema_1.shippingZones.name,
+                nameAr: schema_1.shippingZones.nameAr,
+                coordinates: schema_1.shippingZones.coordinates,
+                coverageAreaRadiusKm: schema_1.shippingZones.coverageAreaRadiusKm,
+                deliveryFee: schema_1.shippingZones.deliveryFee,
+                minOrderAmount: schema_1.shippingZones.minOrderAmount,
+                status: schema_1.shippingZones.status,
+            })
+                .from(schema_1.shippingZones)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingZones.shippingCompanyId, targetShippingCompanyId), (0, drizzle_orm_1.eq)(schema_1.shippingZones.status, "active")));
+            for (const sz of companyZones) {
+                let coords = sz.coordinates;
+                if (typeof coords === "string") {
+                    try {
+                        coords = JSON.parse(coords);
+                    }
+                    catch {
+                        coords = [];
+                    }
+                }
+                const isPolygon = Array.isArray(coords) && coords.length >= 3;
+                const feeObj = {
+                    id: sz.id,
+                    zoneId: sz.id,
+                    branchId: null,
+                    branchStatus: "active",
+                    deliveryFee: sz.deliveryFee,
+                    coverageType: isPolygon ? "POLYGON" : "RADIUS",
+                    customCoordinates: coords,
+                    customRadiusKm: sz.coverageAreaRadiusKm,
+                    defaultCoordinates: coords,
+                    defaultRadiusKm: sz.coverageAreaRadiusKm,
+                    zoneName: sz.name,
+                    zoneNameAr: sz.nameAr,
+                };
+                if ((0, geo_1.isLocationInZone)(lat, lng, feeObj.zoneId, feeObj)) {
+                    const currentFee = parseFloat(feeObj.deliveryFee || "0");
+                    if (currentFee > maxDeliveryFee) {
+                        maxDeliveryFee = currentFee;
+                        applicableFee = feeObj;
+                    }
+                }
+            }
+        }
+        // If not linked to a shipping company or no zone matched, check the restaurant's own zones
+        if (!applicableFee) {
+            const restaurantFees = await connection_1.db.select({
+                id: schema_1.restaurantZoneDeliveryFees.id,
+                zoneId: schema_1.restaurantZoneDeliveryFees.zoneId,
+                branchId: schema_1.restaurantZoneDeliveryFees.branchId,
+                deliveryFee: schema_1.restaurantZoneDeliveryFees.deliveryFee,
+                coverageType: schema_1.restaurantZoneDeliveryFees.coverageType,
+                customCoordinates: schema_1.restaurantZoneDeliveryFees.customCoordinates,
+                customRadiusKm: schema_1.restaurantZoneDeliveryFees.customRadiusKm,
+                defaultCoordinates: schema_1.zones.coordinates,
+                defaultRadiusKm: schema_1.zones.coverageAreaRadiusKm,
+                zoneName: schema_1.zones.name,
+                zoneNameAr: schema_1.zones.nameAr
+            })
+                .from(schema_1.restaurantZoneDeliveryFees)
+                .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, schema_1.zones.id))
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.status, "active"), branchId ? (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.branchId, branchId) : undefined));
+            for (const fee of restaurantFees) {
+                if ((0, geo_1.isLocationInZone)(lat, lng, fee.zoneId, fee)) {
+                    const currentFee = parseFloat(fee.deliveryFee || "0");
+                    if (currentFee > maxDeliveryFee) {
+                        maxDeliveryFee = currentFee;
+                        applicableFee = fee;
+                    }
                 }
             }
         }
@@ -833,17 +1083,54 @@ const checkout = async (req, res) => {
                 throw new BadRequest_1.BadRequest("Selected branch not found or inactive.");
             resolvedBranchId = selectedBranch.id;
         }
+        else if (targetShippingCompanyId && isCompanyActive) {
+            // 🚚 Shipping-company orders: pick the closest active branch to the customer
+            const activeBranches = await connection_1.db.select({
+                id: schema_1.branches.id,
+                name: schema_1.branches.name,
+                lat: schema_1.branches.lat,
+                lng: schema_1.branches.lng,
+            })
+                .from(schema_1.branches)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")));
+            if (!activeBranches || activeBranches.length === 0) {
+                throw new BadRequest_1.BadRequest("No active branch found for this restaurant.");
+            }
+            if (activeBranches.length === 1) {
+                resolvedBranchId = activeBranches[0].id;
+            }
+            else {
+                let closestBranch = activeBranches[0];
+                let minDistance = Infinity;
+                for (const b of activeBranches) {
+                    const bLat = parseFloat(b.lat || "0");
+                    const bLng = parseFloat(b.lng || "0");
+                    if (bLat && bLng) {
+                        const dist = (0, geo_1.calculateDistance)(lat, lng, bLat, bLng);
+                        if (dist < minDistance) {
+                            minDistance = dist;
+                            closestBranch = b;
+                        }
+                    }
+                }
+                resolvedBranchId = closestBranch.id;
+            }
+        }
         else {
             const [matchedBranch] = await connection_1.db.select({ id: schema_1.branches.id })
                 .from(schema_1.branches)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, genericZoneId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")))
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), genericZoneId ? (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, genericZoneId) : undefined, (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")))
                 .limit(1);
             if (!matchedBranch)
                 throw new BadRequest_1.BadRequest("No active branch found serving your delivery zone.");
             resolvedBranchId = matchedBranch.id;
         }
-        const [userInfoForAddress] = await connection_1.db.select({ phone: schema_1.users.phone }).from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, userId)).limit(1);
-        // Snapshot build using pre-fetched applicableFee values (NO SECOND QUERY TO DB)
+        // ✏️ CHANGED: for guests the phone comes from the validated guestInfo (not yet saved on the user row)
+        let snapshotPhone = guestPhone;
+        if (!isGuestUser) {
+            const [userInfoForAddress] = await connection_1.db.select({ phone: schema_1.users.phone }).from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, userId)).limit(1);
+            snapshotPhone = userInfoForAddress?.phone || null;
+        }
         shippingAddressSnapshot = {
             title: userAddress.title,
             street: userAddress.street,
@@ -855,7 +1142,7 @@ const checkout = async (req, res) => {
             fulladdress: userAddress.fulladdress || null,
             lat: lat,
             lng: lng,
-            phone: userInfoForAddress?.phone || null,
+            phone: snapshotPhone,
             addressZoneId: genericZoneId || null,
             restaurantZoneId: resolvedZoneId || null,
             addressZoneName: applicableFee.zoneName || null,
@@ -892,18 +1179,14 @@ const checkout = async (req, res) => {
             cityId: schema_1.branches.cityId,
             cityName: schema_1.cities.name,
             cityNameAr: schema_1.cities.nameAr,
-            // Zone: delivery zone if delivery order, otherwise branch physical zone
             zoneId: deliveryGenericZoneId ? schema_1.restaurantZoneDeliveryFees.zoneId : schema_1.branches.zoneId,
             zoneName: schema_1.zones.name,
             zoneNameAr: schema_1.zones.nameAr,
-            // Restaurant-specific delivery fee for this zone
             zoneDeliveryFee: schema_1.restaurantZoneDeliveryFees.deliveryFee,
         })
             .from(schema_1.branches)
             .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.branches.cityId, schema_1.cities.id))
-            // Join restaurant zone config matching this branch and delivery zone
             .leftJoin(schema_1.restaurantZoneDeliveryFees, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.branchId, schema_1.branches.id), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), deliveryGenericZoneId ? (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, deliveryGenericZoneId) : (0, drizzle_orm_1.sql) `1=0`))
-            // Then join global zones to get the zone name/nameAr
             .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.zones.id, deliveryGenericZoneId ? schema_1.restaurantZoneDeliveryFees.zoneId : schema_1.branches.zoneId))
             .where((0, drizzle_orm_1.eq)(schema_1.branches.id, resolvedBranchId))
             .limit(1);
@@ -947,7 +1230,6 @@ const checkout = async (req, res) => {
             const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= nowForOffer;
             const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= nowForOffer;
             const minAmountOk = !freeDeliveryOffer.minOrderAmount || subtotal >= parseFloat(freeDeliveryOffer.minOrderAmount);
-            // Check maxOrdersPerUser: count completed orders user has at this restaurant
             let userLimitOk = true;
             if (freeDeliveryOffer.maxOrdersPerUser && freeDeliveryOffer.maxOrdersPerUser > 0) {
                 const [userOrdersRow] = await connection_1.db
@@ -970,8 +1252,12 @@ const checkout = async (req, res) => {
         totalAmount = 0;
     const orderId = (0, uuid_1.v4)();
     const orderNumber = `ORD-${Date.now()}`;
-    const [userInfo] = await connection_1.db.select({ id: schema_1.users.id, name: schema_1.users.name, phone: schema_1.users.phone, email: schema_1.users.email })
+    const [userRow] = await connection_1.db.select({ id: schema_1.users.id, name: schema_1.users.name, phone: schema_1.users.phone, email: schema_1.users.email })
         .from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, userId)).limit(1);
+    // ✏️ CHANGED: for guests, name/phone come from the validated guestInfo (they're saved in the transaction)
+    const userInfo = isGuestUser
+        ? { ...userRow, name: guestName, phone: guestPhone }
+        : userRow;
     // ==========================================
     // 11. Create Payment Session BEFORE the DB transaction (if Visa/Online)
     // If this fails the order is never written to DB — no rollback needed.
@@ -993,7 +1279,6 @@ const checkout = async (req, res) => {
                 phone: userInfo?.phone,
             },
         });
-        // ↑ throws BadRequest automatically on failure — order not created yet
     }
     const finalPaymentGatewayType = isWalletPayment ? "SYSTEM" : (paymentSessionData?.gatewayType ?? settings?.paymentGatewayType ?? "SYSTEM");
     let visaCommission = 0;
@@ -1016,9 +1301,18 @@ const checkout = async (req, res) => {
     // 🛡️ 10. Execute Order (Transaction)
     // ==========================================
     const now = new Date();
-    // 🔒 3. Fetch Last Order
     let createdDailyOrderNumber = 1;
     await connection_1.db.transaction(async (tx) => {
+        // ✏️ NEW: guest side-effects now happen ONLY here, atomically with the order.
+        // If anything below fails, the guest row and the address are rolled back too.
+        if (isGuestUser) {
+            await tx.update(schema_1.users)
+                .set({ name: guestName, phone: guestPhone })
+                .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
+            if (pendingGuestAddress) {
+                await tx.insert(schema_1.addresses).values(pendingGuestAddress);
+            }
+        }
         // 🔒 1. Wallet deduction with FOR UPDATE
         if (isWalletPayment) {
             const [userWallet] = await tx.select()
@@ -1046,18 +1340,6 @@ const checkout = async (req, res) => {
             });
         }
         // 🔒 2. Daily order number calculation
-        // const [lastOrder] = await tx
-        //     .select({ dailyOrderNumber: orders.dailyOrderNumber })
-        //     .from(orders)
-        //     .where(
-        //         and(
-        //             eq(orders.restaurantId, restaurantId),
-        //             gte(orders.createdAt, startOfTodayQuery)
-        //         )
-        //     )
-        //     .orderBy(desc(orders.dailyOrderNumber))
-        //     .limit(1)
-        // 🔒 2. Daily order number calculation
         // For cash / wallet orders, calculate dailyOrderNumber immediately.
         // For online visa orders, defer dailyOrderNumber until confirmed paid by webhook.
         if (!isVisaPayment) {
@@ -1076,6 +1358,14 @@ const checkout = async (req, res) => {
             orderSource: storedOrderSource,
             paymentMethod,
             paymentGatewayType: finalPaymentGatewayType,
+            paymentGateway: paymentSessionData?.gateway
+                ? paymentSessionData.gateway.toLowerCase()
+                : null,
+            paymentOrderId: (paymentSessionData?.paymentOrderId ||
+                paymentSessionData?.paymobOrderId ||
+                paymentSessionData?.geideaOrderId ||
+                paymentSessionData?.sessionId ||
+                null),
             paymentStatus: isVisaPayment ? "pending_payment" : "paid",
             orderType: resolvedOrderType,
             subtotal: subtotal.toFixed(2),
@@ -1095,17 +1385,20 @@ const checkout = async (req, res) => {
             couponCode: couponCode || null,
             totalAmount: totalAmount.toFixed(2),
             note: note || null,
+            shippingCompanyId: targetShippingCompanyId || null,
+            shippingStatus: "pending_dispatch",
             status: "pending",
             dailyOrderNumber: isVisaPayment ? null : createdDailyOrderNumber,
             durationOrderPreparing: defaultPreparingDuration,
             offerId: userCart.find(c => c.offerId)?.offerId || null,
+            isBundle: Boolean(userCart.some(c => c.offerId)),
             createdAt: now
         });
         if (isCashPayment) {
             await (0, restaurantWalletService_1.chargePendingServiceFee)(orderId, tx, "cash_pending");
         }
         await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
-        // تفريغ السلة فوراً للدفع كاش أو المحفظة. للدفع بالفيزا/أونلاين السلة تظل موجودة حتى يتأكد الدفع، أو تبقى كما هي لو فشل
+        // Clear the cart immediately for cash / wallet. For visa the cart stays until payment is confirmed.
         if (!isVisaPayment) {
             await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
         }
@@ -1155,7 +1448,7 @@ const checkout = async (req, res) => {
                 .set({ usedCount: (0, drizzle_orm_1.sql) `used_count + 1` })
                 .where((0, drizzle_orm_1.eq)(schema_1.coupons.id, appliedCoupon.id));
         }
-        // تسجيل استخدام خصم الطلبات الأولى للطلبات المؤكدة كاش أو محفظة
+        // Record first-order discount usage for confirmed (cash / wallet) orders
         if (orderFirstOrderDiscountId && !isVisaPayment) {
             await (0, firstOrderDiscount_helper_1.recordFirstOrderDiscountUsage)(orderFirstOrderDiscountId, userId, orderId, firstOrderDiscountAmount, tx);
         }
@@ -1169,7 +1462,7 @@ const checkout = async (req, res) => {
         // Wallet settlement is recorded once the restaurant marks the order delivered.
     });
     // ==========================================
-    // 11. Send Notification to Restaurant (only for non-visa orders; visa orders get notified when paid via webhook)
+    // 11. Send Notification to Restaurant (non-visa only; visa orders are notified via webhook)
     // ==========================================
     if (!isVisaPayment) {
         const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
@@ -1196,7 +1489,7 @@ const checkout = async (req, res) => {
         });
     }
     // ==========================================
-    // 📤 إرجاع البيانات في الـ Response
+    // 📤 Response
     // ==========================================
     return (0, response_1.SuccessResponse)(res, {
         message: "Order created successfully",
@@ -1613,12 +1906,14 @@ const getOrderPrerequisites = async (req, res) => {
         throw new BadRequest_1.BadRequest("Invalid or missing order source");
     }
     // 1. جلب البيانات من الداتا بيز بالتوازي
-    const [userAddresses, restaurantBranches, zoneFees, allActivePaymentMethods, getCancelReasons, businessPlans, freeDeliveryOfferRows, restaurantSettingsRows] = await Promise.all([
+    const [userAddresses, restaurantBranches, restaurantZoneFees, allActivePaymentMethods, getCancelReasons, businessPlans, freeDeliveryOfferRows, restaurantSettingsRows] = await Promise.all([
         connection_1.db.select().from(schema_1.addresses).where((0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId)),
         connection_1.db.select().from(schema_1.branches).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active"))),
         connection_1.db.select({
             id: schema_1.restaurantZoneDeliveryFees.id,
             zoneId: schema_1.restaurantZoneDeliveryFees.zoneId,
+            zoneName: schema_1.zones.name,
+            zoneNameAr: schema_1.zones.nameAr,
             branchId: schema_1.restaurantZoneDeliveryFees.branchId,
             branchStatus: schema_1.branches.status,
             deliveryFee: schema_1.restaurantZoneDeliveryFees.deliveryFee,
@@ -1646,9 +1941,16 @@ const getOrderPrerequisites = async (req, res) => {
             .from(schema_1.freeDeliveryOffers)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.freeDeliveryOffers.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.freeDeliveryOffers.status, "active")))
             .limit(1),
-        // 🛡️ جلب إعدادات المطعم لمعرفة هل الدفع الإلكتروني و الكاش مفعلين أم لا
-        connection_1.db.select({ enableOnlinePayment: schema_1.restaurantSettings.enableOnlinePayment, cashEnabled: schema_1.restaurantSettings.cashEnabled })
+        // 🛡️ جلب إعدادات المطعم لمعرفة هل الدفع الإلكتروني و الكاش مفعلين أم لا ومعرفة شركة الشحن المرتبطة
+        connection_1.db.select({
+            enableOnlinePayment: schema_1.restaurantSettings.enableOnlinePayment,
+            cashEnabled: schema_1.restaurantSettings.cashEnabled,
+            shippingCompanyId: schema_1.restaurantSettings.shippingCompanyId,
+            shippingCompanyName: schema_1.shippingCompanies.name,
+            shippingCompanyStatus: schema_1.shippingCompanies.status,
+        })
             .from(schema_1.restaurantSettings)
+            .leftJoin(schema_1.shippingCompanies, (0, drizzle_orm_1.eq)(schema_1.restaurantSettings.shippingCompanyId, schema_1.shippingCompanies.id))
             .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId))
             .limit(1)
     ]);
@@ -1673,6 +1975,82 @@ const getOrderPrerequisites = async (req, res) => {
     const plan = businessPlans[0];
     if (!plan) {
         throw new BadRequest_1.BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
+    }
+    let targetShippingCompanyId = restaurantSettingsRows[0]?.shippingCompanyId || null;
+    let shippingCompanyName = restaurantSettingsRows[0]?.shippingCompanyName || null;
+    let isCompanyActive = restaurantSettingsRows[0]?.shippingCompanyStatus === "active";
+    // إذا لم تكن شركة الشحن مسجلة في الإعدادات، نتحقق من جدول الربط shippingCompanyRestaurants كخيار بديل
+    if (!targetShippingCompanyId) {
+        const [junctionLink] = await connection_1.db
+            .select({
+            shippingCompanyId: schema_1.shippingCompanyRestaurants.shippingCompanyId,
+            shippingCompanyName: schema_1.shippingCompanies.name,
+            shippingCompanyStatus: schema_1.shippingCompanies.status,
+        })
+            .from(schema_1.shippingCompanyRestaurants)
+            .innerJoin(schema_1.shippingCompanies, (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, schema_1.shippingCompanies.id))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.status, "active"), (0, drizzle_orm_1.eq)(schema_1.shippingCompanies.status, "active")))
+            .limit(1);
+        if (junctionLink) {
+            targetShippingCompanyId = junctionLink.shippingCompanyId;
+            shippingCompanyName = junctionLink.shippingCompanyName;
+            isCompanyActive = true;
+        }
+    }
+    // 🚚 إذا كان المطعم مرتبطاً بشركة شحن نشطة، نستخدم نطاقات شركة الشحن (shipping_zones) بدلاً من نطاقات المطعم
+    let zoneFees = [];
+    if (targetShippingCompanyId && isCompanyActive) {
+        const companyZones = await connection_1.db
+            .select({
+            id: schema_1.shippingZones.id,
+            name: schema_1.shippingZones.name,
+            nameAr: schema_1.shippingZones.nameAr,
+            coordinates: schema_1.shippingZones.coordinates,
+            coverageAreaRadiusKm: schema_1.shippingZones.coverageAreaRadiusKm,
+            deliveryFee: schema_1.shippingZones.deliveryFee,
+            minOrderAmount: schema_1.shippingZones.minOrderAmount,
+            status: schema_1.shippingZones.status,
+        })
+            .from(schema_1.shippingZones)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingZones.shippingCompanyId, targetShippingCompanyId), (0, drizzle_orm_1.eq)(schema_1.shippingZones.status, "active")));
+        if (companyZones.length > 0) {
+            zoneFees = companyZones.map((sz) => {
+                let coords = sz.coordinates;
+                if (typeof coords === "string") {
+                    try {
+                        coords = JSON.parse(coords);
+                    }
+                    catch {
+                        coords = [];
+                    }
+                }
+                const isPolygon = Array.isArray(coords) && coords.length >= 3;
+                return {
+                    id: sz.id,
+                    zoneId: sz.id,
+                    branchId: null,
+                    branchStatus: "active",
+                    deliveryFee: sz.deliveryFee,
+                    coverageType: isPolygon ? "POLYGON" : "RADIUS",
+                    customCoordinates: coords,
+                    customRadiusKm: sz.coverageAreaRadiusKm,
+                    defaultCoordinates: coords,
+                    defaultRadiusKm: sz.coverageAreaRadiusKm,
+                    name: sz.name,
+                    nameAr: sz.nameAr,
+                    minOrderAmount: sz.minOrderAmount,
+                    shippingCompanyId: targetShippingCompanyId,
+                    isShippingCompanyZone: true,
+                };
+            });
+        }
+        else {
+            // Fallback لنطاقات المطعم في حال لم يتم إدخال نطاقات لشركة الشحن بعد
+            zoneFees = restaurantZoneFees;
+        }
+    }
+    else {
+        zoneFees = restaurantZoneFees;
     }
     // 2. معالجة كل عنوان عند المستخدم ومعرفة هل هو قابل للتوصيل ومعرفة zoneId الخاص به
     const addressesWithDeliveryInfo = userAddresses.map((addr) => {
@@ -1713,8 +2091,6 @@ const getOrderPrerequisites = async (req, res) => {
             ...addr,
             isDeliverable,
             deliveryFee: applicableDeliveryFee,
-            // restaurantDeliveryZoneId: matchedRestaurantDeliveryZoneId, // 👈 id الخاص بنطاق المطعم (restaurantZoneDeliveryFees)
-            //zoneId: matchedZoneId, // 👈 إرجاع zoneId داخل العنوان
             zoneId: matchedRestaurantDeliveryZoneId,
         };
     });
@@ -1738,12 +2114,16 @@ const getOrderPrerequisites = async (req, res) => {
         data: {
             addresses: addressesWithDeliveryInfo,
             branches: restaurantBranches,
-            zones: zoneFees, // 👈 إرجاع مناطق التوصيل وأسعارها الخاصة بالمطعم
+            zones: zoneFees, // 👈 إرجاع مناطق التوصيل وأسعارها الخاصة بشركة الشحن أو المطعم
             paymentMethods: activePaymentMethods, // visa filtered out when enableOnlinePayment=false
             enableOnlinePayment, // 👈 هل الدفع الإلكتروني (فيزا) مفعّل لهذا المطعم؟
             reasons: getCancelReasons,
             serviceFee: serviceFee.toFixed(2),
             freeDeliveryOffer: freeDeliveryOfferData,
+            shippingCompany: (targetShippingCompanyId && isCompanyActive) ? {
+                id: targetShippingCompanyId,
+                name: shippingCompanyName,
+            } : null,
         }
     });
 };
@@ -1838,11 +2218,11 @@ const cancelOrder = async (req, res) => {
         }
     });
     // Release courier active orders count if order had courier assigned
-    // if (order.deliveryManId) {
-    //     releaseCourierForOrder(order.id, order.deliveryManId).catch((err) => {
-    //         console.error(`[releaseCourierForOrder:userCancel] failed for order ${order.id}:`, err);
-    //     });
-    // }
+    if (order.deliveryManId) {
+        (0, dispatchEngine_1.releaseCourierForOrder)(order.id, order.deliveryManId).catch((err) => {
+            console.error(`[releaseCourierForOrder:userCancel] failed for order ${order.id}:`, err);
+        });
+    }
     return (0, response_1.SuccessResponse)(res, { message: "Order cancelled successfully" });
 };
 exports.cancelOrder = cancelOrder;

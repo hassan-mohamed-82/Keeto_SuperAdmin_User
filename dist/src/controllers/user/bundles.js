@@ -4,6 +4,145 @@ exports.getBundleById = exports.getAllBundles = void 0;
 const drizzle_orm_1 = require("drizzle-orm");
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
+const response_1 = require("../../utils/response");
+// ==========================================
+// HELPERS
+// ==========================================
+const parseJsonArray = (val) => {
+    if (!val)
+        return [];
+    if (typeof val === "string") {
+        try {
+            const parsed = JSON.parse(val);
+            return typeof parsed === "string" ? JSON.parse(parsed) : (Array.isArray(parsed) ? parsed : []);
+        }
+        catch {
+            return [];
+        }
+    }
+    return Array.isArray(val) ? val : [];
+};
+const getFoodVariationsMap = async (foodIds) => {
+    const foodVariationsMap = new Map();
+    if (!foodIds.length)
+        return foodVariationsMap;
+    const variationsList = await connection_1.db
+        .select({
+        variationId: schema_1.foodVariations.id,
+        foodId: schema_1.foodVariations.foodId,
+        variationName: schema_1.foodVariations.name,
+        variationNameAr: schema_1.foodVariations.nameAr,
+        variationNameFr: schema_1.foodVariations.nameFr,
+        isRequired: schema_1.foodVariations.isRequired,
+        selectionType: schema_1.foodVariations.selectionType,
+        min: schema_1.foodVariations.min,
+        max: schema_1.foodVariations.max,
+        optionId: schema_1.variationOptions.id,
+        optionName: schema_1.variationOptions.optionName,
+        optionNameAr: schema_1.variationOptions.optionNameAr,
+        optionNameFr: schema_1.variationOptions.optionNameFr,
+        additionalPrice: schema_1.variationOptions.additionalPrice,
+    })
+        .from(schema_1.foodVariations)
+        .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId), (0, drizzle_orm_1.eq)(schema_1.variationOptions.status, true)))
+        .where((0, drizzle_orm_1.inArray)(schema_1.foodVariations.foodId, foodIds));
+    for (const v of variationsList) {
+        if (!v.foodId)
+            continue;
+        if (!foodVariationsMap.has(v.foodId)) {
+            foodVariationsMap.set(v.foodId, []);
+        }
+        const currentVars = foodVariationsMap.get(v.foodId);
+        let existingVar = currentVars.find((x) => x.id === v.variationId);
+        if (!existingVar) {
+            existingVar = {
+                id: v.variationId,
+                name: v.variationName,
+                nameAr: v.variationNameAr,
+                nameFr: v.variationNameFr,
+                isRequired: Boolean(v.isRequired),
+                selectionType: v.selectionType,
+                min: v.min,
+                max: v.max,
+                options: [],
+            };
+            currentVars.push(existingVar);
+        }
+        if (v.optionId) {
+            existingVar.options.push({
+                id: v.optionId,
+                name: v.optionName,
+                nameAr: v.optionNameAr,
+                nameFr: v.optionNameFr,
+                additionalPrice: Number(v.additionalPrice || 0),
+            });
+        }
+    }
+    return foodVariationsMap;
+};
+const getAddonsMap = async (addonIds) => {
+    const addonsMap = new Map();
+    if (!addonIds.length)
+        return addonsMap;
+    const addonsList = await connection_1.db
+        .select({
+        id: schema_1.addons.id,
+        name: schema_1.addons.name,
+        nameAr: schema_1.addons.nameAr,
+        nameFr: schema_1.addons.nameFr,
+    })
+        .from(schema_1.addons)
+        .where((0, drizzle_orm_1.inArray)(schema_1.addons.id, addonIds));
+    for (const a of addonsList) {
+        addonsMap.set(a.id, {
+            id: a.id,
+            name: a.name,
+            nameAr: a.nameAr,
+            nameFr: a.nameFr,
+        });
+    }
+    return addonsMap;
+};
+const formatBundleFoodItem = (row, foodVariationsMap, addonsMap) => {
+    const rawOptionIds = parseJsonArray(row.optionIds);
+    const rawVariations = parseJsonArray(row.variations);
+    const rawAddonIds = parseJsonArray(row.addonIds);
+    const selectedOptionIdSet = new Set(rawOptionIds.map((id) => String(id)));
+    for (const pv of rawVariations) {
+        if (Array.isArray(pv?.options)) {
+            pv.options.forEach((optId) => selectedOptionIdSet.add(String(optId)));
+        }
+    }
+    const baseVariations = foodVariationsMap.get(row.foodId) || [];
+    const formattedVariations = baseVariations
+        .map((v) => {
+        const selectedOptions = v.options.filter((opt) => selectedOptionIdSet.has(opt.id));
+        if (selectedOptions.length === 0)
+            return null;
+        return {
+            ...v,
+            options: selectedOptions,
+        };
+    })
+        .filter(Boolean);
+    const formattedAddons = rawAddonIds
+        .map((id) => addonsMap.get(String(id)))
+        .filter(Boolean);
+    return {
+        foodId: row.foodId,
+        quantity: row.quantity,
+        name: row.foodName,
+        nameAr: row.foodNameAr,
+        nameFr: row.foodNameFr || row.foodName,
+        description: row.foodDescription || "",
+        descriptionAr: row.foodDescriptionAr || "",
+        image: row.foodImage,
+        originalPrice: Number(row.foodPrice),
+        isOutOfStock: Boolean(row.isOutOfStock),
+        variations: formattedVariations,
+        addons: formattedAddons,
+    };
+};
 // ==========================================
 // BUNDLE OFFERS — Retrieval Endpoints
 // ==========================================
@@ -27,14 +166,16 @@ const getAllBundles = async (req, res) => {
             restaurantId: schema_1.offers.restaurantId,
             restaurantName: schema_1.restaurants.name,
             restaurantNameAr: schema_1.restaurants.nameAr,
+            restaurantNameFr: schema_1.restaurants.nameFr,
             restaurantLogo: schema_1.restaurants.logo,
+            restaurantCover: schema_1.restaurants.cover,
         })
             .from(schema_1.offers)
             .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.offers.restaurantId, schema_1.restaurants.id))
             .where(whereConditions);
         // For each offer, load its foods
         const offerIds = offersRows.map((o) => o.id);
-        let offerFoodsMap = new Map();
+        const offerFoodsMap = new Map();
         if (offerIds.length > 0) {
             const offerFoodRows = await connection_1.db
                 .select({
@@ -42,27 +183,31 @@ const getAllBundles = async (req, res) => {
                 foodId: schema_1.offerFoods.foodId,
                 quantity: schema_1.offerFoods.quantity,
                 variations: schema_1.offerFoods.variations,
+                optionIds: schema_1.offerFoods.optionIds,
+                addonIds: schema_1.offerFoods.addonIds,
                 foodName: schema_1.food.name,
                 foodNameAr: schema_1.food.nameAr,
+                foodNameFr: schema_1.food.nameFr,
+                foodDescription: schema_1.food.description,
+                foodDescriptionAr: schema_1.food.descriptionAr,
                 foodImage: schema_1.food.image,
                 foodPrice: schema_1.food.price,
+                isOutOfStock: schema_1.food.isOutOfStock,
             })
                 .from(schema_1.offerFoods)
                 .innerJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.offerFoods.foodId, schema_1.food.id))
                 .where((0, drizzle_orm_1.inArray)(schema_1.offerFoods.offerId, offerIds));
+            const uniqueFoodIds = [...new Set(offerFoodRows.map((f) => f.foodId))];
+            const foodVariationsMap = await getFoodVariationsMap(uniqueFoodIds);
+            const allAddonIds = [
+                ...new Set(offerFoodRows.flatMap((r) => parseJsonArray(r.addonIds).map((id) => String(id)).filter(Boolean))),
+            ];
+            const addonsMap = await getAddonsMap(allAddonIds);
             for (const row of offerFoodRows) {
                 if (!offerFoodsMap.has(row.offerId)) {
                     offerFoodsMap.set(row.offerId, []);
                 }
-                offerFoodsMap.get(row.offerId).push({
-                    foodId: row.foodId,
-                    quantity: row.quantity,
-                    variations: row.variations ?? [],
-                    name: row.foodName,
-                    nameAr: row.foodNameAr,
-                    image: row.foodImage,
-                    price: Number(row.foodPrice),
-                });
+                offerFoodsMap.get(row.offerId).push(formatBundleFoodItem(row, foodVariationsMap, addonsMap));
             }
         }
         const result = offersRows.map((o) => ({
@@ -77,13 +222,14 @@ const getAllBundles = async (req, res) => {
                     id: o.restaurantId,
                     name: o.restaurantName,
                     nameAr: o.restaurantNameAr,
+                    nameFr: o.restaurantNameFr,
                     logo: o.restaurantLogo,
+                    cover: o.restaurantCover,
                 }
                 : null,
             foods: offerFoodsMap.get(o.id) ?? [],
         }));
-        return res.status(200).json({
-            success: true,
+        return (0, response_1.SuccessResponse)(res, {
             message: "Bundle offers retrieved successfully",
             data: result,
         });
@@ -137,6 +283,7 @@ const getBundleById = async (req, res) => {
             quantity: schema_1.offerFoods.quantity,
             variations: schema_1.offerFoods.variations,
             optionIds: schema_1.offerFoods.optionIds,
+            addonIds: schema_1.offerFoods.addonIds,
             foodName: schema_1.food.name,
             foodNameAr: schema_1.food.nameAr,
             foodNameFr: schema_1.food.nameFr,
@@ -149,8 +296,14 @@ const getBundleById = async (req, res) => {
             .from(schema_1.offerFoods)
             .innerJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.offerFoods.foodId, schema_1.food.id))
             .where((0, drizzle_orm_1.eq)(schema_1.offerFoods.offerId, id));
-        return res.status(200).json({
-            success: true,
+        const uniqueFoodIds = [...new Set(offerFoodRows.map((f) => f.foodId))];
+        const foodVariationsMap = await getFoodVariationsMap(uniqueFoodIds);
+        const allAddonIds = [
+            ...new Set(offerFoodRows.flatMap((r) => parseJsonArray(r.addonIds).map((id) => String(id)).filter(Boolean))),
+        ];
+        const addonsMap = await getAddonsMap(allAddonIds);
+        const foods = offerFoodRows.map((f) => formatBundleFoodItem(f, foodVariationsMap, addonsMap));
+        return (0, response_1.SuccessResponse)(res, {
             message: "Offer details retrieved successfully",
             data: {
                 id: offerRow.id,
@@ -169,20 +322,7 @@ const getBundleById = async (req, res) => {
                         cover: offerRow.restaurantCover,
                     }
                     : null,
-                foods: offerFoodRows.map((f) => ({
-                    foodId: f.foodId,
-                    quantity: f.quantity,
-                    variations: f.variations ?? [],
-                    optionIds: f.optionIds ?? [],
-                    name: f.foodName,
-                    nameAr: f.foodNameAr,
-                    nameFr: f.foodNameFr,
-                    description: f.foodDescription,
-                    descriptionAr: f.foodDescriptionAr,
-                    image: f.foodImage,
-                    originalPrice: Number(f.foodPrice),
-                    isOutOfStock: f.isOutOfStock,
-                })),
+                foods,
             },
         });
     }
