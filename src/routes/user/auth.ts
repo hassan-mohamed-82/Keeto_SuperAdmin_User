@@ -11,9 +11,13 @@ import {
 } from "../../controllers/user/auth";
 import { facebookLoginOrSignup } from "../../config/facebook";
 import { verifyGoogleToken } from "../../config/passport";
-import {verifyAppleToken} from "../../config/verifyAppleToken"
+import {verifyAppleToken} from "../../config/verifyAppleToken";
+import authHandoffRouter from "./authHandoff";
 
 const router = Router();
+
+// Subdomain & Custom Domain Auth Handoff (also mounted directly at /api/auth)
+router.use(authHandoffRouter);
 
 router.post("/signup", catchAsync(signup));
 router.get("/verify-email", catchAsync(verifyEmail));

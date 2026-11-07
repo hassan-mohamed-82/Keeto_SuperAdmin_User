@@ -76,4 +76,5 @@ export * from "./schema/admin/firstOrderDiscount";
 export * from "./schema/admin/platformPaymentGateways";
 export * from "./schema/admin/videos";
 export * from "./schema/admin/restaurantDomains";
+export * from "./schema/user/authHandoffCodes";
 
