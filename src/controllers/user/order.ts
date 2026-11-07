@@ -1,4 +1,4 @@
-﻿// controllers/user/OrderController.ts
+// controllers/user/OrderController.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import {
@@ -77,6 +77,19 @@ const formatDate = (date: Date | null | undefined): string | null => {
         second: "2-digit",
         hour12: true,
     }).format(new Date(date));
+};
+
+const parseJsonArray = (val: any): any[] => {
+    if (!val) return [];
+    if (typeof val === "string") {
+        try {
+            const parsed = JSON.parse(val);
+            return typeof parsed === "string" ? JSON.parse(parsed) : (Array.isArray(parsed) ? parsed : []);
+        } catch {
+            return [];
+        }
+    }
+    return Array.isArray(val) ? val : [];
 };
 
 // Helper to format order items variations, supporting both snapshot-stored variations and old database lookup fallback
@@ -205,21 +218,17 @@ const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
  */
 export const normalizeEgPhone = (raw: unknown): string => {
     if (typeof raw !== "string") throw new BadRequest("Phone number is required.");
-    let digits = raw.replace(/[^\d+]/g, "");
-    if (digits.startsWith("+")) digits = digits.slice(1);
-    if (digits.startsWith("00")) digits = digits.slice(2);
-    if (digits.startsWith("20")) digits = digits.slice(2);
-    if (digits.startsWith("0")) digits = digits.slice(1);
-    if (!/^1[0125]\d{8}$/.test(digits)) {
-        throw new BadRequest("Invalid phone number format.");
+    const trimmed = raw.trim();
+    if (!/^01[0125][0-9]{8}$/.test(trimmed)) {
+        throw new BadRequest("Phone number must be 11 digits and start with 01.");
     }
-    return `+20${digits}`;
+    return trimmed;
 };
 
 /** All formats a phone may have been stored in (for matching legacy data). */
-const phoneVariants = (e164: string): string[] => {
-    const national = e164.slice(3); // 1XXXXXXXXX
-    return [e164, `0${national}`, `20${national}`, `0020${national}`];
+const phoneVariants = (phone11: string): string[] => {
+    const withoutZero = phone11.startsWith("0") ? phone11.slice(1) : phone11;
+    return [phone11, `+20${withoutZero}`, `20${withoutZero}`, `0020${withoutZero}`];
 };
 
 /** Validates + builds the guest address row. It is NOT inserted here — it is inserted inside the transaction. */
@@ -289,6 +298,10 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (isGuestUser) {
         guestName = String(guestInfo?.name || req.user.name || "Guest").trim().slice(0, 100) || "Guest";
         guestPhone = normalizeEgPhone(guestInfo?.phone); // throws BadRequest if missing / invalid
+        const altPhone = guestInfo?.alternatePhone || guestInfo?.alternativePhone;
+        if (altPhone) {
+            normalizeEgPhone(altPhone);
+        }
 
         // A phone that belongs to a registered account can't be used by a guest (no silent merge, no takeover).
         const [registered] = await db
@@ -626,7 +639,64 @@ export const checkout = async (req: Request | any, res: Response) => {
         if (!checkoutOfferFoodsMap.has(ofRow.offerId)) {
             checkoutOfferFoodsMap.set(ofRow.offerId, []);
         }
-        checkoutOfferFoodsMap.get(ofRow.offerId)!.push(ofRow);
+                checkoutOfferFoodsMap.get(ofRow.offerId)!.push(ofRow);
+    }
+
+    if (dbOfferFoodsForCheckout.length > 0) {
+        const bundleOptionIds = new Set<string>();
+        const bundleAddonIds = new Set<string>();
+
+        for (const ofRow of dbOfferFoodsForCheckout) {
+            const rawOpts = parseJsonArray(ofRow.optionIds);
+            rawOpts.forEach((id: any) => id && bundleOptionIds.add(String(id)));
+
+            const rawVars = parseJsonArray(ofRow.variations);
+            for (const pv of rawVars) {
+                if (pv?.optionId) bundleOptionIds.add(String(pv.optionId));
+                if (Array.isArray(pv?.options)) {
+                    pv.options.forEach((id: any) => id && bundleOptionIds.add(String(id)));
+                }
+            }
+
+            const rawAddonIds = parseJsonArray(ofRow.addonIds);
+            rawAddonIds.forEach((id: any) => id && bundleAddonIds.add(String(id)));
+        }
+
+        const missingOptionIds = Array.from(bundleOptionIds).filter((id) => !optionsWithParentMap.has(id));
+        if (missingOptionIds.length > 0) {
+            const extraOptions = await db
+                .select({
+                    optionId: variationOptions.id,
+                    optionName: variationOptions.optionName,
+                    optionNameAr: variationOptions.optionNameAr,
+                    optionNameFr: variationOptions.optionNameFr,
+                    additionalPrice: variationOptions.additionalPrice,
+                    status: variationOptions.status,
+                    variationId: foodVariations.id,
+                    variationName: foodVariations.name,
+                    variationNameAr: foodVariations.nameAr,
+                    variationNameFr: foodVariations.nameFr,
+                    variationStatus: foodVariations.status,
+                })
+                .from(variationOptions)
+                .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
+                .where(inArray(variationOptions.id, missingOptionIds));
+
+            for (const opt of extraOptions) {
+                optionsWithParentMap.set(opt.optionId, opt);
+            }
+        }
+
+        const missingAddonIds = Array.from(bundleAddonIds).filter((id) => !addonsMap.has(id));
+        if (missingAddonIds.length > 0) {
+            const extraAddons = await db
+                .select({ id: addons.id, name: addons.name, nameAr: addons.nameAr, nameFr: addons.nameFr, price: addons.price })
+                .from(addons)
+                .where(inArray(addons.id, missingAddonIds));
+            for (const a of extraAddons) {
+                addonsMap.set(a.id, a as any);
+            }
+        }
     }
 
     // ─── Calculate pricing per item ───
@@ -840,18 +910,66 @@ export const checkout = async (req: Request | any, res: Response) => {
             subtotal += offerTotal;
             const bFoods = checkoutOfferFoodsMap.get(offer.id) || [];
             const perFoodPrice = bFoods.length > 0 ? roundMoney(offerUnitPrice / bFoods.length) : offerUnitPrice;
-            for (const bf of bFoods) {
+                        for (const bf of bFoods) {
+                const rawOpts = parseJsonArray(bf.optionIds);
+                const rawVars = parseJsonArray(bf.variations);
+
+                const bfOptionIds = new Set<string>(rawOpts.map((id: any) => String(id)).filter(Boolean));
+                for (const pv of rawVars) {
+                    if (pv?.optionId) bfOptionIds.add(String(pv.optionId));
+                    if (Array.isArray(pv?.options)) {
+                        pv.options.forEach((id: any) => id && bfOptionIds.add(String(id)));
+                    }
+                }
+
+                const bundleDetailedVariations = Array.from(bfOptionIds).map((optId) => {
+                    const optDetails = optionsWithParentMap.get(optId);
+                    const resolvedPrice = optDetails?.additionalPrice ?? "0.00";
+                    return {
+                        variationId: optDetails?.variationId ?? null,
+                        variationName: optDetails?.variationName ?? null,
+                        variationNameAr: optDetails?.variationNameAr ?? null,
+                        variationNameFr: optDetails?.variationNameFr ?? null,
+                        optionId: optDetails?.optionId ?? optId,
+                        optionName: optDetails?.optionName ?? null,
+                        optionNameAr: optDetails?.optionNameAr ?? null,
+                        optionNameFr: optDetails?.optionNameFr ?? null,
+                        price: Number(resolvedPrice).toFixed(2),
+                        additionalPrice: Number(resolvedPrice).toFixed(2),
+                    };
+                });
+
+                const rawBfAddonIds = parseJsonArray(bf.addonIds);
+                const bundleDetailedAddons: any[] = [];
+                let bundleAddonsPrice = 0;
+                for (const addonId of rawBfAddonIds) {
+                    const dbAddon = addonsMap.get(String(addonId));
+                    if (dbAddon) {
+                        const addonPrice = Number(dbAddon.price || 0);
+                        bundleAddonsPrice += addonPrice;
+                        bundleDetailedAddons.push({
+                            addonId: dbAddon.id,
+                            name: dbAddon.name,
+                            nameAr: dbAddon.nameAr,
+                            nameFr: dbAddon.nameFr,
+                            price: addonPrice.toFixed(2),
+                        });
+                    }
+                }
+                const bundleItemTotal = roundMoney(perFoodPrice * cartItem.quantity + bundleAddonsPrice);
+
                 itemsToInsert.push({
                     id: uuidv4(),
                     foodId: bf.foodId,
                     quantity: bf.quantity * cartItem.quantity,
                     basePrice: perFoodPrice.toFixed(2),
                     variationsPrice: "0.00",
-                    addonsPrice: "0.00",
-                    totalPrice: (perFoodPrice * cartItem.quantity).toFixed(2),
-                    variations: bf.variations || [],
-                    addons: [],
+                    addonsPrice: bundleAddonsPrice.toFixed(2),
+                    totalPrice: bundleItemTotal.toFixed(2),
+                    variations: bundleDetailedVariations,
+                    addons: bundleDetailedAddons,
                     note: cartItem.note || null,
+                    isBundle: true,
                 });
             }
             continue;
@@ -876,6 +994,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             variations: vars,
             addons: addonsList,
             note: cartItem.note || null,
+            isBundle: false,
         });
     }
 
@@ -1555,6 +1674,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             dailyOrderNumber: isVisaPayment ? null : createdDailyOrderNumber,
             durationOrderPreparing: defaultPreparingDuration,
             offerId: userCart.find(c => c.offerId)?.offerId || null,
+            isBundle: Boolean(userCart.some(c => c.offerId)),
             createdAt: now
         });
 

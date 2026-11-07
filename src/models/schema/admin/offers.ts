@@ -41,6 +41,7 @@ export const offerFoods = mysqlTable("offer_foods", {
         .notNull(),
     variations: json("variations").$type<OfferFoodVariationItem[]>().default([]).notNull(),
     optionIds: json("option_ids").$type<string[]>().default([]).notNull(),
+    addonIds: json("addon_ids").$type<string[]>().default([]).notNull(),
     quantity: int("quantity").default(1).notNull(),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),

@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { validate } from "../../middlewares/validation";
+import { signupSchema } from "../../validation/user/auth";
 import { catchAsync } from "../../utils/catchAsync";
 import {
     signup,
@@ -11,7 +13,7 @@ import {
 } from "../../controllers/user/auth";
 import { facebookLoginOrSignup } from "../../config/facebook";
 import { verifyGoogleToken } from "../../config/passport";
-import {verifyAppleToken} from "../../config/verifyAppleToken";
+import { verifyAppleToken } from "../../config/verifyAppleToken";
 import authHandoffRouter from "./authHandoff";
 
 const router = Router();
@@ -19,7 +21,10 @@ const router = Router();
 // Subdomain & Custom Domain Auth Handoff (also mounted directly at /api/auth)
 router.use(authHandoffRouter);
 
-router.post("/signup", catchAsync(signup));
+// Subdomain & Custom Domain Auth Handoff (also mounted directly at /api/auth)
+router.use(authHandoffRouter);
+
+router.post("/signup", validate(signupSchema), catchAsync(signup));
 router.get("/verify-email", catchAsync(verifyEmail));
 router.post("/login", catchAsync(login));
 router.post("/forgot-password", catchAsync(forgotPassword));
@@ -31,5 +36,5 @@ router.post("/guest-session", catchAsync(initGuestSession));
 
 router.post("/google", catchAsync(verifyGoogleToken));
 router.post("/facebook", catchAsync(facebookLoginOrSignup));
-router.post("/apple",catchAsync(verifyAppleToken))
+router.post("/apple", catchAsync(verifyAppleToken))
 export default router;

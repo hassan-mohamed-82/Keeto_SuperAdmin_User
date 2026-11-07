@@ -178,6 +178,7 @@ export const orders = mysqlTable("orders", {
 
     offerId: char("offer_id", { length: 36 })
         .references(() => offers.id, { onDelete: "set null" }),
+    isBundle: boolean("is_bundle").default(false),
 
     // Unified payment gateway columns (supports Kashier, Paymob, and Geidea)
     paymentGateway: mysqlEnum("payment_gateway", ["kashier", "paymob", "geidea"]),

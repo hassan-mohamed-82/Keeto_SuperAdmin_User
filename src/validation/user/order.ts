@@ -1,11 +1,14 @@
 import { z } from "zod";
+import { egyptPhoneSchema, optionalEgyptPhoneSchema } from "./phone";
 
 // ============================================================
 // Guest Info & Address Schemas
 // ============================================================
 export const guestInfoSchema = z.object({
     name: z.string().min(2, { message: "Guest name must be at least 2 characters" }),
-    phone: z.string().min(7, { message: "Phone number must be at least 7 digits" }).max(20),
+    phone: egyptPhoneSchema,
+    alternatePhone: optionalEgyptPhoneSchema,
+    alternativePhone: optionalEgyptPhoneSchema,
 });
 
 export const guestAddressSchema = z.object({
