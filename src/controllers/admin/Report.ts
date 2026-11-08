@@ -317,6 +317,8 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
 
     walletsData.forEach((row) => {
         const numBalance = parseFloat(row.balance as string || "0");
+        // استبعاد المطاعم التي رصيد محفظتها 0 (خالص)
+        if (numBalance === 0) return;
 
         totalPlatformBalance += numBalance;
         if (numBalance < 0) {
@@ -338,7 +340,7 @@ export const getFinancialReport = async (req: Request | any, res: Response) => {
             restaurantId: row.restaurantId,
             restaurantName: row.restaurantName,
             balance: numBalance > 0 ? `+${numBalance.toFixed(2)}` : numBalance.toFixed(2),
-            claimSide: numBalance < 0 ? "المنصة تريد من المطعم" : numBalance > 0 ? "المطعم يريد من المنصة" : "خالص",
+            claimSide: numBalance < 0 ? "المنصة تريد من المطعم" : "المطعم يريد من المنصة",
             visaSwitchConditionType: row.visaSwitchConditionType || "none",
             visaSwitchAmountThreshold: row.visaSwitchAmountThreshold ? Number(row.visaSwitchAmountThreshold).toFixed(2) : null,
             visaSwitchDayOfWeek: row.visaSwitchDayOfWeek || null,
