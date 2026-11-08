@@ -12,23 +12,44 @@ import { z } from "zod";
 export const egyptPhoneRegex = /^01[0125][0-9]{8}$/;
 
 export const egyptPhoneErrorMessage =
-    "Phone number must be 11 digits and start with 01."
+    "Phone number must be 11 digits and start with 01.";
 
-export const egyptPhoneSchema = z
-    .string({ required_error: "Phone number is required" })
-    .trim()
-    .regex(egyptPhoneRegex, {
-        message: egyptPhoneErrorMessage,
-    });
+export const egyptPhoneSchema = z.preprocess(
+    (val) => {
+        if (typeof val === "string") {
+            const trimmed = val.trim();
+            if (trimmed && !trimmed.startsWith("0")) {
+                return `0${trimmed}`;
+            }
+            return trimmed;
+        }
+        return val;
+    },
+    z
+        .string({ required_error: "Phone number is required" })
+        .regex(egyptPhoneRegex, {
+            message: egyptPhoneErrorMessage,
+        })
+);
 
 export const optionalEgyptPhoneSchema = z
-    .union([
-        z.string().trim().regex(egyptPhoneRegex, {
-            message: egyptPhoneErrorMessage,
-        }),
-        z.literal(""),
-        z.null(),
-        z.undefined(),
-    ])
+    .preprocess(
+        (val) => {
+            if (val === null || val === undefined) return val;
+            if (typeof val === "string") {
+                const trimmed = val.trim();
+                if (trimmed === "") return trimmed;
+                return !trimmed.startsWith("0") ? `0${trimmed}` : trimmed;
+            }
+            return val;
+        },
+        z.union([
+            z.string().regex(egyptPhoneRegex, {
+                message: egyptPhoneErrorMessage,
+            }),
+            z.literal(""),
+            z.null(),
+            z.undefined(),
+        ])
+    )
     .optional();
-
