@@ -15,7 +15,7 @@ import {
 } from "../../controllers/admin/Report";
 import { hasPermission } from "../../middlewares/";
 import { validate } from "../../middlewares/validation";
-import { getPerformanceReportQuerySchema, getChartsQuerySchema } from "../../validation/admin/report";
+import { getPerformanceReportQuerySchema, getChartsQuerySchema, getFinancialReportQuerySchema } from "../../validation/admin/report";
 import { getSuperAdminDashboard } from "../../controllers/admin/dashboard";
 
 const router = Router();
@@ -23,7 +23,7 @@ const router = Router();
 router.get("/dashboard", catchAsync(getSuperAdminDashboard));
 router.get("/performance", hasPermission("reports", "View"), validate(getPerformanceReportQuerySchema, "query"), catchAsync(getOperationsPerformanceReport));
 router.get("/charts", hasPermission("reports", "View"), validate(getChartsQuerySchema, "query"), catchAsync(getOperationsCharts));
-router.get("/", hasPermission("reports", "View"), catchAsync(getFinancialReport));
+router.get("/", hasPermission("reports", "View"), validate(getFinancialReportQuerySchema, "query"), catchAsync(getFinancialReport));
 router.get("/detailed", hasPermission("reports", "View"), catchAsync(getDetailedRestaurantReport));
 router.get("/restaurant/:restaurantId", hasPermission("reports", "View"), catchAsync(getSingleRestaurantReport));
 router.get("/restaurant/:restaurantId/invoices", hasPermission("reports", "View"), catchAsync(getRestaurantInvoices));

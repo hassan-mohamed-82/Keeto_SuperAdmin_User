@@ -16,6 +16,7 @@ import {
     updateRestaurantWalletSchema,
     updateWalletTransactionSchema,
     recordSubscriptionSchema,
+    getWalletTransactionsQuerySchema,
 } from "../../validation/admin/restaurant_wallets"; 
 import { hasPermission } from "../../middlewares/";
 const router = Router();
@@ -25,7 +26,8 @@ router.get("/system", hasPermission("RestaurantWallets", "View"), catchAsync(get
 router.get("/restaurant/:restaurantId", hasPermission("RestaurantWallets", "View"), catchAsync(getRestaurantWallet));
 // تفصيل كامل للمحفظة: service fees + commission + الاشتراكات
 router.get("/restaurant/:restaurantId/details", hasPermission("RestaurantWallets", "View"), catchAsync(getDetailedWallet));
-router.get("/transactions/:restaurantId", hasPermission("RestaurantWallets", "View"), catchAsync(getWalletTransactions));
+router.get("/transactions", hasPermission("RestaurantWallets", "View"), validate(getWalletTransactionsQuerySchema, "query"), catchAsync(getWalletTransactions));
+router.get("/transactions/:restaurantId", hasPermission("RestaurantWallets", "View"), validate(getWalletTransactionsQuerySchema, "query"), catchAsync(getWalletTransactions));
 router.put("/approve/:id", hasPermission("RestaurantWallets", "Edit"), validate(updateWalletTransactionSchema), catchAsync(approveWithdrawal));
 router.put("/collect/:id", hasPermission("RestaurantWallets", "Edit"), catchAsync(collectCashFromRestaurant));
 // تسجيل اشتراك دوري يدويًا (شهري/ربع سنوي/سنوي) في محفظة المطعم

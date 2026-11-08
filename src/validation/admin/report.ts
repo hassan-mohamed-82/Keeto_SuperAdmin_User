@@ -64,3 +64,28 @@ export const getChartsQuerySchema = z
 export type GetPerformanceReportQuery = z.infer<typeof getPerformanceReportQuerySchema>;
 export type GetChartsQuery = z.infer<typeof getChartsQuerySchema>;
 
+
+export const getFinancialReportQuerySchema = z
+    .object({
+        restaurantId: z.string().trim().optional(),
+        startDate: optionalDateQuerySchema,
+        endDate: optionalDateQuerySchema,
+        status: z.enum(["pending", "accepted", "preparing", "out_for_delivery", "delivered", "cancelled", "refund"]).optional(),
+        paymentMethod: z.string().optional(),
+        cityId: z.string().trim().optional(),
+        visaSwitchConditionType: z.enum(["none", "amount", "day_of_week", "day_of_month"]).optional(),
+    })
+    .refine(
+        (data) => {
+            if (data.startDate && data.endDate) {
+                return new Date(data.startDate) <= new Date(data.endDate);
+            }
+            return true;
+        },
+        {
+            message: "startDate must be before or equal to endDate",
+            path: ["startDate"],
+        }
+    );
+
+export type GetFinancialReportQuery = z.infer<typeof getFinancialReportQuerySchema>;

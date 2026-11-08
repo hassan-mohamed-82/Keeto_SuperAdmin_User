@@ -2,7 +2,7 @@
 import { Request, Response,NextFunction } from "express";
 import { db } from "../../models/connection";
 import { restaurantWallets, restaurantWalletTransactions, restaurants, restaurantBusinessPlans, orders, restaurantSettings } from "../../models/schema";
-import { eq, desc, sum, sql, or, and } from "drizzle-orm";
+import { eq, desc, sum, sql, or, and, gte, lte } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -13,7 +13,34 @@ import { checkAndApplyVisaSwitch, restoreCustomGatewayOnDebtSettled } from "../.
  * دالة مساعدة لجلب حركات المحفظة مربوطة ببيانات الأوردر (dailyOrderNumber, orderNumber, ...)
  * إذا كان نوع الحركة order_payment
  */
-async function getWalletTransactionsWithOrderDetails(restaurantId: string, limit?: number) {
+async function getWalletTransactionsWithOrderDetails(
+    restaurantId?: string,
+    limit?: number,
+    options?: {
+        visaSwitchConditionType?: string;
+        startDate?: string;
+        endDate?: string;
+    }
+) {
+    const conditions = [];
+
+    if (restaurantId && restaurantId !== "all") {
+        conditions.push(eq(restaurantWalletTransactions.restaurantId, restaurantId));
+    }
+
+    if (options?.visaSwitchConditionType) {
+        conditions.push(eq(restaurantSettings.visaSwitchConditionType, options.visaSwitchConditionType as any));
+    }
+
+    if (options?.startDate) {
+        conditions.push(gte(restaurantWalletTransactions.createdAt, new Date(options.startDate)));
+    }
+    if (options?.endDate) {
+        const end = new Date(options.endDate);
+        end.setHours(23, 59, 59, 999);
+        conditions.push(lte(restaurantWalletTransactions.createdAt, end));
+    }
+
     const query = db
         .select({
             id: restaurantWalletTransactions.id,
@@ -31,6 +58,7 @@ async function getWalletTransactionsWithOrderDetails(restaurantId: string, limit
             orderAmount: restaurantWalletTransactions.orderAmount,
             note: restaurantWalletTransactions.note,
             createdAt: restaurantWalletTransactions.createdAt,
+            visaSwitchConditionType: sql<string>`COALESCE(${restaurantSettings.visaSwitchConditionType}, 'none')`,
             order: {
                 id: orders.id,
                 orderNumber: orders.orderNumber,
@@ -50,7 +78,8 @@ async function getWalletTransactionsWithOrderDetails(restaurantId: string, limit
                 eq(restaurantWalletTransactions.reference, orders.orderNumber)
             )
         ))
-        .where(eq(restaurantWalletTransactions.restaurantId, restaurantId))
+        .leftJoin(restaurantSettings, eq(restaurantWalletTransactions.restaurantId, restaurantSettings.restaurantId))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(restaurantWalletTransactions.createdAt));
 
     const rows = limit ? await query.limit(limit) : await query;
@@ -70,6 +99,7 @@ async function getWalletTransactionsWithOrderDetails(restaurantId: string, limit
         visaCommission: r.visaCommission,
         orderAmount: r.orderAmount,
         note: r.note,
+        visaSwitchConditionType: r.visaSwitchConditionType || "none",
         createdAt: r.createdAt,
         // إذا كان نوع الحركة order_payment يتم إرجاع تفاصيل الأوردر مع dailyOrderNumber
         order: (r.type === "order_payment" && r.order?.id) ? {
@@ -478,12 +508,18 @@ export const approveWithdrawal = async (req: Request, res: Response) => {
 // 6. WALLET TRANSACTIONS HISTORY
 // ==========================================
 export const getWalletTransactions = async (req: Request, res: Response) => {
-    // 👇 التعديل هنا
-    const restaurantId = req.params.restaurantId || req.params.id;
+    const restaurantId = req.params.restaurantId || req.params.id || (req.query.restaurantId as string);
+    const { visaSwitchConditionType, startDate, endDate, limit } = req.query;
 
-    if (!restaurantId) throw new BadRequest("Restaurant ID is required");
-
-    const data = await getWalletTransactionsWithOrderDetails(restaurantId);
+    const data = await getWalletTransactionsWithOrderDetails(
+        restaurantId && restaurantId !== "all" ? restaurantId : undefined,
+        limit ? parseInt(limit as string, 10) : undefined,
+        {
+            visaSwitchConditionType: visaSwitchConditionType as string,
+            startDate: startDate as string,
+            endDate: endDate as string,
+        }
+    );
 
     return SuccessResponse(res, { data });
 };

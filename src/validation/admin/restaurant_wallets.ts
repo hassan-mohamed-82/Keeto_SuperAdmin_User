@@ -52,3 +52,16 @@ export const recordSubscriptionSchema = z.object({
     subscriptionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "subscriptionDate must be in YYYY-MM-DD format").optional(),
     note: z.string().optional(),
 });
+// ==========================================
+// 4. Get Wallet Transactions Query Validation
+// ==========================================
+export const getWalletTransactionsQuerySchema = z.object({
+    restaurantId: z.string().trim().optional(),
+    visaSwitchConditionType: z.enum(["none", "amount", "day_of_week", "day_of_month"]).optional(),
+    startDate: z.string().trim().optional(),
+    endDate: z.string().trim().optional(),
+    page: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().positive().optional(),
+});
+
+export type GetWalletTransactionsQuery = z.infer<typeof getWalletTransactionsQuerySchema>;
