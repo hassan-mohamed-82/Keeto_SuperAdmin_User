@@ -14,14 +14,21 @@ export const egyptPhoneRegex = /^01[0125][0-9]{8}$/;
 export const egyptPhoneErrorMessage =
     "Phone number must be 11 digits and start with 01.";
 
+export const normalizePhoneInput = (val: string): string => {
+    let trimmed = val.trim();
+    if (!trimmed) return trimmed;
+    if (trimmed.startsWith("00")) {
+        trimmed = trimmed.slice(1); // removes one '0' -> leaves single '0'
+    } else if (!trimmed.startsWith("0")) {
+        trimmed = `0${trimmed}`; // adds '0' if missing
+    }
+    return trimmed;
+};
+
 export const egyptPhoneSchema = z.preprocess(
     (val) => {
         if (typeof val === "string") {
-            const trimmed = val.trim();
-            if (trimmed && !trimmed.startsWith("0")) {
-                return `0${trimmed}`;
-            }
-            return trimmed;
+            return normalizePhoneInput(val);
         }
         return val;
     },
@@ -37,9 +44,9 @@ export const optionalEgyptPhoneSchema = z
         (val) => {
             if (val === null || val === undefined) return val;
             if (typeof val === "string") {
-                const trimmed = val.trim();
-                if (trimmed === "") return trimmed;
-                return !trimmed.startsWith("0") ? `0${trimmed}` : trimmed;
+                const normalized = normalizePhoneInput(val);
+                if (normalized === "") return normalized;
+                return normalized;
             }
             return val;
         },

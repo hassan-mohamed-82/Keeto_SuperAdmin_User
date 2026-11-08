@@ -219,7 +219,9 @@ const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
 export const normalizeEgPhone = (raw: unknown): string => {
     if (typeof raw !== "string") throw new BadRequest("Phone number is required.");
     let trimmed = raw.trim();
-    if (trimmed && !trimmed.startsWith("0")) {
+    if (trimmed.startsWith("00")) {
+        trimmed = trimmed.slice(1);
+    } else if (!trimmed.startsWith("0")) {
         trimmed = `0${trimmed}`;
     }
     if (!/^01[0125][0-9]{8}$/.test(trimmed)) {
