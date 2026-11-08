@@ -1,7 +1,7 @@
 // controllers/admin/restaurantWallet.controller.ts
 import { Request, Response,NextFunction } from "express";
 import { db } from "../../models/connection";
-import { restaurantWallets, restaurantWalletTransactions, restaurants, restaurantBusinessPlans, orders, restaurantSettings } from "../../models/schema";
+import { restaurantWallets, restaurantWalletTransactions, restaurants, restaurantBusinessPlans, orders, restaurantSettings, selectReasons } from "../../models/schema";
 import { eq, desc, sum, sql, or, and, gte, lte } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { SuccessResponse } from "../../utils/response";
@@ -18,6 +18,7 @@ async function getWalletTransactionsWithOrderDetails(
     limit?: number,
     options?: {
         visaSwitchConditionType?: string;
+        cancelType?: string;
         startDate?: string;
         endDate?: string;
     }
@@ -30,6 +31,10 @@ async function getWalletTransactionsWithOrderDetails(
 
     if (options?.visaSwitchConditionType) {
         conditions.push(eq(restaurantSettings.visaSwitchConditionType, options.visaSwitchConditionType as any));
+    }
+
+    if (options?.cancelType) {
+        conditions.push(sql`COALESCE(${orders.cancelReasonType}, ${selectReasons.type}) = ${options.cancelType}`);
     }
 
     if (options?.startDate) {
@@ -59,6 +64,8 @@ async function getWalletTransactionsWithOrderDetails(
             note: restaurantWalletTransactions.note,
             createdAt: restaurantWalletTransactions.createdAt,
             visaSwitchConditionType: sql<string>`COALESCE(${restaurantSettings.visaSwitchConditionType}, 'none')`,
+            cancelType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
+            cancelReason: sql<string | null>`COALESCE(${orders.cancelReason}, ${selectReasons.nameAr}, ${selectReasons.name})`,
             order: {
                 id: orders.id,
                 orderNumber: orders.orderNumber,
@@ -78,6 +85,7 @@ async function getWalletTransactionsWithOrderDetails(
                 eq(restaurantWalletTransactions.reference, orders.orderNumber)
             )
         ))
+        .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
         .leftJoin(restaurantSettings, eq(restaurantWalletTransactions.restaurantId, restaurantSettings.restaurantId))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(restaurantWalletTransactions.createdAt));
@@ -100,9 +108,11 @@ async function getWalletTransactionsWithOrderDetails(
         orderAmount: r.orderAmount,
         note: r.note,
         visaSwitchConditionType: r.visaSwitchConditionType || "none",
+        cancelType: r.cancelType ?? null,
+        cancelReason: r.cancelReason ?? null,
         createdAt: r.createdAt,
-        // إذا كان نوع الحركة order_payment يتم إرجاع تفاصيل الأوردر مع dailyOrderNumber
-        order: (r.type === "order_payment" && r.order?.id) ? {
+        // إذا كان هناك أوردر مرتبط بالحركة
+        order: (r.order?.id) ? {
             id: r.order.id,
             orderNumber: r.order.orderNumber,
             dailyOrderNumber: r.order.dailyOrderNumber,
@@ -110,6 +120,8 @@ async function getWalletTransactionsWithOrderDetails(
             orderType: r.order.orderType,
             orderSource: r.order.orderSource,
             totalAmount: r.order.totalAmount,
+            cancelType: r.cancelType ?? null,
+            cancelReason: r.cancelReason ?? null,
             createdAt: r.order.createdAt,
         } : null
     }));
@@ -509,13 +521,14 @@ export const approveWithdrawal = async (req: Request, res: Response) => {
 // ==========================================
 export const getWalletTransactions = async (req: Request, res: Response) => {
     const restaurantId = req.params.restaurantId || req.params.id || (req.query.restaurantId as string);
-    const { visaSwitchConditionType, startDate, endDate, limit } = req.query;
+    const { visaSwitchConditionType, cancelType, cancelReasonType, startDate, endDate, limit } = req.query;
 
     const data = await getWalletTransactionsWithOrderDetails(
         restaurantId && restaurantId !== "all" ? restaurantId : undefined,
         limit ? parseInt(limit as string, 10) : undefined,
         {
             visaSwitchConditionType: visaSwitchConditionType as string,
+            cancelType: (cancelType || cancelReasonType) as string,
             startDate: startDate as string,
             endDate: endDate as string,
         }

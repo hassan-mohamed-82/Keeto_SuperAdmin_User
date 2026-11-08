@@ -58,6 +58,8 @@ export const recordSubscriptionSchema = z.object({
 export const getWalletTransactionsQuerySchema = z.object({
     restaurantId: z.string().trim().optional(),
     visaSwitchConditionType: z.enum(["none", "amount", "day_of_week", "day_of_month"]).optional(),
+    cancelType: z.enum(["user", "restaurant"]).optional(),
+    cancelReasonType: z.enum(["user", "restaurant"]).optional(),
     startDate: z.string().trim().optional(),
     endDate: z.string().trim().optional(),
     page: z.coerce.number().int().positive().optional(),
