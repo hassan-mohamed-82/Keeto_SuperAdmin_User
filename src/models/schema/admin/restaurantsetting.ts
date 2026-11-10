@@ -10,7 +10,33 @@ import {
   json,
   timestamp
 } from "drizzle-orm/mysql-core";
-import { shippingCompanies } from "./shippingCompany";
+
+// ==========================================
+// إعدادات صفحة "اطلب الآن" (Order Now Settings)
+// ==========================================
+export interface OrderNowSetting {
+  hotline: boolean;
+  branches: boolean;
+  name: boolean;
+  orderNow: boolean;
+  eMenu: boolean;
+  socialMedia: boolean;
+  menuPdf: boolean;
+  iosIcon: boolean;
+  androidIcon: boolean;
+}
+
+export const defaultOrderNowSetting: OrderNowSetting = {
+  hotline: true,
+  branches: true,
+  name: true,
+  orderNow: true,
+  eMenu: true,
+  socialMedia: true,
+  menuPdf: true,
+  iosIcon: true,
+  androidIcon: true,
+};
 
 // 1. جدول الإعدادات العامة
 export const restaurantSettings = mysqlTable("restaurant_settings", {
@@ -23,8 +49,7 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   posSection: boolean("pos_section").default(false),
   selfDelivery: boolean("self_delivery").default(false),
   homeDelivery: boolean("home_delivery").default(true),
-  shippingCompanyId: char("shipping_company_id", { length: 36 })
-    .references(() => shippingCompanies.id, { onDelete: "set null" }),
+  shippingCompanyId: char("shipping_company_id", { length: 36 }),
   takeaway: boolean("takeaway").default(false),
   orderSubscription: boolean("order_subscription").default(false),
   instantOrder: boolean("instant_order").default(true),
@@ -87,6 +112,13 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   gatewayAutoSwitchTriggeredAt: timestamp("gateway_auto_switch_triggered_at"),
   // العداد التراكمي للسيرفيس فيز أثناء تشغيل بوابة CUSTOM لمقارنتها بالـ Threshold
   customGatewayAccumulatedFees: decimal("custom_gateway_accumulated_fees", { precision: 10, scale: 2 }).default("0.00"),
+
+  // ==========================================
+  // إعدادات صفحة "اطلب الآن" (Order Now Settings)
+  // ==========================================
+  orderNowSetting: json("order_now_setting")
+    .$type<OrderNowSetting>()
+    .default(defaultOrderNowSetting),
 });
 
 

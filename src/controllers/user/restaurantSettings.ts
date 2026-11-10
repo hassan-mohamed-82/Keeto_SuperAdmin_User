@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '../../models/connection';
-import { restaurantSettings } from '../../models/schema';
+import { restaurantSettings, defaultOrderNowSetting } from '../../models/schema';
 import { eq } from 'drizzle-orm';
 import { SuccessResponse } from '../../utils/response';
 import { NotFound } from '../../Errors/NotFound';
@@ -15,7 +15,8 @@ export const getRestaurantSettings = async (req: Request, res: Response): Promis
         secondTextColor: restaurantSettings.secondTextColor,
         productView: restaurantSettings.productView,
         isTemporarilyClosed: restaurantSettings.isTemporarilyClosed,
-        instantOrder:restaurantSettings.instantOrder
+        instantOrder: restaurantSettings.instantOrder,
+        orderNowSetting: restaurantSettings.orderNowSetting,
     })
         .from(restaurantSettings)
         .where(eq(restaurantSettings.restaurantId, restaurantId))
@@ -25,5 +26,12 @@ export const getRestaurantSettings = async (req: Request, res: Response): Promis
         throw new NotFound("Restaurant settings not found");
     }
 
-    SuccessResponse(res, { message: "Restaurant settings fetched successfully", data: settings });
+    const responseData = {
+        ...settings,
+        orderNowSetting: settings.orderNowSetting
+            ? { ...defaultOrderNowSetting, ...settings.orderNowSetting }
+            : defaultOrderNowSetting,
+    };
+
+    SuccessResponse(res, { message: "Restaurant settings fetched successfully", data: responseData });
 };
