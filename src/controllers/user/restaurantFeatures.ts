@@ -351,8 +351,8 @@ export const getRestaurantsBranches = async (req: Request, res: Response) => {
         .leftJoin(cities, eq(branches.cityId, cities.id))
         .leftJoin(zones, eq(branches.zoneId, zones.id))
         .where(and(
-            eq(branches.restaurantId, restaurantId),
-            eq(branches.status, "active")
+            eq(branches.restaurantId, restaurantId)
+            // eq(branches.status, "active")
         ));
 
     return SuccessResponse(res, {
