@@ -228,6 +228,17 @@ export const orderItems = mysqlTable("order_items", {
     addons: json("addons"),
 
     note: text("note"),
+
+    // ── Weight-based item columns ──────────────────────────────────────────
+    // NULL for unit-sold items. Populated when food.sold_by = 'weight'.
+    // NOTE: basePrice already stores the per-weight_unit price snapshot for
+    // weighted items (price per kg or per gm). No separate unit_price needed.
+    /** Weight the customer originally requested (in food's weight_unit). */
+    orderedWeight: decimal("ordered_weight", { precision: 10, scale: 3 }),
+    /** Actual weight confirmed by the restaurant (copied from cart_items.final_weight). */
+    finalWeight: decimal("final_weight", { precision: 10, scale: 3 }),
+    /** Snapshot of food.weight_unit at order-creation time. */
+    weightUnit: mysqlEnum("weight_unit", ["kg", "gm"]),
 });
 
 // ==========================================

@@ -119,6 +119,16 @@ export const restaurantSettings = mysqlTable("restaurant_settings", {
   orderNowSetting: json("order_now_setting")
     .$type<OrderNowSetting>()
     .default(defaultOrderNowSetting),
+
+  // ==========================================
+  // Weight-based order settings
+  // ==========================================
+  /** Max % a final weight may exceed the ordered weight (0–20). */
+  weightMaxIncreasePercent: int("weight_max_increase_percent").notNull().default(10),
+  /** Minutes the restaurant has to submit weights before the request is auto-cancelled (5–60). */
+  weightRestaurantTimeoutMin: int("weight_restaurant_timeout_min").notNull().default(10),
+  /** Minutes the customer has to approve/cancel after weighing before auto-cancel (5–60). */
+  weightCustomerTimeoutMin: int("weight_customer_timeout_min").notNull().default(15),
 });
 
 

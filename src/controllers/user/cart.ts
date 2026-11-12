@@ -41,6 +41,8 @@ import {
     offers,
     offerFoods,
     orders,
+    weightRequests,
+    restaurantSettings,
 } from "../../models/schema";
 
 import { eq, and, inArray, isNull, sql } from "drizzle-orm";
@@ -58,6 +60,7 @@ import {
     type ServiceModule,
 } from "../../helpers/pricing.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
+import { computeWeightedLineTotal } from "../../helpers/weightPricing.helper";
 import { resolveFirstOrderDiscount } from "../../helpers/firstOrderDiscount.helper";
 
 /* =========================================
@@ -117,6 +120,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
         foodId,
         offerId,
         quantity = 1,
+        weight,
         variations = [],
         addons: requestAddons = [],
         note,
@@ -237,6 +241,19 @@ export const addToCart = async (req: Request | any, res: Response) => {
 
     const [itemFood] = await db.select().from(food).where(and(eq(food.id, foodId), activeFoodCondition)).limit(1);
     if (!itemFood) throw new BadRequest("Food not found");
+
+    const isWeightedFood = itemFood.sold_by === "weight";
+    let requestedWeight: number | null = null;
+    if (isWeightedFood) {
+        if (weight === undefined || weight === null || isNaN(Number(weight)) || Number(weight) <= 0) {
+            throw new BadRequest("Weight is required and must be greater than 0 for weight-based products");
+        }
+        requestedWeight = Number(weight);
+    } else {
+        if (weight !== undefined && weight !== null) {
+            throw new BadRequest("Weight cannot be specified for unit-sold products");
+        }
+    }
 
     // 🛡️ Block check
     await validateUserNotBlocked(userId, itemFood.restaurantid);
@@ -448,29 +465,70 @@ export const addToCart = async (req: Request | any, res: Response) => {
         return makeDedupeKey(normalizeVariations(dbVars), normalizeAddons(dbAddonsList)) === key;
     });
 
+    const unitPriceNumber = unitPrice;
+    const unitPriceStr = unitPriceNumber.toFixed(2);
+
     if (existingSame) {
-        const newQty = existingSame.quantity + quantity;
-        await db.update(cartItems)
-            .set({
-                quantity: newQty,
-                unitPrice: unitPrice.toString(),
-                totalPrice: (unitPrice * newQty).toString(),
-                variations: JSON.stringify(snapshot),
-                addons: JSON.stringify(addonSnapshot),
-                ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
-                ...(resolvedServiceModule ? { serviceModule: resolvedServiceModule } : {}),
-                ...(note !== undefined ? { note: note || null } : {}),
-            })
-            .where(eq(cartItems.id, existingSame.id));
+        if (existingSame.weightRequestId) {
+            throw new BadRequest("This cart item is locked in an active weight request and cannot be modified");
+        }
+        if (isWeightedFood) {
+            const currentWeight = Number(existingSame.weight || 0);
+            const newWeight = currentWeight + requestedWeight!;
+            const newTotalPriceStr = computeWeightedLineTotal(newWeight, unitPriceStr);
+            await db.update(cartItems)
+                .set({
+                    quantity: 1,
+                    weight: newWeight.toFixed(3),
+                    weightUnit: itemFood.weight_unit,
+                    unitPrice: unitPriceStr,
+                    totalPrice: newTotalPriceStr,
+                    variations: JSON.stringify(snapshot),
+                    addons: JSON.stringify(addonSnapshot),
+                    ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
+                    ...(resolvedServiceModule ? { serviceModule: resolvedServiceModule } : {}),
+                    ...(note !== undefined ? { note: note || null } : {}),
+                })
+                .where(eq(cartItems.id, existingSame.id));
+        } else {
+            const newQty = existingSame.quantity + quantity;
+            const priceCents = Math.round(unitPriceNumber * 100);
+            const newTotalPriceStr = ((priceCents * newQty) / 100).toFixed(2);
+            await db.update(cartItems)
+                .set({
+                    quantity: newQty,
+                    unitPrice: unitPriceStr,
+                    totalPrice: newTotalPriceStr,
+                    variations: JSON.stringify(snapshot),
+                    addons: JSON.stringify(addonSnapshot),
+                    ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
+                    ...(resolvedServiceModule ? { serviceModule: resolvedServiceModule } : {}),
+                    ...(note !== undefined ? { note: note || null } : {}),
+                })
+                .where(eq(cartItems.id, existingSame.id));
+        }
     } else {
+        const itemQty = isWeightedFood ? 1 : quantity;
+        let itemTotalPriceStr: string;
+        if (isWeightedFood) {
+            itemTotalPriceStr = computeWeightedLineTotal(requestedWeight!, unitPriceStr);
+        } else {
+            const priceCents = Math.round(unitPriceNumber * 100);
+            itemTotalPriceStr = ((priceCents * itemQty) / 100).toFixed(2);
+        }
         await db.insert(cartItems).values({
             id: uuidv4(),
             userId,
             restaurantId: itemFood.restaurantid,
             foodId,
-            quantity,
-            unitPrice: unitPrice.toString(),
-            totalPrice: (unitPrice * quantity).toString(),
+            quantity: itemQty,
+            weight: isWeightedFood ? requestedWeight!.toFixed(3) : null,
+            weightUnit: isWeightedFood ? itemFood.weight_unit : null,
+            finalWeight: null,
+            isUnavailable: false,
+            weightRequestId: null,
+            unitPrice: unitPriceStr,
+            totalPrice: itemTotalPriceStr,
             variations: JSON.stringify(snapshot),
             addons: JSON.stringify(addonSnapshot),
             branchId: resolvedBranchId || undefined,
@@ -558,6 +616,13 @@ export const getCart = async (req: Request | any, res: Response) => {
             storedServiceModule: cartItems.serviceModule,
             subcategoryId: food.subcategoryid,
             offerId: cartItems.offerId,
+            weight: cartItems.weight,
+            finalWeight: cartItems.finalWeight,
+            weightUnit: cartItems.weightUnit,
+            isUnavailable: cartItems.isUnavailable,
+            weightRequestId: cartItems.weightRequestId,
+            sold_by: food.sold_by,
+            foodWeightUnit: food.weight_unit,
         })
         .from(cartItems)
         .leftJoin(food, and(eq(cartItems.foodId, food.id), activeFoodCondition))
@@ -986,10 +1051,26 @@ export const getCart = async (req: Request | any, res: Response) => {
         const originalUnitPrice = currentBasePrice + varPrice;
         const finalUnitPrice = discountedBasePrice + varPrice;
 
-        const unitDiscountAmount = Math.max(0, originalUnitPrice - finalUnitPrice);
-        const itemTotalDiscount = unitDiscountAmount * item.quantity;
-        const itemOriginalTotalPrice = originalUnitPrice * item.quantity;
-        const finalTotalPrice = finalUnitPrice * item.quantity;
+        const isWeighted = item.sold_by === "weight";
+        let unitDiscountAmount: number;
+        let itemTotalDiscount: number;
+        let itemOriginalTotalPrice: number;
+        let finalTotalPrice: number;
+
+        if (isWeighted) {
+            const effectiveWeight = item.finalWeight ? Number(item.finalWeight) : Number(item.weight || 0);
+            const finalTotalStr = computeWeightedLineTotal(effectiveWeight, finalUnitPrice);
+            const origTotalStr = computeWeightedLineTotal(effectiveWeight, originalUnitPrice);
+            finalTotalPrice = parseFloat(finalTotalStr);
+            itemOriginalTotalPrice = parseFloat(origTotalStr);
+            unitDiscountAmount = Math.max(0, originalUnitPrice - finalUnitPrice);
+            itemTotalDiscount = Math.max(0, itemOriginalTotalPrice - finalTotalPrice);
+        } else {
+            unitDiscountAmount = Math.max(0, originalUnitPrice - finalUnitPrice);
+            itemTotalDiscount = unitDiscountAmount * item.quantity;
+            itemOriginalTotalPrice = originalUnitPrice * item.quantity;
+            finalTotalPrice = finalUnitPrice * item.quantity;
+        }
 
         finalSubtotal += finalTotalPrice;
         totalOriginalSubtotal += itemOriginalTotalPrice;
@@ -1021,7 +1102,13 @@ export const getCart = async (req: Request | any, res: Response) => {
             variations: variationDetails,
             addons: addonDetails,
             note: item.note || null,
-            isAvailable: itemIsAvailable,
+            isAvailable: itemIsAvailable && !item.isUnavailable,
+            sold_by: item.sold_by || "unit",
+            weight: item.weight ? item.weight.toString() : null,
+            finalWeight: item.finalWeight ? item.finalWeight.toString() : null,
+            weightUnit: item.weightUnit || item.foodWeightUnit || null,
+            isUnavailable: Boolean(item.isUnavailable),
+            weightRequestId: item.weightRequestId || null,
             priceChanged,
             branchPrices: branchPrices.length > 0 ? branchPrices : undefined,
             resolvedBranchId: effectiveBranchId || null,
@@ -1128,6 +1215,29 @@ export const getCart = async (req: Request | any, res: Response) => {
         }
     }
 
+    let activeWeightRequest: any = null;
+    if (restaurantId) {
+        const [activeReq] = await db
+            .select({
+                id: weightRequests.id,
+                status: weightRequests.status,
+                expiresAt: weightRequests.expiresAt,
+                weighedAt: weightRequests.weighedAt,
+            })
+            .from(weightRequests)
+            .where(
+                and(
+                    eq(weightRequests.userId, userId),
+                    eq(weightRequests.restaurantId, restaurantId),
+                    inArray(weightRequests.status, ["awaiting_weighing", "awaiting_customer_approval"])
+                )
+            )
+            .limit(1);
+        if (activeReq) {
+            activeWeightRequest = activeReq;
+        }
+    }
+
     return SuccessResponse(res, {
         message: "Cart fetched successfully",
         data: {
@@ -1142,6 +1252,7 @@ export const getCart = async (req: Request | any, res: Response) => {
                 freeDelivery: freeDeliveryInfo,
                 firstOrderDiscount,
             },
+            activeWeightRequest,
         },
     });
 };
@@ -1152,7 +1263,7 @@ export const getCart = async (req: Request | any, res: Response) => {
 export const updateCartItem = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
-    const { quantity, variations, addons: requestAddons, note, branchId, addressId, serviceModule } = req.body;
+    const { quantity, weight, variations, addons: requestAddons, note, branchId, addressId, serviceModule } = req.body;
 
     const [cartItem] = await db
         .select()
@@ -1161,6 +1272,11 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         .limit(1);
 
     if (!cartItem) throw new BadRequest("Cart item not found");
+
+    // 🛡️ Locked item check
+    if (cartItem.weightRequestId) {
+        throw new BadRequest("This cart item is locked in an active weight request and cannot be modified");
+    }
 
     // 🛡️ Block check
     await validateUserNotBlocked(userId, cartItem.restaurantId);
@@ -1172,11 +1288,13 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         if (offer.status !== "active") throw new BadRequest("Offer is no longer active");
         const newQty = quantity ? Number(quantity) : cartItem.quantity;
         const unitPrice = parseFloat(offer.price);
+        const priceCents = Math.round(unitPrice * 100);
+        const totalPriceStr = ((priceCents * newQty) / 100).toFixed(2);
         await db.update(cartItems)
             .set({
                 quantity: newQty,
-                unitPrice: unitPrice.toString(),
-                totalPrice: (unitPrice * newQty).toFixed(2),
+                unitPrice: unitPrice.toFixed(2),
+                totalPrice: totalPriceStr,
                 ...(note !== undefined ? { note: note || null } : {}),
                 ...(branchId ? { branchId } : {}),
                 ...(serviceModule ? { serviceModule } : {}),
@@ -1188,7 +1306,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
                 cartItemId,
                 quantity: newQty,
                 unitPrice,
-                totalPrice: unitPrice * newQty,
+                totalPrice: parseFloat(totalPriceStr),
             },
         });
     }
@@ -1196,9 +1314,26 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     const [itemFood] = await db.select().from(food).where(and(eq(food.id, cartItem.foodId), activeFoodCondition)).limit(1);
     if (!itemFood) throw new BadRequest("Food item not found");
 
-    if (!itemFood) throw new BadRequest("Food not found");
     if (itemFood.isOutOfStock || itemFood.status === "inactive") {
         throw new BadRequest("This item is currently out of stock.");
+    }
+
+    const isWeightedFood = itemFood.sold_by === "weight";
+    let newWeight: number | null = null;
+    let newQty: number = 1;
+
+    if (isWeightedFood) {
+        const inputWeight = weight !== undefined ? weight : cartItem.weight;
+        if (inputWeight === undefined || inputWeight === null || isNaN(Number(inputWeight)) || Number(inputWeight) <= 0) {
+            throw new BadRequest("Weight must be greater than 0 for weight-based products");
+        }
+        newWeight = Number(inputWeight);
+        newQty = 1;
+    } else {
+        if (weight !== undefined && weight !== null) {
+            throw new BadRequest("Weight cannot be specified for unit-sold products");
+        }
+        newQty = quantity !== undefined ? Number(quantity) : cartItem.quantity;
     }
 
     // ─── Resolve branch ──────────────────────────────────────────────
@@ -1352,13 +1487,24 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         variationSnapshotList = existingVars;
     }
 
-    const qty = quantity ?? cartItem.quantity;
+    const unitPriceNumber = unitPrice;
+    const unitPriceStr = unitPriceNumber.toFixed(2);
+    let totalPriceStr: string;
+
+    if (isWeightedFood) {
+        totalPriceStr = computeWeightedLineTotal(newWeight!, unitPriceStr);
+    } else {
+        const priceCents = Math.round(unitPriceNumber * 100);
+        totalPriceStr = ((priceCents * newQty) / 100).toFixed(2);
+    }
 
     await db.update(cartItems)
         .set({
-            quantity: qty,
-            unitPrice: unitPrice.toString(),
-            totalPrice: (unitPrice * qty).toString(),
+            quantity: newQty,
+            weight: isWeightedFood ? newWeight!.toFixed(3) : null,
+            weightUnit: isWeightedFood ? itemFood.weight_unit : null,
+            unitPrice: unitPriceStr,
+            totalPrice: totalPriceStr,
             variations: JSON.stringify({ variations: variationSnapshotList }),
             addons: JSON.stringify(addonSnapshot),
             ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
@@ -1399,7 +1545,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         message: "Cart updated successfully",
         data: {
             unitPrice,
-            totalPrice: unitPrice * qty,
+            totalPrice: parseFloat(totalPriceStr),
             resolvedBranchId,
             serviceModule: resolvedServiceModule,
             firstOrderDiscount: firstOrderDiscountUpdate,
@@ -1414,6 +1560,20 @@ export const removeCartItem = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const { cartItemId } = req.params;
 
+    const [item] = await db
+        .select({ id: cartItems.id, weightRequestId: cartItems.weightRequestId })
+        .from(cartItems)
+        .where(and(eq(cartItems.id, cartItemId), eq(cartItems.userId, userId)))
+        .limit(1);
+
+    if (!item) {
+        throw new NotFound("Cart item not found");
+    }
+
+    if (item.weightRequestId) {
+        throw new BadRequest("This cart item is locked in an active weight request and cannot be removed");
+    }
+
     await db.delete(cartItems)
         .where(and(eq(cartItems.id, cartItemId), eq(cartItems.userId, userId)));
 
@@ -1427,6 +1587,16 @@ export const removeCartItem = async (req: Request | any, res: Response) => {
 ========================================= */
 export const clearCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
+
+    const lockedItems = await db
+        .select({ id: cartItems.id })
+        .from(cartItems)
+        .where(and(eq(cartItems.userId, userId), sql`${cartItems.weightRequestId} IS NOT NULL`))
+        .limit(1);
+
+    if (lockedItems.length > 0) {
+        throw new BadRequest("Cannot clear cart while items are locked in an active weight request");
+    }
 
     await db.delete(cartItems)
         .where(eq(cartItems.userId, userId));
@@ -2796,3 +2966,157 @@ export const validateCartPricing = async (req: Request | any, res: Response) => 
 //         },
 //     });
 // };
+
+/* =========================================
+   7. SEND CART FOR WEIGHING
+   POST /cart/send-for-weighing
+========================================= */
+export const sendCartForWeighing = async (req: Request | any, res: Response) => {
+    const userId = req.user?.id;
+    if (!userId) throw new BadRequest("User unauthorized");
+
+    const requestedRestaurantId = req.body?.restaurantId as string | undefined;
+
+    const result = await db.transaction(async (tx) => {
+        // 1. Lock user's cart items using SELECT ... FOR UPDATE
+        // Lock only cart_items to avoid locking food/restaurant catalog tables
+        const cartConditions = [eq(cartItems.userId, userId)];
+        if (requestedRestaurantId) {
+            cartConditions.push(eq(cartItems.restaurantId, requestedRestaurantId));
+        }
+
+        const userCartRows = await tx
+            .select()
+            .from(cartItems)
+            .where(and(...cartConditions))
+            .for("update");
+
+        if (userCartRows.length === 0) {
+            throw new BadRequest("Cart is empty");
+        }
+
+        const targetRestaurantId = userCartRows[0].restaurantId;
+
+        // Ensure all cart items belong to the same restaurant
+        const hasOtherRestaurant = userCartRows.some(item => item.restaurantId !== targetRestaurantId);
+        if (hasOtherRestaurant) {
+            throw new BadRequest("Cart contains items from multiple restaurants. Please clear cart or select one restaurant.");
+        }
+
+        // 2. Fetch food information for these items (read-only, no lock)
+        const foodIds = [...new Set(userCartRows.map(i => i.foodId).filter(Boolean))];
+        const foodRows = foodIds.length > 0
+            ? await tx
+                .select({
+                    id: food.id,
+                    name: food.name,
+                    sold_by: food.sold_by,
+                    weight_unit: food.weight_unit,
+                    status: food.status,
+                    isOutOfStock: food.isOutOfStock,
+                })
+                .from(food)
+                .where(inArray(food.id, foodIds))
+            : [];
+
+        const foodMap = new Map(foodRows.map(f => [f.id, f]));
+
+        // Check if cart contains at least ONE weighted food item
+        const weightedItems = userCartRows.filter(item => {
+            const f = foodMap.get(item.foodId);
+            return f?.sold_by === "weight";
+        });
+
+        if (weightedItems.length === 0) {
+            throw new BadRequest("Cart does not contain any weight-based products. Please proceed with standard checkout.");
+        }
+
+        // Validate that all weighted items have a valid weight > 0
+        for (const item of weightedItems) {
+            const w = Number(item.weight);
+            const f = foodMap.get(item.foodId);
+            if (isNaN(w) || w <= 0) {
+                throw new BadRequest(`Item "${f?.name || item.foodId}" must have a valid weight greater than 0`);
+            }
+        }
+
+        // 3. Ensure none of the cart items are already locked
+        const alreadyLocked = userCartRows.some(item => item.weightRequestId !== null);
+        if (alreadyLocked) {
+            throw new BadRequest("Cart items are already locked in a weight request");
+        }
+
+        // 4. Check if there is already an active weight request for (userId, restaurantId)
+        // Active statuses: awaiting_weighing, awaiting_customer_approval
+        // Lock with for("update") to prevent race condition / double-click creating 2 requests
+        const existingActiveRequests = await tx
+            .select({ id: weightRequests.id, status: weightRequests.status })
+            .from(weightRequests)
+            .where(
+                and(
+                    eq(weightRequests.userId, userId),
+                    eq(weightRequests.restaurantId, targetRestaurantId),
+                    inArray(weightRequests.status, ["awaiting_weighing", "awaiting_customer_approval"])
+                )
+            )
+            .for("update");
+
+        if (existingActiveRequests.length > 0) {
+            throw new BadRequest("An active weighing request already exists for this restaurant");
+        }
+
+        // 5. Read restaurant settings to determine timeout
+        const [rSettings] = await tx
+            .select({
+                weightRestaurantTimeoutMin: restaurantSettings.weightRestaurantTimeoutMin,
+            })
+            .from(restaurantSettings)
+            .where(eq(restaurantSettings.restaurantId, targetRestaurantId))
+            .limit(1);
+
+        const timeoutMin = rSettings?.weightRestaurantTimeoutMin ?? 10;
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + timeoutMin * 60 * 1000);
+
+        // 6. Create the weight_requests row
+        const requestId = uuidv4();
+        const branchId = userCartRows[0].branchId || null;
+
+        await tx.insert(weightRequests).values({
+            id: requestId,
+            userId,
+            restaurantId: targetRestaurantId,
+            branchId,
+            status: "awaiting_weighing",
+            expiresAt,
+            createdAt: now,
+            updatedAt: now,
+        });
+
+        // 7. Lock the cart items by setting weightRequestId = requestId
+        await tx
+            .update(cartItems)
+            .set({
+                weightRequestId: requestId,
+                finalWeight: null,
+                isUnavailable: false,
+                updatedAt: now,
+            })
+            .where(and(eq(cartItems.userId, userId), eq(cartItems.restaurantId, targetRestaurantId)));
+
+        return {
+            weightRequestId: requestId,
+            restaurantId: targetRestaurantId,
+            branchId,
+            status: "awaiting_weighing",
+            expiresAt,
+            itemCount: userCartRows.length,
+            weightedItemCount: weightedItems.length,
+        };
+    });
+
+    return SuccessResponse(res, {
+        message: "Cart sent to restaurant for weighing successfully",
+        data: result,
+    });
+};

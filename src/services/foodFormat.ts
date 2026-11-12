@@ -352,6 +352,8 @@ export const formatFoodsList = async (
             isFavorite: userId ? favoriteFoodIds.has(foodId) : false,
             variations: foodVariationsMap.get(foodId) || [],
             addons: foodAddons,
+            sold_by: (row as any).sold_by ?? "unit",
+            weight_unit: (row as any).weight_unit ?? null,
             unavailableBranches,
             category: row.categoryId ? {
                 id: row.categoryId,

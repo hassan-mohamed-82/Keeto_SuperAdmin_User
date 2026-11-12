@@ -151,6 +151,8 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         isOutOfStock: food.isOutOfStock,
         points: food.points,
         addonsId: food.addonsId,
+        sold_by: food.sold_by,
+        weight_unit: food.weight_unit,
 
         categoryId: categories.id,
         categoryName: categories.name,
@@ -320,6 +322,8 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             image: food.image,
             points: food.points,
             addonsId: food.addonsId,
+            sold_by: food.sold_by,
+            weight_unit: food.weight_unit,
 
             categoryId: categories.id,
             categoryName: categories.name,
