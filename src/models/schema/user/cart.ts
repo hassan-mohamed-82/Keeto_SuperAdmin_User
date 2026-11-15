@@ -43,6 +43,12 @@ export const cartItems = mysqlTable("cart_items", {
     weightRequestId: char("weight_request_id", { length: 36 })
         .references(() => weightRequests.id, { onDelete: "set null" }),
 
+    /** Who added this line item: customer or restaurant staff during weighing */
+    addedBy: mysqlEnum("added_by", ["customer", "restaurant"]).notNull().default("customer"),
+
+    /** Staff admin user ID if added by restaurant */
+    addedByAdminId: char("added_by_admin_id", { length: 36 }),
+
     // 🔥 snapshot السعر وقت الإضافة
     unitPrice: varchar("unit_price", { length: 50 }).notNull(),
 

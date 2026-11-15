@@ -28,6 +28,7 @@ import restaurantGroupsRouter from "./restaurantGroups";
 import bundleRouter from "./bundles";
 import foodRouter from "./food";
 import zoneDeliveryFeeRouter from "./zoneDeliveryFee";
+import weightRequestsRouter from "./weightRequests";
 
 
 const router = Router();
@@ -61,4 +62,5 @@ router.use("/notifications", notificationRouter);
 router.use("/points", pointsRouter);
 router.use("/coupon", couponRouter);
 router.use("/first-order-discount", firstOrderDiscountRouter);
+router.use("/weight-requests", weightRequestsRouter);
 export default router;

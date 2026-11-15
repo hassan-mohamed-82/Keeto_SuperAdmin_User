@@ -49,6 +49,7 @@ const getFoodVariationsMap = async (foodIds: string[]) => {
             optionNameAr: variationOptions.optionNameAr,
             optionNameFr: variationOptions.optionNameFr,
             additionalPrice: variationOptions.additionalPrice,
+            priceMode: variationOptions.priceMode,
         })
         .from(foodVariations)
         .leftJoin(
@@ -91,6 +92,7 @@ const getFoodVariationsMap = async (foodIds: string[]) => {
                 nameAr: v.optionNameAr,
                 nameFr: v.optionNameFr,
                 additionalPrice: Number(v.additionalPrice || 0),
+                price_mode: v.priceMode || "fixed",
             });
         }
     }

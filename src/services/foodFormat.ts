@@ -47,6 +47,7 @@ export const formatFoodsList = async (
                 optionNameAr: variationOptions.optionNameAr,
                 optionNameFr: variationOptions.optionNameFr,
                 additionalPrice: variationOptions.additionalPrice,
+                priceMode: variationOptions.priceMode,
             })
             .from(foodVariations)
             .leftJoin(
@@ -162,7 +163,8 @@ export const formatFoodsList = async (
                 name: v.optionName,
                 nameAr: v.optionNameAr,
                 nameFr: v.optionNameFr,
-                additionalPrice: optionPrice
+                additionalPrice: optionPrice,
+                price_mode: v.priceMode || "fixed",
             });
         }
     }

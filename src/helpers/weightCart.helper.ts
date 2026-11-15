@@ -1,0 +1,292 @@
+// Cart rules for the weight-based ordering flow (customer side).
+//
+// The decision functions here are pure so they can be unit-tested and shared by
+// cart.ts, weightRequests.ts and order.ts (getCart's canCheckout and checkout use
+// the SAME evaluateWeightedCheckout(), so the two can never disagree).
+
+import { and, eq, inArray } from "drizzle-orm";
+import { db } from "../models/connection";
+import { weightRequests } from "../models/schema";
+import { BadRequest } from "../Errors/BadRequest";
+import { CodedConflictError } from "../Errors/codedConflictError";
+import { computeWeightedLineTotal, type WeightedOptionExtra } from "./weightPricing.helper";
+
+export type WeightRequestStatus =
+    | "awaiting_weighing"
+    | "awaiting_customer_approval"
+    | "approved"
+    | "cancelled"
+    | "expired";
+
+/** Statuses during which a request "owns" the customer's weighted cart rows. */
+export const ACTIVE_WEIGHT_REQUEST_STATUSES: WeightRequestStatus[] = [
+    "awaiting_weighing",
+    "awaiting_customer_approval",
+];
+
+/**
+ * Statuses during which EVERY cart write is rejected (normal items included).
+ * Empty until Fix 2 adds `checking_out` (the payment amount is then fixed).
+ */
+export const FROZEN_CART_STATUSES: string[] = [];
+
+export interface ActiveWeightRequest {
+    id: string;
+    status: WeightRequestStatus | string;
+    expiresAt: Date | string;
+}
+
+export interface WeightCartRow {
+    id?: string;
+    weight?: unknown;
+    weightRequestId?: string | null;
+    addedBy?: "customer" | "restaurant" | string | null;
+    isUnavailable?: boolean | null;
+}
+
+export const WEIGHT_REQUEST_ACTIVE = "WEIGHT_REQUEST_ACTIVE";
+export const WEIGHT_CART_CHANGED = "WEIGHT_CART_CHANGED";
+
+export class WeightRequestActiveError extends CodedConflictError {
+    constructor(requestId: string, message: string) {
+        super(WEIGHT_REQUEST_ACTIVE, message, { requestId });
+    }
+}
+
+export class WeightCartChangedError extends CodedConflictError {
+    constructor(requestId: string, cartItemIds: string[]) {
+        super(
+            WEIGHT_CART_CHANGED,
+            "Your cart changed after it was sent to the restaurant, please send it again.",
+            { requestId, cartItemIds }
+        );
+    }
+}
+
+/** A row that needs restaurant weighing (weight-sold food or a stored weight). */
+export const isWeighedRow = (row: WeightCartRow, foodSoldBy?: string | null): boolean =>
+    foodSoldBy === "weight" || (row.weight !== undefined && row.weight !== null);
+
+/**
+ * A row that may only be ordered through an approved weight request:
+ * every weighted row and every restaurant-added row.
+ */
+export const isWeightBoundRow = (row: WeightCartRow, foodSoldBy?: string | null): boolean =>
+    isWeighedRow(row, foodSoldBy) || row.addedBy === "restaurant";
+
+/** Active (or frozen) weight request of a user for a restaurant, if any. */
+export const findActiveWeightRequest = async (
+    userId: string,
+    restaurantId: string,
+    executor: any = db
+): Promise<ActiveWeightRequest | null> => {
+    const [row] = await executor
+        .select({ id: weightRequests.id, status: weightRequests.status, expiresAt: weightRequests.expiresAt })
+        .from(weightRequests)
+        .where(
+            and(
+                eq(weightRequests.userId, userId),
+                eq(weightRequests.restaurantId, restaurantId),
+                inArray(weightRequests.status, [...ACTIVE_WEIGHT_REQUEST_STATUSES, ...FROZEN_CART_STATUSES] as any)
+            )
+        )
+        .limit(1);
+    return row ?? null;
+};
+
+export type CartWriteKind = "add" | "update" | "remove" | "clear";
+
+/**
+ * Decides whether a customer cart write is allowed. Throws WeightRequestActiveError (409).
+ *
+ * - Frozen request (checking_out): every write rejected, normal items included.
+ * - Row locked to a request (weight_request_id set): rejected.
+ * - Restaurant-added row: never editable by the customer while a request is active.
+ * - Weighted food / weighted row while a request is active: rejected.
+ * - Normal (unit) items while a request is awaiting_weighing / awaiting_customer_approval: allowed.
+ */
+export const assertCartWriteAllowed = (params: {
+    kind: CartWriteKind;
+    activeRequest: ActiveWeightRequest | null;
+    /** true when the target is a weighted food/row or a restaurant-added row */
+    targetIsWeightBound: boolean;
+    /** weight_request_id of the targeted row (update/remove) */
+    rowWeightRequestId?: string | null;
+    /** for clear: weight_request_id of any locked row in the cart */
+    lockedRowRequestId?: string | null;
+}): void => {
+    const { kind, activeRequest, targetIsWeightBound, rowWeightRequestId, lockedRowRequestId } = params;
+
+    if (activeRequest && FROZEN_CART_STATUSES.includes(activeRequest.status)) {
+        throw new WeightRequestActiveError(
+            activeRequest.id,
+            "Your order is being paid. The cart cannot be changed until the payment finishes."
+        );
+    }
+
+    if (rowWeightRequestId) {
+        throw new WeightRequestActiveError(
+            rowWeightRequestId,
+            "This item is part of a weighing request. Cancel the request to change it."
+        );
+    }
+
+    if (kind === "clear" && lockedRowRequestId) {
+        throw new WeightRequestActiveError(
+            activeRequest?.id ?? lockedRowRequestId,
+            "Your cart has items in a weighing request. Cancel the request before clearing the cart."
+        );
+    }
+
+    if (activeRequest && (targetIsWeightBound || kind === "clear")) {
+        throw new WeightRequestActiveError(
+            activeRequest.id,
+            "You have an active weighing request. Cancel it to change weight-based items, then send the cart again."
+        );
+    }
+};
+
+/**
+ * Checkout gate for carts with weight-bound rows. Shared by checkout and getCart.canCheckout.
+ *
+ * - No weight-bound rows: returns every row unchanged (normal checkout, exactly as before).
+ * - Otherwise requires a request in awaiting_customer_approval that is not expired, and EVERY
+ *   weight-bound row (and every row tagged with any request) must carry `request.id`.
+ *   Any other row means the cart changed after it was sent → WeightCartChangedError; never
+ *   silently included or dropped.
+ * - Rows marked is_unavailable by the restaurant are excluded.
+ */
+export const evaluateWeightedCheckout = <R extends WeightCartRow>(
+    rows: Array<R & { foodSoldBy?: string | null }>,
+    request: ActiveWeightRequest | null,
+    now: Date = new Date()
+): { hasWeightedItems: boolean; checkoutRows: R[] } => {
+    const hasWeightedItems = rows.some((r) => isWeightBoundRow(r, r.foodSoldBy));
+    if (!hasWeightedItems) {
+        return { hasWeightedItems: false, checkoutRows: rows };
+    }
+
+    if (!request) {
+        throw new BadRequest("Cart contains weight-based items. Please send the order to the restaurant for weighing first.");
+    }
+    if (request.status === "awaiting_weighing") {
+        throw new BadRequest("Your order is currently awaiting weighing by the restaurant.");
+    }
+    if (request.status !== "awaiting_customer_approval") {
+        throw new BadRequest("Cart contains weight-based items. Please send the order to the restaurant for weighing first.");
+    }
+    if (new Date(request.expiresAt) <= now) {
+        throw new BadRequest("The weighing approval has expired. Please send your cart for weighing again.");
+    }
+
+    const strayRows = rows.filter((r) =>
+        (isWeightBoundRow(r, r.foodSoldBy) && r.weightRequestId !== request.id) ||
+        (r.weightRequestId && r.weightRequestId !== request.id)
+    );
+    if (strayRows.length > 0) {
+        throw new WeightCartChangedError(request.id, strayRows.map((r) => String(r.id ?? "")));
+    }
+
+    const checkoutRows = rows.filter((r) => !r.isUnavailable);
+    if (checkoutRows.length === 0) {
+        throw new BadRequest("All items in your cart are marked as unavailable.");
+    }
+
+    return { hasWeightedItems: true, checkoutRows };
+};
+
+export const canCheckoutWeightedCart = (
+    rows: Array<WeightCartRow & { foodSoldBy?: string | null }>,
+    request: ActiveWeightRequest | null,
+    now: Date = new Date()
+): boolean => {
+    try {
+        evaluateWeightedCheckout(rows, request, now);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+// ─────────────────────────────────────────────
+// Snapshot pricing of weight-bound rows
+// ─────────────────────────────────────────────
+
+const parseMaybeJson = (raw: any): any => {
+    let v = raw;
+    for (let i = 0; i < 3 && typeof v === "string"; i++) {
+        try { v = JSON.parse(v); } catch { break; }
+    }
+    return v;
+};
+
+/** Variations snapshot stored in cart_items.variations ({variations:[...]} or a bare array). */
+export const parseVariationSnapshot = (raw: any): any[] => {
+    const v = parseMaybeJson(raw);
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === "object" && Array.isArray(v.variations)) return v.variations;
+    return [];
+};
+
+export const parseAddonSnapshot = (raw: any): any[] => {
+    const v = parseMaybeJson(raw);
+    return Array.isArray(v) ? v : [];
+};
+
+export const variationExtrasFromSnapshot = (vars: any[]): WeightedOptionExtra[] =>
+    vars.map((v: any) => ({
+        price: Number(v.price ?? v.additionalPrice ?? 0),
+        priceMode: v.priceMode === "per_weight" ? "per_weight" : "fixed",
+    }));
+
+export const addonExtrasFromSnapshot = (addonList: any[]): WeightedOptionExtra[] =>
+    addonList.map((a: any) => ({ price: Number(a.price ?? 0), priceMode: "fixed" }));
+
+/**
+ * Price snapshot of a weight-bound row (the price the customer saw when sending the cart,
+ * or the price the restaurant set while weighing). Used at checkout and by getCart for
+ * locked rows so that the order total equals the cart total.
+ *
+ * - Weighted row: cart_items.unit_price is the base price per weight unit.
+ * - Restaurant-added unit row: cart_items.unit_price is base + variations + addons per unit.
+ */
+export const snapshotPricing = (row: {
+    weight?: unknown;
+    unitPrice?: string | number | null;
+    variations?: unknown;
+    addons?: unknown;
+}, isWeighted: boolean) => {
+    const vars = parseVariationSnapshot(row.variations);
+    const addonList = parseAddonSnapshot(row.addons);
+    const variationExtras = variationExtrasFromSnapshot(vars);
+    const addonExtras = addonExtrasFromSnapshot(addonList);
+    const unit = Number(row.unitPrice ?? 0) || 0;
+    const varSum = variationExtras.reduce((s, e) => s + Number(e.price), 0);
+    const addonSum = addonExtras.reduce((s, e) => s + Number(e.price), 0);
+    const basePrice = isWeighted ? unit : Math.max(0, Math.round((unit - varSum - addonSum) * 100) / 100);
+    return { basePrice, variationExtras, addonExtras, varSum, addonSum, vars, addonList };
+};
+
+/**
+ * priceChanged rule shared by getCart and checkout. For weighted rows cart_items.unit_price is the
+ * base price per weight unit, so only the live base price is compared (comparing base + variants +
+ * addons would flag every weighted row that has options).
+ */
+export const hasUnitPriceChanged = (p: {
+    isWeighted: boolean;
+    liveBasePrice: number;
+    liveTotalUnitPrice: number;
+    storedUnitPrice: number;
+    tolerance?: number;
+}): boolean => {
+    const live = p.isWeighted ? p.liveBasePrice : p.liveTotalUnitPrice;
+    return Math.abs(live - p.storedUnitPrice) > (p.tolerance ?? 0.001);
+};
+
+/** Line total for a weighted row (final weight if set, else the ordered weight). */
+export const weightedLineTotal = (
+    effectiveWeight: number | string,
+    basePrice: number,
+    variationExtras: WeightedOptionExtra[],
+    addonExtras: WeightedOptionExtra[]
+): number => parseFloat(computeWeightedLineTotal(effectiveWeight, basePrice, [...variationExtras, ...addonExtras]));

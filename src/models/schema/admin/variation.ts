@@ -41,6 +41,7 @@ export const variationOptions = mysqlTable("variation_options", {
     optionNameAr: varchar("option_name_ar", { length: 255 }).notNull().default(''),
     optionNameFr: varchar("option_name_fr", { length: 255 }).notNull().default(''),
     additionalPrice: varchar("additional_price", { length: 255 }).notNull().default("0"),
+    priceMode: mysqlEnum("price_mode", ["fixed", "per_weight"]).notNull().default("fixed"),
 
     // 👇 الحقل الجديد للتحكم في الاختيار الافتراضي
     isDefault: boolean("is_default").default(false),

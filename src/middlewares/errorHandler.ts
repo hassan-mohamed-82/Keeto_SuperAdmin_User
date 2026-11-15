@@ -1,5 +1,6 @@
 import { Response, Request, NextFunction, ErrorRequestHandler } from "express";
 import { AppError } from "../Errors/appError";
+import { CodedConflictError } from "../Errors/codedConflictError";
 import { StatusCodes } from "http-status-codes";
 import Jwt from "jsonwebtoken";
 import { IErrorResponse } from "../utils/response";
@@ -13,6 +14,11 @@ export const errorHandler: ErrorRequestHandler = (
   let statusCode: number = StatusCodes.INTERNAL_SERVER_ERROR;
   let message: string = err.message || "Internal Server Error";
   let details: any | undefined = err.message;
+
+  if (err instanceof CodedConflictError) {
+    res.status(err.statusCode).json({ success: false, ...err.extra, code: err.code, message: err.message });
+    return;
+  }
 
   if (err instanceof AppError) {
     statusCode = err.statusCode;

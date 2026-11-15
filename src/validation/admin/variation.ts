@@ -42,6 +42,7 @@ export const createVariationOptionSchema = z.object({
     
     // السعر الإضافي متسجل كـ varchar فبنتعامل معاه كـ string
     additionalPrice: z.string().max(255).optional(),
+    priceMode: z.enum(["fixed", "per_weight"]).optional().default("fixed"),
     
     status: z.boolean().optional(),
 });

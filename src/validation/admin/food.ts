@@ -39,6 +39,8 @@ export const createFoodSchema = z.object({
     
     stock_type: z.enum(["limited", "unlimited", "daily"]).optional(),
     status: z.enum(["active", "inactive"]).optional(),
+    sold_by: z.enum(["unit", "weight"]).optional().default("unit"),
+    weight_unit: z.enum(["kg", "gm"]).optional().nullable(),
 });
 
 export const updateFoodSchema = createFoodSchema.partial();

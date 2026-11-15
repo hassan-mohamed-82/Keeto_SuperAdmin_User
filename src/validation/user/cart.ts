@@ -1,9 +1,5 @@
 import { z } from "zod";
 
-export const sendForWeighingSchema = z.object({
-    restaurantId: z.string().uuid("Invalid restaurant ID").optional(),
-});
-
 export const addToCartSchema = z.object({
     foodId: z.string().uuid("Invalid food ID").optional(),
     offerId: z.string().uuid("Invalid offer ID").optional(),

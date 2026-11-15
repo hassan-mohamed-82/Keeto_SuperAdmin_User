@@ -440,6 +440,7 @@ export const getOrderDetails = async (req: Request, res: Response) => {
         variationsPrice: orderItems.variationsPrice,
         addonsPrice: orderItems.addonsPrice,
         totalPrice: orderItems.totalPrice,
+        finalWeight: orderItems.finalWeight,
         note: orderItems.note,
         variations: orderItems.variations,
         addons: orderItems.addons,
@@ -515,7 +516,10 @@ export const getOrderDetails = async (req: Request, res: Response) => {
 
         const finalVarPrice = parseFloat(item.variationsPrice || "0") > 0 ? parseFloat(item.variationsPrice || "0") : totalCalculatedVarPrice;
         const finalAddonsPrice = parseFloat(item.addonsPrice || "0");
-        const finalTotalPrice = (parseFloat(item.basePrice || "0") + finalVarPrice + finalAddonsPrice) * item.quantity;
+        // Weighted rows: basePrice is per weight unit, so the stored line total is authoritative.
+        const finalTotalPrice = item.finalWeight != null
+            ? parseFloat(item.totalPrice || "0")
+            : (parseFloat(item.basePrice || "0") + finalVarPrice + finalAddonsPrice) * item.quantity;
 
         // 🌟 جلب تفاصيل الـ Addons اللي اختارها العميل فعلاً
         let foodAddons: any[] = [];
@@ -1157,6 +1161,7 @@ export const generateOrderInvoicePDF = async (req: Request, res: Response) => {
         basePrice: orderItems.basePrice,
         variationsPrice: orderItems.variationsPrice,
         totalPrice: orderItems.totalPrice,
+        finalWeight: orderItems.finalWeight,
         variations: orderItems.variations,
         foodName: food.name,
         foodNameAr: food.nameAr,
@@ -1198,7 +1203,10 @@ export const generateOrderInvoicePDF = async (req: Request, res: Response) => {
         }
 
         const finalVarPrice = parseFloat(item.variationsPrice as string || "0") > 0 ? parseFloat(item.variationsPrice as string || "0") : totalCalculatedVarPrice;
-        const finalTotalPrice = (parseFloat(item.basePrice as string || "0") + finalVarPrice) * item.quantity;
+        // Weighted rows: basePrice is per weight unit, so the stored line total is authoritative.
+        const finalTotalPrice = item.finalWeight != null
+            ? parseFloat(item.totalPrice as string || "0")
+            : (parseFloat(item.basePrice as string || "0") + finalVarPrice) * item.quantity;
 
         return {
             ...item,
