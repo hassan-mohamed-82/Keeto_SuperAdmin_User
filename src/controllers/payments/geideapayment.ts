@@ -7,6 +7,7 @@ import { orders, users, restaurantPaymentCredentials, restaurantSettings, restau
 import { eq, or, and } from "drizzle-orm";
 import { safeDecrypt } from "../../utils/Safedecrypt";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
+import { getActivePlatformGateway } from "../../utils/getActivePlatformGateway";
 import { confirmOrderPayment, recordFailedPayment } from "../../helpers/orderPaymentConfirmation";
 
 /**
@@ -138,16 +139,20 @@ export const handleGeideaWebhook = async (req: Request, res: Response) => {
 
         const responseCode = String(payload.responseCode || orderData.responseCode || "");
         const status = String(payload.status || orderData.status || "").toUpperCase();
-
-        const isSuccess =
-            responseCode === "000" ||
-            status === "SUCCESS" ||
-            status === "CAPTURED" ||
-            status === "PAID";
+        const detailedStatus = String(payload.detailedStatus || orderData.detailedStatus || "").toUpperCase();
 
         const isPending =
             status === "PENDING" ||
-            status === "IN_PROGRESS";
+            status === "IN_PROGRESS" ||
+            detailedStatus === "AWAITINGPAYMENT" ||
+            detailedStatus === "INITIATED" ||
+            detailedStatus === "PENDING";
+
+        // في جيديا لا يعتبر الدفع ناجحاً إلا إذا تم التحصيل الفعلي وليس مجرد إرسال طلب الدفع للمحفظة
+        const isSuccess =
+            !isPending &&
+            (status === "SUCCESS" || status === "CAPTURED" || status === "PAID" || detailedStatus === "PAID" || detailedStatus === "CAPTURED") &&
+            (responseCode === "000" || responseCode === "");
 
         const webhookAmount = payload.amount !== undefined ? Number(payload.amount) : (orderData.amount !== undefined ? Number(orderData.amount) : undefined);
 
@@ -239,66 +244,127 @@ export const handleGeideaWebhook = async (req: Request, res: Response) => {
 export const handleGeideaRedirect = async (req: Request, res: Response) => {
     try {
         const query = req.query as Record<string, string>;
-        const success = query.success === "true";
-        const responseCode = query.responseCode;
-        const sessionId = query.sessionId || query.orderId;
-        const merchantReferenceId = query.merchantReferenceId || query.orderId;
+        const sessionId = (query.sessionId || query.orderId || query.paymentOrderId) as string | undefined;
+        const merchantReferenceId = (query.merchantReferenceId || query.orderId || query.merchant_order_id) as string | undefined;
 
         const rawOrderId = (
             req.query.merchant_order_id ||
             req.query.order_id ||
-            req.query.order
+            req.query.order ||
+            merchantReferenceId
         ) as string | undefined;
 
-        const isSuccess = responseCode === "000" || query.status === "Success" || query.status === "SUCCESS";
         let callbackSlug = req.query.callbackSlug as string | undefined;
         const frontendBaseUrl = (process.env.APP_BASE_URL || process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
-        if (!callbackSlug && rawOrderId) {
-            try {
-                const [result] = await db
-                    .select({ slug: restaurants.slug })
-                    .from(orders)
-                    .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
-                    .where(
-                        or(
-                            eq(orders.id, rawOrderId),                   // مطابقة الـ UUID الخاص بالداتا بيز
-                            eq(orders.paymentOrderId, rawOrderId)        // مطابقة رقم طلب بايموب
-                        )
-                    )
-                    .limit(1);
+        // Find the matched order
+        const [matchedOrder] = await db
+            .select({
+                id: orders.id,
+                restaurantId: orders.restaurantId,
+                orderNumber: orders.orderNumber,
+                paymentStatus: orders.paymentStatus,
+                paymentOrderId: orders.paymentOrderId,
+                totalAmount: orders.totalAmount,
+                slug: restaurants.slug,
+            })
+            .from(orders)
+            .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+            .where(
+                or(
+                    rawOrderId ? eq(orders.id, rawOrderId) : undefined,
+                    sessionId ? eq(orders.paymentOrderId, sessionId) : undefined
+                )
+            )
+            .limit(1);
 
-                if (result?.slug) {
-                    callbackSlug = result.slug;
+        if (matchedOrder?.slug) {
+            callbackSlug = matchedOrder.slug;
+        }
+
+        let isActuallyPaid = false;
+
+        // 1. إذا كان الأوردر مؤكداً كمدفوع مسبقاً (عبر الـ Webhook مثلاً)
+        if (matchedOrder?.paymentStatus === "paid") {
+            isActuallyPaid = true;
+        } else if (matchedOrder && (sessionId || matchedOrder.paymentOrderId)) {
+            // 2. التحقق مباشرة من سيرفر جيديا (Server-to-Server) للتأكد من حالة الخصم الفعلي
+            try {
+                let geideaCreds: any = null;
+                const activeGateway = await getActiveCustomGateway(matchedOrder.restaurantId);
+                if (activeGateway && activeGateway.provider === "GEIDEA") {
+                    geideaCreds = activeGateway.record.credentials;
+                } else {
+                    const platformGateway = await getActivePlatformGateway();
+                    if (platformGateway && platformGateway.provider === "GEIDEA") {
+                        geideaCreds = platformGateway.credentials;
+                    }
                 }
-            } catch (error) {
-                console.error("Error fetching restaurant slug for Paymob redirect:", error);
+
+                if (geideaCreds) {
+                    const sessionDetails = await GeideaService.getSessionDetails(
+                        geideaCreds,
+                        sessionId || matchedOrder.paymentOrderId!
+                    );
+
+                    const orderDetails = sessionDetails?.order || sessionDetails?.data || sessionDetails;
+                    const detailedStatus = String(orderDetails?.detailedStatus || sessionDetails?.detailedStatus || "").toUpperCase();
+                    const status = String(orderDetails?.status || sessionDetails?.status || "").toUpperCase();
+                    const responseCode = String(orderDetails?.responseCode || sessionDetails?.responseCode || "");
+
+                    // في جيديا الخصم الفعلي المؤكد يكون عند detailedStatus = PAID أو CAPTURED
+                    if (
+                        (detailedStatus === "PAID" || detailedStatus === "CAPTURED" || status === "PAID" || status === "CAPTURED") &&
+                        (responseCode === "000" || responseCode === "")
+                    ) {
+                        isActuallyPaid = true;
+                        const txnId = String(orderDetails?.transactionId || sessionDetails?.transactionId || sessionId);
+                        await confirmOrderPayment({
+                            orderId: matchedOrder.id,
+                            gateway: "geidea",
+                            transactionId: txnId,
+                            gatewayOrderId: sessionId || matchedOrder.paymentOrderId || undefined,
+                            rawPayload: sessionDetails,
+                        });
+                        console.log(`[Geidea Redirect]: Order ${matchedOrder.orderNumber} confirmed as paid via verified session details.`);
+                    } else if (
+                        detailedStatus === "EXPIRED" ||
+                        detailedStatus === "FAILED" ||
+                        detailedStatus === "CANCELLED" ||
+                        status === "FAILED" ||
+                        status === "EXPIRED"
+                    ) {
+                        const failureReason =
+                            orderDetails?.detailedResponseMessage ||
+                            sessionDetails?.detailedResponseMessage ||
+                            sessionDetails?.responseMessage ||
+                            `Transaction ${detailedStatus || status}`;
+
+                        await recordFailedPayment({
+                            orderId: matchedOrder.id,
+                            gateway: "geidea",
+                            transactionId: sessionId,
+                            gatewayOrderId: sessionId || matchedOrder.paymentOrderId || undefined,
+                            failureReason,
+                            rawPayload: sessionDetails,
+                        });
+                        console.log(`[Geidea Redirect]: Order ${matchedOrder.orderNumber} recorded as payment_failed (${failureReason}).`);
+                    } else {
+                        console.log(`[Geidea Redirect]: Order ${matchedOrder.orderNumber} is still pending/unpaid (detailedStatus: ${detailedStatus || "N/A"}, status: ${status || "N/A"}).`);
+                    }
+                }
+            } catch (err) {
+                console.error("[Geidea Redirect]: Error querying session details from Geidea:", err);
             }
         }
 
-        const redirectUrl = success
+        const redirectUrl = isActuallyPaid
             ? (callbackSlug
-                ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=true&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`
-                : `${frontendBaseUrl}/payment/result?success=true&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`)
+                ? `${frontendBaseUrl}/profile?callbackSlug=${encodeURIComponent(callbackSlug)}&success=true&orderId=${encodeURIComponent(String(rawOrderId || matchedOrder?.id || ""))}&gateway=geidea`
+                : `${frontendBaseUrl}/payment/result?success=true&orderId=${encodeURIComponent(String(rawOrderId || matchedOrder?.id || ""))}&gateway=geidea`)
             : (callbackSlug
-                ? `${frontendBaseUrl}/home/restaurants/${encodeURIComponent(callbackSlug)}/order?success=false&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`
-                : `${frontendBaseUrl}/payment/result?success=false&orderId=${encodeURIComponent(String(rawOrderId || ""))}&gateway=geidea`);
-
-
-        if (merchantReferenceId && isSuccess) {
-            // Confirm payment if not already confirmed by webhook
-            try {
-                await confirmOrderPayment({
-                    orderId: String(merchantReferenceId),
-                    gateway: "geidea",
-                    transactionId: query.transactionId || sessionId,
-                    gatewayOrderId: sessionId,
-                    rawPayload: query,
-                });
-            } catch (confirmErr) {
-                console.warn("[Geidea Redirect]: confirmOrderPayment background notice:", confirmErr);
-            }
-        }
+                ? `${frontendBaseUrl}/home/restaurants/${encodeURIComponent(callbackSlug)}/order?success=false&orderId=${encodeURIComponent(String(rawOrderId || matchedOrder?.id || ""))}&gateway=geidea`
+                : `${frontendBaseUrl}/payment/result?success=false&orderId=${encodeURIComponent(String(rawOrderId || matchedOrder?.id || ""))}&gateway=geidea`);
 
         return res.redirect(redirectUrl);
     } catch (error: any) {
