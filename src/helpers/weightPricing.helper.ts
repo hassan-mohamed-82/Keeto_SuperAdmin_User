@@ -215,11 +215,22 @@ export const validateWeightInput = (
     weight: number | string | null | undefined,
     selectedOptions: SelectedWeightOption[] = []
 ): number | null => {
-    const hasWeight = weight !== undefined && weight !== null && weight !== "";
+    let hasWeight = weight !== undefined && weight !== null && weight !== "";
 
     if (food.sold_by !== "weight") {
         if (hasWeight) throw new BadRequest("Weight cannot be specified for unit-sold products");
         return null;
+    }
+
+    // If no explicit weight is given but a weight-group option is selected, derive the
+    // weight automatically from that option's weightValue so the caller doesn't have to
+    // send a redundant field.
+    if (!hasWeight && selectedOptions.length > 0) {
+        const weightGroupOption = selectedOptions.find((o) => o && o.isWeightGroup && o.weightValue != null);
+        if (weightGroupOption) {
+            weight = weightGroupOption.weightValue as string | number;
+            hasWeight = true;
+        }
     }
 
     if (!hasWeight) {

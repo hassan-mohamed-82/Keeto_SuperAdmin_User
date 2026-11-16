@@ -274,9 +274,14 @@ export const addToCart = async (req: Request | any, res: Response) => {
     if (!itemFood) throw new BadRequest("Food not found");
 
     const isWeightedFood = itemFood.sold_by === "weight";
-    // Numeric weight rules now; the weight-group / allow_custom_weight rules run once the selected
-    // options are loaded (below).
-    const requestedWeight: number | null = validateWeightInput({ sold_by: itemFood.sold_by, weight_unit: itemFood.weight_unit }, weight);
+    // Full weight validation (including weight-group option derivation) runs after the selected
+    // options are loaded below (line ~393). Here we only do a quick unit-sold guard: if the food
+    // is NOT weight-based, reject any weight that was sent so we fail fast.
+    if (!isWeightedFood && weight !== undefined && weight !== null && weight !== "") {
+        throw new BadRequest("Weight cannot be specified for unit-sold products");
+    }
+    // Placeholder; will be assigned after full validation below.
+    let requestedWeight: number | null = null;
 
     // 🛡️ Block check
     await validateUserNotBlocked(userId, itemFood.restaurantid);
@@ -388,9 +393,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
         selectedWeightOptions.push({ isWeightGroup: validDbVariation.isWeightGroup, weightValue: foundOption.weightValue });
     }
 
-    // ⚖️ Weight groups: a chosen weight option must match the weight exactly; without one, a custom
-    // weight is allowed only when food.allow_custom_weight is true.
-    validateWeightInput(itemFood, weight, selectedWeightOptions);
+    // ⚖️ Full weight validation: weight-group option derivation + allow_custom_weight rules.
+    // Returns the normalised weight (or null for unit-sold foods).
+    requestedWeight = validateWeightInput(itemFood, weight, selectedWeightOptions);
     const hasWeightOption = selectedWeightOptions.some(o => o.isWeightGroup);
 
     // ─── Addons validation ───────────────────────────────────────────
