@@ -153,6 +153,7 @@ export const getFoodsByCategory = async (req: Request, res: Response) => {
         addonsId: food.addonsId,
         sold_by: food.sold_by,
         weight_unit: food.weight_unit,
+        allow_custom_weight: food.allow_custom_weight,
 
         categoryId: categories.id,
         categoryName: categories.name,
@@ -324,6 +325,7 @@ export const getRestaurantDetails = async (req: Request, res: Response) => {
             addonsId: food.addonsId,
             sold_by: food.sold_by,
             weight_unit: food.weight_unit,
+            allow_custom_weight: food.allow_custom_weight,
 
             categoryId: categories.id,
             categoryName: categories.name,

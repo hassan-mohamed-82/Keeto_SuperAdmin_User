@@ -7,7 +7,8 @@ import {
     json,
     char,
     boolean,
-    text
+    text,
+    decimal
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { food } from "./food";
@@ -23,6 +24,8 @@ export const foodVariations = mysqlTable("food_variations", {
     nameFr: varchar("name_fr", { length: 255 }).notNull().default(''),
     isRequired: boolean("is_required").default(false), // Required
     selectionType: mysqlEnum("selection_type", ["single", "multiple"]).default("single"), // Single vs Multiple
+    /** The weight choices of a weighted food (at most one per food, single-select). */
+    isWeightGroup: boolean("is_weight_group").notNull().default(false),
     min: int("min"), // Min
     max: int("max"), // Max
     status: boolean("status").default(true), // حالة الفارييشن (شغال / مقفول)
@@ -42,6 +45,8 @@ export const variationOptions = mysqlTable("variation_options", {
     optionNameFr: varchar("option_name_fr", { length: 255 }).notNull().default(''),
     additionalPrice: varchar("additional_price", { length: 255 }).notNull().default("0"),
     priceMode: mysqlEnum("price_mode", ["fixed", "per_weight"]).notNull().default("fixed"),
+    /** Weight-group options only: the weight this option stands for, in the food's weight_unit. */
+    weightValue: decimal("weight_value", { precision: 10, scale: 3 }),
 
     // 👇 الحقل الجديد للتحكم في الاختيار الافتراضي
     isDefault: boolean("is_default").default(false),

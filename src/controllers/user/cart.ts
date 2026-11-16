@@ -60,7 +60,7 @@ import {
     type ServiceModule,
 } from "../../helpers/pricing.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
-import { computeWeightedLineTotal, validateWeightInput } from "../../helpers/weightPricing.helper";
+import { computeWeightedLineTotal, priceCartLine, validateWeightInput, type SelectedWeightOption } from "../../helpers/weightPricing.helper";
 import {
     assertCartWriteAllowed,
     ACTIVE_WEIGHT_REQUEST_STATUSES,
@@ -274,7 +274,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
     if (!itemFood) throw new BadRequest("Food not found");
 
     const isWeightedFood = itemFood.sold_by === "weight";
-    const requestedWeight: number | null = validateWeightInput(itemFood, weight, safeVariations);
+    // Numeric weight rules now; the weight-group / allow_custom_weight rules run once the selected
+    // options are loaded (below).
+    const requestedWeight: number | null = validateWeightInput({ sold_by: itemFood.sold_by, weight_unit: itemFood.weight_unit }, weight);
 
     // 🛡️ Block check
     await validateUserNotBlocked(userId, itemFood.restaurantid);
@@ -369,6 +371,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
         }
     }
 
+    const selectedWeightOptions: SelectedWeightOption[] = [];
     for (const selected of safeVariations) {
         const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
         if (!validDbVariation) throw new BadRequest(`Invalid variation ID sent: ${selected.variationId}`);
@@ -382,7 +385,13 @@ export const addToCart = async (req: Request | any, res: Response) => {
         const foundOption = dbOptions.find(o => o.id === selected.optionId);
         if (!foundOption) throw new BadRequest(`Invalid option selected for variation: ${validDbVariation.name}`);
         if (foundOption.status === false) throw new BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
+        selectedWeightOptions.push({ isWeightGroup: validDbVariation.isWeightGroup, weightValue: foundOption.weightValue });
     }
+
+    // ⚖️ Weight groups: a chosen weight option must match the weight exactly; without one, a custom
+    // weight is allowed only when food.allow_custom_weight is true.
+    validateWeightInput(itemFood, weight, selectedWeightOptions);
+    const hasWeightOption = selectedWeightOptions.some(o => o.isWeightGroup);
 
     // ─── Addons validation ───────────────────────────────────────────
     let addonSnapshot: { addonId: string; name: string; nameAr: string; price: string }[] = [];
@@ -506,7 +515,8 @@ export const addToCart = async (req: Request | any, res: Response) => {
             isNull(cartItems.offerId)
         ));
 
-    const existingSame = existingItems.find(item => {
+    // A preset weight option is one fixed weight: never merged by summing weights, so it gets its own line.
+    const existingSame = hasWeightOption ? undefined : existingItems.find(item => {
         const { variations: dbVars } = parseCartSnapshot(item.variations);
         const dbAddonsParsed = deepParseJSON(item.addons);
         const dbAddonsList = Array.isArray(dbAddonsParsed) ? dbAddonsParsed : [];
@@ -525,7 +535,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
         if (isWeightedFood) {
             // Sum in thousandths to avoid float drift, then re-validate (sane maximum applies to the sum).
             const summed = (Math.round(Number(existingSame.weight || 0) * 1000) + Math.round(requestedWeight! * 1000)) / 1000;
-            const newWeight = validateWeightInput(itemFood, summed, safeVariations)!;
+            const newWeight = validateWeightInput(itemFood, summed, selectedWeightOptions)!;
             const newTotalPriceStr = computeWeightedLineTotal(newWeight, unitPriceStr, weightedOptionExtras);
             lineTotalStr = newTotalPriceStr;
             await db.update(cartItems)
@@ -1159,26 +1169,20 @@ export const getCart = async (req: Request | any, res: Response) => {
         const originalUnitPrice = currentBasePrice + varPrice;
         const finalUnitPrice = discountedBasePrice + varPrice;
 
-        const isWeighted = isWeightedRow;
-        let unitDiscountAmount: number;
-        let itemTotalDiscount: number;
-        let itemOriginalTotalPrice: number;
-        let finalTotalPrice: number;
-
-        if (isWeighted) {
-            const effectiveWeight = item.finalWeight ? Number(item.finalWeight) : Number(item.weight || 0);
-            const finalTotalStr = computeWeightedLineTotal(effectiveWeight, discountedBasePrice, weightedExtras);
-            const origTotalStr = computeWeightedLineTotal(effectiveWeight, currentBasePrice, weightedExtras);
-            finalTotalPrice = parseFloat(finalTotalStr);
-            itemOriginalTotalPrice = parseFloat(origTotalStr);
-            unitDiscountAmount = Math.max(0, currentBasePrice - discountedBasePrice);
-            itemTotalDiscount = Math.max(0, itemOriginalTotalPrice - finalTotalPrice);
-        } else {
-            unitDiscountAmount = Math.max(0, originalUnitPrice - finalUnitPrice);
-            itemTotalDiscount = unitDiscountAmount * item.quantity;
-            itemOriginalTotalPrice = originalUnitPrice * item.quantity;
-            finalTotalPrice = finalUnitPrice * item.quantity;
-        }
+        // The shared line-price formula (also used by both weight-request detail screens).
+        const linePrice = priceCartLine({
+            isWeighted: isWeightedRow,
+            effectiveWeight: item.finalWeight ? Number(item.finalWeight) : Number(item.weight || 0),
+            quantity: item.quantity,
+            basePrice: currentBasePrice,
+            discountedBasePrice,
+            extras: weightedExtras,
+            unitExtras: varPrice,
+        });
+        const unitDiscountAmount = linePrice.discountPerUnit;
+        const itemTotalDiscount = linePrice.discountTotal;
+        const itemOriginalTotalPrice = linePrice.originalTotal;
+        const finalTotalPrice = linePrice.finalTotal;
 
         // Rows the restaurant marked unavailable are not ordered, so they don't count in the totals.
         if (!item.isUnavailable) {
@@ -1508,7 +1512,8 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
 
     if (isWeightedFood) {
         const inputWeight = weight !== undefined ? weight : cartItem.weight;
-        newWeight = validateWeightInput(itemFood, inputWeight, Array.isArray(variations) ? variations : []);
+        // numeric rules now; weight-group rules once the selected options are loaded (below)
+        newWeight = validateWeightInput({ sold_by: itemFood.sold_by, weight_unit: itemFood.weight_unit }, inputWeight);
         newQty = 1;
     } else {
         validateWeightInput(itemFood, weight);
@@ -1554,6 +1559,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
 
     const dbVariations = await db.select().from(foodVariations).where(eq(foodVariations.foodId, itemFood.id));
 
+    const selectedWeightOptions: SelectedWeightOption[] = [];
     for (const selected of safeVariations) {
         const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
         if (!validDbVariation) throw new BadRequest("Invalid variation ID");
@@ -1563,6 +1569,12 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
         const foundOption = dbOptions.find(o => o.id === selected.optionId);
         if (!foundOption) throw new BadRequest("Invalid option selected");
         if (foundOption.status === false) throw new BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
+        selectedWeightOptions.push({ isWeightGroup: validDbVariation.isWeightGroup, weightValue: foundOption.weightValue });
+    }
+
+    // ⚖️ Weight groups / allow_custom_weight (same rule as addToCart).
+    if (isWeightedFood) {
+        validateWeightInput(itemFood, newWeight, selectedWeightOptions);
     }
 
     // ─── Resolve addons ──────────────────────────────────────────────

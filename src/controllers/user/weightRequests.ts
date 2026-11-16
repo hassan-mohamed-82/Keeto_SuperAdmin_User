@@ -6,6 +6,10 @@ import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
 import { SuccessResponse } from "../../utils/response";
 import { v4 as uuidv4 } from "uuid";
+import { sendPushNotification } from "../../utils/notifications";
+import { priceWeightRequestRows } from "../../services/weightRequestPricing.service";
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 import {
     ACTIVE_WEIGHT_REQUEST_STATUSES,
     FROZEN_CART_STATUSES,
@@ -19,6 +23,41 @@ import {
  * Sends the user's cart for weighing to the restaurant.
  * Enforces one active request per user + restaurant via a FOR UPDATE lock on cart items.
  */
+/**
+ * Push to the restaurant (and its branch) about a weight request: same channel as new orders
+ * (sendPushNotification → notifications row + FCM). Never throws: the request itself already committed.
+ */
+const notifyRestaurantAboutWeightRequest = async (p: {
+    restaurantId: string;
+    branchId: string | null;
+    userId: string;
+    weightRequestId: string;
+    type: "weight_request_new" | "weight_request_cancelled";
+    title: string;
+    body: (customerName: string) => string;
+    extra?: Record<string, unknown>;
+}) => {
+    try {
+        const [customer] = await db.select({ name: users.name }).from(users).where(eq(users.id, p.userId)).limit(1);
+        await sendPushNotification({
+            recipientType: "restaurant",
+            recipientId: p.restaurantId,
+            branchId: p.branchId,
+            title: p.title,
+            body: p.body(customer?.name || "عميل"),
+            data: {
+                type: p.type,
+                weightRequestId: p.weightRequestId,
+                restaurantId: p.restaurantId,
+                branchId: p.branchId,
+                ...(p.extra || {}),
+            },
+        });
+    } catch (err) {
+        console.warn(`[WeightRequest] ${p.type} notification failed for request ${p.weightRequestId}:`, err);
+    }
+};
+
 export const sendWeightRequest = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     let restaurantId = req.body.restaurantId;
@@ -101,7 +140,8 @@ export const sendWeightRequest = async (req: Request | any, res: Response) => {
             .where(eq(restaurantSettings.restaurantId, restaurantId))
             .limit(1);
 
-        const timeoutMin = settings?.weightRestaurantTimeoutMin ?? 30;
+        // Fallback = column default (migration 0013): 10 minutes.
+        const timeoutMin = settings?.weightRestaurantTimeoutMin ?? 10;
         const now = new Date();
         const expiresAt = new Date(now.getTime() + timeoutMin * 60 * 1000);
         const requestId = uuidv4();
@@ -135,14 +175,29 @@ export const sendWeightRequest = async (req: Request | any, res: Response) => {
             id: requestId,
             status: "awaiting_weighing",
             restaurantId,
+            branchId: (userCart[0].branchId || null) as string | null,
+            timeoutMin,
             expiresAt,
             createdAt: now,
         };
     });
 
+    // Tell the restaurant AFTER the transaction committed; a notification failure must not fail the request.
+    await notifyRestaurantAboutWeightRequest({
+        restaurantId: result.restaurantId,
+        branchId: result.branchId,
+        userId,
+        weightRequestId: result.id,
+        type: "weight_request_new",
+        title: "طلب وزن جديد ⚖️",
+        body: (name) => `طلب وزن جديد من ${name}، يرجى وزن الأصناف وتأكيدها خلال ${result.timeoutMin} دقيقة.`,
+        extra: { expiresAt: result.expiresAt },
+    });
+
+    const { timeoutMin: _timeoutMin, ...data } = result;
     return SuccessResponse(res, {
         message: "Order sent for weighing successfully",
-        data: result,
+        data,
     });
 };
 
@@ -186,46 +241,41 @@ export const getWeightRequestById = async (req: Request | any, res: Response) =>
             isUnavailable: cartItems.isUnavailable,
             addedBy: cartItems.addedBy,
             addedByAdminId: cartItems.addedByAdminId,
+            discountId: food.discountId,
+            discountType: food.discount_type,
+            discountValue: food.discount_value,
         })
         .from(cartItems)
         .leftJoin(food, eq(cartItems.foodId, food.id))
         .where(eq(cartItems.weightRequestId, id));
 
-    let subtotal = 0;
-    const formattedItems = items.map((item) => {
+    // Same price snapshot + product discount + line formula as getCart (shared service).
+    const priced = await priceWeightRequestRows(
+        items.map((item) => ({
+            foodId: item.foodId,
+            isWeighted: item.sold_by === "weight" || item.orderedWeight != null,
+            orderedWeight: item.orderedWeight,
+            finalWeight: item.finalWeight,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            variations: item.variations,
+            addons: item.addons,
+            isUnavailable: item.isUnavailable,
+            discountId: item.discountId,
+            discountType: item.discountType,
+            discountValue: item.discountValue,
+        })),
+        request.restaurantId
+    );
+
+    const formattedItems = items.map((item, index) => {
         const isWeighted = item.sold_by === "weight" || item.orderedWeight != null;
+        const line = priced.lines[index];
         const orderedW = item.orderedWeight ? Number(item.orderedWeight) : null;
         const finalW = item.finalWeight ? Number(item.finalWeight) : null;
         const weightChanged = finalW != null && orderedW != null && Math.abs(finalW - orderedW) > 0.0001;
 
-        let parsedVars: any[] = [];
-        try {
-            parsedVars = typeof item.variations === "string" ? JSON.parse(item.variations) : item.variations || [];
-        } catch {
-            parsedVars = [];
-        }
-
-        let parsedAddons: any[] = [];
-        try {
-            parsedAddons = typeof item.addons === "string" ? JSON.parse(item.addons) : item.addons || [];
-        } catch {
-            parsedAddons = [];
-        }
-
-        let lineTotal = parseFloat(item.totalPrice as string || "0");
-        if (isWeighted) {
-            // Same snapshot pricing as checkout (unit_price = base price per weight unit,
-            // option/addon prices from the snapshot), not the live food.price.
-            const effectiveWeight = finalW ?? orderedW ?? 0;
-            const snap = snapshotPricing(item, true);
-            lineTotal = weightedLineTotal(effectiveWeight, snap.basePrice, snap.variationExtras, snap.addonExtras);
-            parsedVars = snap.vars;
-            parsedAddons = snap.addonList;
-        }
-
-        if (!item.isUnavailable) {
-            subtotal += lineTotal;
-        }
+        const snap = snapshotPricing(item, isWeighted);
 
         return {
             cartItemId: item.cartItemId,
@@ -239,9 +289,15 @@ export const getWeightRequestById = async (req: Request | any, res: Response) =>
             finalWeight: item.finalWeight ? String(item.finalWeight) : null,
             weightUnit: item.weightUnit || item.foodWeightUnit || null,
             unitPrice: item.unitPrice,
-            totalPrice: lineTotal.toFixed(2),
-            variations: parsedVars,
-            addons: parsedAddons,
+            // per unit (or per weight unit for weighted items), before and after the product discount
+            originalUnitPrice: round2(line.originalUnitPrice),
+            discountedUnitPrice: round2(line.finalUnitPrice),
+            originalTotalPrice: line.originalTotal.toFixed(2),
+            discountAmount: line.discountTotal.toFixed(2),
+            totalPrice: line.finalTotal.toFixed(2),
+            appliedDiscount: line.appliedDiscount,
+            variations: snap.vars,
+            addons: snap.addonList,
             note: item.note,
             isUnavailable: Boolean(item.isUnavailable),
             addedBy: item.addedBy || "customer",
@@ -267,7 +323,9 @@ export const getWeightRequestById = async (req: Request | any, res: Response) =>
             },
             items: formattedItems,
             totals: {
-                subtotal: parseFloat(subtotal.toFixed(2)),
+                originalSubtotal: priced.totals.originalSubtotal,
+                discountTotal: priced.totals.discountTotal,
+                subtotal: priced.totals.subtotal,
                 isEstimatedTotal,
             },
             canCheckout: request.status === "awaiting_customer_approval" && !isExpired && formattedItems.some((i) => !i.isUnavailable),
@@ -286,7 +344,7 @@ export const cancelWeightRequest = async (req: Request | any, res: Response) => 
 
     const now = new Date();
 
-    await db.transaction(async (tx) => {
+    const cancelled = await db.transaction(async (tx) => {
         const [request] = await tx
             .select()
             .from(weightRequests)
@@ -326,6 +384,20 @@ export const cancelWeightRequest = async (req: Request | any, res: Response) => 
                 updatedAt: now,
             })
             .where(and(eq(cartItems.weightRequestId, id), eq(cartItems.addedBy, "customer")));
+
+        return { restaurantId: request.restaurantId, branchId: request.branchId, previousStatus: request.status };
+    });
+
+    // Tell the restaurant (it may be weighing right now) AFTER the transaction committed.
+    await notifyRestaurantAboutWeightRequest({
+        restaurantId: cancelled.restaurantId,
+        branchId: cancelled.branchId,
+        userId,
+        weightRequestId: id,
+        type: "weight_request_cancelled",
+        title: "تم إلغاء طلب وزن ❌",
+        body: (name) => `قام ${name} بإلغاء طلب الوزن${reason ? `: ${String(reason).slice(0, 200)}` : "."}`,
+        extra: { previousStatus: cancelled.previousStatus, reason: reason || null },
     });
 
     return SuccessResponse(res, {

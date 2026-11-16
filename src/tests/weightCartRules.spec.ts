@@ -251,3 +251,32 @@ describe("Fixes 3, 4, 8: pricing of weighted rows", () => {
         expect(cartTotal).toBe(215);
     });
 });
+
+describe("confirm at the ordered weight → checkout total = cart total", () => {
+    it("a row the restaurant confirmed as ordered (final_weight = weight) prices the same in the cart, at checkout and as stored", () => {
+        // what POST /confirm stores for an unweighed row: final_weight = weight, total recomputed
+        const row = {
+            weight: "0.500",
+            finalWeight: "0.500",
+            unitPrice: "300.00",
+            variations: JSON.stringify({ variations: [{ optionId: "o1", price: "60.00", priceMode: "per_weight" }] }),
+            addons: JSON.stringify([{ addonId: "a1", price: "10.00" }]),
+        };
+        const storedByConfirm = computeWeightedLineTotal(0.5, 300, [{ price: 60, priceMode: "per_weight" }, { price: 10, priceMode: "fixed" }]);
+
+        // getCart and checkout both use snapshotPricing + weightedLineTotal on finalWeight ?? weight
+        const snap = snapshotPricing(row, true);
+        const effective = row.finalWeight ?? row.weight;
+        const cartLine = weightedLineTotal(effective, snap.basePrice, snap.variationExtras, snap.addonExtras);
+        const checkoutLine = parseFloat(splitWeightedLineTotal(effective, snap.basePrice, snap.variationExtras, snap.addonExtras).total);
+
+        expect(storedByConfirm).toBe("190.00");
+        expect(cartLine).toBe(190);
+        expect(checkoutLine).toBe(cartLine);
+
+        // with a product discount (10% on the per-kg base) cart and checkout still agree
+        const discounted = snap.basePrice * 0.9;
+        expect(parseFloat(splitWeightedLineTotal(effective, discounted, snap.variationExtras, snap.addonExtras).total))
+            .toBe(weightedLineTotal(effective, discounted, snap.variationExtras, snap.addonExtras));
+    });
+});

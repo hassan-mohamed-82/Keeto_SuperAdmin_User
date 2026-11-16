@@ -9,7 +9,7 @@ import { db } from "../models/connection";
 import { weightRequests } from "../models/schema";
 import { BadRequest } from "../Errors/BadRequest";
 import { CodedConflictError } from "../Errors/codedConflictError";
-import { computeWeightedLineTotal, type WeightedOptionExtra } from "./weightPricing.helper";
+import { computeWeightedLineTotal, snapshotLinePricing, type WeightedOptionExtra } from "./weightPricing.helper";
 
 export type WeightRequestStatus =
     | "awaiting_weighing"
@@ -40,8 +40,8 @@ export const CHECKOUT_NO_ORDER_MINUTES = 5;
 export const PAYMENT_ABANDON_MINUTES = 30;
 /** Failed / abandoned payment attempts after which the request expires. */
 export const MAX_PAYMENT_ATTEMPTS = 3;
-/** Fallback when restaurant_settings has no row: same as the column default (0005 migration, Restaurant schema). */
-export const DEFAULT_WEIGHT_CUSTOMER_TIMEOUT_MIN = 40;
+/** Fallback when restaurant_settings has no row: the agreed 15 minutes. */
+export const DEFAULT_WEIGHT_CUSTOMER_TIMEOUT_MIN = 15;
 
 export interface ActiveWeightRequest {
     id: string;
@@ -279,17 +279,7 @@ export const snapshotPricing = (row: {
     unitPrice?: string | number | null;
     variations?: unknown;
     addons?: unknown;
-}, isWeighted: boolean) => {
-    const vars = parseVariationSnapshot(row.variations);
-    const addonList = parseAddonSnapshot(row.addons);
-    const variationExtras = variationExtrasFromSnapshot(vars);
-    const addonExtras = addonExtrasFromSnapshot(addonList);
-    const unit = Number(row.unitPrice ?? 0) || 0;
-    const varSum = variationExtras.reduce((s, e) => s + Number(e.price), 0);
-    const addonSum = addonExtras.reduce((s, e) => s + Number(e.price), 0);
-    const basePrice = isWeighted ? unit : Math.max(0, Math.round((unit - varSum - addonSum) * 100) / 100);
-    return { basePrice, variationExtras, addonExtras, varSum, addonSum, vars, addonList };
-};
+}, isWeighted: boolean) => snapshotLinePricing(row, isWeighted);
 
 /**
  * priceChanged rule shared by getCart and checkout. For weighted rows cart_items.unit_price is the

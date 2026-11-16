@@ -233,7 +233,7 @@ export const revertWeightRequestInTx = async (
         .from(restaurantSettings)
         .where(eq(restaurantSettings.restaurantId, request.restaurantId))
         .limit(1);
-    // Same fallback as the column default (restaurant_settings.weight_customer_timeout_min DEFAULT 40).
+    // Fallback when the restaurant has no settings row: the agreed 15 minutes.
     const timeoutMin = settings?.weightCustomerTimeoutMin ?? DEFAULT_WEIGHT_CUSTOMER_TIMEOUT_MIN;
     await tx
         .update(weightRequests)

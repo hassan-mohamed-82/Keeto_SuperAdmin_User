@@ -99,6 +99,22 @@ All monetary calculations use scaled integer arithmetic in `src/helpers/weightPr
 
 ---
 
+### 5.1 Weight groups and custom weight
+
+- `food.allow_custom_weight` (default `true`): may the customer type any weight? Weighted foods only.
+- `food_variations.is_weight_group`: the preset weights of a weighted food (e.g. 250 g / 500 g / 1 kg).
+  At most ONE per food, single-select, only on foods sold by weight. It is required exactly when
+  `allow_custom_weight = false` (stored as `is_required = !allow_custom_weight`).
+- `variation_options.weight_value` (decimal(10,3), in the food's `weight_unit`): required (> 0, unique)
+  on weight-group options; must be empty on normal options.
+- Cart rule (`validateWeightInput`): a selected weight option → `weight` must equal its `weight_value`
+  (exact thousandths comparison, never float equality); no weight option → allowed only when
+  `allow_custom_weight = true`. The restaurant's final (measured) weight is not checked against the options.
+- A weight option's price is an OPTIONAL extra fee (`fixed` or `per_weight`), normally 0. The weight itself
+  is always priced as `weight × unit price`.
+- A fixed-amount discount is rejected on foods sold per gram (`weight_unit = gm`), because it is applied per
+  weight unit. Percentage discounts are allowed for both units; fixed discounts stay allowed for kg foods.
+
 ## 6. Background Expiry Cron
 
 - File: `Keeto_Restaurant_User/src/services/weightRequestCron.ts`

@@ -1,3 +1,4 @@
+import { parseBooleanInput, validateWeightGroupConfig } from "../../helpers/weightPricing.helper";
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import {
@@ -372,6 +373,9 @@ export const getFoodById = async (req: Request, res: Response) => {
         Maximum_Purchase: food.Maximum_Purchase,
         stock_type: food.stock_type,
         status: food.status,
+        sold_by: food.sold_by,
+        weight_unit: food.weight_unit,
+        allow_custom_weight: food.allow_custom_weight,
         createdAt: food.createdAt,
         updatedAt: food.updatedAt,
         restaurant: {
@@ -526,6 +530,36 @@ export const updateFood = async (req: Request, res: Response) => {
         updateData.subcategoryid = incomingSubcategoryId === "" ? null : incomingSubcategoryId;
     }
 
+    // ⚖️ Weight groups: when variations are sent, validate the resulting setup BEFORE any write
+    // (same rules as the restaurant panel: one single-select weight group on weight foods only,
+    // weight_value > 0 and unique inside it, none on normal groups, allow_custom_weight = false needs one).
+    let weightConfig: ReturnType<typeof validateWeightGroupConfig> | null = null;
+    if (Array.isArray(data.variations)) {
+        const storedVars = await db.select().from(foodVariations).where(eq(foodVariations.foodId, id));
+        const storedOpts = storedVars.length > 0
+            ? await db.select().from(variationOptions).where(inArray(variationOptions.variationId, storedVars.map(v => v.id)))
+            : [];
+        weightConfig = validateWeightGroupConfig({
+            soldBy: existingFood[0].sold_by,
+            weightUnit: existingFood[0].weight_unit,
+            allowCustomWeight: existingFood[0].allow_custom_weight,
+            variations: data.variations.map((v: any) => {
+                const stored = v.id ? storedVars.find(sv => sv.id === v.id) : undefined;
+                const flag = parseBooleanInput(v.isWeightGroup ?? v.is_weight_group);
+                return {
+                    name: v.name ?? stored?.name,
+                    isWeightGroup: flag !== undefined ? flag : Boolean(stored?.isWeightGroup),
+                    selectionType: v.selectionType ?? stored?.selectionType,
+                    options: (Array.isArray(v.options) ? v.options : []).map((o: any) => {
+                        const storedOpt = o.id ? storedOpts.find(so => so.id === o.id) : undefined;
+                        const wv = o.weightValue ?? o.weight_value;
+                        return { optionName: o.optionName ?? storedOpt?.optionName, weightValue: wv !== undefined ? wv : (storedOpt?.weightValue ?? null) };
+                    }),
+                };
+            }),
+        });
+    }
+
     if (Object.keys(updateData).length > 1) {
         await db.update(food).set(updateData).where(queryCondition);
     }
@@ -549,9 +583,10 @@ export const updateFood = async (req: Request, res: Response) => {
         const incomingVarIds = new Set<string>();
         const incomingOptIds = new Set<string>();
 
-        for (const variation of data.variations) {
+        for (const [variationIndex, variation] of (data.variations as any[]).entries()) {
             let variationId = variation.id;
             const existingVar = variationId ? oldVars.find(v => v.id === variationId) : null;
+            const weightGroup = weightConfig?.weightGroups.get(variationIndex);
 
             if (existingVar) {
                 // Update existing variation
@@ -559,11 +594,12 @@ export const updateFood = async (req: Request, res: Response) => {
                     name: variation.name,
                     nameAr: variation.nameAr ?? existingVar.nameAr,
                     nameFr: variation.nameFr ?? existingVar.nameFr,
-                    isRequired: variation.isRequired !== undefined ? variation.isRequired : existingVar.isRequired,
-                    selectionType: variation.selectionType || existingVar.selectionType,
-                    min: variation.min !== undefined ? variation.min : existingVar.min,
-                    max: variation.max !== undefined ? variation.max : existingVar.max,
+                    isRequired: weightGroup ? weightGroup.isRequired : (variation.isRequired !== undefined ? variation.isRequired : existingVar.isRequired),
+                    selectionType: weightGroup ? weightGroup.selectionType : (variation.selectionType || existingVar.selectionType),
+                    min: weightGroup ? null : (variation.min !== undefined ? variation.min : existingVar.min),
+                    max: weightGroup ? null : (variation.max !== undefined ? variation.max : existingVar.max),
                     status: variation.status !== undefined ? variation.status : existingVar.status,
+                    isWeightGroup: Boolean(weightGroup),
                 }).where(eq(foodVariations.id, variationId));
             } else {
                 // Insert new variation
@@ -574,20 +610,22 @@ export const updateFood = async (req: Request, res: Response) => {
                     name: variation.name,
                     nameAr: variation.nameAr || '',
                     nameFr: variation.nameFr || '',
-                    isRequired: variation.isRequired || false,
-                    selectionType: variation.selectionType || "single",
-                    min: variation.min ?? null,
-                    max: variation.max ?? null,
+                    isRequired: weightGroup ? weightGroup.isRequired : (variation.isRequired || false),
+                    selectionType: weightGroup ? weightGroup.selectionType : (variation.selectionType || "single"),
+                    min: weightGroup ? null : (variation.min ?? null),
+                    max: weightGroup ? null : (variation.max ?? null),
                     status: variation.status !== undefined ? variation.status : true,
+                    isWeightGroup: Boolean(weightGroup),
                 });
             }
             incomingVarIds.add(variationId);
 
             // Handle options for this variation
             if (variation.options && Array.isArray(variation.options)) {
-                for (const option of variation.options) {
+                for (const [optionIndex, option] of (variation.options as any[]).entries()) {
                     let optionId = option.id;
                     const existingOpt = optionId ? oldOptions.find(o => o.id === optionId) : null;
+                    const optionWeightValue = weightConfig?.weightValues.get(`${variationIndex}:${optionIndex}`) ?? null;
 
                     const additionalPriceStr = option.additionalPrice !== undefined && option.additionalPrice !== null
                         ? option.additionalPrice.toString()
@@ -601,6 +639,7 @@ export const updateFood = async (req: Request, res: Response) => {
                             optionNameAr: option.optionNameAr ?? existingOpt.optionNameAr,
                             optionNameFr: option.optionNameFr ?? existingOpt.optionNameFr,
                             additionalPrice: additionalPriceStr,
+                            weightValue: optionWeightValue,
                             status: option.status !== undefined ? option.status : existingOpt.status,
                             isDefault: option.isDefault !== undefined ? option.isDefault : existingOpt.isDefault,
                         }).where(eq(variationOptions.id, optionId));
@@ -614,6 +653,7 @@ export const updateFood = async (req: Request, res: Response) => {
                             optionNameAr: option.optionNameAr || '',
                             optionNameFr: option.optionNameFr || '',
                             additionalPrice: additionalPriceStr,
+                            weightValue: optionWeightValue,
                             status: option.status !== undefined ? option.status : true,
                             isDefault: option.isDefault !== undefined ? option.isDefault : false,
                         });

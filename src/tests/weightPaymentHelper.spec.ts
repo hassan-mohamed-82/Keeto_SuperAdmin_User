@@ -128,12 +128,12 @@ describe("weighted hooks / transitions against a fake transaction", () => {
         ]);
     });
 
-    it("revertWeightRequestInTx falls back to the column default (40 min) when settings are missing", async () => {
+    it("revertWeightRequestInTx falls back to the agreed 15 minutes when settings are missing", async () => {
         h.state.queue = [[]];
         await revertWeightRequestInTx(h.fakeTx, { id: "wr-1", restaurantId: "r-1" }, { incrementAttempts: true, now: NOW });
-        expect(DEFAULT_WEIGHT_CUSTOMER_TIMEOUT_MIN).toBe(40);
+        expect(DEFAULT_WEIGHT_CUSTOMER_TIMEOUT_MIN).toBe(15);
         expect(h.writes[0].values.status).toBe("awaiting_customer_approval");
-        expect((h.writes[0].values.expiresAt as Date).getTime() - NOW.getTime()).toBe(40 * 60000);
+        expect((h.writes[0].values.expiresAt as Date).getTime() - NOW.getTime()).toBe(15 * 60000);
     });
 
     it("claimWeightedConfirmationInTx: conditional claim wins once; a lost claim is 'already_paid'", async () => {

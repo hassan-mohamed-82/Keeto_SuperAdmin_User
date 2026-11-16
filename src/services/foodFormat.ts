@@ -40,6 +40,7 @@ export const formatFoodsList = async (
                 variationNameFr: foodVariations.nameFr,
                 isRequired: foodVariations.isRequired,
                 selectionType: foodVariations.selectionType,
+                isWeightGroup: foodVariations.isWeightGroup,
                 min: foodVariations.min,
                 max: foodVariations.max,
                 optionId: variationOptions.id,
@@ -48,6 +49,7 @@ export const formatFoodsList = async (
                 optionNameFr: variationOptions.optionNameFr,
                 additionalPrice: variationOptions.additionalPrice,
                 priceMode: variationOptions.priceMode,
+                weightValue: variationOptions.weightValue,
             })
             .from(foodVariations)
             .leftJoin(
@@ -144,6 +146,8 @@ export const formatFoodsList = async (
                 selectionType: v.selectionType,
                 min: v.min,
                 max: v.max,
+                // the weight choices of a weighted food; its options carry weight_value
+                is_weight_group: Boolean(v.isWeightGroup),
                 options: []
             };
             currentVars.push(existingVar);
@@ -165,6 +169,8 @@ export const formatFoodsList = async (
                 nameFr: v.optionNameFr,
                 additionalPrice: optionPrice,
                 price_mode: v.priceMode || "fixed",
+                // weight-group options: the weight to send as `weight` (additionalPrice is an optional extra fee)
+                weight_value: v.weightValue ?? null,
             });
         }
     }
@@ -356,6 +362,7 @@ export const formatFoodsList = async (
             addons: foodAddons,
             sold_by: (row as any).sold_by ?? "unit",
             weight_unit: (row as any).weight_unit ?? null,
+            allow_custom_weight: (row as any).allow_custom_weight ?? true,
             unavailableBranches,
             category: row.categoryId ? {
                 id: row.categoryId,
