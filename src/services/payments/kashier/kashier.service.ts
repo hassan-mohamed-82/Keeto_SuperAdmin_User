@@ -14,6 +14,8 @@ export interface CreateSessionInput {
     currency?: string;
     customerEmail?: string;
     merchantRedirect?: string; // optional override; defaults to APP_BASE_URL/payment/result
+    /** Optional session expiry (ISO). Omitted = 24 hours from now (unchanged default). */
+    expireAt?: string;
     credentials?: {
         mid: string;
         apiKey: string;
@@ -63,8 +65,9 @@ export class KashierService {
         // Default: test sandbox.
         const baseUrl = creds.baseUrl || "https://api.kashier.io";
 
-        // Session expires in 24 hours from now
-        const expireAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        // Session expires in 24 hours from now, unless the caller passes a shorter expiry
+        // (only weighted orders do: see createOrderPaymentSession.sessionExpiresAt).
+        const expireAt = input.expireAt ?? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
         // Redirect URL after Kashier hosted checkout completes
         const appBaseUrl = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "");

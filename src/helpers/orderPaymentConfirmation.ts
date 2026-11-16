@@ -19,6 +19,16 @@ import { calculateVisaCommission } from "../utils/calculateVisaCommission";
 import { getActiveCustomGateway } from "../utils/getActiveCustomGateway";
 import { getSystemVisaSettings } from "../utils/getSystemVisaSettings";
 import { recordFirstOrderDiscountUsage } from "./firstOrderDiscount.helper";
+import {
+    applyWeightedFailureToRequestInTx,
+    approveWeightRequestInTx,
+    claimWeightedConfirmationInTx,
+    handleLateWeightedPayment,
+    isWeightedOrder,
+    notifyWeightRequestExpiredAfterPayments,
+    weightedFailureGateInTx,
+    type WeightedFailureGate,
+} from "./weightPayment.helper";
 
 const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
 
@@ -71,6 +81,14 @@ export async function confirmOrderPayment({
         return { success: true, alreadyProcessed: true };
     }
 
+    // ⚖️ Weight-request orders only (no-op for every other order).
+    const isWeighted = await isWeightedOrder(order.id);
+    const weightedInfo = { gateway, transactionId, gatewayOrderId, rawPayload };
+    if (isWeighted && await handleLateWeightedPayment(order, weightedInfo)) {
+        return { success: true, needsReview: true };
+    }
+    let weightedGate = "confirm" as "confirm" | "already_paid" | "needs_review";
+
     const now = new Date();
     let assignedDailyOrderNumber = order.dailyOrderNumber;
 
@@ -96,6 +114,13 @@ export async function confirmOrderPayment({
         .limit(1);
 
     await db.transaction(async (tx) => {
+        // ⚖️ Weighted only: lock + claim the confirmation (pending_payment → paid). Not "confirm"
+        // means another webhook / redirect already confirmed it, or it turned into a late payment.
+        if (isWeighted) {
+            weightedGate = await claimWeightedConfirmationInTx(tx, order.id, weightedInfo, now);
+            if (weightedGate !== "confirm") return;
+        }
+
         // إذا لم يكن لديه رقم يومي بعد (أوردر أونلاين تم تأجيل رقمه)، نحسبه الآن
         if (!assignedDailyOrderNumber) {
             assignedDailyOrderNumber = await getNextDailyOrderNumber(
@@ -190,7 +215,20 @@ export async function confirmOrderPayment({
 
         // تفريغ سلة العميل بعد نجاح وتأكيد الدفع الإلكتروني
         await tx.delete(cartItems).where(eq(cartItems.userId, order.userId));
+
+        // ⚖️ Weighted only: checking_out → approved (conditional on order_id and status).
+        if (isWeighted) {
+            await approveWeightRequestInTx(tx, order.id, now);
+        }
     });
+
+    if (weightedGate === "already_paid") {
+        console.log(`[ConfirmPayment]: Order ${order.orderNumber} already paid (weighted, confirmed by another call).`);
+        return { success: true, alreadyProcessed: true };
+    }
+    if (weightedGate === "needs_review") {
+        return { success: true, needsReview: true };
+    }
 
     // إرسال الإشعار للمطعم بالرقم اليومي المؤكد
     const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
@@ -251,7 +289,19 @@ export async function recordFailedPayment({
 
     const now = new Date();
 
+    // ⚖️ Weight-request orders only (no-op for every other order).
+    const isWeighted = await isWeightedOrder(order.id);
+    let weightedGate: WeightedFailureGate | null = null;
+    let weightedExpired: { userId: string; requestId: string } | null = null;
+
     await db.transaction(async (tx) => {
+        // ⚖️ Weighted only: lock order + request; never overwrite an order that is already paid
+        // (or already failed: gateway retry).
+        if (isWeighted) {
+            weightedGate = await weightedFailureGateInTx(tx, order.id);
+            if (weightedGate.outcome === "ignore") return;
+        }
+
         // 1. تحديث حالة الأوردر إلى failed بدل cancelled أو الحذف
         await tx
             .update(orders)
@@ -300,7 +350,25 @@ export async function recordFailedPayment({
                     .where(eq(coupons.id, usage.couponId));
             }
         }
+
+        // ⚖️ Weighted only: request back to awaiting_customer_approval (attempts + 1, fresh window)
+        // or expired at the attempt limit.
+        if (isWeighted && weightedGate) {
+            weightedExpired = await applyWeightedFailureToRequestInTx(tx, weightedGate, now);
+        }
     });
+
+    if (isWeighted) {
+        const gate = weightedGate as WeightedFailureGate | null;
+        if (gate?.outcome === "ignore") {
+            console.log(`[RecordFailedPayment]: Order ${order.orderNumber} is weighted and already paid / failed; nothing changed.`);
+            return { success: true };
+        }
+        if (weightedExpired) {
+            const e = weightedExpired as { userId: string; requestId: string };
+            await notifyWeightRequestExpiredAfterPayments(e.userId, e.requestId); // after commit
+        }
+    }
 
     try {
         const claimed = await claimPaymentIssueNotification(

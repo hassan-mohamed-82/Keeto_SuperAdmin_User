@@ -6,6 +6,7 @@ import {
     timestamp,
     json,
     index,
+    int,
 } from "drizzle-orm/mysql-core";
 import { sql, relations } from "drizzle-orm";
 import { users } from "../user/Users";
@@ -52,6 +53,7 @@ export const weightRequests = mysqlTable("weight_requests", {
     /**
      * awaiting_weighing       – waiting for restaurant staff to enter weights
      * awaiting_customer_approval – weights submitted; waiting for customer
+     * checking_out            – Visa checkout claimed; payment session / order in progress (cart frozen)
      * approved                – customer approved; order_id is set
      * cancelled               – customer cancelled (from awaiting_customer_approval)
      * expired                 – auto-cancelled by cron (restaurant or customer timeout)
@@ -59,6 +61,7 @@ export const weightRequests = mysqlTable("weight_requests", {
     status: mysqlEnum("status", [
         "awaiting_weighing",
         "awaiting_customer_approval",
+        "checking_out",
         "approved",
         "cancelled",
         "expired",
@@ -89,6 +92,12 @@ export const weightRequests = mysqlTable("weight_requests", {
      */
     weighingLog: json("weighing_log").$type<WeighingLogEntry[]>(),
 
+    /** Failed / abandoned Visa payment attempts for this request (expires at 3). */
+    paymentAttempts: int("payment_attempts").notNull().default(0),
+
+    /** When the current Visa checkout claim (status checking_out) started. */
+    checkoutStartedAt: timestamp("checkout_started_at"),
+
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({
@@ -96,6 +105,8 @@ export const weightRequests = mysqlTable("weight_requests", {
     statusExpiresIdx: index("idx_wr_status_expires").on(table.status, table.expiresAt),
     // Enforce only one active request per user+restaurant (enforced in app layer too).
     userRestaurantIdx: index("idx_wr_user_restaurant").on(table.userId, table.restaurantId),
+    // Payment confirmation / cron look requests up by order.
+    orderIdx: index("idx_wr_order_id").on(table.orderId),
 }));
 
 export const weightRequestsRelations = relations(weightRequests, ({ one }) => ({

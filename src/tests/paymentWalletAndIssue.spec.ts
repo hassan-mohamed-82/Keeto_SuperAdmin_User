@@ -4,6 +4,12 @@ vi.mock("../utils/notifications", () => ({
   sendPushNotification: vi.fn(),
 }));
 
+// These are normal (non-weighted) orders: the weight-request hooks must stay out of the way.
+vi.mock("../helpers/weightPayment.helper", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../helpers/weightPayment.helper")>()),
+  isWeightedOrder: vi.fn(async () => false),
+}));
+
 import { db } from "../models/connection";
 import { recordFailedPayment } from "../helpers/orderPaymentConfirmation";
 import { claimPaymentIssueNotification, releasePaymentIssueNotificationClaim } from "../services/orderNotificationCron";

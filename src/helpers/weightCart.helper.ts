@@ -14,6 +14,7 @@ import { computeWeightedLineTotal, type WeightedOptionExtra } from "./weightPric
 export type WeightRequestStatus =
     | "awaiting_weighing"
     | "awaiting_customer_approval"
+    | "checking_out"
     | "approved"
     | "cancelled"
     | "expired";
@@ -25,10 +26,22 @@ export const ACTIVE_WEIGHT_REQUEST_STATUSES: WeightRequestStatus[] = [
 ];
 
 /**
- * Statuses during which EVERY cart write is rejected (normal items included).
- * Empty until Fix 2 adds `checking_out` (the payment amount is then fixed).
+ * Statuses during which EVERY cart write is rejected (normal items included):
+ * the Visa payment amount is fixed while the request is checking_out.
  */
-export const FROZEN_CART_STATUSES: string[] = [];
+export const FROZEN_CART_STATUSES: WeightRequestStatus[] = ["checking_out"];
+
+// ─── Visa checkout windows (weighted orders only) ────────────────────────────
+/** A second checkout click younger than this is treated as a double click ("payment in progress"). */
+export const CHECKOUT_RETRY_MIN_AGE_MINUTES = 2;
+/** A checking_out claim without an order older than this is stale (the cron reverts it). */
+export const CHECKOUT_NO_ORDER_MINUTES = 5;
+/** A weighted Visa order still pending_payment after this is abandoned; also the Kashier session lifetime. */
+export const PAYMENT_ABANDON_MINUTES = 30;
+/** Failed / abandoned payment attempts after which the request expires. */
+export const MAX_PAYMENT_ATTEMPTS = 3;
+/** Fallback when restaurant_settings has no row: same as the column default (0005 migration, Restaurant schema). */
+export const DEFAULT_WEIGHT_CUSTOMER_TIMEOUT_MIN = 40;
 
 export interface ActiveWeightRequest {
     id: string;
@@ -50,6 +63,14 @@ export const WEIGHT_CART_CHANGED = "WEIGHT_CART_CHANGED";
 export class WeightRequestActiveError extends CodedConflictError {
     constructor(requestId: string, message: string) {
         super(WEIGHT_REQUEST_ACTIVE, message, { requestId });
+    }
+}
+
+export const WEIGHT_PAYMENT_IN_PROGRESS = "WEIGHT_PAYMENT_IN_PROGRESS";
+
+export class WeightPaymentInProgressError extends CodedConflictError {
+    constructor(requestId: string, message = "A payment for this order is already in progress. Please finish it or try again in a few minutes.") {
+        super(WEIGHT_PAYMENT_IN_PROGRESS, message, { requestId });
     }
 }
 
@@ -117,7 +138,7 @@ export const assertCartWriteAllowed = (params: {
 }): void => {
     const { kind, activeRequest, targetIsWeightBound, rowWeightRequestId, lockedRowRequestId } = params;
 
-    if (activeRequest && FROZEN_CART_STATUSES.includes(activeRequest.status)) {
+    if (activeRequest && (FROZEN_CART_STATUSES as string[]).includes(activeRequest.status)) {
         throw new WeightRequestActiveError(
             activeRequest.id,
             "Your order is being paid. The cart cannot be changed until the payment finishes."
@@ -171,6 +192,9 @@ export const evaluateWeightedCheckout = <R extends WeightCartRow>(
     }
     if (request.status === "awaiting_weighing") {
         throw new BadRequest("Your order is currently awaiting weighing by the restaurant.");
+    }
+    if (request.status === "checking_out") {
+        throw new WeightPaymentInProgressError(request.id);
     }
     if (request.status !== "awaiting_customer_approval") {
         throw new BadRequest("Cart contains weight-based items. Please send the order to the restaurant for weighing first.");
@@ -290,3 +314,82 @@ export const weightedLineTotal = (
     variationExtras: WeightedOptionExtra[],
     addonExtras: WeightedOptionExtra[]
 ): number => parseFloat(computeWeightedLineTotal(effectiveWeight, basePrice, [...variationExtras, ...addonExtras]));
+
+// ─────────────────────────────────────────────
+// Re-checkout while a Visa claim exists (status checking_out)
+// ─────────────────────────────────────────────
+
+export type CheckoutRetryDecision =
+    /** double click / payment page may still be open: reject, never touch the first order */
+    | "in_progress"
+    /** claim never got an order and is old enough: revert the claim, then check out normally */
+    | "revert_claim"
+    /** old unpaid order is old enough: fail it (weighted path), revert, then check out again */
+    | "fail_old_order"
+    /** old order is already paid: nothing to retry */
+    | "already_paid"
+    /** old order is already failed / cancelled: just revert the claim */
+    | "revert_after_failed_order";
+
+const minutesBetween = (from: Date | string | null | undefined, now: Date) =>
+    from ? (now.getTime() - new Date(from).getTime()) / 60000 : Number.POSITIVE_INFINITY;
+
+/**
+ * Pure decision for a checkout attempt that finds the request in checking_out.
+ * The age is measured from the order's creation (or the claim's start when no order exists yet).
+ */
+export const decideCheckoutRetry = (p: {
+    checkoutStartedAt: Date | string | null;
+    order: { paymentStatus: string | null; status: string | null; createdAt: Date | string | null } | null;
+    now?: Date;
+}): CheckoutRetryDecision => {
+    const now = p.now ?? new Date();
+    if (!p.order) {
+        return minutesBetween(p.checkoutStartedAt, now) < CHECKOUT_RETRY_MIN_AGE_MINUTES ? "in_progress" : "revert_claim";
+    }
+    if (p.order.paymentStatus === "paid") return "already_paid";
+    if (p.order.paymentStatus === "payment_failed" || p.order.status === "failed" || p.order.status === "cancelled") {
+        return "revert_after_failed_order";
+    }
+    return minutesBetween(p.order.createdAt, now) < CHECKOUT_RETRY_MIN_AGE_MINUTES ? "in_progress" : "fail_old_order";
+};
+
+/**
+ * Pure decision for a successful payment of an order that belongs to a weight request.
+ * - "already_paid": idempotent no-op (gateway retry, redirect + webhook).
+ * - "confirm": the request still points at this order and is checking_out.
+ * - "needs_review": late payment (request reverted / expired / cancelled / moved to another order,
+ *   or the order was already failed / cancelled): record it for a manual refund, never confirm.
+ */
+export const decideWeightedPaymentSuccess = (p: {
+    order: { id: string; paymentStatus: string | null; status: string | null };
+    request: { orderId: string | null; status: string } | null;
+}): "already_paid" | "confirm" | "needs_review" => {
+    if (p.order.paymentStatus === "paid") return "already_paid";
+    if (p.order.status === "failed" || p.order.status === "cancelled" || p.order.paymentStatus === "payment_failed") {
+        return "needs_review";
+    }
+    // Already past "pending" (accepted, preparing, ...) means it was confirmed before; a later
+    // webhook (e.g. Paymob "pending" that rewrote payment_status) must not confirm it twice.
+    if (p.order.status && p.order.status !== "pending") return "already_paid";
+    if (p.request && p.request.orderId === p.order.id && p.request.status === "checking_out") return "confirm";
+    return "needs_review";
+};
+
+/**
+ * Pure decision for a failed / rejected / cancelled payment of a weighted order.
+ * - "ignore": order already paid / past pending (never overwrite) or already failed (gateway retry).
+ * - "fail_order_only": the request no longer points at this order (or isn't checking_out).
+ * - "revert": request back to awaiting_customer_approval, attempts + 1.
+ * - "expire": the attempt limit is reached: expire with the normal cleanup.
+ */
+export const decideWeightedPaymentFailure = (p: {
+    order: { id: string; paymentStatus: string | null; status?: string | null };
+    request: { orderId: string | null; status: string; paymentAttempts: number } | null;
+}): "ignore" | "fail_order_only" | "revert" | "expire" => {
+    if (p.order.paymentStatus === "paid" || p.order.paymentStatus === "payment_failed") return "ignore";
+    // Never overwrite an order that left "pending" (paid & accepted, or already failed / cancelled).
+    if (p.order.status && p.order.status !== "pending") return "ignore";
+    if (!p.request || p.request.orderId !== p.order.id || p.request.status !== "checking_out") return "fail_order_only";
+    return p.request.paymentAttempts + 1 >= MAX_PAYMENT_ATTEMPTS ? "expire" : "revert";
+};

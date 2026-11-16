@@ -23,6 +23,12 @@ export interface CreateOrderPaymentSessionParams {
         phone?: string | null;
     };
     preferredGateway?: "KASHIER" | "PAYMOB" | "GEIDEA";
+    /**
+     * OPTIONAL, weighted orders only. Shortens the hosted session lifetime where the gateway
+     * supports it (Kashier `expireAt`). Paymob (Intention API) and Geidea: no expiry is sent,
+     * because our integration has no supported parameter for it. Omitted = today's behaviour.
+     */
+    sessionExpiresAt?: Date;
 }
 
 export interface PaymentSessionResult {
@@ -46,7 +52,8 @@ export interface PaymentSessionResult {
 export async function createOrderPaymentSession(
     params: CreateOrderPaymentSessionParams
 ): Promise<PaymentSessionResult> {
-    const { orderId, orderNumber, restaurantId, totalAmount, userInfo, preferredGateway, restaurantSlug } = params;
+    const { orderId, orderNumber, restaurantId, totalAmount, userInfo, preferredGateway, restaurantSlug, sessionExpiresAt } = params;
+    const kashierExpiry = sessionExpiresAt ? { expireAt: sessionExpiresAt.toISOString() } : {};
 
     // Build frontend redirect URL with callbackSlug when a restaurant slug is available
     const appBaseUrl = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
@@ -95,6 +102,7 @@ export async function createOrderPaymentSession(
                 : `${backendBaseUrl}/api/payments/kashier/callback`;
 
             const kashierSession = await KashierService.createPaymentSession({
+                ...kashierExpiry,
                 orderId,
                 amount: totalAmount,
                 currency: "EGP",
@@ -242,6 +250,7 @@ export async function createOrderPaymentSession(
                 : `${backendBaseUrl}/api/payments/kashier/callback`;
 
             const kashierSession = await KashierService.createPaymentSession({
+                ...kashierExpiry,
                 orderId,
                 amount: totalAmount,
                 currency: "EGP",
@@ -276,6 +285,7 @@ export async function createOrderPaymentSession(
                 : `${backendBaseUrl}/api/payments/kashier/callback`;
 
             const kashierSession = await KashierService.createPaymentSession({
+                ...kashierExpiry,
                 orderId,
                 amount: totalAmount,
                 currency: "EGP",

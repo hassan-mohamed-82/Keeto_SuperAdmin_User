@@ -4,7 +4,8 @@ import {
     decimal,
     timestamp,
     mysqlEnum,
-    int
+    int,
+    json
 } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants";
@@ -16,6 +17,8 @@ export const freeDeliveryOffers = mysqlTable("free_delivery_offers", {
         .references(() => restaurants.id, { onDelete: "cascade" })
         .notNull()
         .unique(),
+
+    branchIds: json("branch_ids").$type<string[]>().default([]).notNull(),
 
     status: mysqlEnum("status", ["active", "inactive"])
         .default("active")

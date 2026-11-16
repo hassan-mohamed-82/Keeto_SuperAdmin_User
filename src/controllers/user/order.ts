@@ -26,9 +26,27 @@ import {
     shippingCompanies,
     shippingZones,
     shippingCompanyRestaurants,
+    weightRequests,
 } from "../../models/schema";
+import { computeWeightedLineTotal, splitWeightedLineTotal } from "../../helpers/weightPricing.helper";
+import {
+    type ActiveWeightRequest,
+    evaluateWeightedCheckout,
+    findActiveWeightRequest,
+    hasUnitPriceChanged,
+    isWeighedRow,
+    isWeightBoundRow,
+    snapshotPricing,
+    PAYMENT_ABANDON_MINUTES,
+    WeightCartChangedError,
+} from "../../helpers/weightCart.helper";
+import {
+    claimWeightCheckout,
+    releaseWeightCheckoutClaim,
+    resolveCheckingOutRequest,
+} from "../../helpers/weightPayment.helper";
 import { releaseCourierForOrder } from "../../services/shipping/dispatchEngine";
-import { eq, and, inArray, sql, desc, gte, ne } from "drizzle-orm";
+import { eq, and, inArray, isNull, sql, desc, gte, ne } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
@@ -526,7 +544,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         const cartFoodIds = userCart.filter(c => !c.offerId).map(c => c.foodId).filter(Boolean) as string[];
         const cartFoods = cartFoodIds.length > 0
             ? await db
-                .select({ id: food.id, subcategoryid: food.subcategoryid })
+                .select({ id: food.id, subcategoryid: food.subcategoryid, sold_by: food.sold_by, weight_unit: food.weight_unit })
                 .from(food)
                 .where(and(inArray(food.id, cartFoodIds), activeFoodCondition))
             : [];
@@ -560,9 +578,72 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
     }
 
+    // ─── Weight-based Cart Gating ─────────────────────────────────────────
+    const userCartFoodIds = userCart.filter(c => c.foodId).map(c => c.foodId!);
+    const dbCartFoods = userCartFoodIds.length > 0
+        ? await db
+            .select({ id: food.id, sold_by: food.sold_by, weight_unit: food.weight_unit })
+            .from(food)
+            .where(inArray(food.id, userCartFoodIds))
+        : [];
+    const weightedCartFoodMap = new Map(dbCartFoods.map(f => [f.id, f]));
+    const cartFoodSoldBy = (c: { foodId: string; offerId?: string | null }) =>
+        c.offerId ? null : weightedCartFoodMap.get(c.foodId)?.sold_by ?? null;
+
+    // A cart with weighted rows (food sold by weight / stored weight) or restaurant-added rows
+    // can only be ordered through a request in awaiting_customer_approval, and EVERY such row
+    // must be tagged with that request. Anything else (a row added through a missed path, a
+    // row changed after sending) rejects the checkout here, before any order or payment session.
+    const cartHasWeightBoundRows = userCart.some(c => !c.offerId && isWeightBoundRow(c, cartFoodSoldBy(c)));
+    let activeWeightRequest: ActiveWeightRequest | null = cartHasWeightBoundRows
+        ? await findActiveWeightRequest(userId, restaurantId)
+        : null;
+
+    // A previous Visa checkout of this request is still claimed (checking_out): a double click gets
+    // "payment in progress"; an older unpaid attempt is failed and the request reverted (option b).
+    if (activeWeightRequest?.status === "checking_out") {
+        await resolveCheckingOutRequest(activeWeightRequest.id);
+        activeWeightRequest = await findActiveWeightRequest(userId, restaurantId);
+    }
+
+    const weightGate = evaluateWeightedCheckout(
+        userCart.map(c => ({ ...c, foodSoldBy: cartFoodSoldBy(c) })),
+        activeWeightRequest
+    );
+    const hasWeightedItems = weightGate.hasWeightedItems;
+    // Rows the restaurant marked unavailable are excluded (only when the cart is weight-bound;
+    // a normal cart is passed through unchanged).
+    const checkoutCart = weightGate.checkoutRows;
+    /**
+     * Re-check the cart under lock (used by the Visa claim and by the order transaction): a weighted /
+     * restaurant-added row that appeared (or lost its tag) since the gate above must abort, never be
+     * added or dropped silently.
+     */
+    const assertWeightCartUnchanged = async (tx: any, lockedRequestId: string) => {
+        const lockedCart: typeof userCart = await tx
+            .select()
+            .from(cartItems)
+            .where(and(eq(cartItems.userId, userId), eq(cartItems.restaurantId, restaurantId)))
+            .for("update");
+        const pricedIds = new Set(checkoutCart.map(c => c.id));
+        const stray = lockedCart.filter(c =>
+            !c.isUnavailable &&
+            !c.offerId &&
+            (isWeightBoundRow(c, cartFoodSoldBy(c)) || c.weightRequestId) &&
+            (c.weightRequestId !== lockedRequestId || !pricedIds.has(c.id))
+        );
+        if (stray.length > 0) {
+            throw new WeightCartChangedError(lockedRequestId, stray.map(c => c.id));
+        }
+    };
+
+    /** Weighted / restaurant-added rows of the approved request: charged at their snapshot price. */
+    const isSnapshotRow = (c: typeof userCart[number]) =>
+        hasWeightedItems && !c.offerId && isWeightBoundRow(c, cartFoodSoldBy(c));
+
     // Parse cart variations + addons (needed for pricing engine + order items)
     const allAddonIds: string[] = [];
-    const cartParsed = userCart.map(item => {
+    const cartParsed = checkoutCart.map(item => {
         let safeVars = typeof item.variations === "string" ? JSON.parse(item.variations) : item.variations;
         if (typeof safeVars === "string") safeVars = JSON.parse(safeVars);
 
@@ -596,7 +677,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
     }
 
-    const uniqueFoodIds = [...new Set(userCart.filter(c => !c.offerId && c.foodId).map(c => c.foodId))];
+    const uniqueFoodIds = [...new Set(checkoutCart.filter(c => !c.offerId && c.foodId).map(c => c.foodId))];
 
     const [optionsWithParent, addonsListDb, foodItemsDb] = await Promise.all([
         allCheckoutOptionIds.size > 0
@@ -607,6 +688,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                     optionNameAr: variationOptions.optionNameAr,
                     optionNameFr: variationOptions.optionNameFr,
                     additionalPrice: variationOptions.additionalPrice,
+                    priceMode: variationOptions.priceMode,
                     status: variationOptions.status,
                     variationId: foodVariations.id,
                     variationName: foodVariations.name,
@@ -622,7 +704,17 @@ export const checkout = async (req: Request | any, res: Response) => {
             ? db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)]))
             : [],
         uniqueFoodIds.length > 0
-            ? db.select({ id: food.id, price: food.price, status: food.status, isOutOfStock: food.isOutOfStock, discountId: food.discountId, discount_type: food.discount_type, discount_value: food.discount_value })
+            ? db.select({
+                id: food.id,
+                price: food.price,
+                status: food.status,
+                isOutOfStock: food.isOutOfStock,
+                discountId: food.discountId,
+                discount_type: food.discount_type,
+                discount_value: food.discount_value,
+                sold_by: food.sold_by,
+                weight_unit: food.weight_unit,
+            })
                 .from(food).where(and(inArray(food.id, uniqueFoodIds), activeFoodCondition))
             : []
     ]);
@@ -631,7 +723,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     const addonsMap = new Map(addonsListDb.map(a => [a.id, a]));
     const foodMap = new Map(foodItemsDb.map(f => [f.id, f]));
 
-    const checkoutOfferIds = [...new Set(userCart.filter(c => c.offerId).map(c => c.offerId!))];
+    const checkoutOfferIds = [...new Set(checkoutCart.filter(c => c.offerId).map(c => c.offerId!))];
     const [dbOffersForCheckout, dbOfferFoodsForCheckout] = checkoutOfferIds.length > 0
         ? await Promise.all([
             db.select().from(offers).where(inArray(offers.id, checkoutOfferIds)),
@@ -676,6 +768,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                     optionNameAr: variationOptions.optionNameAr,
                     optionNameFr: variationOptions.optionNameFr,
                     additionalPrice: variationOptions.additionalPrice,
+                    priceMode: variationOptions.priceMode,
                     status: variationOptions.status,
                     variationId: foodVariations.id,
                     variationName: foodVariations.name,
@@ -757,6 +850,11 @@ export const checkout = async (req: Request | any, res: Response) => {
         }
 
         const optionIds = parsedVariations.map((v: any) => v.optionId).filter(Boolean);
+        // Weighted / restaurant-added rows of the approved request are charged at the price
+        // snapshot the customer approved (cart_items.unit_price + stored option/addon prices),
+        // not a re-read live price. Availability is still checked live below.
+        const snapshotRow = isSnapshotRow(cartItem);
+        const isWeightedLine = isWeighedRow(cartItem, cartFoodSoldBy(cartItem));
 
         let addonPrice = 0;
         for (const a of parsedAddons) {
@@ -769,7 +867,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                         message: `Add-on "${dbAddon.name}" is currently unavailable.`,
                     });
                 }
-                const p = parseFloat((dbAddon.price || "0") as string);
+                const p = snapshotRow ? Number(a.price ?? 0) : parseFloat((dbAddon.price || "0") as string);
                 addonPrice += p;
                 a.price = p.toString();
                 a.name = dbAddon.name;
@@ -799,16 +897,34 @@ export const checkout = async (req: Request | any, res: Response) => {
         varPrice = priceResult.variants.reduce((s, v) => s + v.price, 0);
         itemIsAvailable = priceResult.isAvailable;
 
-        for (const v of parsedVariations) {
-            if (v.optionId) {
-                const resolved = priceResult.variants.find(r => r.variantOptionId === v.optionId);
-                if (resolved) v.additionalPrice = resolved.price.toString();
+        if (snapshotRow) {
+            const snap = snapshotPricing(cartItem, isWeightedLine);
+            channelBasePrice = snap.basePrice;
+            varPrice = snap.varSum;
+            for (const v of parsedVariations) {
+                const p = Number(v.price ?? v.additionalPrice ?? 0).toString();
+                v.additionalPrice = p;
+                v.price = p;
+            }
+        } else {
+            for (const v of parsedVariations) {
+                if (v.optionId) {
+                    const resolved = priceResult.variants.find(r => r.variantOptionId === v.optionId);
+                    if (resolved) v.additionalPrice = resolved.price.toString();
+                }
             }
         }
 
         const storedUnit = parseFloat(cartItem.unitPrice as string || "0");
-        const liveUnit = channelBasePrice + varPrice + addonPrice;
-        if (Math.abs(liveUnit - storedUnit) > 0.01) {
+        // Weighted rows store the base price per weight unit: compare the live base price only.
+        const liveUnit = isWeightedLine ? priceResult.basePrice : channelBasePrice + varPrice + addonPrice;
+        if (hasUnitPriceChanged({
+            isWeighted: isWeightedLine,
+            liveBasePrice: priceResult.basePrice,
+            liveTotalUnitPrice: channelBasePrice + varPrice + addonPrice,
+            storedUnitPrice: storedUnit,
+            tolerance: 0.01,
+        })) {
             checkoutPriceChanged = true;
             priceChangedItems.push({
                 foodId: cartItem.foodId,
@@ -832,7 +948,16 @@ export const checkout = async (req: Request | any, res: Response) => {
             }
         }
 
-        initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * cartItem.quantity;
+        if (isWeightedLine) {
+            // Same extras as the item total below; a 0.5 kg line must not look like a product discount.
+            const effectiveWeight = cartItem.finalWeight ?? cartItem.weight ?? 0;
+            initialSubtotal += parseFloat(computeWeightedLineTotal(effectiveWeight, initialDiscountPrice, [
+                ...parsedVariations.map((v: any) => ({ price: v.additionalPrice ?? v.price ?? 0, priceMode: v.priceMode || "fixed" })),
+                ...parsedAddons.map((a: any) => ({ price: a.price ?? 0, priceMode: "fixed" })),
+            ]));
+        } else {
+            initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * cartItem.quantity;
+        }
 
         const detailedVariations = parsedVariations.map((v: any) => {
             const optDetails = optionsWithParentMap.get(v.optionId);
@@ -848,7 +973,8 @@ export const checkout = async (req: Request | any, res: Response) => {
                 optionNameAr: optDetails?.optionNameAr ?? v.optionNameAr ?? null,
                 optionNameFr: optDetails?.optionNameFr ?? v.optionNameFr ?? null,
                 price: Number(resolvedPrice).toFixed(2),
-                additionalPrice: Number(resolvedPrice).toFixed(2)
+                additionalPrice: Number(resolvedPrice).toFixed(2),
+                priceMode: snapshotRow ? (v.priceMode ?? "fixed") : (optDetails?.priceMode ?? v.priceMode ?? "fixed"),
             };
         });
 
@@ -985,7 +1111,28 @@ export const checkout = async (req: Request | any, res: Response) => {
         const resolvedProduct = resolvedOrderProductMap.get(foodItem.id);
         const discountedBasePrice = resolvedProduct?.finalPrice ?? originalBasePrice;
 
-        const itemTotal = roundMoney((discountedBasePrice + varPrice + addonPrice) * cartItem.quantity);
+        const isWeightedFood = isWeighedRow(cartItem, foodItem?.sold_by);
+        let itemTotal: number;
+        // Order item price columns. Unit rows: per-unit prices, total = (base+var+addons) × qty.
+        // Weighted rows (quantity is always 1): basePrice = discounted price PER WEIGHT UNIT,
+        // variationsPrice / addonsPrice = the LINE amounts of the extras (fixed + weight × per_weight),
+        // so that round(finalWeight × basePrice) + variationsPrice + addonsPrice = totalPrice exactly.
+        let lineVariationsPrice = varPrice;
+        let lineAddonsPrice = addonPrice;
+        if (isWeightedFood) {
+            const effectiveWeight = cartItem.finalWeight ? Number(cartItem.finalWeight) : Number(cartItem.weight || 0);
+            const split = splitWeightedLineTotal(
+                effectiveWeight,
+                discountedBasePrice,
+                vars.map((v: any) => ({ price: v.additionalPrice || v.price || 0, priceMode: v.priceMode || "fixed" })),
+                addonsList.map((a: any) => ({ price: a.price || 0, priceMode: "fixed" }))
+            );
+            itemTotal = parseFloat(split.total);
+            lineVariationsPrice = parseFloat(split.variationsPortion);
+            lineAddonsPrice = parseFloat(split.addonsPortion);
+        } else {
+            itemTotal = roundMoney((discountedBasePrice + varPrice + addonPrice) * cartItem.quantity);
+        }
         subtotal += itemTotal;
 
         itemsToInsert.push({
@@ -993,13 +1140,16 @@ export const checkout = async (req: Request | any, res: Response) => {
             foodId: cartItem.foodId,
             quantity: cartItem.quantity,
             basePrice: discountedBasePrice.toFixed(2),
-            variationsPrice: varPrice.toFixed(2),
-            addonsPrice: addonPrice.toFixed(2),
+            variationsPrice: lineVariationsPrice.toFixed(2),
+            addonsPrice: lineAddonsPrice.toFixed(2),
             totalPrice: itemTotal.toFixed(2),
             variations: vars,
             addons: addonsList,
             note: cartItem.note || null,
             isBundle: false,
+            orderedWeight: isWeightedFood && cartItem.weight ? String(cartItem.weight) : null,
+            finalWeight: isWeightedFood && (cartItem.finalWeight ?? cartItem.weight) ? String(cartItem.finalWeight ?? cartItem.weight) : null,
+            weightUnit: isWeightedFood ? (cartItem.weightUnit || foodItem?.weight_unit || null) : null,
         });
     }
 
@@ -1480,6 +1630,20 @@ export const checkout = async (req: Request | any, res: Response) => {
             const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= nowForOffer;
             const minAmountOk = !freeDeliveryOffer.minOrderAmount || subtotal >= parseFloat(freeDeliveryOffer.minOrderAmount as string);
 
+            let offerBranchIds: string[] = [];
+            const rawBranchIds = freeDeliveryOffer.branchIds;
+            if (Array.isArray(rawBranchIds)) {
+                offerBranchIds = rawBranchIds.map(String).filter(Boolean);
+            } else if (typeof rawBranchIds === "string") {
+                try {
+                    const parsed = JSON.parse(rawBranchIds);
+                    if (Array.isArray(parsed)) offerBranchIds = parsed.map(String).filter(Boolean);
+                } catch {
+                    offerBranchIds = [];
+                }
+            }
+            const branchOk = offerBranchIds.length === 0 || (resolvedBranchId ? offerBranchIds.includes(resolvedBranchId) : false);
+
             let userLimitOk = true;
             if (freeDeliveryOffer.maxOrdersPerUser && freeDeliveryOffer.maxOrdersPerUser > 0) {
                 const [userOrdersRow] = await db
@@ -1498,7 +1662,7 @@ export const checkout = async (req: Request | any, res: Response) => {
                 }
             }
 
-            if (startOk && endOk && minAmountOk && userLimitOk) {
+            if (startOk && endOk && minAmountOk && userLimitOk && branchOk) {
                 deliveryFee = 0;
                 isFreeDelivery = true;
             }
@@ -1524,11 +1688,25 @@ export const checkout = async (req: Request | any, res: Response) => {
     // If this fails the order is never written to DB — no rollback needed.
     // ==========================================
     let paymentSessionData: any = null;
+    // Visa + weighted only: claim the request (awaiting_customer_approval -> checking_out) BEFORE the
+    // payment session, so only one concurrent checkout can create a session / order. Released below
+    // if the session or the order transaction fails.
+    const weightClaimRequestId: string | null =
+        isVisaPayment && hasWeightedItems && activeWeightRequest ? activeWeightRequest.id : null;
     if (isVisaPayment) {
         if (!settings?.enableOnlinePayment) {
             throw new BadRequest("Online payment is not enabled for this restaurant.");
         }
+        if (weightClaimRequestId) {
+            await claimWeightCheckout(weightClaimRequestId, assertWeightCartUnchanged);
+        }
+    }
 
+    const now = new Date();
+    let createdDailyOrderNumber = 1;
+    let orderCommitted = false;
+    try {
+    if (isVisaPayment) {
         paymentSessionData = await createOrderPaymentSession({
             orderId,
             orderNumber,
@@ -1540,6 +1718,10 @@ export const checkout = async (req: Request | any, res: Response) => {
                 email: userInfo?.email,
                 phone: userInfo?.phone,
             },
+            // Weighted orders only: the hosted session must not outlive the abandon window.
+            ...(weightClaimRequestId
+                ? { sessionExpiresAt: new Date(Date.now() + PAYMENT_ABANDON_MINUTES * 60 * 1000) }
+                : {}),
         });
     }
 
@@ -1573,11 +1755,33 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ==========================================
     // 🛡️ 10. Execute Order (Transaction)
     // ==========================================
-    const now = new Date();
-
-    let createdDailyOrderNumber = 1;
+    // (now / createdDailyOrderNumber are declared before the Visa claim try-block)
 
     await db.transaction(async (tx) => {
+        // 🔒 Lock and validate weight request row if cart is weight-based.
+        // Visa: the request must still be OUR claim (checking_out, no order yet).
+        // Cash / wallet: it must be awaiting_customer_approval and not expired.
+        if (hasWeightedItems && activeWeightRequest) {
+            const [lockedReq] = await tx
+                .select()
+                .from(weightRequests)
+                .where(
+                    weightClaimRequestId
+                        ? and(eq(weightRequests.id, activeWeightRequest.id), eq(weightRequests.status, "checking_out"), isNull(weightRequests.orderId))
+                        : and(eq(weightRequests.id, activeWeightRequest.id), eq(weightRequests.status, "awaiting_customer_approval"))
+                )
+                .for("update");
+
+            if (!lockedReq) {
+                throw new BadRequest("Weighing request is no longer valid or has already been checked out.");
+            }
+            if (!weightClaimRequestId && new Date(lockedReq.expiresAt) <= new Date()) {
+                throw new BadRequest("The weighing approval has expired. Please send your cart for weighing again.");
+            }
+
+            await assertWeightCartUnchanged(tx, lockedReq.id);
+        }
+
         // ✏️ NEW: guest side-effects now happen ONLY here, atomically with the order.
         // If anything below fails, the guest row and the address are rolled back too.
         if (isGuestUser) {
@@ -1689,9 +1893,33 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
 
-        // Clear the cart immediately for cash / wallet. For visa the cart stays until payment is confirmed.
+        if (hasWeightedItems && activeWeightRequest) {
+            if (weightClaimRequestId) {
+                // Visa: stays checking_out (approved only when the payment is confirmed);
+                // cart rows stay locked and the cart is kept, like any Visa order.
+                await tx
+                    .update(weightRequests)
+                    .set({ orderId: orderId, updatedAt: now })
+                    .where(and(eq(weightRequests.id, activeWeightRequest.id), eq(weightRequests.status, "checking_out")));
+            } else {
+                // Cash / wallet: straight to approved.
+                await tx
+                    .update(weightRequests)
+                    .set({
+                        status: "approved",
+                        orderId: orderId,
+                        updatedAt: now,
+                    })
+                    .where(and(eq(weightRequests.id, activeWeightRequest.id), eq(weightRequests.status, "awaiting_customer_approval")));
+            }
+        }
+
+        // Clear the cart immediately for cash / wallet (the whole cart of this user for this
+        // restaurant, weighted, restaurant-added, unavailable and normal rows alike; the
+        // weight_requests row stays as history with order_id).
+        // For visa the cart stays until payment is confirmed.
         if (!isVisaPayment) {
-            await tx.delete(cartItems).where(eq(cartItems.userId, userId));
+            await tx.delete(cartItems).where(and(eq(cartItems.userId, userId), eq(cartItems.restaurantId, restaurantId)));
         }
 
         // Increment user's total orders count
@@ -1766,6 +1994,14 @@ export const checkout = async (req: Request | any, res: Response) => {
 
         // Wallet settlement is recorded once the restaurant marks the order delivered.
     });
+    orderCommitted = true;
+    } finally {
+        // Session creation or the order transaction failed: give the claim back (conditional:
+        // only while it is still checking_out without an order).
+        if (weightClaimRequestId && !orderCommitted) {
+            await releaseWeightCheckoutClaim(weightClaimRequestId);
+        }
+    }
 
     // ==========================================
     // 11. Send Notification to Restaurant (non-visa only; visa orders are notified via webhook)
@@ -2512,16 +2748,72 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         minOrderAmount: number;
         startDate: string | null;
         endDate: string | null;
+        branches: Array<{ id: string; name: string; nameAr: string | null; nameFr: string | null }>;
     } | null = null;
 
     if (activeFreeDeliveryOffer) {
         const startOk = !activeFreeDeliveryOffer.startDate || new Date(activeFreeDeliveryOffer.startDate) <= nowForPrereq;
         const endOk = !activeFreeDeliveryOffer.endDate || new Date(activeFreeDeliveryOffer.endDate) >= nowForPrereq;
         if (startOk && endOk) {
+            let offerBranchIds: string[] = [];
+            const rawBranchIds = activeFreeDeliveryOffer.branchIds;
+            if (Array.isArray(rawBranchIds)) {
+                offerBranchIds = rawBranchIds.map(String).filter(Boolean);
+            } else if (typeof rawBranchIds === "string") {
+                try {
+                    const parsed = JSON.parse(rawBranchIds);
+                    if (Array.isArray(parsed)) offerBranchIds = parsed.map(String).filter(Boolean);
+                } catch {
+                    offerBranchIds = [];
+                }
+            }
+
+            const branchMap = new Map<string, { id: string; name: string; nameAr: string | null; nameFr: string | null }>();
+            for (const b of restaurantBranches) {
+                branchMap.set(b.id, {
+                    id: b.id,
+                    name: b.name,
+                    nameAr: b.nameAr || null,
+                    nameFr: b.nameFr || null,
+                });
+            }
+
+            const missingBranchIds = offerBranchIds.filter(id => !branchMap.has(id));
+            if (missingBranchIds.length > 0) {
+                const extraBranches = await db
+                    .select({
+                        id: branches.id,
+                        name: branches.name,
+                        nameAr: branches.nameAr,
+                        nameFr: branches.nameFr,
+                    })
+                    .from(branches)
+                    .where(inArray(branches.id, missingBranchIds));
+                for (const b of extraBranches) {
+                    branchMap.set(b.id, {
+                        id: b.id,
+                        name: b.name,
+                        nameAr: b.nameAr || null,
+                        nameFr: b.nameFr || null,
+                    });
+                }
+            }
+
+            const branchObjects = offerBranchIds.map((id) => {
+                const b = branchMap.get(id);
+                return {
+                    id,
+                    name: b?.name || "Branch",
+                    nameAr: b?.nameAr || null,
+                    nameFr: b?.nameFr || null,
+                };
+            });
+
             freeDeliveryOfferData = {
                 minOrderAmount: parseFloat(activeFreeDeliveryOffer.minOrderAmount as string || "0"),
                 startDate: activeFreeDeliveryOffer.startDate ? activeFreeDeliveryOffer.startDate.toISOString() : null,
                 endDate: activeFreeDeliveryOffer.endDate ? activeFreeDeliveryOffer.endDate.toISOString() : null,
+                branches: branchObjects,
             };
         }
     }

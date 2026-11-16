@@ -199,7 +199,7 @@ describe("Weight-Based Checkout Gating & Flow Logic", () => {
         const req: WeightRequestState = {
             id: "req-1",
             status: "awaiting_customer_approval",
-            expiresAt: new Date("2026-11-15T12:30:00Z"),
+            expiresAt: new Date(Date.now() + 30 * 60 * 1000) // relative: the gate below uses the real clock,
         };
 
         // First checkout succeeds
