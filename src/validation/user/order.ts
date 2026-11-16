@@ -69,3 +69,16 @@ export const checkoutSchema = z.object({
 });
 
 export type CheckoutInput = z.infer<typeof checkoutSchema>;
+
+// ============================================================
+// Order Prerequisites Validation Schema
+// ============================================================
+export const getOrderPrerequisitesQuerySchema = z.object({
+    restaurantId: z.string({ required_error: "restaurantId is required" }),
+    orderSource: z.enum(["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"], {
+        required_error: "Invalid or missing order source",
+    }),
+    addressId: z.string().optional(),
+    addressid: z.string().optional(),
+});
+

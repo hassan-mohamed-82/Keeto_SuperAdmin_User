@@ -2482,6 +2482,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     const userId = req.user.id;
     const restaurantId = req.query.restaurantId as string;
     const orderSource = req.query.orderSource as string;
+    const addressId = (req.query.addressId || req.query.addressid) as string | undefined;
 
     if (!restaurantId) {
         throw new BadRequest("restaurantId is required");
@@ -2799,22 +2800,127 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                 }
             }
 
-            const branchObjects = offerBranchIds.map((id) => {
-                const b = branchMap.get(id);
-                return {
-                    id,
-                    name: b?.name || "Branch",
-                    nameAr: b?.nameAr || null,
-                    nameFr: b?.nameFr || null,
-                };
-            });
+            const allBranchObjects = offerBranchIds.length > 0
+                ? offerBranchIds.map((id) => {
+                    const b = branchMap.get(id);
+                    return {
+                        id,
+                        name: b?.name || "Branch",
+                        nameAr: b?.nameAr || null,
+                        nameFr: b?.nameFr || null,
+                    };
+                })
+                : restaurantBranches.map(b => ({
+                    id: b.id,
+                    name: b.name,
+                    nameAr: b.nameAr || null,
+                    nameFr: b.nameFr || null,
+                }));
 
-            freeDeliveryOfferData = {
-                minOrderAmount: parseFloat(activeFreeDeliveryOffer.minOrderAmount as string || "0"),
-                startDate: activeFreeDeliveryOffer.startDate ? activeFreeDeliveryOffer.startDate.toISOString() : null,
-                endDate: activeFreeDeliveryOffer.endDate ? activeFreeDeliveryOffer.endDate.toISOString() : null,
-                branches: branchObjects,
-            };
+            // إذا تم إرسال addressId في الـ query، نحدد الفرع الذي يخدم هذا العنوان ونرجع العرض الخاص به فقط
+            if (addressId) {
+                let targetAddress = userAddresses.find(a => a.id === addressId);
+                if (!targetAddress) {
+                    const [fetchedAddr] = await db
+                        .select()
+                        .from(addresses)
+                        .where(and(eq(addresses.id, addressId), eq(addresses.userId, userId)))
+                        .limit(1);
+                    if (fetchedAddr) {
+                        targetAddress = fetchedAddr;
+                    }
+                }
+
+                let matchedBranchId: string | null = null;
+                if (targetAddress) {
+                    const addrLat = parseFloat(targetAddress.lat || "0");
+                    const addrLng = parseFloat(targetAddress.lng || "0");
+                    let applicableFee: any = null;
+                    let applicableDeliveryFee: number | null = null;
+
+                    if (addrLat && addrLng) {
+                        for (const fee of zoneFees) {
+                            const matchesZone = isLocationInZone(addrLat, addrLng, targetAddress.zoneId, fee);
+                            if (matchesZone) {
+                                const isBranchActive = !fee.branchId || fee.branchStatus === "active";
+                                if (!isBranchActive) continue;
+
+                                const currentFee = parseFloat((fee.deliveryFee || "0") as string);
+                                if (applicableDeliveryFee === null || currentFee > applicableDeliveryFee) {
+                                    applicableDeliveryFee = currentFee;
+                                    applicableFee = fee;
+                                }
+                            }
+                        }
+                    }
+
+                    if (applicableFee?.branchId) {
+                        matchedBranchId = applicableFee.branchId;
+                    } else if (applicableFee?.zoneId) {
+                        const branchInZone = restaurantBranches.find(b => b.zoneId === applicableFee.zoneId);
+                        if (branchInZone) {
+                            matchedBranchId = branchInZone.id;
+                        }
+                    }
+
+                    if (!matchedBranchId && addrLat && addrLng && restaurantBranches.length > 0) {
+                        let minDistance = Infinity;
+                        let closestBranch = restaurantBranches[0];
+                        for (const b of restaurantBranches) {
+                            const bLat = parseFloat(b.lat as string || "0");
+                            const bLng = parseFloat(b.lng as string || "0");
+                            if (bLat && bLng) {
+                                const dist = calculateDistance(addrLat, addrLng, bLat, bLng);
+                                if (dist < minDistance) {
+                                    minDistance = dist;
+                                    closestBranch = b;
+                                }
+                            }
+                        }
+                        matchedBranchId = closestBranch?.id || null;
+                    } else if (!matchedBranchId && restaurantBranches.length > 0) {
+                        matchedBranchId = restaurantBranches[0]?.id || null;
+                    }
+                }
+
+                if (matchedBranchId) {
+                    const isBranchIncluded = offerBranchIds.length === 0 || offerBranchIds.includes(matchedBranchId);
+                    if (isBranchIncluded) {
+                        const b = branchMap.get(matchedBranchId);
+                        const singleBranchObject = b ? {
+                            id: b.id,
+                            name: b.name || "Branch",
+                            nameAr: b.nameAr || null,
+                            nameFr: b.nameFr || null,
+                        } : {
+                            id: matchedBranchId,
+                            name: "Branch",
+                            nameAr: null,
+                            nameFr: null,
+                        };
+
+                        freeDeliveryOfferData = {
+                            minOrderAmount: parseFloat(activeFreeDeliveryOffer.minOrderAmount as string || "0"),
+                            startDate: activeFreeDeliveryOffer.startDate ? activeFreeDeliveryOffer.startDate.toISOString() : null,
+                            endDate: activeFreeDeliveryOffer.endDate ? activeFreeDeliveryOffer.endDate.toISOString() : null,
+                            branches: [singleBranchObject],
+                        };
+                    } else {
+                        // الفرع غير مشمول في عرض التوصيل المجاني
+                        freeDeliveryOfferData = null;
+                    }
+                } else {
+                    freeDeliveryOfferData = null;
+                }
+            } else {
+                // في حال عدم إرسال addressId، نرجع كل الفروع كما هي
+                freeDeliveryOfferData = {
+                    minOrderAmount: parseFloat(activeFreeDeliveryOffer.minOrderAmount as string || "0"),
+                    startDate: activeFreeDeliveryOffer.startDate ? activeFreeDeliveryOffer.startDate.toISOString() : null,
+                    endDate: activeFreeDeliveryOffer.endDate ? activeFreeDeliveryOffer.endDate.toISOString() : null,
+                    branches: allBranchObjects,
+                };
+            }
         }
     }
 

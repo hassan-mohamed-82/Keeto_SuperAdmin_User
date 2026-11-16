@@ -5,12 +5,12 @@ import {
     , getOrderPrerequisites, cancelOrder, getCancelReasons, rateOrder
 } from "../../controllers/user/order";
 import { validate } from "../../middlewares/validation";
-import { checkoutSchema } from "../../validation/user/order";
+import { checkoutSchema, getOrderPrerequisitesQuerySchema } from "../../validation/user/order";
 
 const router = Router();
 router.put("/:orderId/cancel", catchAsync(cancelOrder));
 router.post("/:orderId/rate", catchAsync(rateOrder));
-router.get("/select", catchAsync(getOrderPrerequisites));
+router.get("/select", validate(getOrderPrerequisitesQuerySchema, "query"), catchAsync(getOrderPrerequisites));
 router.get("/cancel-reasons", catchAsync(getCancelReasons));
 // router.post("/checkout", validate(checkoutSchema), catchAsync(checkout));
 router.post("/checkout", catchAsync(checkout));
