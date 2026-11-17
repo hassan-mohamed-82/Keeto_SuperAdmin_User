@@ -75,6 +75,7 @@ export const getRestaurantOffers = async (req: Request, res: Response) => {
                 image: food.image,
                 points: food.points,
                 addonsId: food.addonsId,
+                foodOrderLevel: food.order_level,
 
                 categoryId: categories.id,
                 categoryName: categories.name,
@@ -173,6 +174,7 @@ export const getAllOffers = async (req: Request, res: Response) => {
                 points: food.points,
                 isOutOfStock: food.isOutOfStock,
                 addonsId: food.addonsId,
+                foodOrderLevel: food.order_level,
 
                 categoryId: categories.id,
                 categoryName: categories.name,

@@ -370,6 +370,7 @@ export const formatFoodsList = async (
                 nameAr: row.categoryNameAr,
                 nameFr: row.categoryNameFr,
             } : null,
+            order_level: (row as any).foodOrderLevel ?? null,
             subcategory: row.subcategoryId ? {
                 id: row.subcategoryId,
                 name: row.subcategoryName,

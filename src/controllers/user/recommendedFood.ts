@@ -52,6 +52,7 @@ export const getRecommendedFoodsForUser = async (req: Request, res: Response) =>
             isOutOfStock: food.isOutOfStock,
             points: food.points,
             addonsId: food.addonsId,
+            foodOrderLevel: food.order_level,
 
             categoryId: categories.id,
             categoryName: categories.name,

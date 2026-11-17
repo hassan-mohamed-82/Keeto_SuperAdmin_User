@@ -33,7 +33,7 @@ export const food = mysqlTable("food", {
         .notNull(),
 
     categoryid: char("categoryid", { length: 36 }).references(() => categories.id).notNull(),
-    subcategoryid: char("subcategoryid", { length: 36 }).references(() => subcategories.id).notNull(),
+    subcategoryid: char("subcategoryid", { length: 36 }).references(() => subcategories.id),
     foodtype: mysqlEnum("foodtype", ["veg", "non-veg"]).default("veg"),
     Nutrition: text("nutrition"),
     allergen_ingredients: text("allergen_ingredients"),
@@ -43,8 +43,8 @@ export const food = mysqlTable("food", {
         .references(() => noteGroups.id, { onDelete: "set null" }),
     discountId: char("discount_id", { length: 36 })
         .references(() => discountGroups.id, { onDelete: "set null" }),
-    startTime: varchar("start_time", { length: 255 }).notNull(),
-    endTime: varchar("end_time", { length: 255 }).notNull(),
+    startTime: varchar("start_time", { length: 255 }),
+    endTime: varchar("end_time", { length: 255 }),
 
     search_tags: varchar("search_tags", { length: 255 }),
 
@@ -63,6 +63,9 @@ export const food = mysqlTable("food", {
 
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     points: int("points").default(0),
+
+    // Display ordering
+    order_level: int("order_level").notNull().default(0),
 
     // Weight-based selling
     sold_by: mysqlEnum("sold_by", ["unit", "weight"]).notNull().default("unit"),

@@ -46,6 +46,7 @@ export const getProductById = async (req: Request, res: Response) => {
                 restaurantId: food.restaurantid,
                 sold_by: food.sold_by,
                 weight_unit: food.weight_unit,
+                foodOrderLevel: food.order_level,
 
                 categoryId: categories.id,
                 categoryName: categories.name,
