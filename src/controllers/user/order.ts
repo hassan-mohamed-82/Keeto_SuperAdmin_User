@@ -2337,6 +2337,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
     const userId = req.user.id;
     const { orderId } = req.params;
 
+    // ── Main order query (no discount/coupon joins to avoid column name collisions) ──
     const orderInfo = await db
         .select({
             orderId: orders.id,
@@ -2359,19 +2360,12 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             couponCode: orders.couponCode,
             totalAmount: orders.totalAmount,
 
-            // Discount & Coupon fields
+            // Raw discount/coupon IDs — names fetched separately
             discountId: orders.discountId,
             discountType: orders.discountType,
             discountValue: orders.discountValue,
             discountSource: orders.discountSource,
-            discountName: sql<string | null>`${discounts.name}`.as("discount_name"),
-            discountNameAr: sql<string | null>`${discounts.nameAr}`.as("discount_name_ar"),
-            discountNameFr: sql<string | null>`${discounts.nameFr}`.as("discount_name_fr"),
             couponId: orders.couponId,
-            couponTableCode: sql<string | null>`${coupons.code}`.as("coupon_table_code"),
-            couponName: sql<string | null>`${coupons.name}`.as("coupon_name"),
-            couponNameAr: sql<string | null>`${coupons.nameAr}`.as("coupon_name_ar"),
-            couponNameFr: sql<string | null>`${coupons.nameFr}`.as("coupon_name_fr"),
 
             note: orders.note,
             rating: orders.rating,
@@ -2408,8 +2402,6 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
-        .leftJoin(discounts, eq(orders.discountId, discounts.id))
-        .leftJoin(coupons, eq(orders.couponId, coupons.id))
         .where(
             and(
                 eq(orders.id, orderId),
@@ -2424,6 +2416,21 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
     }
 
     const o = orderInfo[0];
+
+    // ── Fetch discount & coupon names in separate queries (avoid JOIN name collisions) ──
+    let discountRow: { name: string | null; nameAr: string | null; nameFr: string | null } | null = null;
+    if (o.discountId) {
+        const [d] = await db.select({ name: discounts.name, nameAr: discounts.nameAr, nameFr: discounts.nameFr })
+            .from(discounts).where(eq(discounts.id, o.discountId)).limit(1);
+        discountRow = d ?? null;
+    }
+
+    let couponRow: { code: string | null; name: string | null; nameAr: string | null; nameFr: string | null } | null = null;
+    if (o.couponId) {
+        const [c] = await db.select({ code: coupons.code, name: coupons.name, nameAr: coupons.nameAr, nameFr: coupons.nameFr })
+            .from(coupons).where(eq(coupons.id, o.couponId)).limit(1);
+        couponRow = c ?? null;
+    }
 
     // 1. جلب عناصر الطلب الأساسية
     const itemsRaw = await db
@@ -2480,14 +2487,14 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
                 discountType: o.discountType ?? null,
                 discountValue: o.discountValue ? String(o.discountValue) : null,
                 discountSource: o.discountSource ?? null,
-                discountName: o.discountName ?? null,
-                discountNameAr: o.discountNameAr ?? null,
-                discountNameFr: o.discountNameFr ?? null,
+                discountName: discountRow?.name ?? null,
+                discountNameAr: discountRow?.nameAr ?? null,
+                discountNameFr: discountRow?.nameFr ?? null,
                 couponId: o.couponId ?? null,
-                couponCode: o.couponCode ?? o.couponTableCode ?? null,
-                couponName: o.couponName ?? null,
-                couponNameAr: o.couponNameAr ?? null,
-                couponNameFr: o.couponNameFr ?? null,
+                couponCode: o.couponCode ?? couponRow?.code ?? null,
+                couponName: couponRow?.name ?? null,
+                couponNameAr: couponRow?.nameAr ?? null,
+                couponNameFr: couponRow?.nameFr ?? null,
             },
             totalAmount: o.totalAmount,
             note: o.note,

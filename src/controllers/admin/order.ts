@@ -1,4 +1,4 @@
-import { eq, desc, and, inArray, or, gte, lte, ne, sql } from "drizzle-orm";
+import { eq, desc, and, inArray, or, gte, lte, ne } from "drizzle-orm";
 import { addons, foodVariations, addresses, branches, deliveryMen, food, orderItems, orders, paymentMethods, pointsProducts, restaurants, restaurantWallets, restaurantWalletTransactions, restaurantZoneDeliveryFees, selectReasons, userPointsTransactions, userRestaurantPoints, users, userWallets, userWalletTransactions, variationOptions, zones, restaurantSettings, shippingCompanies, discounts, coupons } from "../../models/schema";
 import { SuccessResponse } from "../../utils/response";
 import { Request, Response } from "express";
@@ -333,19 +333,6 @@ export const getOrderDetails = async (req: Request, res: Response) => {
             name: deliveryMen.name,
             phone: deliveryMen.phone,
         },
-        discount: {
-            id: sql<string | null>`${discounts.id}`.as("discount_id"),
-            name: sql<string | null>`${discounts.name}`.as("discount_name"),
-            nameAr: sql<string | null>`${discounts.nameAr}`.as("discount_name_ar"),
-            nameFr: sql<string | null>`${discounts.nameFr}`.as("discount_name_fr"),
-        },
-        coupon: {
-            id: sql<string | null>`${coupons.id}`.as("coupon_id"),
-            code: sql<string | null>`${coupons.code}`.as("coupon_code"),
-            name: sql<string | null>`${coupons.name}`.as("coupon_name"),
-            nameAr: sql<string | null>`${coupons.nameAr}`.as("coupon_name_ar"),
-            nameFr: sql<string | null>`${coupons.nameFr}`.as("coupon_name_fr"),
-        },
     })
         .from(orders)
         .leftJoin(users, eq(orders.userId, users.id))
@@ -355,8 +342,6 @@ export const getOrderDetails = async (req: Request, res: Response) => {
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .leftJoin(restaurantZoneDeliveryFees, eq(orders.zoneId, restaurantZoneDeliveryFees.id))
         .leftJoin(zones, or(eq(restaurantZoneDeliveryFees.zoneId, zones.id), eq(orders.zoneId, zones.id), eq(addresses.zoneId, zones.id)))
-        .leftJoin(discounts, eq(orders.discountId, discounts.id))
-        .leftJoin(coupons, eq(orders.couponId, coupons.id))
         .where(eq(orders.id, id))
         .limit(1);
 
@@ -370,6 +355,21 @@ export const getOrderDetails = async (req: Request, res: Response) => {
         if (adminBranchId && orderDetail.order.branchId !== adminBranchId) {
             throw new BadRequest("Unauthorized: Order does not belong to your branch");
         }
+    }
+
+    // ── Fetch discount & coupon names in separate queries (avoid JOIN name collisions) ──
+    let discountRow: { name: string | null; nameAr: string | null; nameFr: string | null } | null = null;
+    if (orderDetail.order.discountId) {
+        const [d] = await db.select({ name: discounts.name, nameAr: discounts.nameAr, nameFr: discounts.nameFr })
+            .from(discounts).where(eq(discounts.id, orderDetail.order.discountId)).limit(1);
+        discountRow = d ?? null;
+    }
+
+    let couponRow: { code: string | null; name: string | null; nameAr: string | null; nameFr: string | null } | null = null;
+    if (orderDetail.order.couponId) {
+        const [c] = await db.select({ code: coupons.code, name: coupons.name, nameAr: coupons.nameAr, nameFr: coupons.nameFr })
+            .from(coupons).where(eq(coupons.id, orderDetail.order.couponId)).limit(1);
+        couponRow = c ?? null;
     }
 
     // ==========================================
@@ -666,21 +666,21 @@ export const getOrderDetails = async (req: Request, res: Response) => {
             appCommission: orderDetail.order.appCommission,
             visaCommission: orderDetail.order.visaCommission,
             discountAmount: orderDetail.order.discountAmount,
-            couponCode: orderDetail.order.couponCode ?? orderDetail.coupon?.code ?? null,
+            couponCode: orderDetail.order.couponCode ?? couponRow?.code ?? null,
             discount: {
                 discountId: orderDetail.order.discountId ?? null,
                 discountAmount: orderDetail.order.discountAmount ? String(orderDetail.order.discountAmount) : "0.00",
                 discountType: orderDetail.order.discountType ?? null,
                 discountValue: orderDetail.order.discountValue ? String(orderDetail.order.discountValue) : null,
                 discountSource: orderDetail.order.discountSource ?? null,
-                discountName: orderDetail.discount?.name ?? null,
-                discountNameAr: orderDetail.discount?.nameAr ?? null,
-                discountNameFr: orderDetail.discount?.nameFr ?? null,
+                discountName: discountRow?.name ?? null,
+                discountNameAr: discountRow?.nameAr ?? null,
+                discountNameFr: discountRow?.nameFr ?? null,
                 couponId: orderDetail.order.couponId ?? null,
-                couponCode: orderDetail.order.couponCode ?? orderDetail.coupon?.code ?? null,
-                couponName: orderDetail.coupon?.name ?? null,
-                couponNameAr: orderDetail.coupon?.nameAr ?? null,
-                couponNameFr: orderDetail.coupon?.nameFr ?? null,
+                couponCode: orderDetail.order.couponCode ?? couponRow?.code ?? null,
+                couponName: couponRow?.name ?? null,
+                couponNameAr: couponRow?.nameAr ?? null,
+                couponNameFr: couponRow?.nameFr ?? null,
             },
             totalAmount: orderDetail.order.totalAmount,
             createdAt: orderDetail.order.createdAt,
