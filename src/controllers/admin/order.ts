@@ -1,4 +1,4 @@
-import { eq, desc, and, inArray, or, gte, lte, ne } from "drizzle-orm";
+import { eq, desc, and, inArray, or, gte, lte, ne, sql } from "drizzle-orm";
 import { addons, foodVariations, addresses, branches, deliveryMen, food, orderItems, orders, paymentMethods, pointsProducts, restaurants, restaurantWallets, restaurantWalletTransactions, restaurantZoneDeliveryFees, selectReasons, userPointsTransactions, userRestaurantPoints, users, userWallets, userWalletTransactions, variationOptions, zones, restaurantSettings, shippingCompanies, discounts, coupons } from "../../models/schema";
 import { SuccessResponse } from "../../utils/response";
 import { Request, Response } from "express";
@@ -334,17 +334,17 @@ export const getOrderDetails = async (req: Request, res: Response) => {
             phone: deliveryMen.phone,
         },
         discount: {
-            id: discounts.id,
-            name: discounts.name,
-            nameAr: discounts.nameAr,
-            nameFr: discounts.nameFr,
+            id: sql<string | null>`${discounts.id}`.as("discount_id"),
+            name: sql<string | null>`${discounts.name}`.as("discount_name"),
+            nameAr: sql<string | null>`${discounts.nameAr}`.as("discount_name_ar"),
+            nameFr: sql<string | null>`${discounts.nameFr}`.as("discount_name_fr"),
         },
         coupon: {
-            id: coupons.id,
-            code: coupons.code,
-            name: coupons.name,
-            nameAr: coupons.nameAr,
-            nameFr: coupons.nameFr,
+            id: sql<string | null>`${coupons.id}`.as("coupon_id"),
+            code: sql<string | null>`${coupons.code}`.as("coupon_code"),
+            name: sql<string | null>`${coupons.name}`.as("coupon_name"),
+            nameAr: sql<string | null>`${coupons.nameAr}`.as("coupon_name_ar"),
+            nameFr: sql<string | null>`${coupons.nameFr}`.as("coupon_name_fr"),
         },
     })
         .from(orders)
