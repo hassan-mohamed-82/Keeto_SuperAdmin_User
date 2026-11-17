@@ -3,6 +3,8 @@ import {
     computeWeightedLineTotal,
     isFixedDiscountOnGramFood,
     parseBooleanInput,
+    priceCartLine,
+    splitWeightedLineTotal,
     toThousandths,
     validateWeightGroupConfig,
     validateWeightInput,
@@ -116,6 +118,49 @@ describe("fixed-amount discount on per-gram foods", () => {
         expect(isFixedDiscountOnGramFood({ soldBy: "unit", weightUnit: null, discountType: "amount", discountValue: 20 })).toBe(false);
         // no discount value → nothing to reject
         expect(isFixedDiscountOnGramFood({ soldBy: "weight", weightUnit: "gm", discountType: "amount", discountValue: null })).toBe(false);
+    });
+});
+
+describe("weight-group options with quantity > 1 (e.g. 4 quarters of fish)", () => {
+    it("computes line total multiplied by quantity", () => {
+        // 4 portions of 0.250 kg @ 200/kg = 4 * 50 = 200.00
+        expect(computeWeightedLineTotal(0.250, 200, [], 4)).toBe("200.00");
+        // with fixed extra 10 EGP per portion: 4 * (50 + 10) = 240.00
+        expect(computeWeightedLineTotal(0.250, 200, [{ price: 10, priceMode: "fixed" }], 4)).toBe("240.00");
+    });
+
+    it("priceCartLine scales weighted originalTotal and finalTotal by quantity", () => {
+        const line = priceCartLine({
+            isWeighted: true,
+            effectiveWeight: 0.250,
+            quantity: 4,
+            basePrice: 200,
+            discountedBasePrice: 180,
+            extras: [{ price: 10, priceMode: "fixed" }],
+        });
+        // 1 portion: original = 0.25*200 + 10 = 60; final = 0.25*180 + 10 = 55
+        // 4 portions: original = 240, final = 220, discount = 20
+        expect(line.originalTotal).toBe(240);
+        expect(line.finalTotal).toBe(220);
+        expect(line.discountTotal).toBe(20);
+    });
+
+    it("splitWeightedLineTotal correctly splits line across base, variations, and addons with quantity", () => {
+        const split = splitWeightedLineTotal(
+            0.250,
+            200,
+            [{ price: 10, priceMode: "fixed" }],
+            [{ price: 5, priceMode: "fixed" }],
+            4
+        );
+        // Base: 4 * (0.25 * 200) = 200.00
+        // Variations: 4 * 10 = 40.00
+        // Addons: 4 * 5 = 20.00
+        // Total: 260.00
+        expect(split.basePortion).toBe("200.00");
+        expect(split.variationsPortion).toBe("40.00");
+        expect(split.addonsPortion).toBe("20.00");
+        expect(split.total).toBe("260.00");
     });
 });
 

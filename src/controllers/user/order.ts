@@ -954,7 +954,7 @@ export const checkout = async (req: Request | any, res: Response) => {
             initialSubtotal += parseFloat(computeWeightedLineTotal(effectiveWeight, initialDiscountPrice, [
                 ...parsedVariations.map((v: any) => ({ price: v.additionalPrice ?? v.price ?? 0, priceMode: v.priceMode || "fixed" })),
                 ...parsedAddons.map((a: any) => ({ price: a.price ?? 0, priceMode: "fixed" })),
-            ]));
+            ], cartItem.quantity));
         } else {
             initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * cartItem.quantity;
         }
@@ -1125,7 +1125,8 @@ export const checkout = async (req: Request | any, res: Response) => {
                 effectiveWeight,
                 discountedBasePrice,
                 vars.map((v: any) => ({ price: v.additionalPrice || v.price || 0, priceMode: v.priceMode || "fixed" })),
-                addonsList.map((a: any) => ({ price: a.price || 0, priceMode: "fixed" }))
+                addonsList.map((a: any) => ({ price: a.price || 0, priceMode: "fixed" })),
+                cartItem.quantity
             );
             itemTotal = parseFloat(split.total);
             lineVariationsPrice = parseFloat(split.variationsPortion);

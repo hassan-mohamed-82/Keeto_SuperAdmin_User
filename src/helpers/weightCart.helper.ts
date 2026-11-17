@@ -302,8 +302,9 @@ export const weightedLineTotal = (
     effectiveWeight: number | string,
     basePrice: number,
     variationExtras: WeightedOptionExtra[],
-    addonExtras: WeightedOptionExtra[]
-): number => parseFloat(computeWeightedLineTotal(effectiveWeight, basePrice, [...variationExtras, ...addonExtras]));
+    addonExtras: WeightedOptionExtra[],
+    quantity: number = 1
+): number => parseFloat(computeWeightedLineTotal(effectiveWeight, basePrice, [...variationExtras, ...addonExtras], quantity));
 
 // ─────────────────────────────────────────────
 // Re-checkout while a Visa claim exists (status checking_out)

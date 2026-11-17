@@ -520,8 +520,8 @@ export const addToCart = async (req: Request | any, res: Response) => {
             isNull(cartItems.offerId)
         ));
 
-    // A preset weight option is one fixed weight: never merged by summing weights, so it gets its own line.
-    const existingSame = hasWeightOption ? undefined : existingItems.find(item => {
+    // A preset weight option merges by incrementing quantity; custom weight merges by summing weights.
+    const existingSame = existingItems.find(item => {
         const { variations: dbVars } = parseCartSnapshot(item.variations);
         const dbAddonsParsed = deepParseJSON(item.addons);
         const dbAddonsList = Array.isArray(dbAddonsParsed) ? dbAddonsParsed : [];
@@ -538,25 +538,47 @@ export const addToCart = async (req: Request | any, res: Response) => {
     let lineTotalStr: string;
     if (existingSame) {
         if (isWeightedFood) {
-            // Sum in thousandths to avoid float drift, then re-validate (sane maximum applies to the sum).
-            const summed = (Math.round(Number(existingSame.weight || 0) * 1000) + Math.round(requestedWeight! * 1000)) / 1000;
-            const newWeight = validateWeightInput(itemFood, summed, selectedWeightOptions)!;
-            const newTotalPriceStr = computeWeightedLineTotal(newWeight, unitPriceStr, weightedOptionExtras);
-            lineTotalStr = newTotalPriceStr;
-            await db.update(cartItems)
-                .set({
-                    quantity: 1,
-                    weight: newWeight.toFixed(3),
-                    weightUnit: itemFood.weight_unit,
-                    unitPrice: unitPriceStr,
-                    totalPrice: newTotalPriceStr,
-                    variations: JSON.stringify(snapshot),
-                    addons: JSON.stringify(addonSnapshot),
-                    ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
-                    ...(resolvedServiceModule ? { serviceModule: resolvedServiceModule } : {}),
-                    ...(note !== undefined ? { note: note || null } : {}),
-                })
-                .where(eq(cartItems.id, existingSame.id));
+            if (hasWeightOption) {
+                // If weight-group option selected (e.g. 1/4 kg), keep weight as option weight and increment quantity
+                const addQty = Math.max(1, Number(quantity) || 1);
+                const newQty = existingSame.quantity + addQty;
+                const newTotalPriceStr = computeWeightedLineTotal(requestedWeight!, unitPriceStr, weightedOptionExtras, newQty);
+                lineTotalStr = newTotalPriceStr;
+                await db.update(cartItems)
+                    .set({
+                        quantity: newQty,
+                        weight: requestedWeight!.toFixed(3),
+                        weightUnit: itemFood.weight_unit,
+                        unitPrice: unitPriceStr,
+                        totalPrice: newTotalPriceStr,
+                        variations: JSON.stringify(snapshot),
+                        addons: JSON.stringify(addonSnapshot),
+                        ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
+                        ...(resolvedServiceModule ? { serviceModule: resolvedServiceModule } : {}),
+                        ...(note !== undefined ? { note: note || null } : {}),
+                    })
+                    .where(eq(cartItems.id, existingSame.id));
+            } else {
+                // Custom weight: Sum in thousandths to avoid float drift, then re-validate (sane maximum applies to the sum).
+                const summed = (Math.round(Number(existingSame.weight || 0) * 1000) + Math.round(requestedWeight! * 1000)) / 1000;
+                const newWeight = validateWeightInput(itemFood, summed, selectedWeightOptions)!;
+                const newTotalPriceStr = computeWeightedLineTotal(newWeight, unitPriceStr, weightedOptionExtras, 1);
+                lineTotalStr = newTotalPriceStr;
+                await db.update(cartItems)
+                    .set({
+                        quantity: 1,
+                        weight: newWeight.toFixed(3),
+                        weightUnit: itemFood.weight_unit,
+                        unitPrice: unitPriceStr,
+                        totalPrice: newTotalPriceStr,
+                        variations: JSON.stringify(snapshot),
+                        addons: JSON.stringify(addonSnapshot),
+                        ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
+                        ...(resolvedServiceModule ? { serviceModule: resolvedServiceModule } : {}),
+                        ...(note !== undefined ? { note: note || null } : {}),
+                    })
+                    .where(eq(cartItems.id, existingSame.id));
+            }
         } else {
             const newQty = existingSame.quantity + quantity;
             const priceCents = Math.round(unitPriceNumber * 100);
@@ -576,10 +598,10 @@ export const addToCart = async (req: Request | any, res: Response) => {
                 .where(eq(cartItems.id, existingSame.id));
         }
     } else {
-        const itemQty = isWeightedFood ? 1 : quantity;
+        const itemQty = (isWeightedFood && !hasWeightOption) ? 1 : Math.max(1, Number(quantity) || 1);
         let itemTotalPriceStr: string;
         if (isWeightedFood) {
-            itemTotalPriceStr = computeWeightedLineTotal(requestedWeight!, unitPriceStr, weightedOptionExtras);
+            itemTotalPriceStr = computeWeightedLineTotal(requestedWeight!, unitPriceStr, weightedOptionExtras, itemQty);
         } else {
             const priceCents = Math.round(unitPriceNumber * 100);
             itemTotalPriceStr = ((priceCents * itemQty) / 100).toFixed(2);
@@ -1515,14 +1537,8 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     let newWeight: number | null = null;
     let newQty: number = 1;
 
-    if (isWeightedFood) {
-        const inputWeight = weight !== undefined ? weight : cartItem.weight;
-        // numeric rules now; weight-group rules once the selected options are loaded (below)
-        newWeight = validateWeightInput({ sold_by: itemFood.sold_by, weight_unit: itemFood.weight_unit }, inputWeight);
-        newQty = 1;
-    } else {
-        validateWeightInput(itemFood, weight);
-        newQty = quantity !== undefined ? Number(quantity) : cartItem.quantity;
+    if (!isWeightedFood && weight !== undefined && weight !== null && weight !== "") {
+        throw new BadRequest("Weight cannot be specified for unit-sold products");
     }
 
     // ─── Resolve branch ──────────────────────────────────────────────
@@ -1578,8 +1594,17 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     }
 
     // ⚖️ Weight groups / allow_custom_weight (same rule as addToCart).
+    const hasWeightOption = selectedWeightOptions.some(o => o.isWeightGroup);
     if (isWeightedFood) {
-        validateWeightInput(itemFood, newWeight, selectedWeightOptions);
+        const inputWeight = weight !== undefined ? weight : cartItem.weight;
+        newWeight = validateWeightInput(itemFood, inputWeight, selectedWeightOptions);
+        if (hasWeightOption) {
+            newQty = quantity !== undefined ? Math.max(1, Number(quantity)) : cartItem.quantity;
+        } else {
+            newQty = 1;
+        }
+    } else {
+        newQty = quantity !== undefined ? Number(quantity) : cartItem.quantity;
     }
 
     // ─── Resolve addons ──────────────────────────────────────────────
@@ -1709,7 +1734,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     let totalPriceStr: string;
 
     if (isWeightedFood) {
-        totalPriceStr = computeWeightedLineTotal(newWeight!, unitPriceStr, weightedOptionExtras);
+        totalPriceStr = computeWeightedLineTotal(newWeight!, unitPriceStr, weightedOptionExtras, newQty);
     } else {
         const priceCents = Math.round(unitPriceNumber * 100);
         totalPriceStr = ((priceCents * newQty) / 100).toFixed(2);
@@ -1965,7 +1990,7 @@ export const validateCartPricing = async (req: Request | any, res: Response) => 
                 ...parsedAddons.map((a: any) => ({ price: Number(a.price || 0), priceMode: "fixed" })),
             ];
             oldTotal = parseFloat(item.totalPrice as string || "0");
-            newTotal = weightedLineTotal(w, newCalculatedUnitPrice, extras, []);
+            newTotal = weightedLineTotal(w, newCalculatedUnitPrice, extras, [], quantity);
         }
         if (item.isUnavailable) {
             oldTotal = 0;

@@ -80,7 +80,8 @@ export const validateOptionPriceMode = (
 export const computeWeightedLineTotal = (
     weight: number | string,
     foodUnitPrice: number | string,
-    options: WeightedOptionExtra[] = []
+    options: WeightedOptionExtra[] = [],
+    quantity: number = 1
 ): string => {
     const w = typeof weight === "number" ? weight : parseFloat(weight);
     const baseP = typeof foodUnitPrice === "number" ? foodUnitPrice : parseFloat(foodUnitPrice);
@@ -112,7 +113,8 @@ export const computeWeightedLineTotal = (
     const perWeightCents = Math.round((weightScaled * totalPerWeightCents) / 1000);
     const finalCents = perWeightCents + fixedCents;
 
-    return (finalCents / 100).toFixed(2);
+    const qty = Math.max(1, Math.round(Number(quantity) || 1));
+    return ((finalCents * qty) / 100).toFixed(2);
 };
 
 /**
@@ -418,12 +420,13 @@ export const splitWeightedLineTotal = (
     weight: number | string,
     foodUnitPrice: number | string,
     variationExtras: WeightedOptionExtra[] = [],
-    addonExtras: WeightedOptionExtra[] = []
+    addonExtras: WeightedOptionExtra[] = [],
+    quantity: number = 1
 ): { total: string; basePortion: string; variationsPortion: string; addonsPortion: string } => {
     const toCents = (s: string) => Math.round(parseFloat(s) * 100);
-    const totalCents = toCents(computeWeightedLineTotal(weight, foodUnitPrice, [...variationExtras, ...addonExtras]));
-    const baseCents = toCents(computeWeightedLineTotal(weight, foodUnitPrice, []));
-    const addonsCents = toCents(computeWeightedLineTotal(weight, 0, addonExtras));
+    const totalCents = toCents(computeWeightedLineTotal(weight, foodUnitPrice, [...variationExtras, ...addonExtras], quantity));
+    const baseCents = toCents(computeWeightedLineTotal(weight, foodUnitPrice, [], quantity));
+    const addonsCents = toCents(computeWeightedLineTotal(weight, 0, addonExtras, quantity));
     const variationsCents = totalCents - baseCents - addonsCents;
     return {
         total: (totalCents / 100).toFixed(2),
@@ -516,8 +519,9 @@ export const priceCartLine = (p: CartLinePriceInput): CartLinePrice => {
     if (p.isWeighted) {
         const w = Number(p.effectiveWeight ?? 0);
         const extras = p.extras || [];
-        const originalTotal = parseFloat(computeWeightedLineTotal(w, p.basePrice, extras));
-        const finalTotal = parseFloat(computeWeightedLineTotal(w, p.discountedBasePrice, extras));
+        const qty = Math.max(1, Math.round(Number(p.quantity) || 1));
+        const originalTotal = parseFloat(computeWeightedLineTotal(w, p.basePrice, extras, qty));
+        const finalTotal = parseFloat(computeWeightedLineTotal(w, p.discountedBasePrice, extras, qty));
         return {
             originalUnitPrice: p.basePrice,
             finalUnitPrice: p.discountedBasePrice,
