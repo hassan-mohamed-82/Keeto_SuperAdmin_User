@@ -128,22 +128,20 @@ const formatOrderItemsVariations = async (items: any[]) => {
         return { item, cleanVariations };
     });
 
-    // ✅ FIX: collect option IDs per-variation, not per-item, so a single
-    // incomplete variation doesn't force a re-fetch (and possible drop) of
-    // its siblings that already have full details.
-    const allOldOptionIds = new Set<string>();
+    // Collect option IDs that need fetching from DB (either missing names or missing weight metadata)
+    const optionsToFetch = new Set<string>();
     for (const { cleanVariations } of parsedItems) {
         for (const v of cleanVariations) {
+            const optId = v?.optionId || v?.id;
             const hasFullDetails = Boolean(v?.variationName && v?.optionName);
-            if (!hasFullDetails) {
-                const optId = v?.optionId || v?.id;
-                if (optId) allOldOptionIds.add(optId);
+            if (optId && (!hasFullDetails || v?.priceMode === undefined || v?.isWeightGroup === undefined)) {
+                optionsToFetch.add(optId);
             }
         }
     }
 
     const optionsMap = new Map<string, any>();
-    if (allOldOptionIds.size > 0) {
+    if (optionsToFetch.size > 0) {
         const optionsWithParent = await db
             .select({
                 optionId: variationOptions.id,
@@ -151,14 +149,17 @@ const formatOrderItemsVariations = async (items: any[]) => {
                 optionNameAr: variationOptions.optionNameAr,
                 optionNameFr: variationOptions.optionNameFr,
                 additionalPrice: variationOptions.additionalPrice,
+                priceMode: variationOptions.priceMode,
+                weightValue: variationOptions.weightValue,
                 variationId: foodVariations.id,
                 variationName: foodVariations.name,
                 variationNameAr: foodVariations.nameAr,
                 variationNameFr: foodVariations.nameFr,
+                isWeightGroup: foodVariations.isWeightGroup,
             })
             .from(variationOptions)
             .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
-            .where(inArray(variationOptions.id, Array.from(allOldOptionIds)));
+            .where(inArray(variationOptions.id, Array.from(optionsToFetch)));
 
         for (const opt of optionsWithParent) {
             optionsMap.set(opt.optionId, opt);
@@ -167,52 +168,52 @@ const formatOrderItemsVariations = async (items: any[]) => {
 
     return parsedItems.map(({ item, cleanVariations }) => {
         const variationDetails = cleanVariations.map((v: any) => {
-            const hasFullDetails = Boolean(v?.variationName && v?.optionName);
-
-            if (hasFullDetails) {
-                return {
-                    optionId: v.optionId,
-                    optionName: v.optionName,
-                    optionNameAr: v.optionNameAr,
-                    optionNameFr: v.optionNameFr || '',
-                    additionalPrice: v.price || v.additionalPrice || '0',
-                    variationId: v.variationId,
-                    variationName: v.variationName,
-                    variationNameAr: v.variationNameAr,
-                    variationNameFr: v.variationNameFr || '',
-                };
-            }
-
             const optId = v?.optionId || v?.id;
             const optDetails = optId ? optionsMap.get(optId) : null;
 
-            if (optDetails) {
-                return optDetails;
+            const variationName = v.variationName || optDetails?.variationName || null;
+            const optionName = v.optionName || optDetails?.optionName || null;
+
+            if (!variationName && !optionName && !optId) {
+                return null;
             }
 
-            // ✅ FIX: option/variation no longer exists in the DB (deleted after
-            // the order was placed) — fall back to the order-item snapshot
-            // instead of dropping the row, flagged as unavailable.
-            if (v && (v.optionId || v.id)) {
-                return {
-                    optionId: v.optionId || v.id || null,
-                    optionName: v.optionName || null,
-                    optionNameAr: v.optionNameAr || null,
-                    optionNameFr: v.optionNameFr || '',
-                    additionalPrice: v.price || v.additionalPrice || '0',
-                    variationId: v.variationId || null,
-                    variationName: v.variationName || null,
-                    variationNameAr: v.variationNameAr || null,
-                    variationNameFr: v.variationNameFr || '',
-                    isAvailable: false,
-                };
-            }
+            const variationNameAr = v.variationNameAr || optDetails?.variationNameAr || null;
+            const variationNameFr = v.variationNameFr || optDetails?.variationNameFr || '';
+            const optionNameAr = v.optionNameAr || optDetails?.optionNameAr || null;
+            const optionNameFr = v.optionNameFr || optDetails?.optionNameFr || '';
+            const additionalPrice = v.price || v.additionalPrice || optDetails?.additionalPrice || '0';
+            const priceMode = v.priceMode || optDetails?.priceMode || 'fixed';
+            const weightValue = v.weightValue != null ? String(v.weightValue) : (optDetails?.weightValue != null ? String(optDetails.weightValue) : null);
+            const isWeightGroup = Boolean(v.isWeightGroup ?? optDetails?.isWeightGroup ?? false);
+            const variationId = v.variationId || optDetails?.variationId || null;
 
-            return null;
+            return {
+                optionId: optId || null,
+                optionName,
+                optionNameAr,
+                optionNameFr,
+                additionalPrice,
+                priceMode,
+                weightValue,
+                variationId,
+                variationName,
+                variationNameAr,
+                variationNameFr,
+                isWeightGroup,
+                ...(v.isAvailable !== undefined ? { isAvailable: v.isAvailable } : (!optDetails && optId && !v.variationName ? { isAvailable: false } : {})),
+            };
         }).filter(Boolean);
 
         return {
             ...item,
+            sold_by: item.sold_by ?? (item.orderedWeight || item.finalWeight ? "weight" : "unit"),
+            isSoldByWeight: item.sold_by === "weight" || Boolean(item.orderedWeight || item.finalWeight),
+            weightUnit: item.weightUnit || item.foodWeightUnit || null,
+            allowCustomWeight: item.allowCustomWeight ?? true,
+            weight: item.orderedWeight ? String(item.orderedWeight) : null,
+            orderedWeight: item.orderedWeight ? String(item.orderedWeight) : null,
+            finalWeight: item.finalWeight ? String(item.finalWeight) : null,
             variations: variationDetails,
         };
     });
@@ -2154,7 +2155,13 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
             totalPrice: orderItems.totalPrice,
             note: orderItems.note,
             variations: orderItems.variations,
-            addons: orderItems.addons
+            addons: orderItems.addons,
+            sold_by: food.sold_by,
+            foodWeightUnit: food.weight_unit,
+            allowCustomWeight: food.allow_custom_weight,
+            orderedWeight: orderItems.orderedWeight,
+            finalWeight: orderItems.finalWeight,
+            weightUnit: orderItems.weightUnit,
         })
             .from(orderItems)
             .leftJoin(food, and(eq(orderItems.foodId, food.id), activeFoodCondition))
@@ -2272,7 +2279,13 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
             totalPrice: orderItems.totalPrice,
             note: orderItems.note,
             variations: orderItems.variations,
-            addons: orderItems.addons
+            addons: orderItems.addons,
+            sold_by: food.sold_by,
+            foodWeightUnit: food.weight_unit,
+            allowCustomWeight: food.allow_custom_weight,
+            orderedWeight: orderItems.orderedWeight,
+            finalWeight: orderItems.finalWeight,
+            weightUnit: orderItems.weightUnit,
         })
             .from(orderItems)
             .leftJoin(food, and(eq(orderItems.foodId, food.id), activeFoodCondition))
@@ -2346,6 +2359,20 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             couponCode: orders.couponCode,
             totalAmount: orders.totalAmount,
 
+            // Discount & Coupon fields
+            discountId: orders.discountId,
+            discountType: orders.discountType,
+            discountValue: orders.discountValue,
+            discountSource: orders.discountSource,
+            discountName: discounts.name,
+            discountNameAr: discounts.nameAr,
+            discountNameFr: discounts.nameFr,
+            couponId: orders.couponId,
+            couponTableCode: coupons.code,
+            couponName: coupons.name,
+            couponNameAr: coupons.nameAr,
+            couponNameFr: coupons.nameFr,
+
             note: orders.note,
             rating: orders.rating,
             ratingComment: orders.ratingComment,
@@ -2381,6 +2408,8 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
         .leftJoin(addresses, eq(orders.addressId, addresses.id))
         .leftJoin(deliveryMen, eq(orders.deliveryManId, deliveryMen.id))
         .leftJoin(selectReasons, eq(orders.cancelReasonId, selectReasons.id))
+        .leftJoin(discounts, eq(orders.discountId, discounts.id))
+        .leftJoin(coupons, eq(orders.couponId, coupons.id))
         .where(
             and(
                 eq(orders.id, orderId),
@@ -2414,7 +2443,13 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             totalPrice: orderItems.totalPrice,
             note: orderItems.note,
             variations: orderItems.variations,
-            addons: orderItems.addons
+            addons: orderItems.addons,
+            sold_by: food.sold_by,
+            foodWeightUnit: food.weight_unit,
+            allowCustomWeight: food.allow_custom_weight,
+            orderedWeight: orderItems.orderedWeight,
+            finalWeight: orderItems.finalWeight,
+            weightUnit: orderItems.weightUnit,
         })
         .from(orderItems)
         .leftJoin(food, and(eq(orderItems.foodId, food.id), activeFoodCondition))
@@ -2439,6 +2474,21 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
             serviceFee: o.serviceFee,
             discountAmount: o.discountAmount,
             couponCode: o.couponCode,
+            discount: {
+                discountId: o.discountId ?? null,
+                discountAmount: o.discountAmount ? String(o.discountAmount) : "0.00",
+                discountType: o.discountType ?? null,
+                discountValue: o.discountValue ? String(o.discountValue) : null,
+                discountSource: o.discountSource ?? null,
+                discountName: o.discountName ?? null,
+                discountNameAr: o.discountNameAr ?? null,
+                discountNameFr: o.discountNameFr ?? null,
+                couponId: o.couponId ?? null,
+                couponCode: o.couponCode ?? o.couponTableCode ?? null,
+                couponName: o.couponName ?? null,
+                couponNameAr: o.couponNameAr ?? null,
+                couponNameFr: o.couponNameFr ?? null,
+            },
             totalAmount: o.totalAmount,
             note: o.note,
             rating: o.rating,
