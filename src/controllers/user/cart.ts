@@ -463,6 +463,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
                     variationName: foodVariations.name,
                     variationNameAr: foodVariations.nameAr,
                     variationNameFr: foodVariations.nameFr,
+                    isWeightGroup: foodVariations.isWeightGroup,
                 })
                 .from(variationOptions)
                 .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
@@ -489,6 +490,7 @@ export const addToCart = async (req: Request | any, res: Response) => {
                 additionalPrice: optionPrice,
                 price: optionPrice,
                 priceMode: (details?.priceMode ?? v.priceMode ?? "fixed") as "fixed" | "per_weight",
+                isWeightGroup: Boolean(details?.isWeightGroup ?? v.isWeightGroup),
             });
         }
     }
@@ -719,6 +721,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             addedByAdminId: cartItems.addedByAdminId,
             sold_by: food.sold_by,
             foodWeightUnit: food.weight_unit,
+            allow_custom_weight: food.allow_custom_weight,
         })
         .from(cartItems)
         .leftJoin(food, and(eq(cartItems.foodId, food.id), activeFoodCondition))
@@ -853,6 +856,8 @@ export const getCart = async (req: Request | any, res: Response) => {
                 addons: [],
                 note: item.note || null,
                 isAvailable: true,
+                sold_by: "unit",
+                allowCustomWeight: true,
                 locked: Boolean(item.weightRequestId),
                 requiresWeighing: false,
                 addedBy: item.addedBy || "customer",
@@ -1140,6 +1145,8 @@ export const getCart = async (req: Request | any, res: Response) => {
                     optionName: v.optionName ?? null,
                     optionNameAr: v.optionNameAr ?? null,
                     additionalPrice: v.additionalPrice ?? "0.00",
+                    priceMode: v.priceMode || "fixed",
+                    isWeightGroup: Boolean(v.isWeightGroup),
                     isAvailable: false,
                 };
             }
@@ -1153,6 +1160,7 @@ export const getCart = async (req: Request | any, res: Response) => {
                 optionNameAr: option.optionNameAr,
                 additionalPrice: Number(optionDisplayPrice(v, option.additionalPrice) ?? 0).toFixed(2),
                 priceMode: v.priceMode || (option as any).priceMode || "fixed",
+                isWeightGroup: Boolean(variation.isWeightGroup ?? v.isWeightGroup),
                 isAvailable: option.status !== false && variation.status !== false,
             };
         });
@@ -1246,6 +1254,7 @@ export const getCart = async (req: Request | any, res: Response) => {
             note: item.note || null,
             isAvailable: itemIsAvailable && !item.isUnavailable,
             sold_by: item.sold_by || "unit",
+            allowCustomWeight: Boolean(item.allow_custom_weight ?? true),
             weight: item.weight ? item.weight.toString() : null,
             finalWeight: item.finalWeight ? item.finalWeight.toString() : null,
             weightUnit: item.weightUnit || item.foodWeightUnit || null,
@@ -1681,6 +1690,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
                     variationName: foodVariations.name,
                     variationNameAr: foodVariations.nameAr,
                     variationNameFr: foodVariations.nameFr,
+                    isWeightGroup: foodVariations.isWeightGroup,
                 })
                 .from(variationOptions)
                 .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
@@ -1703,6 +1713,7 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
                 additionalPrice: Number(details?.additionalPrice ?? v.additionalPrice ?? v.price ?? 0).toFixed(2),
                 price: Number(details?.additionalPrice ?? v.additionalPrice ?? v.price ?? 0).toFixed(2),
                 priceMode: (details?.priceMode ?? v.priceMode ?? "fixed") as "fixed" | "per_weight",
+                isWeightGroup: Boolean(details?.isWeightGroup ?? v.isWeightGroup),
             };
         });
     } else if (variations === undefined) {
