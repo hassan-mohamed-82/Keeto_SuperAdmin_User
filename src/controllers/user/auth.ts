@@ -325,11 +325,15 @@ export const forgotPassword = async (req: Request, res: Response) => {
         });
     });
 
-    await sendEmail({
-        to: email,
-        subject: "Password Reset Code (Keeto)",
-        html: `<h1>Hello ${user.name}</h1><p>Your password reset code is: <b>${code}</b></p><p>It will expire in 15 minutes.</p>`
-    });
+    try {
+        await sendEmail({
+            to: email,
+            subject: "Password Reset Code (Keeto)",
+            html: `<h1>Hello ${user.name}</h1><p>Your password reset code is: <b>${code}</b></p><p>It will expire in 15 minutes.</p>`
+        });
+    } catch (emailErr) {
+        console.error("⚠️ Failed to send reset email but code was saved:", emailErr);
+    }
 
     return SuccessResponse(res, { message: "If this email is registered, a password reset code has been sent." });
 };

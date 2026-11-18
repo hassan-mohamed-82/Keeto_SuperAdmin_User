@@ -1,85 +1,3 @@
-// import nodemailer from "nodemailer";
-// import { Resend } from "resend";
-
-// const getFromEmail = () =>
-//   process.env.EMAIL_FROM || process.env.EMAIL_USER || "no-reply@keeto.app";
-
-// const getResendClient = () => {
-//   if (!process.env.RESEND_API_KEY) return null;
-//   return new Resend(process.env.RESEND_API_KEY);
-// };
-
-// const getSmtpTransporter = () => {
-//   const SMTP_USER = process.env.SMTP_USER || process.env.EMAIL_USER;
-//   const SMTP_PASS = process.env.SMTP_PASS || process.env.EMAIL_PASS;
-
-//   if (!SMTP_USER || !SMTP_PASS) {
-//     console.log("❌ SMTP not configured");
-//     return null;
-//   }
-
-//   return nodemailer.createTransport({
-//     service: "gmail",
-//     auth: {
-//       user: SMTP_USER,
-//       pass: SMTP_PASS,
-//     },
-//   });
-// };
-
-// export const sendEmail = async ({
-//   to,
-//   subject,
-//   html,
-// }: {
-//   to: string;
-//   subject: string;
-//   html: string;
-// }) => {
-//   console.log("📧 Sending email to:", to);
-
-//   const resend = getResendClient();
-
-//   // ===== Resend =====
-//   if (resend) {
-//     try {
-//       await resend.emails.send({
-//         from: getFromEmail(),
-//         to,
-//         subject,
-//         html,
-//       });
-
-//       console.log("✅ Email sent via Resend");
-//       return;
-//     } catch (err) {
-//       console.log("❌ Resend error:", err);
-//     }
-//   }
-
-//   // ===== SMTP (Gmail) =====
-//   const transporter = getSmtpTransporter();
-
-//   if (transporter) {
-//     try {
-//       await transporter.sendMail({
-//         from: getFromEmail(),
-//         to,
-//         subject,
-//         html,
-//       });
-
-//       console.log("✅ Email sent via SMTP");
-//       return;
-//     } catch (err) {
-//       console.log("❌ SMTP error:", err);
-//     }
-//   }
-
-//   console.log("⚠️ No email provider configured. Email not sent.");
-// };
-
-
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 
@@ -93,7 +11,12 @@ const getResendClient = () => {
   return new Resend(process.env.RESEND_API_KEY);
 };
 
+// ✅ Singleton SMTP transporter — created once, reused for all emails
+let _smtpTransporter: nodemailer.Transporter | null = null;
+
 const getSmtpTransporter = () => {
+  if (_smtpTransporter) return _smtpTransporter;
+
   const host = process.env.SMTP_HOST || "mail.keeto.org";
   const port = Number(process.env.SMTP_PORT) || 587;
   const user = process.env.SMTP_USER;
@@ -104,18 +27,21 @@ const getSmtpTransporter = () => {
     return null;
   }
 
-  return nodemailer.createTransport({
+  _smtpTransporter = nodemailer.createTransport({
     host,
     port,
-    secure: false, // Must be false for port 587 (uses STARTTLS)
-    auth: {
-      user,
-      pass,
-    },
-    tls: {
-      rejectUnauthorized: false, // Prevents failures with self-signed certificates on Plesk
-    },
+    secure: false,
+    pool: true,           // ✅ Connection pooling — reuse TCP connections
+    maxConnections: 5,    // ✅ Max 5 simultaneous connections to SMTP
+    maxMessages: 100,     // ✅ Max 100 messages per connection
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false },
+    connectionTimeout: 10000,  // ✅ 10s to connect
+    greetingTimeout: 10000,    // ✅ 10s for SMTP greeting
+    socketTimeout: 15000,      // ✅ 15s per send operation
   });
+
+  return _smtpTransporter;
 };
 
 export const sendEmail = async ({
