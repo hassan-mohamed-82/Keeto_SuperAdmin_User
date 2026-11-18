@@ -198,6 +198,8 @@ export const getAllBundles = async (req: Request, res: Response) => {
             .select({
                 id: offers.id,
                 name: offers.name,
+                nameAr: offers.nameAr,
+                nameFr: offers.nameFr,
                 image: offers.image,
                 price: offers.price,
                 startDate: offers.startDate,
@@ -262,6 +264,8 @@ export const getAllBundles = async (req: Request, res: Response) => {
         const result = offersRows.map((o) => ({
             id: o.id,
             name: o.name,
+            nameAr: o.nameAr,
+            nameFr: o.nameFr,
             image: o.image,
             price: Number(o.price),
             startDate: o.startDate,
@@ -302,6 +306,8 @@ export const getBundleById = async (req: Request, res: Response) => {
             .select({
                 id: offers.id,
                 name: offers.name,
+                nameAr: offers.nameAr,
+                nameFr: offers.nameFr,
                 image: offers.image,
                 price: offers.price,
                 startDate: offers.startDate,
@@ -370,6 +376,8 @@ export const getBundleById = async (req: Request, res: Response) => {
             data: {
                 id: offerRow.id,
                 name: offerRow.name,
+                nameAr: offerRow.nameAr,
+                nameFr: offerRow.nameFr,
                 image: offerRow.image,
                 price: Number(offerRow.price),
                 startDate: offerRow.startDate,
