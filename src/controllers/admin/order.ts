@@ -855,6 +855,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         await tx.update(orders)
             .set({
                 status: status,
+                cancelledAt: status === "cancelled" ? new Date() : null,
                 cancelReasonId: status === "cancelled" ? reason.id : null,
                 cancelReason: status === "cancelled" ? reason.name : null,
                 cancelReasonType: status === "cancelled" ? reason.type : null,

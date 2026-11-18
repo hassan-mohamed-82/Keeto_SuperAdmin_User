@@ -194,6 +194,7 @@ export const orders = mysqlTable("orders", {
     shippingAssignedAt: timestamp("shipping_assigned_at"),
     pickedUpAt: timestamp("picked_up_at"),
     deliveredAt: timestamp("delivered_at"),
+    cancelledAt: timestamp("cancelled_at"),
 
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
     createdAt: timestamp("created_at").defaultNow(),
