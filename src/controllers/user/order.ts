@@ -327,6 +327,7 @@ export const checkout = async (req: Request | any, res: Response) => {
     if (!user) {
         throw new UnauthorizedError("User not found");
     }
+    
 
     // ==========================================
     // 🛡️ User Phone & Guest Checkout Validation
