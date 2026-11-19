@@ -310,41 +310,100 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ✏️ CHANGED: no more identity merge. The user id is always the authenticated one.
     const userId: string = req.user.id;
 
+    // Fetch user from DB to verify user existence and retrieve profile details
+    const [user] = await db
+        .select({
+            id: users.id,
+            name: users.name,
+            phone: users.phone,
+            alternatePhone: users.alternatePhone,
+            email: users.email,
+            isGuest: users.isGuest,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+    if (!user) {
+        throw new UnauthorizedError("User not found");
+    }
+
     // ==========================================
-    // 🛡️ Guest Checkout — validation only (NO DB writes here)
-    // ✏️ CHANGED: only runs for real guest sessions. `guestInfo` is ignored for registered users,
-    // so a registered account can never be renamed / re-phoned / soft-deleted through this endpoint.
-    // All writes happen later inside the transaction.
+    // 🛡️ User Phone & Guest Checkout Validation
+    // Validates that the user (whether guest or registered) has a primary phone or alternative phone.
     // ==========================================
     let guestName: string | null = null;
     let guestPhone: string | null = null;
+    let guestAltPhone: string | null = null;
+    let registeredPhone: string | null = null;
 
     if (isGuestUser) {
-        guestName = String(guestInfo?.name || req.user.name || "Guest").trim().slice(0, 100) || "Guest";
-        guestPhone = normalizeEgPhone(guestInfo?.phone); // throws BadRequest if missing / invalid
-        const altPhone = guestInfo?.alternatePhone || guestInfo?.alternativePhone;
-        if (altPhone) {
-            normalizeEgPhone(altPhone);
+        guestName = String(guestInfo?.name || req.user.name || user.name || "Guest").trim().slice(0, 100) || "Guest";
+
+        const rawGuestPhone = guestInfo?.phone || req.body.phone || user.phone || null;
+        const rawGuestAltPhone = guestInfo?.alternatePhone || guestInfo?.alternativePhone || req.body.alternatePhone || req.body.alternativePhone || user.alternatePhone || null;
+
+        if (!rawGuestPhone && !rawGuestAltPhone) {
+            throw new BadRequest("Phone number or alternative phone number is required to complete checkout.");
+        }
+
+        if (rawGuestPhone) {
+            guestPhone = normalizeEgPhone(rawGuestPhone);
+        }
+        if (rawGuestAltPhone) {
+            guestAltPhone = normalizeEgPhone(rawGuestAltPhone);
+        }
+
+        // If primary phone is missing but alternative phone exists, use alternative phone as guestPhone
+        if (!guestPhone && guestAltPhone) {
+            guestPhone = guestAltPhone;
         }
 
         // A phone that belongs to a registered account can't be used by a guest (no silent merge, no takeover).
-        const [registered] = await db
-            .select({ id: users.id })
-            .from(users)
-            .where(
-                and(
-                    inArray(users.phone, phoneVariants(guestPhone)),
-                    eq(users.isGuest, false),
-                    eq(users.isDeleted, false)
+        const phonesToCheck = [guestPhone, guestAltPhone].filter(Boolean) as string[];
+        for (const phoneToCheck of phonesToCheck) {
+            const [registered] = await db
+                .select({ id: users.id })
+                .from(users)
+                .where(
+                    and(
+                        inArray(users.phone, phoneVariants(phoneToCheck)),
+                        eq(users.isGuest, false),
+                        eq(users.isDeleted, false)
+                    )
                 )
-            )
-            .limit(1);
+                .limit(1);
 
-        if (registered) {
-            throw new BadRequest(
-                "An account already exists with this phone number. Please log in to continue, or use a different phone number."
-            );
+            if (registered) {
+                throw new BadRequest(
+                    "An account already exists with this phone number. Please log in to continue, or use a different phone number."
+                );
+            }
         }
+    } else {
+        let userPhone = user.phone ? user.phone.trim() : null;
+        let userAltPhone = user.alternatePhone ? user.alternatePhone.trim() : null;
+
+        const reqPhone = req.body.phone || guestInfo?.phone;
+        const reqAltPhone = req.body.alternatePhone || req.body.alternativePhone || guestInfo?.alternatePhone || guestInfo?.alternativePhone;
+
+        if (!userPhone && reqPhone) {
+            userPhone = normalizeEgPhone(reqPhone);
+            await db.update(users).set({ phone: userPhone }).where(eq(users.id, userId));
+            user.phone = userPhone;
+        }
+
+        if (!userAltPhone && reqAltPhone) {
+            userAltPhone = normalizeEgPhone(reqAltPhone);
+            await db.update(users).set({ alternatePhone: userAltPhone }).where(eq(users.id, userId));
+            user.alternatePhone = userAltPhone;
+        }
+
+        if (!userPhone && !userAltPhone) {
+            throw new BadRequest("Phone number or alternative phone number is required to complete checkout.");
+        }
+
+        registeredPhone = userPhone || userAltPhone;
     }
 
     // ==========================================
@@ -1500,12 +1559,8 @@ export const checkout = async (req: Request | any, res: Response) => {
             resolvedBranchId = matchedBranch.id;
         }
 
-        // ✏️ CHANGED: for guests the phone comes from the validated guestInfo (not yet saved on the user row)
-        let snapshotPhone: string | null = guestPhone;
-        if (!isGuestUser) {
-            const [userInfoForAddress] = await db.select({ phone: users.phone }).from(users).where(eq(users.id, userId)).limit(1);
-            snapshotPhone = userInfoForAddress?.phone || null;
-        }
+        // Phone number for shipping address snapshot
+        const snapshotPhone: string | null = isGuestUser ? guestPhone : registeredPhone;
 
         shippingAddressSnapshot = {
             title: userAddress.title,
@@ -1677,13 +1732,10 @@ export const checkout = async (req: Request | any, res: Response) => {
     const orderId = uuidv4();
     const orderNumber = `ORD-${Date.now()}`;
 
-    const [userRow] = await db.select({ id: users.id, name: users.name, phone: users.phone, email: users.email })
-        .from(users).where(eq(users.id, userId)).limit(1);
-
-    // ✏️ CHANGED: for guests, name/phone come from the validated guestInfo (they're saved in the transaction)
+    // For guests, name/phone come from the validated guestInfo (they're saved in the transaction)
     const userInfo = isGuestUser
-        ? { ...userRow, name: guestName, phone: guestPhone }
-        : userRow;
+        ? { ...user, name: guestName, phone: guestPhone }
+        : { ...user, phone: registeredPhone || user.phone };
 
     // ==========================================
     // 11. Create Payment Session BEFORE the DB transaction (if Visa/Online)
@@ -1788,7 +1840,11 @@ export const checkout = async (req: Request | any, res: Response) => {
         // If anything below fails, the guest row and the address are rolled back too.
         if (isGuestUser) {
             await tx.update(users)
-                .set({ name: guestName!, phone: guestPhone! })
+                .set({
+                    name: guestName!,
+                    phone: guestPhone!,
+                    ...(guestAltPhone ? { alternatePhone: guestAltPhone } : {}),
+                })
                 .where(eq(users.id, userId));
 
             if (pendingGuestAddress) {

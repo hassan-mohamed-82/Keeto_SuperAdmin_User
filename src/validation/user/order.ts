@@ -5,8 +5,8 @@ import { egyptPhoneSchema, optionalEgyptPhoneSchema } from "./phone";
 // Guest Info & Address Schemas
 // ============================================================
 export const guestInfoSchema = z.object({
-    name: z.string().min(2, { message: "Guest name must be at least 2 characters" }),
-    phone: egyptPhoneSchema,
+    name: z.string().min(2, { message: "Guest name must be at least 2 characters" }).optional(),
+    phone: optionalEgyptPhoneSchema,
     alternatePhone: optionalEgyptPhoneSchema,
     alternativePhone: optionalEgyptPhoneSchema,
 });
@@ -43,6 +43,11 @@ export const checkoutSchema = z.object({
     note: z.string().max(500).optional(),
     couponCode: z.string().optional(),
 
+    // Contact Phone Fields (can be supplied directly or via guestInfo)
+    phone: optionalEgyptPhoneSchema,
+    alternatePhone: optionalEgyptPhoneSchema,
+    alternativePhone: optionalEgyptPhoneSchema,
+
     // Guest Flow Fields
     guestInfo: guestInfoSchema.optional(),
     guestAddress: guestAddressSchema.optional(),
@@ -65,6 +70,25 @@ export const checkoutSchema = z.object({
             message: "Branch ID is required for takeaway or dine-in orders.",
             path: ["branchId"],
         });
+    }
+
+    // If guestInfo is explicitly provided, verify that at least one phone field is present
+    if (data.guestInfo) {
+        const hasPhone = Boolean(
+            data.guestInfo.phone ||
+            data.guestInfo.alternatePhone ||
+            data.guestInfo.alternativePhone ||
+            data.phone ||
+            data.alternatePhone ||
+            data.alternativePhone
+        );
+        if (!hasPhone) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Phone number or alternative phone number is required.",
+                path: ["guestInfo", "phone"],
+            });
+        }
     }
 });
 
