@@ -56,6 +56,7 @@ import { sendPushNotification } from "../../utils/notifications";
 import { calculateDistance, isLocationInZone } from "../../utils/geo";
 import { formatProductsWithDiscounts } from "../../services/discount.service";
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
+import { validateUserPhone, normalizeEgPhone, phoneVariants } from "../../utils/userPhoneCheck";
 import { calculateCurrentStatus } from "./restaurantFeatures";
 import * as turf from "@turf/turf";
 import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
@@ -230,30 +231,8 @@ const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
 // ✏️ NEW HELPERS (put them in a utils file and import them if you prefer)
 // ==========================================================================
 
-/**
- * Normalizes an Egyptian mobile number to E.164 (+201XXXXXXXXX).
- * Accepts: 01012345678 / +201012345678 / 00201012345678 / 201012345678
- * Throws BadRequest if the format is invalid.
- */
-export const normalizeEgPhone = (raw: unknown): string => {
-    if (typeof raw !== "string") throw new BadRequest("Phone number is required.");
-    let trimmed = raw.trim();
-    if (trimmed.startsWith("00")) {
-        trimmed = trimmed.slice(1);
-    } else if (!trimmed.startsWith("0")) {
-        trimmed = `0${trimmed}`;
-    }
-    if (!/^01[0125][0-9]{8}$/.test(trimmed)) {
-        throw new BadRequest("Phone number must be 11 digits and start with 01.");
-    }
-    return trimmed;
-};
-
-/** All formats a phone may have been stored in (for matching legacy data). */
-const phoneVariants = (phone11: string): string[] => {
-    const withoutZero = phone11.startsWith("0") ? phone11.slice(1) : phone11;
-    return [phone11, `+20${withoutZero}`, `20${withoutZero}`, `0020${withoutZero}`];
-};
+/** Re-export normalizeEgPhone for backward compatibility. */
+export { normalizeEgPhone };
 
 /** Validates + builds the guest address row. It is NOT inserted here — it is inserted inside the transaction. */
 const buildGuestAddress = (guestAddress: any, userId: string) => {
@@ -310,102 +289,25 @@ export const checkout = async (req: Request | any, res: Response) => {
     // ✏️ CHANGED: no more identity merge. The user id is always the authenticated one.
     const userId: string = req.user.id;
 
-    // Fetch user from DB to verify user existence and retrieve profile details
-    const [user] = await db
-        .select({
-            id: users.id,
-            name: users.name,
-            phone: users.phone,
-            alternatePhone: users.alternatePhone,
-            email: users.email,
-            isGuest: users.isGuest,
-        })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-
-    if (!user) {
-        throw new UnauthorizedError("User not found");
-    }
-    
-
     // ==========================================
     // 🛡️ User Phone & Guest Checkout Validation
     // Validates that the user (whether guest or registered) has a primary phone or alternative phone.
     // ==========================================
-    let guestName: string | null = null;
-    let guestPhone: string | null = null;
-    let guestAltPhone: string | null = null;
-    let registeredPhone: string | null = null;
+    const phoneValidation = await validateUserPhone(
+        userId,
+        isGuestUser,
+        {
+            ...req.body,
+            name: req.user.name,
+        },
+        "Phone number or alternative phone number is required to complete checkout."
+    );
 
-    if (isGuestUser) {
-        guestName = String(guestInfo?.name || req.user.name || user.name || "Guest").trim().slice(0, 100) || "Guest";
-
-        const rawGuestPhone = guestInfo?.phone || req.body.phone || user.phone || null;
-        const rawGuestAltPhone = guestInfo?.alternatePhone || guestInfo?.alternativePhone || req.body.alternatePhone || req.body.alternativePhone || user.alternatePhone || null;
-
-        if (!rawGuestPhone && !rawGuestAltPhone) {
-            throw new BadRequest("Phone number or alternative phone number is required to complete checkout.");
-        }
-
-        if (rawGuestPhone) {
-            guestPhone = normalizeEgPhone(rawGuestPhone);
-        }
-        if (rawGuestAltPhone) {
-            guestAltPhone = normalizeEgPhone(rawGuestAltPhone);
-        }
-
-        // If primary phone is missing but alternative phone exists, use alternative phone as guestPhone
-        if (!guestPhone && guestAltPhone) {
-            guestPhone = guestAltPhone;
-        }
-
-        // A phone that belongs to a registered account can't be used by a guest (no silent merge, no takeover).
-        const phonesToCheck = [guestPhone, guestAltPhone].filter(Boolean) as string[];
-        for (const phoneToCheck of phonesToCheck) {
-            const [registered] = await db
-                .select({ id: users.id })
-                .from(users)
-                .where(
-                    and(
-                        inArray(users.phone, phoneVariants(phoneToCheck)),
-                        eq(users.isGuest, false),
-                        eq(users.isDeleted, false)
-                    )
-                )
-                .limit(1);
-
-            if (registered) {
-                throw new BadRequest(
-                    "An account already exists with this phone number. Please log in to continue, or use a different phone number."
-                );
-            }
-        }
-    } else {
-        let userPhone = user.phone ? user.phone.trim() : null;
-        let userAltPhone = user.alternatePhone ? user.alternatePhone.trim() : null;
-
-        const reqPhone = req.body.phone || guestInfo?.phone;
-        const reqAltPhone = req.body.alternatePhone || req.body.alternativePhone || guestInfo?.alternatePhone || guestInfo?.alternativePhone;
-
-        if (!userPhone && reqPhone) {
-            userPhone = normalizeEgPhone(reqPhone);
-            await db.update(users).set({ phone: userPhone }).where(eq(users.id, userId));
-            user.phone = userPhone;
-        }
-
-        if (!userAltPhone && reqAltPhone) {
-            userAltPhone = normalizeEgPhone(reqAltPhone);
-            await db.update(users).set({ alternatePhone: userAltPhone }).where(eq(users.id, userId));
-            user.alternatePhone = userAltPhone;
-        }
-
-        if (!userPhone && !userAltPhone) {
-            throw new BadRequest("Phone number or alternative phone number is required to complete checkout.");
-        }
-
-        registeredPhone = userPhone || userAltPhone;
-    }
+    const user = phoneValidation.user;
+    const guestName: string | null = isGuestUser ? (phoneValidation.guestName || "Guest") : null;
+    const guestPhone: string | null = isGuestUser ? phoneValidation.phone : null;
+    const guestAltPhone: string | null = isGuestUser ? phoneValidation.alternatePhone : null;
+    const registeredPhone: string | null = !isGuestUser ? phoneValidation.phone : null;
 
     // ==========================================
     // 🏠 Guest Address (Delivery) — built in memory, inserted inside the transaction

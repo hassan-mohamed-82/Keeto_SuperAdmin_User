@@ -52,6 +52,7 @@ import { NotFound } from "../../Errors/NotFound";
 import { v4 as uuidv4 } from "uuid";
 import { formatProductsWithDiscounts } from "../../services/discount.service";
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
+import { validateUserPhone } from "../../utils/userPhoneCheck";
 import { type BranchInfo, getUnavailableBranchesForFoods } from "../../helpers/food.helper";
 import { resolveBranchIdForCart, validateFoodAvailabilityForCart } from "../../helpers/cart.helper";
 import {
@@ -139,6 +140,10 @@ const extractOptionIds = (parsedVariations: any[]): string[] =>
 ========================================= */
 export const addToCart = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
+    const isGuestUser = Boolean(req.user?.isGuest);
+
+    await validateUserPhone(userId, isGuestUser, req.body);
+
     const {
         foodId,
         offerId,
@@ -631,7 +636,6 @@ export const addToCart = async (req: Request | any, res: Response) => {
     }
 
     // ─── First-order discount preview (registered users only) ────────
-    const isGuestUser = Boolean(req.user?.isGuest);
     let firstOrderDiscount: any = null;
     if (!isGuestUser && itemFood?.restaurantid) {
         // Whole-cart subtotal from the stored line totals (weighted rows store the weighted
@@ -1479,6 +1483,10 @@ export const getCart = async (req: Request | any, res: Response) => {
 ========================================= */
 export const updateCartItem = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
+    const isGuestUser = Boolean(req.user?.isGuest);
+
+    await validateUserPhone(userId, isGuestUser, req.body);
+
     const { cartItemId } = req.params;
     const { quantity, weight, variations, addons: requestAddons, note, branchId, addressId, serviceModule } = req.body;
 

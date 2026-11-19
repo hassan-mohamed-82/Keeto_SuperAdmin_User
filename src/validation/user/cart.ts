@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalEgyptPhoneSchema } from "./phone";
 
 export const addToCartSchema = z.object({
     foodId: z.string().uuid("Invalid food ID").optional(),
@@ -11,6 +12,9 @@ export const addToCartSchema = z.object({
     branchId: z.string().uuid("Invalid branch ID").optional(),
     addressId: z.string().uuid("Invalid address ID").optional(),
     serviceModule: z.enum(["takeaway", "dine_in", "delivery"]).optional(),
+    phone: optionalEgyptPhoneSchema,
+    alternatePhone: optionalEgyptPhoneSchema,
+    alternativePhone: optionalEgyptPhoneSchema,
 });
 
 export const updateCartItemSchema = z.object({
@@ -22,4 +26,7 @@ export const updateCartItemSchema = z.object({
     branchId: z.string().uuid("Invalid branch ID").optional(),
     addressId: z.string().uuid("Invalid address ID").optional(),
     serviceModule: z.enum(["takeaway", "dine_in", "delivery"]).optional(),
+    phone: optionalEgyptPhoneSchema,
+    alternatePhone: optionalEgyptPhoneSchema,
+    alternativePhone: optionalEgyptPhoneSchema,
 });
