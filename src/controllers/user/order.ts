@@ -2,51 +2,33 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
 import {
-    restaurantZoneDeliveryFees, zoneDeliveryFees, restaurantSettings,
-    restaurantSchedules, cartItems, users, addresses, branches,
-    userWallets, userWalletTransactions, paymentMethods,
-    coupons, couponUsages, couponRestaurants, discounts,
+    restaurantZoneDeliveryFees,
+    restaurantSettings,
+    addresses,
+    branches,
+    userWallets,
+    userWalletTransactions,
+    paymentMethods,
+    coupons,
+    discounts,
     selectReasons,
     orders,
     restaurants,
     orderItems,
-    notifications,
-    restaurantBusinessPlans, food,
+    restaurantBusinessPlans,
+    food,
     variationOptions,
     addons,
     zones,
     deliveryMen,
     freeDeliveryOffers,
-    branchSubcategories,
     foodVariations,
-    userRestaurantPoints,
-    cities,
-    offers,
-    offerFoods,
     shippingCompanies,
     shippingZones,
     shippingCompanyRestaurants,
-    weightRequests,
 } from "../../models/schema";
-import { computeWeightedLineTotal, splitWeightedLineTotal } from "../../helpers/weightPricing.helper";
-import {
-    type ActiveWeightRequest,
-    evaluateWeightedCheckout,
-    findActiveWeightRequest,
-    hasUnitPriceChanged,
-    isWeighedRow,
-    isWeightBoundRow,
-    snapshotPricing,
-    PAYMENT_ABANDON_MINUTES,
-    WeightCartChangedError,
-} from "../../helpers/weightCart.helper";
-import {
-    claimWeightCheckout,
-    releaseWeightCheckoutClaim,
-    resolveCheckingOutRequest,
-} from "../../helpers/weightPayment.helper";
 import { releaseCourierForOrder } from "../../services/shipping/dispatchEngine";
-import { eq, and, inArray, isNull, sql, desc, gte, ne } from "drizzle-orm";
+import { eq, and, inArray, sql, desc, ne } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { NotFound } from "../../Errors/NotFound";
@@ -54,36 +36,33 @@ import { v4 as uuidv4 } from "uuid";
 import { UnauthorizedError } from "../../Errors";
 import { sendPushNotification } from "../../utils/notifications";
 import { calculateDistance, isLocationInZone } from "../../utils/geo";
-import { formatProductsWithDiscounts } from "../../services/discount.service";
-import { validateUserNotBlocked } from "../../utils/userBlockCheck";
-import { validateUserPhone, normalizeEgPhone, phoneVariants } from "../../utils/userPhoneCheck";
-import { calculateCurrentStatus } from "./restaurantFeatures";
-import * as turf from "@turf/turf";
-import { calculateCalculatedPrice, resolveBranchIdFromAddress, type ServiceModule } from "../../helpers/pricing.helper";
-import { validateAndCalculateCoupon } from "../../helpers/coupon.helper";
-import { resolveFirstOrderDiscount, recordFirstOrderDiscountUsage } from "../../helpers/firstOrderDiscount.helper";
+import { validateUserPhone } from "../../utils/userPhoneCheck";
+import { type ServiceModule } from "../../helpers/pricing.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
-import { createOrderPaymentSession } from "../../services/payments/paymentSession.service";
-import { getNextDailyOrderNumber } from "../../helpers/getNextDailyOrderNumber";
-import { chargePendingServiceFee, handleCancelledOrder, mapOrderSourceToPlatformType } from "../../services/restaurantWalletService";
-import { calculateVisaCommission } from "../../utils/calculateVisaCommission";
-import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
-import { getSystemVisaSettings } from "../../utils/getSystemVisaSettings";
+import { handleCancelledOrder, mapOrderSourceToPlatformType } from "../../services/restaurantWalletService";
+import {
+    roundMoney,
+    buildGuestAddress,
+    resolvePaymentMethod,
+    checkCheckoutIdempotency,
+    getAndValidateUserCart,
+    validateRestaurantAndPlan,
+    validateOperatingHoursAndChannel,
+    resolveBranchForPricing,
+    checkSubcategoryBranchAvailability,
+    evaluateCartWeightGating,
+    fetchCartLookupMaps,
+    calculateCartPricingAndItems,
+    resolveDiscounts,
+    resolveDeliveryAndZones,
+    preparePaymentSessionAndCommission,
+    releaseWeightCheckoutClaim,
+    executeOrderTransaction,
+    notifyRestaurantAfterOrder,
+    formatCheckoutResponsePayload,
+} from "../../services/order";
 
-// 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
-const formatToEgyptTime = (date: Date) => {
-    return new Intl.DateTimeFormat("ar-EG", { // غيرتها لـ ar-EG عشان تطلع بالعربي لو حابة
-        timeZone: "Africa/Cairo",
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-    }).format(date);
-};
-
-// 🗓️ Helper لتحويل التاريخ لصيغة مقروءة وواضحة
+// 🗓️ Helper to format date 
 const formatDate = (date: Date | null | undefined): string | null => {
     if (!date) return null;
     return new Intl.DateTimeFormat("en-GB", {
@@ -96,19 +75,6 @@ const formatDate = (date: Date | null | undefined): string | null => {
         second: "2-digit",
         hour12: true,
     }).format(new Date(date));
-};
-
-const parseJsonArray = (val: any): any[] => {
-    if (!val) return [];
-    if (typeof val === "string") {
-        try {
-            const parsed = JSON.parse(val);
-            return typeof parsed === "string" ? JSON.parse(parsed) : (Array.isArray(parsed) ? parsed : []);
-        } catch {
-            return [];
-        }
-    }
-    return Array.isArray(val) ? val : [];
 };
 
 // Helper to format order items variations, supporting both snapshot-stored variations and old database lookup fallback
@@ -221,54 +187,12 @@ const formatOrderItemsVariations = async (items: any[]) => {
 };
 
 // ==========================================
-// 1. إنشاء الطلب (Checkout)
+// 1. Create Order (Checkout)
 // ==========================================
-// دالة مساعدة لضمان سلامة العمليات الحسابية المالية
-
-const roundMoney = (amount: number): number => Math.round(amount * 100) / 100;
-
-// ==========================================================================
-// ✏️ NEW HELPERS (put them in a utils file and import them if you prefer)
-// ==========================================================================
-
-/** Re-export normalizeEgPhone for backward compatibility. */
-export { normalizeEgPhone };
-
-/** Validates + builds the guest address row. It is NOT inserted here — it is inserted inside the transaction. */
-const buildGuestAddress = (guestAddress: any, userId: string) => {
-    if (!guestAddress || typeof guestAddress !== "object") {
-        throw new BadRequest("Delivery address is required.");
-    }
-    const lat = Number(guestAddress.lat);
-    const lng = Number(guestAddress.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !lat || !lng || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-        throw new BadRequest("Delivery address requires valid latitude and longitude coordinates.");
-    }
-    if (!guestAddress.street || String(guestAddress.street).trim() === "") {
-        throw new BadRequest("Street is required for the delivery address.");
-    }
-    const number = guestAddress.number != null ? String(guestAddress.number).trim() : "";
-    return {
-        id: uuidv4(),
-        userId,
-        title: guestAddress.title || "Guest Address",
-        street: String(guestAddress.street).trim(),
-        number: number || "-",
-        floor: guestAddress.floor ? String(guestAddress.floor) : null,
-        apartment: guestAddress.apartment ? String(guestAddress.apartment) : null,
-        landmark: guestAddress.landmark || null,
-        location: guestAddress.location || null,
-        fulladdress: guestAddress.fulladdress || `${number} ${String(guestAddress.street).trim()}`.trim(),
-        lat: String(lat),
-        lng: String(lng),
-    };
-};
-
 export const checkout = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
 
     const isGuestUser = Boolean(req.user.isGuest);
-
     const {
         orderSource,
         paymentMethod,
@@ -279,20 +203,14 @@ export const checkout = async (req: Request | any, res: Response) => {
         addressId: inputAddressId,
         note,
         couponCode,
-        guestInfo,
         guestAddress,
-        restaurantName
+        restaurantName,
     } = req.body;
 
     let addressId: string | null = inputAddressId || null;
-
-    // ✏️ CHANGED: no more identity merge. The user id is always the authenticated one.
     const userId: string = req.user.id;
 
-    // ==========================================
-    // 🛡️ User Phone & Guest Checkout Validation
-    // Validates that the user (whether guest or registered) has a primary phone or alternative phone.
-    // ==========================================
+    // 1. User Phone & Guest Validation
     const phoneValidation = await validateUserPhone(
         userId,
         isGuestUser,
@@ -309,1325 +227,178 @@ export const checkout = async (req: Request | any, res: Response) => {
     const guestAltPhone: string | null = isGuestUser ? phoneValidation.alternatePhone : null;
     const registeredPhone: string | null = !isGuestUser ? phoneValidation.phone : null;
 
-    // ==========================================
-    // 🏠 Guest Address (Delivery) — built in memory, inserted inside the transaction
-    // ✏️ CHANGED: validated, and not inserted before the order is validated.
-    // ==========================================
+    // 2. Guest Address (in-memory)
     let pendingGuestAddress: ReturnType<typeof buildGuestAddress> | null = null;
-
     if (isGuestUser && orderType === "delivery" && !addressId) {
         pendingGuestAddress = buildGuestAddress(guestAddress, userId);
         addressId = pendingGuestAddress.id;
     }
 
-    // ==========================================
-    // 🛡️ 1. Validation
-    // ==========================================
-    const validOrderSources = ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"];
-    if (!validOrderSources.includes(orderSource)) {
-        throw new BadRequest("Invalid order source");
+    // 3. Payment Method Validation
+    const {
+        isWalletPayment,
+        isCashPayment,
+        isVisaPayment,
+    } = await resolvePaymentMethod(paymentMethod, isGuestUser);
+
+    // 4. Idempotency Check
+    const existingOrder = await checkCheckoutIdempotency(idempotencyKey, userId);
+    if (existingOrder) {
+        return SuccessResponse(res, { message: "Order already processed", data: existingOrder });
     }
 
-    const [selectedPayment] = await db.select().from(paymentMethods).where(eq(paymentMethods.id, paymentMethod)).limit(1);
+    // 5. Get User Cart & Validate User Not Blocked
+    const { userCart, restaurantId } = await getAndValidateUserCart(userId);
 
-    if (!selectedPayment || !selectedPayment.isActive) {
-        throw new BadRequest("Invalid or inactive payment method");
-    }
-
-    const paymentMethodName = selectedPayment.name;
-    const paymentMethodNameAr = selectedPayment.nameAr;
-    const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
-    const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
-
-    // 🛡️ Prevent wallet payment for guest accounts
-    if (isGuestUser && isWalletPayment) {
-        throw new BadRequest("Wallet payment is only available for registered accounts.");
-    }
-
-    const isVisaPayment =
-        paymentMethodName?.toLowerCase() === "visa" ||
-        paymentMethodNameAr === "بطاقة";
-
-    // ==========================================
-    // 2. Idempotency Check
-    // ✏️ CHANGED: scoped by userId so one user can never receive another user's order.
-    // (Also add a unique index on (user_id, idempotency_key).)
-    // ==========================================
-    if (idempotencyKey) {
-        const [existing] = await db
-            .select()
-            .from(orders)
-            .where(and(eq(orders.idempotencyKey, idempotencyKey), eq(orders.userId, userId)))
-            .limit(1);
-        if (existing) return SuccessResponse(res, { message: "Order already processed", data: existing });
-    }
-
-    // ==========================================
-    // 3. Get Cart Items & User Verification
-    // ==========================================
-    const userCart = await db.select().from(cartItems).where(eq(cartItems.userId, userId));
-    if (!userCart.length) throw new BadRequest("Your cart is empty");
-
-    const restaurantId = userCart[0].restaurantId;
-    const storedOrderSource = orderSource === "mykeeto" ? "my_keeto" : orderSource;
-
-    await validateUserNotBlocked(userId, restaurantId);
-
-    // ==========================================
-    // 4. Get Restaurant, Business Plan, Schedules & Settings (Parallelized)
-    // ==========================================
-    const [
-        [restaurant],
-        [plan],
+    // 6. Restaurant, Business Plan & Schedules
+    const {
+        restaurant,
+        plan,
         schedulesList,
-        [settings]
-    ] = await Promise.all([
-        db.select().from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1),
-        db.select()
-            .from(restaurantBusinessPlans)
-            .where(
-                and(
-                    eq(restaurantBusinessPlans.restaurantId, restaurantId),
-                    eq(restaurantBusinessPlans.platformType, mapOrderSourceToPlatformType(orderSource))
-                )
-            )
-            .limit(1),
-        db.select().from(restaurantSchedules).where(eq(restaurantSchedules.restaurantId, restaurantId)),
-        db.select().from(restaurantSettings).where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1)
-    ]);
+        settings,
+        storedOrderSource,
+    } = await validateRestaurantAndPlan(restaurantId, orderSource, restaurantName);
 
-    if (!restaurant) throw new BadRequest("Restaurant not found");
-    if (!plan) {
-        throw new BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
-    }
+    // 7. Operating Hours & Channel Validation
+    const {
+        defaultPreparingDuration,
+        resolvedOrderType,
+    } = validateOperatingHoursAndChannel(settings, schedulesList, orderType, isCashPayment);
 
-    if (!restaurant.slug && restaurantName) {
-        await db
-            .update(restaurants)
-            .set({
-                slug: restaurantName,
-            })
-            .where(eq(restaurants.id, restaurant.id));
-    }
-
-    // ==========================================
-    // 🛡️ 4.5 Operating Hours & Channel Validation
-    // ==========================================
-    const validOrderTypes = ["delivery", "takeaway", "dine_in"];
-    if (!orderType || !validOrderTypes.includes(orderType)) {
-        throw new BadRequest("orderType is required and must be one of: delivery, takeaway, dine_in");
-    }
-    const resolvedOrderType = orderType;
-    const status = calculateCurrentStatus(settings, schedulesList);
-
-    if (!status.isOpenNow) throw new BadRequest(`Order failed. ${status.reason}`);
-    if (resolvedOrderType === "delivery" && !status.canDeliveryNow) throw new BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
-    if (resolvedOrderType === "takeaway" && !status.canTakeawayNow) throw new BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
-
-    // 🛡️ Cash payment guard
-    if (isCashPayment && settings?.cashEnabled === false) {
-        throw new BadRequest("Cash payment is not accepted by this restaurant. Please choose a different payment method.");
-    }
-
-    let defaultPreparingDuration: number;
-    if (resolvedOrderType === "takeaway") {
-        defaultPreparingDuration = settings?.maxTakeAwayTime ?? 25;
-    } else if (resolvedOrderType === "dine_in") {
-        defaultPreparingDuration = settings?.maxDineInTime ?? 25;
-    } else {
-        defaultPreparingDuration = settings?.maxDeliveryTime ?? 25;
-    }
-
-    // ==========================================
-    // ⚡ 5. Channel Pricing Engine — Subtotal, Variations & Addons
-    // orderType IS the serviceModule (they are the same concept)
-    // ==========================================
+    // 8. Branch Resolution for Pricing
     const serviceModule = resolvedOrderType as ServiceModule;
-
-    let pricingBranchId: string | null = branchId || null;
-
-    if (resolvedOrderType === "delivery") {
-        if (!addressId) throw new BadRequest("Delivery address is required.");
-        if (!pricingBranchId) {
-            try {
-                // ✏️ CHANGED: a pending guest address isn't in the DB yet, so skip the DB-based resolver
-                // and go straight to the coordinate-based fallback below.
-                if (pendingGuestAddress) throw new Error("GUEST_ADDRESS_NOT_SAVED_YET");
-                pricingBranchId = await resolveBranchIdFromAddress(addressId, restaurantId);
-            } catch (err: any) {
-                const storedBranch = userCart.find(c => c.branchId);
-                pricingBranchId = storedBranch?.branchId || null;
-
-                if (!pricingBranchId && (settings?.shippingCompanyId || pendingGuestAddress)) {
-                    let addr: { lat: string | null; lng: string | null } | undefined;
-                    if (pendingGuestAddress) {
-                        addr = { lat: pendingGuestAddress.lat, lng: pendingGuestAddress.lng };
-                    } else {
-                        [addr] = await db
-                            .select({ lat: addresses.lat, lng: addresses.lng })
-                            .from(addresses)
-                            .where(eq(addresses.id, addressId))
-                            .limit(1);
-                    }
-
-                    const cLat = parseFloat(addr?.lat || "0");
-                    const cLng = parseFloat(addr?.lng || "0");
-
-                    const activeBranches = await db
-                        .select({ id: branches.id, lat: branches.lat, lng: branches.lng })
-                        .from(branches)
-                        .where(and(eq(branches.restaurantId, restaurantId), eq(branches.status, "active")));
-
-                    if (activeBranches.length > 0) {
-                        let closest = activeBranches[0];
-                        let minDist = Infinity;
-                        for (const b of activeBranches) {
-                            const bLat = parseFloat(b.lat || "0");
-                            const bLng = parseFloat(b.lng || "0");
-                            if (bLat && bLng && cLat && cLng) {
-                                const dist = calculateDistance(cLat, cLng, bLat, bLng);
-                                if (dist < minDist) {
-                                    minDist = dist;
-                                    closest = b;
-                                }
-                            }
-                        }
-                        pricingBranchId = closest.id;
-                    }
-                }
-            }
-        }
-    } else {
-        // Takeaway / dine_in: branchId is required
-        if (!branchId) throw new BadRequest("Branch is required for takeaway or dine-in orders.");
-    }
-
-    // ─── Subcategory-branch availability guard ──────────────────────────
-    if (pricingBranchId) {
-        const cartFoodIds = userCart.filter(c => !c.offerId).map(c => c.foodId).filter(Boolean) as string[];
-        const cartFoods = cartFoodIds.length > 0
-            ? await db
-                .select({ id: food.id, subcategoryid: food.subcategoryid, sold_by: food.sold_by, weight_unit: food.weight_unit })
-                .from(food)
-                .where(and(inArray(food.id, cartFoodIds), activeFoodCondition))
-            : [];
-
-        const subcatIdsInCart = [...new Set(cartFoods.map(f => f.subcategoryid).filter(Boolean))] as string[];
-
-        if (subcatIdsInCart.length > 0) {
-            const inactiveSubcats = await db
-                .select({ subcategoryId: branchSubcategories.subcategoryId })
-                .from(branchSubcategories)
-                .where(and(
-                    eq(branchSubcategories.branchId, pricingBranchId),
-                    inArray(branchSubcategories.subcategoryId, subcatIdsInCart),
-                    eq(branchSubcategories.status, "inactive")
-                ));
-
-            if (inactiveSubcats.length > 0) {
-                const inactiveSet = new Set(inactiveSubcats.map(r => r.subcategoryId));
-                const blockedFoodIds = cartFoods
-                    .filter(f => f.subcategoryid && inactiveSet.has(f.subcategoryid))
-                    .map(f => f.id);
-
-                return res.status(422).json({
-                    success: false,
-                    message: "One or more items in your cart are not available at the selected branch or location.",
-                    data: {
-                        unavailableItems: blockedFoodIds.map(foodId => ({ foodId })),
-                    },
-                });
-            }
-        }
-    }
-
-    // ─── Weight-based Cart Gating ─────────────────────────────────────────
-    const userCartFoodIds = userCart.filter(c => c.foodId).map(c => c.foodId!);
-    const dbCartFoods = userCartFoodIds.length > 0
-        ? await db
-            .select({ id: food.id, sold_by: food.sold_by, weight_unit: food.weight_unit })
-            .from(food)
-            .where(inArray(food.id, userCartFoodIds))
-        : [];
-    const weightedCartFoodMap = new Map(dbCartFoods.map(f => [f.id, f]));
-    const cartFoodSoldBy = (c: { foodId: string; offerId?: string | null }) =>
-        c.offerId ? null : weightedCartFoodMap.get(c.foodId)?.sold_by ?? null;
-
-    // A cart with weighted rows (food sold by weight / stored weight) or restaurant-added rows
-    // can only be ordered through a request in awaiting_customer_approval, and EVERY such row
-    // must be tagged with that request. Anything else (a row added through a missed path, a
-    // row changed after sending) rejects the checkout here, before any order or payment session.
-    const cartHasWeightBoundRows = userCart.some(c => !c.offerId && isWeightBoundRow(c, cartFoodSoldBy(c)));
-    let activeWeightRequest: ActiveWeightRequest | null = cartHasWeightBoundRows
-        ? await findActiveWeightRequest(userId, restaurantId)
-        : null;
-
-    // A previous Visa checkout of this request is still claimed (checking_out): a double click gets
-    // "payment in progress"; an older unpaid attempt is failed and the request reverted (option b).
-    if (activeWeightRequest?.status === "checking_out") {
-        await resolveCheckingOutRequest(activeWeightRequest.id);
-        activeWeightRequest = await findActiveWeightRequest(userId, restaurantId);
-    }
-
-    const weightGate = evaluateWeightedCheckout(
-        userCart.map(c => ({ ...c, foodSoldBy: cartFoodSoldBy(c) })),
-        activeWeightRequest
+    const pricingBranchId = await resolveBranchForPricing(
+        resolvedOrderType,
+        addressId,
+        branchId,
+        restaurantId,
+        pendingGuestAddress,
+        settings,
+        userCart
     );
-    const hasWeightedItems = weightGate.hasWeightedItems;
-    // Rows the restaurant marked unavailable are excluded (only when the cart is weight-bound;
-    // a normal cart is passed through unchanged).
-    const checkoutCart = weightGate.checkoutRows;
-    /**
-     * Re-check the cart under lock (used by the Visa claim and by the order transaction): a weighted /
-     * restaurant-added row that appeared (or lost its tag) since the gate above must abort, never be
-     * added or dropped silently.
-     */
-    const assertWeightCartUnchanged = async (tx: any, lockedRequestId: string) => {
-        const lockedCart: typeof userCart = await tx
-            .select()
-            .from(cartItems)
-            .where(and(eq(cartItems.userId, userId), eq(cartItems.restaurantId, restaurantId)))
-            .for("update");
-        const pricedIds = new Set(checkoutCart.map(c => c.id));
-        const stray = lockedCart.filter(c =>
-            !c.isUnavailable &&
-            !c.offerId &&
-            (isWeightBoundRow(c, cartFoodSoldBy(c)) || c.weightRequestId) &&
-            (c.weightRequestId !== lockedRequestId || !pricedIds.has(c.id))
-        );
-        if (stray.length > 0) {
-            throw new WeightCartChangedError(lockedRequestId, stray.map(c => c.id));
-        }
-    };
 
-    /** Weighted / restaurant-added rows of the approved request: charged at their snapshot price. */
-    const isSnapshotRow = (c: typeof userCart[number]) =>
-        hasWeightedItems && !c.offerId && isWeightBoundRow(c, cartFoodSoldBy(c));
-
-    // Parse cart variations + addons (needed for pricing engine + order items)
-    const allAddonIds: string[] = [];
-    const cartParsed = checkoutCart.map(item => {
-        let safeVars = typeof item.variations === "string" ? JSON.parse(item.variations) : item.variations;
-        if (typeof safeVars === "string") safeVars = JSON.parse(safeVars);
-
-        let parsedVariations: any[] = [];
-        let parsedAddons: any[] = [];
-
-        if (Array.isArray(safeVars)) {
-            parsedVariations = safeVars;
-        } else if (safeVars && typeof safeVars === "object") {
-            parsedVariations = Array.isArray(safeVars.variations) ? safeVars.variations : [];
-            parsedAddons = Array.isArray(safeVars.addons) ? safeVars.addons : [];
-        }
-
-        let safeAddons = typeof item.addons === "string" ? JSON.parse(item.addons) : item.addons;
-        if (typeof safeAddons === "string") safeAddons = JSON.parse(safeAddons);
-        if (Array.isArray(safeAddons)) {
-            parsedAddons = [...parsedAddons, ...safeAddons];
-        }
-
-        parsedAddons.forEach((a: any) => { if (a.addonId || a.id) allAddonIds.push(a.addonId || a.id); });
-        return { cartItem: item, parsedVariations, parsedAddons };
-    });
-
-    // Batch fetch variation details for snapshot storage
-    const allCheckoutOptionIds = new Set<string>();
-    for (const { parsedVariations } of cartParsed) {
-        for (const v of parsedVariations) {
-            if (v.optionId) {
-                allCheckoutOptionIds.add(v.optionId);
-            }
-        }
-    }
-
-    const uniqueFoodIds = [...new Set(checkoutCart.filter(c => !c.offerId && c.foodId).map(c => c.foodId))];
-
-    const [optionsWithParent, addonsListDb, foodItemsDb] = await Promise.all([
-        allCheckoutOptionIds.size > 0
-            ? db
-                .select({
-                    optionId: variationOptions.id,
-                    optionName: variationOptions.optionName,
-                    optionNameAr: variationOptions.optionNameAr,
-                    optionNameFr: variationOptions.optionNameFr,
-                    additionalPrice: variationOptions.additionalPrice,
-                    priceMode: variationOptions.priceMode,
-                    status: variationOptions.status,
-                    variationId: foodVariations.id,
-                    variationName: foodVariations.name,
-                    variationNameAr: foodVariations.nameAr,
-                    variationNameFr: foodVariations.nameFr,
-                    variationStatus: foodVariations.status,
-                })
-                .from(variationOptions)
-                .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
-                .where(inArray(variationOptions.id, Array.from(allCheckoutOptionIds)))
-            : [],
-        allAddonIds.length > 0
-            ? db.select().from(addons).where(inArray(addons.id, [...new Set(allAddonIds)]))
-            : [],
-        uniqueFoodIds.length > 0
-            ? db.select({
-                id: food.id,
-                price: food.price,
-                status: food.status,
-                isOutOfStock: food.isOutOfStock,
-                discountId: food.discountId,
-                discount_type: food.discount_type,
-                discount_value: food.discount_value,
-                sold_by: food.sold_by,
-                weight_unit: food.weight_unit,
-            })
-                .from(food).where(and(inArray(food.id, uniqueFoodIds), activeFoodCondition))
-            : []
-    ]);
-
-    const optionsWithParentMap = new Map(optionsWithParent.map(o => [o.optionId, o]));
-    const addonsMap = new Map(addonsListDb.map(a => [a.id, a]));
-    const foodMap = new Map(foodItemsDb.map(f => [f.id, f]));
-
-    const checkoutOfferIds = [...new Set(checkoutCart.filter(c => c.offerId).map(c => c.offerId!))];
-    const [dbOffersForCheckout, dbOfferFoodsForCheckout] = checkoutOfferIds.length > 0
-        ? await Promise.all([
-            db.select().from(offers).where(inArray(offers.id, checkoutOfferIds)),
-            db.select().from(offerFoods).where(inArray(offerFoods.offerId, checkoutOfferIds))
-        ])
-        : [[], []];
-    const checkoutOffersMap = new Map(dbOffersForCheckout.map(o => [o.id, o]));
-    const checkoutOfferFoodsMap = new Map<string, any[]>();
-    for (const ofRow of dbOfferFoodsForCheckout) {
-        if (!checkoutOfferFoodsMap.has(ofRow.offerId)) {
-            checkoutOfferFoodsMap.set(ofRow.offerId, []);
-        }
-                checkoutOfferFoodsMap.get(ofRow.offerId)!.push(ofRow);
-    }
-
-    if (dbOfferFoodsForCheckout.length > 0) {
-        const bundleOptionIds = new Set<string>();
-        const bundleAddonIds = new Set<string>();
-
-        for (const ofRow of dbOfferFoodsForCheckout) {
-            const rawOpts = parseJsonArray(ofRow.optionIds);
-            rawOpts.forEach((id: any) => id && bundleOptionIds.add(String(id)));
-
-            const rawVars = parseJsonArray(ofRow.variations);
-            for (const pv of rawVars) {
-                if (pv?.optionId) bundleOptionIds.add(String(pv.optionId));
-                if (Array.isArray(pv?.options)) {
-                    pv.options.forEach((id: any) => id && bundleOptionIds.add(String(id)));
-                }
-            }
-
-            const rawAddonIds = parseJsonArray(ofRow.addonIds);
-            rawAddonIds.forEach((id: any) => id && bundleAddonIds.add(String(id)));
-        }
-
-        const missingOptionIds = Array.from(bundleOptionIds).filter((id) => !optionsWithParentMap.has(id));
-        if (missingOptionIds.length > 0) {
-            const extraOptions = await db
-                .select({
-                    optionId: variationOptions.id,
-                    optionName: variationOptions.optionName,
-                    optionNameAr: variationOptions.optionNameAr,
-                    optionNameFr: variationOptions.optionNameFr,
-                    additionalPrice: variationOptions.additionalPrice,
-                    priceMode: variationOptions.priceMode,
-                    status: variationOptions.status,
-                    variationId: foodVariations.id,
-                    variationName: foodVariations.name,
-                    variationNameAr: foodVariations.nameAr,
-                    variationNameFr: foodVariations.nameFr,
-                    variationStatus: foodVariations.status,
-                })
-                .from(variationOptions)
-                .leftJoin(foodVariations, eq(variationOptions.variationId, foodVariations.id))
-                .where(inArray(variationOptions.id, missingOptionIds));
-
-            for (const opt of extraOptions) {
-                optionsWithParentMap.set(opt.optionId, opt);
-            }
-        }
-
-        const missingAddonIds = Array.from(bundleAddonIds).filter((id) => !addonsMap.has(id));
-        if (missingAddonIds.length > 0) {
-            const extraAddons = await db
-                .select({ id: addons.id, name: addons.name, nameAr: addons.nameAr, nameFr: addons.nameFr, price: addons.price })
-                .from(addons)
-                .where(inArray(addons.id, missingAddonIds));
-            for (const a of extraAddons) {
-                addonsMap.set(a.id, a as any);
-            }
-        }
-    }
-
-    // ─── Calculate pricing per item ───
-    let subtotal = 0;
-    let initialSubtotal = 0;
-    const itemsWithData: any[] = [];
-    let checkoutHasUnavailable = false;
-    let checkoutPriceChanged = false;
-    const priceChangedItems: any[] = [];
-    let hasFoodLevelDiscount = false;
-
-    for (const { cartItem, parsedVariations, parsedAddons } of cartParsed) {
-        if (cartItem.offerId) {
-            const offer = checkoutOffersMap.get(cartItem.offerId);
-            if (!offer) {
-                return res.status(422).json({
-                    success: false,
-                    message: "An offer in your cart was not found. Please refresh your cart.",
-                });
-            }
-            const nowForOffer = new Date();
-            const isOfferActive = offer.status === "active" && new Date(offer.endDate) >= nowForOffer && new Date(offer.startDate) <= nowForOffer;
-            if (!isOfferActive) {
-                return res.status(422).json({
-                    success: false,
-                    message: `Offer "${offer.name}" is no longer active or has expired. Please remove it from your cart.`,
-                });
-            }
-
-            const offerUnitPrice = parseFloat(offer.price);
-            const storedUnit = parseFloat(cartItem.unitPrice as string || "0");
-            if (Math.abs(offerUnitPrice - storedUnit) > 0.01) {
-                checkoutPriceChanged = true;
-                priceChangedItems.push({
-                    foodId: cartItem.foodId,
-                    oldUnitPrice: storedUnit,
-                    newUnitPrice: offerUnitPrice,
-                });
-            }
-
-            const offerTotal = roundMoney(offerUnitPrice * cartItem.quantity);
-            initialSubtotal += offerTotal;
-
-            itemsWithData.push({
-                cartItem,
-                isOffer: true,
-                offer,
-                offerUnitPrice,
-                offerTotal,
-                itemIsAvailable: true,
-            });
-            continue;
-        }
-
-        const optionIds = parsedVariations.map((v: any) => v.optionId).filter(Boolean);
-        // Weighted / restaurant-added rows of the approved request are charged at the price
-        // snapshot the customer approved (cart_items.unit_price + stored option/addon prices),
-        // not a re-read live price. Availability is still checked live below.
-        const snapshotRow = isSnapshotRow(cartItem);
-        const isWeightedLine = isWeighedRow(cartItem, cartFoodSoldBy(cartItem));
-
-        let addonPrice = 0;
-        for (const a of parsedAddons) {
-            const addonId = a.addonId || a.id;
-            const dbAddon = addonsMap.get(addonId);
-            if (dbAddon) {
-                if (dbAddon.status === "inactive") {
-                    return res.status(422).json({
-                        success: false,
-                        message: `Add-on "${dbAddon.name}" is currently unavailable.`,
-                    });
-                }
-                const p = snapshotRow ? Number(a.price ?? 0) : parseFloat((dbAddon.price || "0") as string);
-                addonPrice += p;
-                a.price = p.toString();
-                a.name = dbAddon.name;
-                a.nameAr = dbAddon.nameAr;
-                a.nameFr = dbAddon.nameFr;
-            } else {
-                return res.status(422).json({
-                    success: false,
-                    message: `Add-on is no longer available. Please refresh your cart.`,
-                    data: { affectedFoodId: cartItem.foodId, addonId },
-                });
-            }
-        }
-
-        let channelBasePrice: number;
-        let varPrice: number;
-        let itemIsAvailable = true;
-
-        const priceResult = await calculateCalculatedPrice(
-            cartItem.foodId,
-            optionIds,
-            pricingBranchId || null,
-            serviceModule
-        );
-
-        channelBasePrice = priceResult.basePrice;
-        varPrice = priceResult.variants.reduce((s, v) => s + v.price, 0);
-        itemIsAvailable = priceResult.isAvailable;
-
-        if (snapshotRow) {
-            const snap = snapshotPricing(cartItem, isWeightedLine);
-            channelBasePrice = snap.basePrice;
-            varPrice = snap.varSum;
-            for (const v of parsedVariations) {
-                const p = Number(v.price ?? v.additionalPrice ?? 0).toString();
-                v.additionalPrice = p;
-                v.price = p;
-            }
-        } else {
-            for (const v of parsedVariations) {
-                if (v.optionId) {
-                    const resolved = priceResult.variants.find(r => r.variantOptionId === v.optionId);
-                    if (resolved) v.additionalPrice = resolved.price.toString();
-                }
-            }
-        }
-
-        const storedUnit = parseFloat(cartItem.unitPrice as string || "0");
-        // Weighted rows store the base price per weight unit: compare the live base price only.
-        const liveUnit = isWeightedLine ? priceResult.basePrice : channelBasePrice + varPrice + addonPrice;
-        if (hasUnitPriceChanged({
-            isWeighted: isWeightedLine,
-            liveBasePrice: priceResult.basePrice,
-            liveTotalUnitPrice: channelBasePrice + varPrice + addonPrice,
-            storedUnitPrice: storedUnit,
-            tolerance: 0.01,
-        })) {
-            checkoutPriceChanged = true;
-            priceChangedItems.push({
-                foodId: cartItem.foodId,
-                oldUnitPrice: storedUnit,
-                newUnitPrice: liveUnit,
-            });
-        }
-
-        if (!itemIsAvailable) checkoutHasUnavailable = true;
-
-        const originalBasePrice = channelBasePrice;
-        const foodItem = foodMap.get(cartItem.foodId);
-
-        let initialDiscountPrice = originalBasePrice;
-        if (foodItem?.discount_value && Number(foodItem.discount_value) > 0) {
-            hasFoodLevelDiscount = true;
-            if (foodItem.discount_type === "percentage") {
-                initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(foodItem.discount_value) / 100));
-            } else if (foodItem.discount_type === "amount" || foodItem.discount_type === "fixed") {
-                initialDiscountPrice = Math.max(0, originalBasePrice - Number(foodItem.discount_value));
-            }
-        }
-
-        if (isWeightedLine) {
-            // Same extras as the item total below; a 0.5 kg line must not look like a product discount.
-            const effectiveWeight = cartItem.finalWeight ?? cartItem.weight ?? 0;
-            initialSubtotal += parseFloat(computeWeightedLineTotal(effectiveWeight, initialDiscountPrice, [
-                ...parsedVariations.map((v: any) => ({ price: v.additionalPrice ?? v.price ?? 0, priceMode: v.priceMode || "fixed" })),
-                ...parsedAddons.map((a: any) => ({ price: a.price ?? 0, priceMode: "fixed" })),
-            ], cartItem.quantity));
-        } else {
-            initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * cartItem.quantity;
-        }
-
-        const detailedVariations = parsedVariations.map((v: any) => {
-            const optDetails = optionsWithParentMap.get(v.optionId);
-            const resolvedPrice = (v.additionalPrice ?? optDetails?.additionalPrice ?? v.price ?? "0.00");
-
-            return {
-                variationId: optDetails?.variationId ?? v.variationId ?? null,
-                variationName: optDetails?.variationName ?? v.variationName ?? null,
-                variationNameAr: optDetails?.variationNameAr ?? v.variationNameAr ?? null,
-                variationNameFr: optDetails?.variationNameFr ?? v.variationNameFr ?? null,
-                optionId: optDetails?.optionId ?? v.optionId ?? null,
-                optionName: optDetails?.optionName ?? v.optionName ?? null,
-                optionNameAr: optDetails?.optionNameAr ?? v.optionNameAr ?? null,
-                optionNameFr: optDetails?.optionNameFr ?? v.optionNameFr ?? null,
-                price: Number(resolvedPrice).toFixed(2),
-                additionalPrice: Number(resolvedPrice).toFixed(2),
-                priceMode: snapshotRow ? (v.priceMode ?? "fixed") : (optDetails?.priceMode ?? v.priceMode ?? "fixed"),
-            };
-        });
-
-        const hasMissingDetails = detailedVariations.some(v => !v.variationName && !v.optionName);
-
-        if (hasMissingDetails) {
-            return res.status(422).json({
-                success: false,
-                message: "Some selected options are no longer available. Please refresh your cart.",
-                data: {
-                    affectedFoodId: cartItem.foodId,
-                },
-            });
-        }
-
-        itemsWithData.push({
-            cartItem,
-            foodItem,
-            originalBasePrice,
-            varPrice,
-            addonPrice,
-            vars: detailedVariations,
-            addonsList: parsedAddons,
-            itemIsAvailable,
-        });
-    }
-
-    // ─── 422: Unavailable items guard ────────────────────────────────────
-    if (checkoutHasUnavailable) {
+    // 9. Subcategory-branch Availability Guard
+    const blockedFoodIds = await checkSubcategoryBranchAvailability(pricingBranchId, userCart);
+    if (blockedFoodIds && blockedFoodIds.length > 0) {
         return res.status(422).json({
             success: false,
-            message: "One or more items in your cart are unavailable. Please review your cart before placing the order.",
+            message: "One or more items in your cart are not available at the selected branch or location.",
             data: {
-                unavailableItems: itemsWithData
-                    .filter(d => !d.itemIsAvailable)
-                    .map(d => ({ foodId: d.cartItem.foodId })),
+                unavailableItems: blockedFoodIds.map((foodId) => ({ foodId })),
             },
         });
     }
 
-    const resolvedOrderProducts = await formatProductsWithDiscounts(
-        itemsWithData
-            .filter(data => !data.isOffer && data.foodItem)
-            .map(data => ({
-                id: data.foodItem.id,
-                price: data.originalBasePrice,
-                discountId: data.foodItem.discountId,
-                discountType: data.foodItem.discount_type,
-                discountValue: data.foodItem.discount_value,
-            })),
+    // 10. Weight-based Cart Gating
+    const {
+        activeWeightRequest,
+        hasWeightedItems,
+        checkoutCart,
+        cartFoodSoldBy,
+        assertWeightCartUnchanged,
+    } = await evaluateCartWeightGating(userCart, userId, restaurantId);
+
+    // 11. Fetch Cart Lookup Maps
+    const {
+        cartParsed,
+        optionsWithParentMap,
+        addonsMap,
+        foodMap,
+        checkoutOffersMap,
+        checkoutOfferFoodsMap,
+    } = await fetchCartLookupMaps(checkoutCart);
+
+    // 12. Calculate Cart Pricing & Item Details
+    const pricingResult = await calculateCartPricingAndItems({
+        cartParsed,
+        checkoutOffersMap,
+        checkoutOfferFoodsMap,
+        optionsWithParentMap,
+        addonsMap,
+        foodMap,
+        pricingBranchId,
+        serviceModule,
+        hasWeightedItems,
+        cartFoodSoldBy,
         restaurantId,
-    );
-    const resolvedOrderProductMap = new Map(resolvedOrderProducts.map(product => [product.id, product]));
-    const appliedDiscountIds = new Set(
-        resolvedOrderProducts
-            .map(product => product.appliedDiscountId)
-            .filter((id): id is string => Boolean(id))
-    );
-    const itemsToInsert: any[] = [];
+    });
 
-    for (const data of itemsWithData) {
-        if (data.isOffer) {
-            const { cartItem, offer, offerUnitPrice, offerTotal } = data;
-            subtotal += offerTotal;
-            const bFoods = checkoutOfferFoodsMap.get(offer.id) || [];
-            const perFoodPrice = bFoods.length > 0 ? roundMoney(offerUnitPrice / bFoods.length) : offerUnitPrice;
-                        for (const bf of bFoods) {
-                const rawOpts = parseJsonArray(bf.optionIds);
-                const rawVars = parseJsonArray(bf.variations);
-
-                const bfOptionIds = new Set<string>(rawOpts.map((id: any) => String(id)).filter(Boolean));
-                for (const pv of rawVars) {
-                    if (pv?.optionId) bfOptionIds.add(String(pv.optionId));
-                    if (Array.isArray(pv?.options)) {
-                        pv.options.forEach((id: any) => id && bfOptionIds.add(String(id)));
-                    }
-                }
-
-                const bundleDetailedVariations = Array.from(bfOptionIds).map((optId) => {
-                    const optDetails = optionsWithParentMap.get(optId);
-                    const resolvedPrice = optDetails?.additionalPrice ?? "0.00";
-                    return {
-                        variationId: optDetails?.variationId ?? null,
-                        variationName: optDetails?.variationName ?? null,
-                        variationNameAr: optDetails?.variationNameAr ?? null,
-                        variationNameFr: optDetails?.variationNameFr ?? null,
-                        optionId: optDetails?.optionId ?? optId,
-                        optionName: optDetails?.optionName ?? null,
-                        optionNameAr: optDetails?.optionNameAr ?? null,
-                        optionNameFr: optDetails?.optionNameFr ?? null,
-                        price: Number(resolvedPrice).toFixed(2),
-                        additionalPrice: Number(resolvedPrice).toFixed(2),
-                    };
-                });
-
-                const rawBfAddonIds = parseJsonArray(bf.addonIds);
-                const bundleDetailedAddons: any[] = [];
-                let bundleAddonsPrice = 0;
-                for (const addonId of rawBfAddonIds) {
-                    const dbAddon = addonsMap.get(String(addonId));
-                    if (dbAddon) {
-                        const addonPrice = Number(dbAddon.price || 0);
-                        bundleAddonsPrice += addonPrice;
-                        bundleDetailedAddons.push({
-                            addonId: dbAddon.id,
-                            name: dbAddon.name,
-                            nameAr: dbAddon.nameAr,
-                            nameFr: dbAddon.nameFr,
-                            price: addonPrice.toFixed(2),
-                        });
-                    }
-                }
-                const bundleItemTotal = roundMoney(perFoodPrice * cartItem.quantity + bundleAddonsPrice);
-
-                itemsToInsert.push({
-                    id: uuidv4(),
-                    foodId: bf.foodId,
-                    quantity: bf.quantity * cartItem.quantity,
-                    basePrice: perFoodPrice.toFixed(2),
-                    variationsPrice: "0.00",
-                    addonsPrice: bundleAddonsPrice.toFixed(2),
-                    totalPrice: bundleItemTotal.toFixed(2),
-                    variations: bundleDetailedVariations,
-                    addons: bundleDetailedAddons,
-                    note: cartItem.note || null,
-                    isBundle: true,
-                });
-            }
-            continue;
-        }
-
-        const { cartItem, foodItem, originalBasePrice, varPrice, addonPrice, vars, addonsList } = data;
-
-        const resolvedProduct = resolvedOrderProductMap.get(foodItem.id);
-        const discountedBasePrice = resolvedProduct?.finalPrice ?? originalBasePrice;
-
-        const isWeightedFood = isWeighedRow(cartItem, foodItem?.sold_by);
-        let itemTotal: number;
-        // Order item price columns. Unit rows: per-unit prices, total = (base+var+addons) × qty.
-        // Weighted rows (quantity is always 1): basePrice = discounted price PER WEIGHT UNIT,
-        // variationsPrice / addonsPrice = the LINE amounts of the extras (fixed + weight × per_weight),
-        // so that round(finalWeight × basePrice) + variationsPrice + addonsPrice = totalPrice exactly.
-        let lineVariationsPrice = varPrice;
-        let lineAddonsPrice = addonPrice;
-        if (isWeightedFood) {
-            const effectiveWeight = cartItem.finalWeight ? Number(cartItem.finalWeight) : Number(cartItem.weight || 0);
-            const split = splitWeightedLineTotal(
-                effectiveWeight,
-                discountedBasePrice,
-                vars.map((v: any) => ({ price: v.additionalPrice || v.price || 0, priceMode: v.priceMode || "fixed" })),
-                addonsList.map((a: any) => ({ price: a.price || 0, priceMode: "fixed" })),
-                cartItem.quantity
-            );
-            itemTotal = parseFloat(split.total);
-            lineVariationsPrice = parseFloat(split.variationsPortion);
-            lineAddonsPrice = parseFloat(split.addonsPortion);
-        } else {
-            itemTotal = roundMoney((discountedBasePrice + varPrice + addonPrice) * cartItem.quantity);
-        }
-        subtotal += itemTotal;
-
-        itemsToInsert.push({
-            id: uuidv4(),
-            foodId: cartItem.foodId,
-            quantity: cartItem.quantity,
-            basePrice: discountedBasePrice.toFixed(2),
-            variationsPrice: lineVariationsPrice.toFixed(2),
-            addonsPrice: lineAddonsPrice.toFixed(2),
-            totalPrice: itemTotal.toFixed(2),
-            variations: vars,
-            addons: addonsList,
-            note: cartItem.note || null,
-            isBundle: false,
-            orderedWeight: isWeightedFood && cartItem.weight ? String(cartItem.weight) : null,
-            finalWeight: isWeightedFood && (cartItem.finalWeight ?? cartItem.weight) ? String(cartItem.finalWeight ?? cartItem.weight) : null,
-            weightUnit: isWeightedFood ? (cartItem.weightUnit || foodItem?.weight_unit || null) : null,
+    if ("error" in pricingResult && pricingResult.error) {
+        return res.status(pricingResult.error.status).json({
+            success: false,
+            message: pricingResult.error.message,
+            ...(pricingResult.error.data ? { data: pricingResult.error.data } : {}),
         });
     }
 
-    subtotal = roundMoney(subtotal);
+    const {
+        subtotal,
+        initialSubtotal,
+        hasFoodLevelDiscount,
+        resolvedOrderProducts,
+        appliedDiscountIds,
+        itemsToInsert,
+    } = pricingResult;
 
-    // ==========================================
-    // 5.2 Fees & Commission
-    // ==========================================
-    const serviceFee = parseFloat(plan.serviceFee as string || "0");
-    const commissionRate = parseFloat(plan.commissionRate as string || "0");
+    // 13. Fees & Commission
+    const serviceFee = parseFloat((plan.serviceFee as string) || "0");
+    const commissionRate = parseFloat((plan.commissionRate as string) || "0");
     const appCommission = roundMoney(subtotal * (commissionRate / 100));
 
-    // ==========================================
-    // 5.5 Check Coupons & Order Level Discounts
-    // ==========================================
-    let totalDiscount = 0;
-    let appliedCoupon: any = null;
-    let isFreeDelivery = false;
+    // 14. Discounts & Coupons
+    const discountResult = await resolveDiscounts({
+        subtotal,
+        initialSubtotal,
+        hasFoodLevelDiscount,
+        resolvedOrderProducts,
+        appliedDiscountIds,
+        isGuestUser,
+        userId,
+        restaurantId,
+        couponCode,
+        itemsToInsert,
+    });
 
-    let orderDiscountId: string | null = null;
-    let orderCouponId: string | null = null;
-    let orderDiscountType: "percentage" | "fixed_amount" | null = null;
-    let orderDiscountValue: string | null = null;
-    let orderDiscountSource: "food_level" | "restaurant_discount" | "global_discount" | "coupon" | "first_order_discount" | null = null;
+    const {
+        totalDiscount,
+        appliedCoupon,
+        isFreeDelivery: couponFreeDelivery,
+        orderDiscountId,
+        orderCouponId,
+        orderFirstOrderDiscountId,
+        orderDiscountType,
+        orderDiscountValue,
+        orderDiscountSource,
+        firstOrderDiscountAmount,
+    } = discountResult;
 
-    const appliedProduct = resolvedOrderProducts.find(product => product.discountAmount > 0);
-    if (appliedProduct?.discountDetails) {
-        orderDiscountId = appliedProduct.discountDetails.id;
-        orderDiscountSource = appliedProduct.discountDetails.source === "product"
-            ? "food_level"
-            : appliedProduct.discountDetails.source === "global" ? "global_discount" : "restaurant_discount";
-        orderDiscountType = appliedProduct.discountDetails.type === "percentage" ? "percentage" : "fixed_amount";
-        orderDiscountValue = String(appliedProduct.discountDetails.value);
-    } else if (hasFoodLevelDiscount) {
-        orderDiscountSource = "food_level";
-        orderDiscountValue = roundMoney(initialSubtotal - subtotal).toFixed(2);
-    }
+    // 15. Delivery & Zone Resolution
+    const deliveryResult = await resolveDeliveryAndZones({
+        resolvedOrderType,
+        addressId,
+        pendingGuestAddress,
+        userId,
+        restaurantId,
+        branchId,
+        zoneId,
+        settings,
+        guestPhone,
+        registeredPhone,
+        isGuestUser,
+        subtotal,
+        initialIsFreeDelivery: couponFreeDelivery,
+    });
 
-    // First Orders Discount — applies the maximum discount available
-    let appliedFirstOrderDiscount: any = null;
-    let firstOrderDiscountAmount = 0;
-    let orderFirstOrderDiscountId: string | null = null;
-
-    const existingProductDiscountAmount = roundMoney(Math.max(0, initialSubtotal - subtotal));
-
-    // First-order discount is only for registered (non-guest) users
-    if (!isGuestUser) {
-        const eligibleFirstOrder = await resolveFirstOrderDiscount(
-            userId,
-            restaurantId,
-            initialSubtotal > 0 ? initialSubtotal : subtotal
-        );
-
-        if (eligibleFirstOrder) {
-            firstOrderDiscountAmount = eligibleFirstOrder.discountAmount;
-            appliedFirstOrderDiscount = eligibleFirstOrder.discount;
-        }
-    }
-
-    if (appliedFirstOrderDiscount && firstOrderDiscountAmount > existingProductDiscountAmount) {
-        const additionalDiscount = roundMoney(firstOrderDiscountAmount - existingProductDiscountAmount);
-        totalDiscount += additionalDiscount;
-        orderFirstOrderDiscountId = appliedFirstOrderDiscount.id;
-        orderDiscountSource = "first_order_discount";
-        orderDiscountType = appliedFirstOrderDiscount.discountType === "percentage" ? "percentage" : "fixed_amount";
-        orderDiscountValue = appliedFirstOrderDiscount.discountValue ? String(appliedFirstOrderDiscount.discountValue) : String(firstOrderDiscountAmount);
-    } else {
-        appliedFirstOrderDiscount = null;
-    }
-
-    // Coupon
-    if (couponCode) {
-        const couponResult = await validateAndCalculateCoupon(
-            couponCode,
-            userId,
-            restaurantId,
-            subtotal,
-            0,
-            itemsToInsert.map((c) => c.foodId).filter(Boolean) as string[],
-            itemsToInsert.map((c) => ({
-                foodId: c.foodId,
-                totalPrice: parseFloat(c.totalPrice || "0"),
-            }))
-        );
-
-        appliedCoupon = couponResult.coupon;
-        const couponDiscountAmount = couponResult.discountAmount;
-        isFreeDelivery = couponResult.isFreeDelivery;
-
-        if (appliedCoupon) {
-            orderCouponId = appliedCoupon.id || null;
-            totalDiscount += couponDiscountAmount;
-
-            if (!orderDiscountSource) {
-                orderDiscountSource = "coupon";
-                orderDiscountType = appliedCoupon.discountType === "percentage" ? "percentage" : "fixed_amount";
-                orderDiscountValue = appliedCoupon.discountValue ? appliedCoupon.discountValue.toString() : couponDiscountAmount.toFixed(2);
-            }
-        }
-    }
-
-    totalDiscount = roundMoney(totalDiscount);
-
-    // ==========================================
-    // 6. Dynamic Delivery & Turf Zone Logic
-    // ==========================================
-    let deliveryFee = 0;
-    let resolvedZoneId: string | null = zoneId || null;
-    let resolvedBranchId: string | null = branchId || null;
-    let deliveryGenericZoneId: string | null = null;
-    let shippingAddressSnapshot: any = null;
-    let targetShippingCompanyId: string | null = null;
-    let isCompanyActive = false; // ✏️ CHANGED: hoisted so it's visible outside the delivery block
-
-    if (resolvedOrderType === "delivery") {
-        if (!addressId) throw new BadRequest("Delivery address is required");
-
-        // ✏️ CHANGED: use the in-memory guest address if it hasn't been saved yet
-        let userAddress: any;
-        if (pendingGuestAddress) {
-            userAddress = pendingGuestAddress;
-        } else {
-            [userAddress] = await db.select().from(addresses)
-                .where(and(eq(addresses.id, addressId), eq(addresses.userId, userId))).limit(1);
-        }
-        if (!userAddress) throw new BadRequest("Invalid delivery address");
-
-        const lat = parseFloat(userAddress.lat as string || "0");
-        const lng = parseFloat(userAddress.lng as string || "0");
-
-        if (!lat || !lng) {
-            throw new BadRequest("Delivery address requires valid latitude and longitude coordinates.");
-        }
-
-        targetShippingCompanyId = settings?.shippingCompanyId || null;
-
-        if (!targetShippingCompanyId) {
-            const [junctionLink] = await db
-                .select({
-                    shippingCompanyId: shippingCompanyRestaurants.shippingCompanyId,
-                    shippingCompanyStatus: shippingCompanies.status,
-                })
-                .from(shippingCompanyRestaurants)
-                .innerJoin(shippingCompanies, eq(shippingCompanyRestaurants.shippingCompanyId, shippingCompanies.id))
-                .where(
-                    and(
-                        eq(shippingCompanyRestaurants.restaurantId, restaurantId),
-                        eq(shippingCompanyRestaurants.status, "active"),
-                        eq(shippingCompanies.status, "active")
-                    )
-                )
-                .limit(1);
-
-            if (junctionLink) {
-                targetShippingCompanyId = junctionLink.shippingCompanyId;
-                isCompanyActive = true;
-            }
-        } else {
-            const [company] = await db
-                .select({ id: shippingCompanies.id, status: shippingCompanies.status })
-                .from(shippingCompanies)
-                .where(eq(shippingCompanies.id, targetShippingCompanyId))
-                .limit(1);
-
-            if (company && company.status === "active") {
-                isCompanyActive = true;
-            } else {
-                targetShippingCompanyId = null;
-            }
-        }
-
-        let applicableFee: any = null;
-        let maxDeliveryFee = -1;
-
-        if (targetShippingCompanyId && isCompanyActive) {
-            const companyZones = await db
-                .select({
-                    id: shippingZones.id,
-                    name: shippingZones.name,
-                    nameAr: shippingZones.nameAr,
-                    coordinates: shippingZones.coordinates,
-                    coverageAreaRadiusKm: shippingZones.coverageAreaRadiusKm,
-                    deliveryFee: shippingZones.deliveryFee,
-                    minOrderAmount: shippingZones.minOrderAmount,
-                    status: shippingZones.status,
-                })
-                .from(shippingZones)
-                .where(
-                    and(
-                        eq(shippingZones.shippingCompanyId, targetShippingCompanyId),
-                        eq(shippingZones.status, "active")
-                    )
-                );
-
-            for (const sz of companyZones) {
-                let coords = sz.coordinates as any;
-                if (typeof coords === "string") {
-                    try {
-                        coords = JSON.parse(coords);
-                    } catch {
-                        coords = [];
-                    }
-                }
-                const isPolygon = Array.isArray(coords) && coords.length >= 3;
-                const feeObj = {
-                    id: sz.id,
-                    zoneId: sz.id,
-                    branchId: null,
-                    branchStatus: "active",
-                    deliveryFee: sz.deliveryFee,
-                    coverageType: isPolygon ? "POLYGON" : "RADIUS",
-                    customCoordinates: coords,
-                    customRadiusKm: sz.coverageAreaRadiusKm,
-                    defaultCoordinates: coords,
-                    defaultRadiusKm: sz.coverageAreaRadiusKm,
-                    zoneName: sz.name,
-                    zoneNameAr: sz.nameAr,
-                };
-
-                if (isLocationInZone(lat, lng, feeObj.zoneId, feeObj)) {
-                    const currentFee = parseFloat(feeObj.deliveryFee as string || "0");
-                    if (currentFee > maxDeliveryFee) {
-                        maxDeliveryFee = currentFee;
-                        applicableFee = feeObj;
-                    }
-                }
-            }
-        }
-
-        // If not linked to a shipping company or no zone matched, check the restaurant's own zones
-        if (!applicableFee) {
-            const restaurantFees = await db.select({
-                id: restaurantZoneDeliveryFees.id,
-                zoneId: restaurantZoneDeliveryFees.zoneId,
-                branchId: restaurantZoneDeliveryFees.branchId,
-                deliveryFee: restaurantZoneDeliveryFees.deliveryFee,
-                coverageType: restaurantZoneDeliveryFees.coverageType,
-                customCoordinates: restaurantZoneDeliveryFees.customCoordinates,
-                customRadiusKm: restaurantZoneDeliveryFees.customRadiusKm,
-                defaultCoordinates: zones.coordinates,
-                defaultRadiusKm: zones.coverageAreaRadiusKm,
-                zoneName: zones.name,
-                zoneNameAr: zones.nameAr
-            })
-                .from(restaurantZoneDeliveryFees)
-                .leftJoin(zones, eq(restaurantZoneDeliveryFees.zoneId, zones.id))
-                .where(
-                    and(
-                        eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
-                        eq(restaurantZoneDeliveryFees.status, "active"),
-                        branchId ? eq(restaurantZoneDeliveryFees.branchId, branchId) : undefined
-                    )
-                );
-
-            for (const fee of restaurantFees) {
-                if (isLocationInZone(lat, lng, fee.zoneId, fee)) {
-                    const currentFee = parseFloat(fee.deliveryFee as string || "0");
-                    if (currentFee > maxDeliveryFee) {
-                        maxDeliveryFee = currentFee;
-                        applicableFee = fee;
-                    }
-                }
-            }
-        }
-
-        if (!applicableFee) {
-            throw new BadRequest("Your delivery address is outside our covered delivery zones.");
-        }
-
-        const genericZoneId = applicableFee.zoneId;
-        deliveryGenericZoneId = genericZoneId;
-        resolvedZoneId = applicableFee.id;
-        if (!resolvedZoneId) {
-            throw new BadRequest("No delivery zone found for this address.");
-        }
-        deliveryFee = parseFloat(applicableFee.deliveryFee as string || "0");
-
-        if (applicableFee.branchId) {
-            resolvedBranchId = applicableFee.branchId;
-        } else if (branchId) {
-            const [selectedBranch] = await db.select({ id: branches.id })
-                .from(branches)
-                .where(
-                    and(
-                        eq(branches.id, branchId),
-                        eq(branches.restaurantId, restaurantId),
-                        eq(branches.status, "active")
-                    )
-                )
-                .limit(1);
-
-            if (!selectedBranch) throw new BadRequest("Selected branch not found or inactive.");
-            resolvedBranchId = selectedBranch.id;
-        } else if (targetShippingCompanyId && isCompanyActive) {
-            // 🚚 Shipping-company orders: pick the closest active branch to the customer
-            const activeBranches = await db.select({
-                id: branches.id,
-                name: branches.name,
-                lat: branches.lat,
-                lng: branches.lng,
-            })
-                .from(branches)
-                .where(
-                    and(
-                        eq(branches.restaurantId, restaurantId),
-                        eq(branches.status, "active")
-                    )
-                );
-
-            if (!activeBranches || activeBranches.length === 0) {
-                throw new BadRequest("No active branch found for this restaurant.");
-            }
-
-            if (activeBranches.length === 1) {
-                resolvedBranchId = activeBranches[0].id;
-            } else {
-                let closestBranch = activeBranches[0];
-                let minDistance = Infinity;
-
-                for (const b of activeBranches) {
-                    const bLat = parseFloat(b.lat as string || "0");
-                    const bLng = parseFloat(b.lng as string || "0");
-                    if (bLat && bLng) {
-                        const dist = calculateDistance(lat, lng, bLat, bLng);
-                        if (dist < minDistance) {
-                            minDistance = dist;
-                            closestBranch = b;
-                        }
-                    }
-                }
-                resolvedBranchId = closestBranch.id;
-            }
-        } else {
-            const [matchedBranch] = await db.select({ id: branches.id })
-                .from(branches)
-                .where(
-                    and(
-                        eq(branches.restaurantId, restaurantId),
-                        genericZoneId ? eq(branches.zoneId, genericZoneId) : undefined,
-                        eq(branches.status, "active")
-                    )
-                )
-                .limit(1);
-
-            if (!matchedBranch) throw new BadRequest("No active branch found serving your delivery zone.");
-            resolvedBranchId = matchedBranch.id;
-        }
-
-        // Phone number for shipping address snapshot
-        const snapshotPhone: string | null = isGuestUser ? guestPhone : registeredPhone;
-
-        shippingAddressSnapshot = {
-            title: userAddress.title,
-            street: userAddress.street,
-            building: userAddress.number || null,
-            floor: userAddress.floor || null,
-            apartment: userAddress.apartment || null,
-            landmark: userAddress.landmark || null,
-            location: userAddress.location || null,
-            fulladdress: userAddress.fulladdress || null,
-            lat: lat,
-            lng: lng,
-            phone: snapshotPhone,
-            addressZoneId: genericZoneId || null,
-            restaurantZoneId: resolvedZoneId || null,
-            addressZoneName: applicableFee.zoneName || null,
-            addressZoneNameAr: applicableFee.zoneNameAr || null,
-        };
-    } else {
-        if (!branchId) throw new BadRequest("Branch is required for takeaway or dine-in orders.");
-
-        const [branch] = await db.select({ id: branches.id, zoneId: branches.zoneId })
-            .from(branches)
-            .where(
-                and(
-                    eq(branches.id, branchId),
-                    eq(branches.restaurantId, restaurantId),
-                    eq(branches.status, "active")
-                )
-            )
-            .limit(1);
-
-        if (!branch) throw new BadRequest("Invalid or inactive branch selected.");
-
-        resolvedBranchId = branch.id;
-        resolvedZoneId = branch.zoneId;
-    }
-
-    // Branch Snapshot — zone data comes from the restaurant's own zone config
-    // (restaurantZoneDeliveryFees) matching the order delivery zone, or the branch's zone.
-    let branchSnapshotData: any = null;
-    if (resolvedBranchId) {
-        const [branchDetails] = await db
-            .select({
-                id: branches.id,
-                name: branches.name,
-                nameAr: branches.nameAr,
-                nameFr: branches.nameFr,
-                address: branches.address,
-                addressAr: branches.addressAr,
-                addressFr: branches.addressFr,
-                phoneNumber: branches.phoneNumber,
-                status: branches.status,
-                cityId: branches.cityId,
-                cityName: cities.name,
-                cityNameAr: cities.nameAr,
-                zoneId: deliveryGenericZoneId ? restaurantZoneDeliveryFees.zoneId : branches.zoneId,
-                zoneName: zones.name,
-                zoneNameAr: zones.nameAr,
-                zoneDeliveryFee: restaurantZoneDeliveryFees.deliveryFee,
-            })
-            .from(branches)
-            .leftJoin(cities, eq(branches.cityId, cities.id))
-            .leftJoin(
-                restaurantZoneDeliveryFees,
-                and(
-                    eq(restaurantZoneDeliveryFees.branchId, branches.id),
-                    eq(restaurantZoneDeliveryFees.restaurantId, restaurantId),
-                    deliveryGenericZoneId ? eq(restaurantZoneDeliveryFees.zoneId, deliveryGenericZoneId) : sql`1=0`
-                )
-            )
-            .leftJoin(
-                zones,
-                eq(zones.id, deliveryGenericZoneId ? restaurantZoneDeliveryFees.zoneId : branches.zoneId)
-            )
-            .where(eq(branches.id, resolvedBranchId))
-            .limit(1);
-
-        if (branchDetails) {
-            branchSnapshotData = {
-                id: branchDetails.id,
-                name: branchDetails.name,
-                nameAr: branchDetails.nameAr || null,
-                nameFr: branchDetails.nameFr || null,
-                address: branchDetails.address,
-                addressAr: branchDetails.addressAr || null,
-                addressFr: branchDetails.addressFr || null,
-                phone: branchDetails.phoneNumber || null,
-                status: branchDetails.status,
-                zoneId: branchDetails.zoneId || null,
-                zoneName: branchDetails.zoneName || null,
-                zoneNameAr: branchDetails.zoneNameAr || null,
-                zoneDeliveryFee: branchDetails.zoneDeliveryFee
-                    ? parseFloat(branchDetails.zoneDeliveryFee as string)
-                    : null,
-                cityId: branchDetails.cityId || null,
-                cityName: branchDetails.cityName || null,
-                cityNameAr: branchDetails.cityNameAr || null,
-            };
-        }
-    }
-
-    const calculatedDeliveryFee = deliveryFee;
-    if (isFreeDelivery) deliveryFee = 0;
-
-    // ==========================================
-    // 6.5 Free Delivery Offer Check (schema-based)
-    // ==========================================
-    if (!isFreeDelivery && resolvedOrderType === "delivery") {
-        const nowForOffer = new Date();
-        const [freeDeliveryOffer] = await db
-            .select()
-            .from(freeDeliveryOffers)
-            .where(
-                and(
-                    eq(freeDeliveryOffers.restaurantId, restaurantId),
-                    eq(freeDeliveryOffers.status, "active")
-                )
-            )
-            .limit(1);
-
-        if (freeDeliveryOffer) {
-            const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= nowForOffer;
-            const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= nowForOffer;
-            const minAmountOk = !freeDeliveryOffer.minOrderAmount || subtotal >= parseFloat(freeDeliveryOffer.minOrderAmount as string);
-
-            let offerBranchIds: string[] = [];
-            const rawBranchIds = freeDeliveryOffer.branchIds;
-            if (Array.isArray(rawBranchIds)) {
-                offerBranchIds = rawBranchIds.map(String).filter(Boolean);
-            } else if (typeof rawBranchIds === "string") {
-                try {
-                    const parsed = JSON.parse(rawBranchIds);
-                    if (Array.isArray(parsed)) offerBranchIds = parsed.map(String).filter(Boolean);
-                } catch {
-                    offerBranchIds = [];
-                }
-            }
-            const branchOk = offerBranchIds.length === 0 || (resolvedBranchId ? offerBranchIds.includes(resolvedBranchId) : false);
-
-            let userLimitOk = true;
-            if (freeDeliveryOffer.maxOrdersPerUser && freeDeliveryOffer.maxOrdersPerUser > 0) {
-                const [userOrdersRow] = await db
-                    .select({ cnt: sql<number>`count(*)` })
-                    .from(orders)
-                    .where(
-                        and(
-                            eq(orders.userId, userId),
-                            eq(orders.restaurantId, restaurantId),
-                            sql`${orders.status} NOT IN ('cancelled', 'failed')`
-                        )
-                    );
-                const userOrderCount = Number(userOrdersRow?.cnt ?? 0);
-                if (userOrderCount >= freeDeliveryOffer.maxOrdersPerUser) {
-                    userLimitOk = false;
-                }
-            }
-
-            if (startOk && endOk && minAmountOk && userLimitOk && branchOk) {
-                deliveryFee = 0;
-                isFreeDelivery = true;
-            }
-        }
-    }
+    const {
+        deliveryFee,
+        calculatedDeliveryFee,
+        resolvedZoneId,
+        resolvedBranchId,
+        shippingAddressSnapshot,
+        targetShippingCompanyId,
+        branchSnapshotData,
+        isFreeDelivery,
+    } = deliveryResult;
 
     let totalAmount = roundMoney(subtotal + deliveryFee + serviceFee - totalDiscount);
     if (totalAmount < 0) totalAmount = 0;
@@ -1635,412 +406,145 @@ export const checkout = async (req: Request | any, res: Response) => {
     const orderId = uuidv4();
     const orderNumber = `ORD-${Date.now()}`;
 
-    // For guests, name/phone come from the validated guestInfo (they're saved in the transaction)
     const userInfo = isGuestUser
         ? { ...user, name: guestName, phone: guestPhone }
         : { ...user, phone: registeredPhone || user.phone };
 
-    // ==========================================
-    // 11. Create Payment Session BEFORE the DB transaction (if Visa/Online)
-    // If this fails the order is never written to DB — no rollback needed.
-    // ==========================================
-    let paymentSessionData: any = null;
-    // Visa + weighted only: claim the request (awaiting_customer_approval -> checking_out) BEFORE the
-    // payment session, so only one concurrent checkout can create a session / order. Released below
-    // if the session or the order transaction fails.
-    const weightClaimRequestId: string | null =
-        isVisaPayment && hasWeightedItems && activeWeightRequest ? activeWeightRequest.id : null;
-    if (isVisaPayment) {
-        if (!settings?.enableOnlinePayment) {
-            throw new BadRequest("Online payment is not enabled for this restaurant.");
-        }
-        if (weightClaimRequestId) {
-            await claimWeightCheckout(weightClaimRequestId, assertWeightCartUnchanged);
-        }
-    }
+    // 16. Prepare Payment Session & Visa Commission (Pre-Transaction)
+    const paymentPrep = await preparePaymentSessionAndCommission({
+        isVisaPayment,
+        isWalletPayment,
+        hasWeightedItems,
+        activeWeightRequest,
+        assertWeightCartUnchanged,
+        settings,
+        orderId,
+        orderNumber,
+        restaurantId,
+        totalAmount,
+        restaurant,
+        restaurantName,
+        userInfo,
+    });
+
+    const {
+        weightClaimRequestId,
+        paymentSessionData,
+        finalPaymentGatewayType,
+        visaCommission,
+    } = paymentPrep;
 
     const now = new Date();
-    let createdDailyOrderNumber = 1;
     let orderCommitted = false;
+    let createdDailyOrderNumber = 1;
+
+    // 17. Execute Order DB Transaction
     try {
-    if (isVisaPayment) {
-        paymentSessionData = await createOrderPaymentSession({
-            orderId,
-            orderNumber,
-            restaurantId,
-            totalAmount,
-            restaurantSlug: restaurant?.slug || restaurantName || undefined,
-            userInfo: {
-                name: userInfo?.name,
-                email: userInfo?.email,
-                phone: userInfo?.phone,
-            },
-            // Weighted orders only: the hosted session must not outlive the abandon window.
-            ...(weightClaimRequestId
-                ? { sessionExpiresAt: new Date(Date.now() + PAYMENT_ABANDON_MINUTES * 60 * 1000) }
-                : {}),
-        });
-    }
-
-    const finalPaymentGatewayType = isWalletPayment ? "SYSTEM" : (paymentSessionData?.gatewayType ?? settings?.paymentGatewayType ?? "SYSTEM");
-
-    let visaCommission = 0;
-    if (isVisaPayment && finalPaymentGatewayType === "CUSTOM") {
-        try {
-            const activeCustom = await getActiveCustomGateway(restaurantId);
-            if (activeCustom?.record) {
-                visaCommission = calculateVisaCommission(
-                    totalAmount,
-                    activeCustom.record.percentageValue,
-                    activeCustom.record.fixedValue,
-                    activeCustom.record.tax
-                );
-            }
-        } catch (e) {
-            console.warn("[order] Failed to calculate custom gateway visaCommission:", e);
-        }
-    } else if (isVisaPayment && finalPaymentGatewayType === "SYSTEM") {
-        const systemSettings = await getSystemVisaSettings();
-        visaCommission = calculateVisaCommission(
-            totalAmount,
-            systemSettings.percentageValue,
-            systemSettings.fixedValue,
-            systemSettings.tax
-        );
-    }
-
-    // ==========================================
-    // 🛡️ 10. Execute Order (Transaction)
-    // ==========================================
-    // (now / createdDailyOrderNumber are declared before the Visa claim try-block)
-
-    await db.transaction(async (tx) => {
-        // 🔒 Lock and validate weight request row if cart is weight-based.
-        // Visa: the request must still be OUR claim (checking_out, no order yet).
-        // Cash / wallet: it must be awaiting_customer_approval and not expired.
-        if (hasWeightedItems && activeWeightRequest) {
-            const [lockedReq] = await tx
-                .select()
-                .from(weightRequests)
-                .where(
-                    weightClaimRequestId
-                        ? and(eq(weightRequests.id, activeWeightRequest.id), eq(weightRequests.status, "checking_out"), isNull(weightRequests.orderId))
-                        : and(eq(weightRequests.id, activeWeightRequest.id), eq(weightRequests.status, "awaiting_customer_approval"))
-                )
-                .for("update");
-
-            if (!lockedReq) {
-                throw new BadRequest("Weighing request is no longer valid or has already been checked out.");
-            }
-            if (!weightClaimRequestId && new Date(lockedReq.expiresAt) <= new Date()) {
-                throw new BadRequest("The weighing approval has expired. Please send your cart for weighing again.");
-            }
-
-            await assertWeightCartUnchanged(tx, lockedReq.id);
-        }
-
-        // ✏️ NEW: guest side-effects now happen ONLY here, atomically with the order.
-        // If anything below fails, the guest row and the address are rolled back too.
-        if (isGuestUser) {
-            await tx.update(users)
-                .set({
-                    name: guestName!,
-                    phone: guestPhone!,
-                    ...(guestAltPhone ? { alternatePhone: guestAltPhone } : {}),
-                })
-                .where(eq(users.id, userId));
-
-            if (pendingGuestAddress) {
-                await tx.insert(addresses).values(pendingGuestAddress);
-            }
-        }
-
-        // 🔒 1. Wallet deduction with FOR UPDATE
-        if (isWalletPayment) {
-            const [userWallet] = await tx.select()
-                .from(userWallets)
-                .where(eq(userWallets.userId, userId))
-                .for("update");
-
-            const currentBalance = parseFloat(userWallet?.balance as string || "0");
-            if (!userWallet || currentBalance < totalAmount) {
-                throw new BadRequest("Insufficient wallet balance");
-            }
-
-            const newBalance = roundMoney(currentBalance - totalAmount);
-
-            await tx.update(userWallets)
-                .set({ balance: newBalance.toFixed(2) })
-                .where(eq(userWallets.userId, userId));
-
-            await tx.insert(userWalletTransactions).values({
-                id: uuidv4(),
-                userId,
-                type: "debit",
-                transactionType: "order_payment",
-                amount: totalAmount.toFixed(2),
-                balanceBefore: currentBalance.toFixed(2),
-                reference: orderNumber,
-                status: "approved",
-                createdAt: now
-            });
-        }
-
-        // 🔒 2. Daily order number calculation
-        // For cash / wallet orders, calculate dailyOrderNumber immediately.
-        // For online visa orders, defer dailyOrderNumber until confirmed paid by webhook.
-        if (!isVisaPayment) {
-            createdDailyOrderNumber = await getNextDailyOrderNumber(tx, restaurantId, settings, now);
-        }
-
-        // 3. Create order record
-        await tx.insert(orders).values({
-            id: orderId,
-            orderNumber,
-            idempotencyKey,
+        const txResult = await executeOrderTransaction({
+            now,
+            hasWeightedItems,
+            activeWeightRequest,
+            weightClaimRequestId,
+            assertWeightCartUnchanged,
+            isGuestUser,
+            guestName,
+            guestPhone,
+            guestAltPhone,
+            pendingGuestAddress,
+            isWalletPayment,
+            isCashPayment,
+            isVisaPayment,
             userId,
+            totalAmount,
+            orderNumber,
             restaurantId,
-            branchId: resolvedBranchId,
-            zoneId: resolvedZoneId,
-            addressId: addressId || null,
-            orderSource: storedOrderSource,
+            settings,
+            orderId,
+            idempotencyKey,
+            resolvedBranchId,
+            resolvedZoneId,
+            addressId,
+            storedOrderSource,
             paymentMethod,
-            paymentGatewayType: finalPaymentGatewayType,
-            paymentGateway: paymentSessionData?.gateway
-                ? (paymentSessionData.gateway.toLowerCase() as "kashier" | "paymob" | "geidea")
-                : null,
-            paymentOrderId: (
-                paymentSessionData?.paymentOrderId ||
-                paymentSessionData?.paymobOrderId ||
-                paymentSessionData?.geideaOrderId ||
-                paymentSessionData?.sessionId ||
-                null
-            ),
-            paymentStatus: isVisaPayment ? "pending_payment" : "paid",
-            orderType: resolvedOrderType,
-            subtotal: subtotal.toFixed(2),
-            deliveryFee: deliveryFee.toFixed(2),
-            serviceFee: serviceFee.toFixed(2),
-            appCommission: appCommission.toFixed(2),
-            visaCommission: visaCommission.toFixed(2),
-
-            shippingAddress: shippingAddressSnapshot,
-            branchSnapshot: branchSnapshotData,
-
-            discountId: orderDiscountId,
-            couponId: orderCouponId,
-            firstOrderDiscountId: orderFirstOrderDiscountId,
-            discountAmount: totalDiscount.toFixed(2),
-            discountType: orderDiscountType,
-            discountValue: orderDiscountValue,
-            discountSource: orderDiscountSource,
-
-            couponCode: couponCode || null,
-            totalAmount: totalAmount.toFixed(2),
-            note: note || null,
-            shippingCompanyId: targetShippingCompanyId || null,
-            shippingStatus: "pending_dispatch",
-            status: "pending",
-            dailyOrderNumber: isVisaPayment ? null : createdDailyOrderNumber,
-            durationOrderPreparing: defaultPreparingDuration,
-            offerId: userCart.find(c => c.offerId)?.offerId || null,
-            isBundle: Boolean(userCart.some(c => c.offerId)),
-            createdAt: now
+            finalPaymentGatewayType,
+            paymentSessionData,
+            resolvedOrderType,
+            subtotal,
+            deliveryFee,
+            serviceFee,
+            appCommission,
+            visaCommission,
+            shippingAddressSnapshot,
+            branchSnapshotData,
+            orderDiscountId,
+            orderCouponId,
+            orderFirstOrderDiscountId,
+            totalDiscount,
+            orderDiscountType,
+            orderDiscountValue,
+            orderDiscountSource,
+            couponCode,
+            note,
+            targetShippingCompanyId,
+            defaultPreparingDuration,
+            userCart,
+            itemsToInsert,
+            restaurant,
+            appliedCoupon,
+            calculatedDeliveryFee,
+            firstOrderDiscountAmount,
+            appliedDiscountIds,
         });
-
-        if (isCashPayment) {
-            await chargePendingServiceFee(orderId, tx, "cash_pending");
-        }
-
-        await tx.insert(orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
-
-        if (hasWeightedItems && activeWeightRequest) {
-            if (weightClaimRequestId) {
-                // Visa: stays checking_out (approved only when the payment is confirmed);
-                // cart rows stay locked and the cart is kept, like any Visa order.
-                await tx
-                    .update(weightRequests)
-                    .set({ orderId: orderId, updatedAt: now })
-                    .where(and(eq(weightRequests.id, activeWeightRequest.id), eq(weightRequests.status, "checking_out")));
-            } else {
-                // Cash / wallet: straight to approved.
-                await tx
-                    .update(weightRequests)
-                    .set({
-                        status: "approved",
-                        orderId: orderId,
-                        updatedAt: now,
-                    })
-                    .where(and(eq(weightRequests.id, activeWeightRequest.id), eq(weightRequests.status, "awaiting_customer_approval")));
-            }
-        }
-
-        // Clear the cart immediately for cash / wallet (the whole cart of this user for this
-        // restaurant, weighted, restaurant-added, unavailable and normal rows alike; the
-        // weight_requests row stays as history with order_id).
-        // For visa the cart stays until payment is confirmed.
-        if (!isVisaPayment) {
-            await tx.delete(cartItems).where(and(eq(cartItems.userId, userId), eq(cartItems.restaurantId, restaurantId)));
-        }
-
-        // Increment user's total orders count
-        await tx.update(users)
-            .set({ totalOrders: sql`${users.totalOrders} + 1` })
-            .where(eq(users.id, userId));
-
-        // Increment user's total orders count for this restaurant
-        const [existingPointRecord] = await tx.select().from(userRestaurantPoints)
-            .where(and(eq(userRestaurantPoints.userId, userId), eq(userRestaurantPoints.restaurantId, restaurantId))).for("update");
-
-        if (existingPointRecord) {
-            await tx.update(userRestaurantPoints)
-                .set({ totalOrders: sql`${userRestaurantPoints.totalOrders} + 1` })
-                .where(eq(userRestaurantPoints.id, existingPointRecord.id));
-        } else {
-            await tx.insert(userRestaurantPoints).values({
-                id: uuidv4(),
-                userId,
-                restaurantId,
-                totalOrders: 1,
-                points: 0
-            });
-        }
-
-        // Superadmin notification (only for confirmed orders)
-        if (!isVisaPayment) {
-            await tx.insert(notifications).values({
-                recipientType: "superadmin",
-                recipientId: "superadmin",
-                title: "New Order",
-                body: `Order #${createdDailyOrderNumber} has been placed at ${restaurant?.name}.`,
-                data: { orderId, orderNumber, createdDailyOrderNumber, restaurantName: restaurant?.name }
-            });
-        }
-
-        // 4. Coupons and Discounts tracking
-        if (appliedCoupon) {
-            await tx.insert(couponUsages).values({
-                id: uuidv4(),
-                couponId: appliedCoupon.id,
-                userId,
-                orderId,
-                discountAmount: appliedCoupon.discountType === "free_delivery"
-                    ? calculatedDeliveryFee.toFixed(2)
-                    : totalDiscount.toFixed(2)
-            });
-
-            await tx.update(coupons)
-                .set({ usedCount: sql`used_count + 1` })
-                .where(eq(coupons.id, appliedCoupon.id));
-        }
-
-        // Record first-order discount usage for confirmed (cash / wallet) orders
-        if (orderFirstOrderDiscountId && !isVisaPayment) {
-            await recordFirstOrderDiscountUsage(
-                orderFirstOrderDiscountId,
-                userId,
-                orderId,
-                firstOrderDiscountAmount,
-                tx
-            );
-        }
-
-        if (appliedDiscountIds.size > 0) {
-            for (const dId of appliedDiscountIds) {
-                await tx.update(discounts)
-                    .set({ usedCount: sql`used_count + 1` })
-                    .where(eq(discounts.id, dId));
-            }
-        }
-
-        // Wallet settlement is recorded once the restaurant marks the order delivered.
-    });
-    orderCommitted = true;
+        createdDailyOrderNumber = txResult.createdDailyOrderNumber;
+        orderCommitted = true;
     } finally {
-        // Session creation or the order transaction failed: give the claim back (conditional:
-        // only while it is still checking_out without an order).
         if (weightClaimRequestId && !orderCommitted) {
             await releaseWeightCheckoutClaim(weightClaimRequestId);
         }
     }
 
-    // ==========================================
-    // 11. Send Notification to Restaurant (non-visa only; visa orders are notified via webhook)
-    // ==========================================
-    if (!isVisaPayment) {
-        const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
-            timeZone: "Africa/Cairo",
-            hour: "numeric",
-            minute: "numeric",
-            hour12: true
-        }).format(now);
-
-        await sendPushNotification({
-            recipientType: "restaurant",
-            recipientId: restaurantId,
-            branchId: resolvedBranchId || null,
-            title: "طلب جديد! 🛒",
-            body: `تم استلام طلب جديد #${createdDailyOrderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
-            data: {
-                restaurantId,
-                orderId,
-                orderNumber,
-                branchId: resolvedBranchId || null,
-                type: "new_order",
-                createdAt: now.toISOString(),
-                dailyOrderNumber: createdDailyOrderNumber
-            }
-        });
-    }
-
-    // ==========================================
-    // 📤 Response
-    // ==========================================
-    return SuccessResponse(res, {
-        message: "Order created successfully",
-        payment: paymentSessionData ? {
-            gateway: paymentSessionData.gateway,       // "KASHIER" | "PAYMOB"
-            type: paymentSessionData.type,             // "redirect" | "iframe"
-            sessionId: paymentSessionData.sessionId,
-            sessionUrl: paymentSessionData.sessionUrl,
-            status: paymentSessionData.status,
-            expireAt: paymentSessionData.expireAt,
-            error: paymentSessionData.error,
-        } : null,
-        order_level: {
-            orderDetails: {
-                orderId,
-                orderNumber,
-                paymentSessionUrl: paymentSessionData?.sessionUrl || null,
-                zoneId: resolvedZoneId,
-                subtotal,
-                deliveryFee,
-                serviceFee,
-                discountAmount: totalDiscount,
-                couponCode: couponCode || null,
-                totalAmount,
-                createdAt: now.toISOString(),
-                dailyOrderNumber: createdDailyOrderNumber,
-                durationOrderPreparing: defaultPreparingDuration,
-            },
-            discountDetails: {
-                discountId: orderDiscountId,
-                couponId: orderCouponId,
-                firstOrderDiscountId: orderFirstOrderDiscountId,
-                discountAmount: totalDiscount,
-                discountType: orderDiscountType,
-                discountValue: orderDiscountValue,
-                discountSource: orderDiscountSource,
-                couponCode: couponCode || null,
-                isFreeDelivery
-            },
-            customerDetails: userInfo
-        }
+    // 18. Send Push Notification to Restaurant
+    await notifyRestaurantAfterOrder({
+        isVisaPayment,
+        restaurantId,
+        resolvedBranchId,
+        createdDailyOrderNumber,
+        totalAmount,
+        orderId,
+        orderNumber,
+        now,
     });
+
+    // 19. Response
+    const responsePayload = formatCheckoutResponsePayload({
+        orderId,
+        orderNumber,
+        paymentSessionData,
+        resolvedZoneId,
+        subtotal,
+        deliveryFee,
+        serviceFee,
+        totalDiscount,
+        couponCode,
+        totalAmount,
+        now,
+        createdDailyOrderNumber,
+        defaultPreparingDuration,
+        orderDiscountId,
+        orderCouponId,
+        orderFirstOrderDiscountId,
+        orderDiscountType,
+        orderDiscountValue,
+        orderDiscountSource,
+        isFreeDelivery,
+        userInfo,
+    });
+
+    return SuccessResponse(res, responsePayload);
 };
 
 // ==========================================
-// 2. جلب الطلبات النشطة (الحالية)
+// 2. Get Active Orders
 // ==========================================
 export const getActiveOrders = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -2163,7 +667,7 @@ export const getActiveOrders = async (req: Request | any, res: Response) => {
 };
 
 // ==========================================
-// 3. جلب سجل الطلبات (History) - المكتملة والملغية
+// 3. Get History Orders
 // ==========================================
 export const getOrderHistory = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -2289,7 +793,7 @@ export const getOrderHistory = async (req: Request | any, res: Response) => {
 };
 
 // ==========================================
-// 4. تفاصيل الطلب (Order Details)
+// 4. Order Details
 // ==========================================
 export const getOrderDetails = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");
@@ -2489,7 +993,7 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
 };
 
 // ==========================================
-// 5. متطلبات الطلب المسبقة (Order Prerequisites)
+// 5. Order Prerequisites
 // ==========================================
 export const getOrderPrerequisites = async (req: Request | any, res: Response) => {
     if (!req.user) {
@@ -2960,7 +1464,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
 };
 
 // ==========================================
-// 6. إلغاء الطلب من قبل المستخدم (Cancel Order)
+// 6. Cancel Order
 // ==========================================
 export const cancelOrder = async (req: Request | any, res: Response) => {
     if (!req.user) throw new UnauthorizedError("Unauthenticated");

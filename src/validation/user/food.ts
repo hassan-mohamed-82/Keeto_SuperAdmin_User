@@ -9,7 +9,7 @@ export const getFoodByIdParamsSchema = z.object({
 });
 
 export const getFoodByIdQuerySchema = z.object({
-    branchId: z.string().uuid("branchId must be a valid UUID").optional(),
-    addressId: z.string().uuid("addressId must be a valid UUID").optional(),
-    serviceModule: z.enum(["delivery", "takeaway", "dine_in"]).optional(),
+    branchId: z.string().uuid("branchId must be a valid UUID").nullable().optional(),
+    addressId: z.string().uuid("addressId must be a valid UUID").nullable().optional(),
+    serviceModule: z.enum(["delivery", "takeaway", "dine_in"]).nullable().optional(),
 });
