@@ -97,6 +97,7 @@ export const validateUserPhone = async (
         }
 
         // A phone that belongs to a registered account can't be used by a guest (no silent merge, no takeover).
+        // Note: we intentionally do NOT filter by isDeleted — a soft-deleted account still owns its phone number.
         const phonesToCheck = [guestPhone, guestAltPhone].filter(Boolean) as string[];
         for (const phoneToCheck of phonesToCheck) {
             const [registered] = await db
@@ -105,8 +106,8 @@ export const validateUserPhone = async (
                 .where(
                     and(
                         inArray(users.phone, phoneVariants(phoneToCheck)),
-                        eq(users.isGuest, false),
-                        eq(users.isDeleted, false)
+                        eq(users.isGuest, false)
+                        //eq(users.isDeleted, false)
                     )
                 )
                 .limit(1);
