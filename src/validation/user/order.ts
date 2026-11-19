@@ -5,21 +5,21 @@ import { egyptPhoneSchema, optionalEgyptPhoneSchema } from "./phone";
 // Guest Info & Address Schemas
 // ============================================================
 export const guestInfoSchema = z.object({
-    name: z.string().min(2, { message: "Guest name must be at least 2 characters" }).optional(),
+    name: z.string().min(2, { message: "Guest name must be at least 2 characters" }).nullable().optional(),
     phone: optionalEgyptPhoneSchema,
     alternatePhone: optionalEgyptPhoneSchema,
     alternativePhone: optionalEgyptPhoneSchema,
 });
 
 export const guestAddressSchema = z.object({
-    title: z.string().optional().default("Guest Address"),
+    title: z.string().nullable().optional().default("Guest Address"),
     street: z.string().min(1, { message: "Street is required" }),
     number: z.string().min(1, { message: "Building/House number is required" }),
-    floor: z.string().optional(),
-    apartment: z.string().optional(),
-    landmark: z.string().optional(),
-    location: z.string().optional(),
-    fulladdress: z.string().optional(),
+    floor: z.string().nullable().optional(),
+    apartment: z.string().nullable().optional(),
+    landmark: z.string().nullable().optional(),
+    location: z.string().nullable().optional(),
+    fulladdress: z.string().nullable().optional(),
     lat: z.union([z.number(), z.string().regex(/^-?\d+(\.\d+)?$/)]).transform(Number),
     lng: z.union([z.number(), z.string().regex(/^-?\d+(\.\d+)?$/)]).transform(Number),
 });
@@ -36,12 +36,12 @@ export const checkoutSchema = z.object({
     orderType: z.enum(["delivery", "takeaway", "dine_in"], {
         required_error: "orderType is required and must be one of: delivery, takeaway, dine_in",
     }),
-    idempotencyKey: z.string().optional(),
-    zoneId: z.string().optional(),
-    branchId: z.string().optional(),
-    addressId: z.string().optional(),
-    note: z.string().max(500).optional(),
-    couponCode: z.string().optional(),
+    idempotencyKey: z.string().nullable().optional(),
+    zoneId: z.string().nullable().optional(),
+    branchId: z.string().nullable().optional(),
+    addressId: z.string().nullable().optional(),
+    note: z.string().max(500).nullable().optional(),
+    couponCode: z.string().nullable().optional(),
 
     // Contact Phone Fields (can be supplied directly or via guestInfo)
     phone: optionalEgyptPhoneSchema,
@@ -49,8 +49,8 @@ export const checkoutSchema = z.object({
     alternativePhone: optionalEgyptPhoneSchema,
 
     // Guest Flow Fields
-    guestInfo: guestInfoSchema.optional(),
-    guestAddress: guestAddressSchema.optional(),
+    guestInfo: guestInfoSchema.nullable().optional(),
+    guestAddress: guestAddressSchema.nullable().optional(),
 }).superRefine((data, ctx) => {
     // If delivery, either addressId or guestAddress with lat/lng must be provided
     if (data.orderType === "delivery") {
@@ -102,7 +102,7 @@ export const getOrderPrerequisitesQuerySchema = z.object({
     orderSource: z.enum(["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"], {
         required_error: "Invalid or missing order source",
     }),
-    addressId: z.string().optional(),
-    addressid: z.string().optional(),
+    addressId: z.string().nullable().optional(),
+    addressid: z.string().nullable().optional(),
 });
 

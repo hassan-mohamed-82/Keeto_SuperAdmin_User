@@ -322,16 +322,27 @@ export const updateUser = async (req: Request, res: Response) => {
     return SuccessResponse(res, { message: "User updated successfully", data: { id } }, 200);
 };
 
-// Delete a user
+// Delete a user (soft delete)
 export const deleteUser = async (req: Request, res: Response) => {
     const { id } = req.params;
 
-    const [existingUser] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    const [existingUser] = await db
+        .select()
+        .from(users)
+        .where(and(eq(users.id, id), eq(users.isDeleted, false)))
+        .limit(1);
+
     if (!existingUser) {
         throw new NotFound("User not found");
     }
 
-    await db.delete(users).where(eq(users.id, id));
+    await db
+        .update(users)
+        .set({
+            isDeleted: true,
+            deletedAt: new Date(),
+        })
+        .where(eq(users.id, id));
 
     return SuccessResponse(res, { message: "User deleted successfully", data: { id } }, 200);
 };
