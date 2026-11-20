@@ -144,21 +144,19 @@ export const resolveBranchIdFromAddress = async (
         return matchedFee.branchId;
     }
 
-    // 4b. No dedicated branch → find an active branch in that zone
-    if (matchedFee.zoneId) {
-        const [branch] = await db
-            .select({ id: branches.id })
-            .from(branches)
-            .where(
-                and(
-                    eq(branches.restaurantId, restaurantId),
-                    eq(branches.zoneId, matchedFee.zoneId),
-                    eq(branches.status, "active")
-                )
+    // 4b. No dedicated branch → check if restaurant has a single branch
+    const activeBranches = await db
+        .select({ id: branches.id })
+        .from(branches)
+        .where(
+            and(
+                eq(branches.restaurantId, restaurantId),
+                eq(branches.status, "active")
             )
-            .limit(1);
+        );
 
-        if (branch) return branch.id;
+    if (activeBranches.length === 1) {
+        return activeBranches[0].id;
     }
 
     throw new NotFound(

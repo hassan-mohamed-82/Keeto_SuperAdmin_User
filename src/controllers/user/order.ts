@@ -421,6 +421,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         orderId,
         orderNumber,
         restaurantId,
+        branchId: resolvedBranchId,
         totalAmount,
         restaurant,
         restaurantName,
@@ -993,6 +994,120 @@ export const getOrderDetails = async (req: Request | any, res: Response) => {
 };
 
 // ==========================================
+// 📍 Helpers for Order Prerequisites
+// ==========================================
+
+interface AddressZoneMatchResult {
+    isDeliverable: boolean;
+    deliveryFee: number | null;
+    matchedZoneId: string | null;
+    matchedRestaurantDeliveryZoneId: string | null;
+    applicableFee: any | null;
+}
+
+/**
+ * مطابقة عنوان العميل بنطاقات التوصيل واختيار النطاق المناسب والسعر الأعلى
+ */
+const matchAddressToDeliveryZone = (
+    address: { lat?: string | null; lng?: string | null; zoneId?: string | null } | null | undefined,
+    zoneFees: any[]
+): AddressZoneMatchResult => {
+    if (!address) {
+        return {
+            isDeliverable: false,
+            deliveryFee: null,
+            matchedZoneId: null,
+            matchedRestaurantDeliveryZoneId: null,
+            applicableFee: null,
+        };
+    }
+
+    const addrLat = parseFloat(address.lat || "0");
+    const addrLng = parseFloat(address.lng || "0");
+
+    if (!addrLat || !addrLng) {
+        return {
+            isDeliverable: false,
+            deliveryFee: null,
+            matchedZoneId: null,
+            matchedRestaurantDeliveryZoneId: null,
+            applicableFee: null,
+        };
+    }
+
+    let isDeliverable = false;
+    let applicableDeliveryFee: number | null = null;
+    let matchedZoneId: string | null = null;
+    let matchedRestaurantDeliveryZoneId: string | null = null;
+    let applicableFee: any = null;
+
+    for (const fee of zoneFees) {
+        // فحص وقوع النقط جغرافياً داخل الـ restaurantDeliveryZone مع zoneId كآخر احتمال (Fallback)
+        const matchesZone = isLocationInZone(addrLat, addrLng, address.zoneId || fee.zoneId, fee);
+        if (matchesZone) {
+            const isBranchActive = !fee.branchId || fee.branchStatus === "active";
+            if (!isBranchActive) continue;
+
+            isDeliverable = true;
+            const currentFee = parseFloat((fee.deliveryFee || "0") as string);
+
+            // 🚀 اختيار السعر الأعلى والـ restaurantDeliveryZoneId التابع له
+            if (applicableDeliveryFee === null || currentFee > applicableDeliveryFee) {
+                applicableDeliveryFee = currentFee;
+                matchedZoneId = fee.zoneId;
+                matchedRestaurantDeliveryZoneId = fee.id;
+                applicableFee = fee;
+            }
+        }
+    }
+
+    return {
+        isDeliverable,
+        deliveryFee: applicableDeliveryFee,
+        matchedZoneId,
+        matchedRestaurantDeliveryZoneId,
+        applicableFee,
+    };
+};
+
+/**
+ * تحديد الفرع المسؤول عن الطلب بناءً على branchId أو نطاق التوصيل الفعلي للعنوان (restaurantDeliveryZone)
+ */
+const resolveServingBranchId = (params: {
+    branchId?: string | null;
+    address?: { lat?: string | null; lng?: string | null; zoneId?: string | null } | null;
+    zoneFees: any[];
+    restaurantBranches: any[];
+}): string | null => {
+    const { branchId, address, zoneFees, restaurantBranches } = params;
+
+    // 1. إذا تم إرسال branchId صراحة، نستخدمه مباشرة
+    if (branchId) {
+        return branchId;
+    }
+
+    // 2. إذا لم يتم إرسال عنوان، لا يمكن تحديد الفرع
+    if (!address) {
+        return null;
+    }
+
+    // 3. مطابقة العنوان مع نقاط الـ restaurantDeliveryZone
+    const zoneMatch = matchAddressToDeliveryZone(address, zoneFees);
+    if (!zoneMatch.isDeliverable || !zoneMatch.applicableFee) {
+        return null;
+    }
+
+    // حساب الفرع من الـ restaurantDeliveryZone مباشرة وليس من zoneId
+    if (zoneMatch.applicableFee.branchId) {
+        return zoneMatch.applicableFee.branchId;
+    } else if (restaurantBranches.length === 1) {
+        return restaurantBranches[0].id;
+    }
+
+    return null;
+};
+
+// ==========================================
 // 5. Order Prerequisites
 // ==========================================
 export const getOrderPrerequisites = async (req: Request | any, res: Response) => {
@@ -1004,6 +1119,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
     const restaurantId = req.query.restaurantId as string;
     const orderSource = req.query.orderSource as string;
     const addressId = (req.query.addressId || req.query.addressid) as string | undefined;
+    const branchId = (req.query.branchId || req.query.branchid) as string | undefined;
 
     if (!restaurantId) {
         throw new BadRequest("restaurantId is required");
@@ -1212,56 +1328,46 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
 
     // 2. معالجة كل عنوان عند المستخدم ومعرفة هل هو قابل للتوصيل ومعرفة zoneId الخاص به
     const addressesWithDeliveryInfo = userAddresses.map((addr) => {
-        let isDeliverable = false;
-        let applicableDeliveryFee: number | null = null;
-        let matchedZoneId: string | null = null;
-        let matchedRestaurantDeliveryZoneId: string | null = null;
-
-        const addrLat = parseFloat(addr.lat || "0");
-        const addrLng = parseFloat(addr.lng || "0");
-
-        if (!addrLat || !addrLng) {
-            return {
-                ...addr,
-                isDeliverable: false,
-                deliveryFee: null,
-                restaurantDeliveryZoneId: null,
-                zoneId: null,
-            };
-        }
-
-        for (const fee of zoneFees) {
-            let matchesZone = isLocationInZone(addrLat, addrLng, addr.zoneId, fee);
-
-            // لو النطاق ده طابق موقع العميل
-            if (matchesZone) {
-                const isBranchActive = !fee.branchId || fee.branchStatus === "active";
-
-                if (!isBranchActive) {
-                    continue;
-                }
-
-                isDeliverable = true;
-                const currentFee = parseFloat((fee.deliveryFee || "0") as string);
-
-                // 🚀 اختيار السعر الأعلى والـ zoneId التابع له في حالة مطابقة أكثر من نطاق
-                if (applicableDeliveryFee === null || currentFee > applicableDeliveryFee) {
-                    applicableDeliveryFee = currentFee;
-                    matchedZoneId = fee.zoneId;
-                    matchedRestaurantDeliveryZoneId = fee.id;
-                }
-            }
-        }
-
+        const match = matchAddressToDeliveryZone(addr, zoneFees);
         return {
             ...addr,
-            isDeliverable,
-            deliveryFee: applicableDeliveryFee,
-            zoneId: matchedRestaurantDeliveryZoneId,
+            isDeliverable: match.isDeliverable,
+            deliveryFee: match.deliveryFee,
+            restaurantDeliveryZoneId: match.matchedRestaurantDeliveryZoneId,
+            zoneId: match.matchedRestaurantDeliveryZoneId,
         };
     });
 
     const serviceFee = parseFloat((plan.serviceFee || "0") as string);
+
+    // 🏢 تحديد الفرع المسؤول عن الطلب (سواء من branchId أو addressId)
+    const targetAddress = addressId ? userAddresses.find((a) => a.id === addressId) || null : null;
+    const resolvedBranchId = (branchId || addressId)
+        ? resolveServingBranchId({
+            branchId,
+            address: targetAddress,
+            zoneFees,
+            restaurantBranches,
+        })
+        : null;
+
+    // 🔍 Resolve branch-level visa status when addressId or branchId provided
+    let visaEnabledForLocation: boolean = enableOnlinePayment;
+
+    if (addressId || branchId) {
+        if (!enableOnlinePayment || !resolvedBranchId) {
+            // إذا كان الدفع أونلاين مغلق عاماً، أو لم يتطابق العنوان مع أي نطاق توصيل للمطعم
+            visaEnabledForLocation = false;
+        } else {
+            const [branchRow] = await db
+                .select({ visa_status: branches.visa_status })
+                .from(branches)
+                .where(eq(branches.id, resolvedBranchId))
+                .limit(1);
+
+            visaEnabledForLocation = branchRow?.visa_status ?? true;
+        }
+    }
 
     // Free delivery offer — check validity window
     const nowForPrereq = new Date();
@@ -1338,83 +1444,19 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                     nameFr: b.nameFr || null,
                 }));
 
-            // إذا تم إرسال addressId في الـ query، نحدد الفرع الذي يخدم هذا العنوان ونرجع العرض الخاص به فقط
-            if (addressId) {
-                let targetAddress = userAddresses.find(a => a.id === addressId);
-                if (!targetAddress) {
-                    const [fetchedAddr] = await db
-                        .select()
-                        .from(addresses)
-                        .where(and(eq(addresses.id, addressId), eq(addresses.userId, userId)))
-                        .limit(1);
-                    if (fetchedAddr) {
-                        targetAddress = fetchedAddr;
-                    }
-                }
-
-                let matchedBranchId: string | null = null;
-                if (targetAddress) {
-                    const addrLat = parseFloat(targetAddress.lat || "0");
-                    const addrLng = parseFloat(targetAddress.lng || "0");
-                    let applicableFee: any = null;
-                    let applicableDeliveryFee: number | null = null;
-
-                    if (addrLat && addrLng) {
-                        for (const fee of zoneFees) {
-                            const matchesZone = isLocationInZone(addrLat, addrLng, targetAddress.zoneId, fee);
-                            if (matchesZone) {
-                                const isBranchActive = !fee.branchId || fee.branchStatus === "active";
-                                if (!isBranchActive) continue;
-
-                                const currentFee = parseFloat((fee.deliveryFee || "0") as string);
-                                if (applicableDeliveryFee === null || currentFee > applicableDeliveryFee) {
-                                    applicableDeliveryFee = currentFee;
-                                    applicableFee = fee;
-                                }
-                            }
-                        }
-                    }
-
-                    if (applicableFee?.branchId) {
-                        matchedBranchId = applicableFee.branchId;
-                    } else if (applicableFee?.zoneId) {
-                        const branchInZone = restaurantBranches.find(b => b.zoneId === applicableFee.zoneId);
-                        if (branchInZone) {
-                            matchedBranchId = branchInZone.id;
-                        }
-                    }
-
-                    if (!matchedBranchId && addrLat && addrLng && restaurantBranches.length > 0) {
-                        let minDistance = Infinity;
-                        let closestBranch = restaurantBranches[0];
-                        for (const b of restaurantBranches) {
-                            const bLat = parseFloat(b.lat as string || "0");
-                            const bLng = parseFloat(b.lng as string || "0");
-                            if (bLat && bLng) {
-                                const dist = calculateDistance(addrLat, addrLng, bLat, bLng);
-                                if (dist < minDistance) {
-                                    minDistance = dist;
-                                    closestBranch = b;
-                                }
-                            }
-                        }
-                        matchedBranchId = closestBranch?.id || null;
-                    } else if (!matchedBranchId && restaurantBranches.length > 0) {
-                        matchedBranchId = restaurantBranches[0]?.id || null;
-                    }
-                }
-
-                if (matchedBranchId) {
-                    const isBranchIncluded = offerBranchIds.length === 0 || offerBranchIds.includes(matchedBranchId);
+            // إذا تم إرسال addressId أو branchId في الـ query، نحدد الفرع الذي يخدم هذا الطلب ونرجع العرض الخاص به فقط
+            if (addressId || branchId) {
+                if (resolvedBranchId) {
+                    const isBranchIncluded = offerBranchIds.length === 0 || offerBranchIds.includes(resolvedBranchId);
                     if (isBranchIncluded) {
-                        const b = branchMap.get(matchedBranchId);
+                        const b = branchMap.get(resolvedBranchId);
                         const singleBranchObject = b ? {
                             id: b.id,
                             name: b.name || "Branch",
                             nameAr: b.nameAr || null,
                             nameFr: b.nameFr || null,
                         } : {
-                            id: matchedBranchId,
+                            id: resolvedBranchId,
                             name: "Branch",
                             nameAr: null,
                             nameFr: null,
@@ -1434,7 +1476,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
                     freeDeliveryOfferData = null;
                 }
             } else {
-                // في حال عدم إرسال addressId، نرجع كل الفروع كما هي
+                // في حال عدم إرسال addressId أو branchId، نرجع كل الفروع كما هي
                 freeDeliveryOfferData = {
                     minOrderAmount: parseFloat(activeFreeDeliveryOffer.minOrderAmount as string || "0"),
                     startDate: activeFreeDeliveryOffer.startDate ? activeFreeDeliveryOffer.startDate.toISOString() : null,
@@ -1445,13 +1487,25 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         }
     }
 
+    // إرجاع طرق الدفع وتوضيح حالة الفيزا للفرع/العنوان المحدد للفرونت إند لعمل disable إن لزم
+    const formattedPaymentMethods = activePaymentMethods.map((pm) => {
+        const name = pm.name?.toLowerCase() ?? "";
+        const nameAr = pm.nameAr ?? "";
+        const isVisa = name === "visa" || name === "card" || nameAr === "بطاقة";
+        return {
+            ...pm,
+            ...(isVisa ? { visaEnabledForLocation } : {}),
+        };
+    });
+
     return SuccessResponse(res, {
         data: {
             addresses: addressesWithDeliveryInfo,
             branches: restaurantBranches,
             zones: zoneFees, // 👈 إرجاع مناطق التوصيل وأسعارها الخاصة بشركة الشحن أو المطعم
-            paymentMethods: activePaymentMethods, // visa filtered out when enableOnlinePayment=false
+            paymentMethods: formattedPaymentMethods, // visa filtered out only when enableOnlinePayment=false
             enableOnlinePayment, // 👈 هل الدفع الإلكتروني (فيزا) مفعّل لهذا المطعم؟
+            visaEnabledForLocation, // 👈 هل الفيزا مفعّلة لهذا الفرع/العنوان تحديداً؟
             reasons: getCancelReasons,
             serviceFee: serviceFee.toFixed(2),
             freeDeliveryOffer: freeDeliveryOfferData,

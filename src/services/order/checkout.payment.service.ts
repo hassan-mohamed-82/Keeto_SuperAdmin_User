@@ -5,6 +5,9 @@ import { createOrderPaymentSession } from "../payments/paymentSession.service";
 import { getActiveCustomGateway } from "../../utils/getActiveCustomGateway";
 import { getSystemVisaSettings } from "../../utils/getSystemVisaSettings";
 import { calculateVisaCommission } from "../../utils/calculateVisaCommission";
+import { db } from "../../models/connection";
+import { branches } from "../../models/schema";
+import { eq } from "drizzle-orm";
 
 /**
  * Prepares online / Visa payment session and commission before the database transaction.
@@ -19,6 +22,7 @@ export const preparePaymentSessionAndCommission = async (params: {
     orderId: string;
     orderNumber: string;
     restaurantId: string;
+    branchId?: string | null;
     totalAmount: number;
     restaurant: any;
     restaurantName?: string;
@@ -34,6 +38,7 @@ export const preparePaymentSessionAndCommission = async (params: {
         orderId,
         orderNumber,
         restaurantId,
+        branchId,
         totalAmount,
         restaurant,
         restaurantName,
@@ -46,6 +51,23 @@ export const preparePaymentSessionAndCommission = async (params: {
     if (isVisaPayment) {
         if (!settings?.enableOnlinePayment) {
             throw new BadRequest("Online payment is not enabled for this restaurant.");
+        }
+        if (branchId) {
+            const [branchRow] = await db
+                .select({
+                    id: branches.id,
+                    name: branches.name,
+                    nameAr: branches.nameAr,
+                    visa_status: branches.visa_status,
+                })
+                .from(branches)
+                .where(eq(branches.id, branchId))
+                .limit(1);
+
+            if (branchRow && branchRow.visa_status === false) {
+                const branchDisplayName = branchRow.nameAr || branchRow.name || "the selected branch";
+                throw new BadRequest(`Online payment (Visa) is not available for ${branchDisplayName}.`);
+            }
         }
         if (weightClaimRequestId) {
             await claimWeightCheckout(weightClaimRequestId, assertWeightCartUnchanged);
