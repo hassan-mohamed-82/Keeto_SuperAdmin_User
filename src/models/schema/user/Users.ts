@@ -23,6 +23,7 @@ export const users = mysqlTable("users", {
     facebookId: varchar("facebook_id", { length: 255 }).unique(),
 
     googleId: varchar("google_id", { length: 255 }).unique(),
+    deviceId: varchar("device_id", { length: 255 }),
     isVerified: boolean("is_verified").default(false),
     isProfileComplete: boolean("is_profile_complete").default(false),
     status: mysqlEnum("status", ["active", "blocked"]).default("active"),

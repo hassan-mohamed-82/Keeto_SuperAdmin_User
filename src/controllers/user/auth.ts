@@ -24,7 +24,7 @@ const generateOTP = (length: number = 6): string => {
 // 1. Signup
 // ===================================
 export const signup = async (req: Request, res: Response) => {
-    const { name, email, phone, alternatePhone, password, photo, restaurantId } = req.body;
+    const { name, email, phone, alternatePhone, password, photo, restaurantId, deviceId } = req.body;
     const resolvedAlternatePhone = alternatePhone || null;
 
     if (!name || !email || !phone || !password) {
@@ -56,6 +56,7 @@ export const signup = async (req: Request, res: Response) => {
                 alternatePhone: resolvedAlternatePhone ? resolvedAlternatePhone.trim() : null,
                 password: hashedPassword,
                 photo,
+                deviceId: deviceId !== undefined ? (deviceId ? String(deviceId).trim() : null) : existingUser.deviceId,
                 isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
             }).where(eq(users.id, userId));
 
@@ -76,6 +77,7 @@ export const signup = async (req: Request, res: Response) => {
                 alternatePhone: resolvedAlternatePhone ? resolvedAlternatePhone.trim() : null,
                 password: hashedPassword,
                 photo,
+                deviceId: deviceId ? String(deviceId).trim() : null,
                 isVerified: false,
                 isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
             });
@@ -240,7 +242,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
 // 3. Login
 // ===================================
 export const login = async (req: Request, res: Response) => {
-    const { email, password, restaurantId } = req.body;
+    const { email, password, restaurantId, deviceId } = req.body;
 
     if (!email || !password) throw new BadRequest("Email and password are required");
 
@@ -271,6 +273,12 @@ export const login = async (req: Request, res: Response) => {
         if (existingLink.length === 0) {
             await db.insert(restaurant_users).values({ restaurantId, userId: user.id });
         }
+    }
+
+    // 📱 تحديث الـ deviceId للمستخدم في حالة إرساله
+    if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+        await db.update(users).set({ deviceId: deviceId.trim() }).where(eq(users.id, user.id));
+        user.deviceId = deviceId.trim();
     }
 
     const token = generateUserToken({ id: user.id, name: user.name, restaurantId });
@@ -391,7 +399,7 @@ export const resetPassword = async (req: Request, res: Response) => {
 // 7. Guest Session (Shadow User)
 // ===================================
 export const initGuestSession = async (req: Request, res: Response) => {
-    const { restaurantId } = req.body;
+    const { restaurantId, deviceId } = req.body;
 
     const guestId = uuidv4();
 
@@ -399,6 +407,7 @@ export const initGuestSession = async (req: Request, res: Response) => {
     await db.insert(users).values({
         id: guestId,
         name: "Guest",
+        deviceId: deviceId ? String(deviceId).trim() : null,
         isGuest: true,
         authProvider: "guest",
         isVerified: false,

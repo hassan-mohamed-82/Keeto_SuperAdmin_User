@@ -43,6 +43,9 @@ export const firstOrderDiscounts = mysqlTable("first_order_discounts", {
      */
     firstOrderCount: int("first_order_count").notNull().default(1),
 
+    /** Channel where this discount applies */
+    channel: mysqlEnum("channel", ["all", "app", "web", "pos"]).notNull().default("all"),
+
     /** How the discount value is interpreted */
     discountType: mysqlEnum("discount_type", ["percentage", "fixed"]).notNull().default("percentage"),
 

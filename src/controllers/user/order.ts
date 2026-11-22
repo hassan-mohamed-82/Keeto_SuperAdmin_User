@@ -357,6 +357,7 @@ export const checkout = async (req: Request | any, res: Response) => {
         restaurantId,
         couponCode,
         itemsToInsert,
+        orderSource,
     });
 
     const {

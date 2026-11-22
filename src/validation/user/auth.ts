@@ -10,6 +10,7 @@ export const signupSchema = z.object({
     password: z.string({ required_error: "Password is required" }).min(6, "Password must be at least 6 characters"),
     photo: z.string().optional().nullable(),
     restaurantId: z.string().optional().nullable(),
+    deviceId: z.string().optional().nullable(),
 });
 
 export type SignupInput = z.infer<typeof signupSchema>;

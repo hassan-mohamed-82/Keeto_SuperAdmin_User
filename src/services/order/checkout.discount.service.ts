@@ -16,6 +16,7 @@ export const resolveDiscounts = async (params: {
     restaurantId: string;
     couponCode: string | undefined;
     itemsToInsert: any[];
+    orderSource?: string;
 }): Promise<DiscountResolutionResult> => {
     const {
         subtotal,
@@ -28,6 +29,7 @@ export const resolveDiscounts = async (params: {
         restaurantId,
         couponCode,
         itemsToInsert,
+        orderSource,
     } = params;
 
     let totalDiscount = 0;
@@ -73,7 +75,8 @@ export const resolveDiscounts = async (params: {
         const eligibleFirstOrder = await resolveFirstOrderDiscount(
             userId,
             restaurantId,
-            initialSubtotal > 0 ? initialSubtotal : subtotal
+            initialSubtotal > 0 ? initialSubtotal : subtotal,
+            orderSource
         );
 
         if (eligibleFirstOrder) {

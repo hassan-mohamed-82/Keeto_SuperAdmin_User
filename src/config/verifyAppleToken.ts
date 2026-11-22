@@ -7,7 +7,7 @@ import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 export const verifyAppleToken = async (req: Request, res: Response) => {
-  const { token, fullName } = req.body;
+  const { token, fullName, deviceId } = req.body;
   let { restaurantId } = req.body;
 
   if (!token) {
@@ -101,7 +101,12 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
       user = usersByEmail[0];
 
       if (user) {
-        await db.update(users).set({ appleId }).where(eq(users.id, user.id));
+        const updates: Record<string, any> = { appleId };
+        if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+          updates.deviceId = deviceId.trim();
+          user.deviceId = deviceId.trim();
+        }
+        await db.update(users).set(updates).where(eq(users.id, user.id));
         user.appleId = appleId;
       }
     }
@@ -118,6 +123,7 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
         appleId,
         email: finalEmail,
         name: finalName,
+        deviceId: deviceId ? String(deviceId).trim() : null,
         isVerified: true,
         isProfileComplete,
       });
@@ -127,15 +133,24 @@ export const verifyAppleToken = async (req: Request, res: Response) => {
         name: finalName,
         email: finalEmail,
         appleId,
+        deviceId: deviceId ? String(deviceId).trim() : null,
         isProfileComplete,
         status: "active",
       } as any;
     } else {
       // If user exists and isProfileComplete was false but now email is real, update it
+      const updates: Record<string, any> = {};
       const shouldBeComplete = !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
       if (!user.isProfileComplete && shouldBeComplete) {
-        await db.update(users).set({ isProfileComplete: true }).where(eq(users.id, user.id));
+        updates.isProfileComplete = true;
         user.isProfileComplete = true;
+      }
+      if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+        updates.deviceId = deviceId.trim();
+        user.deviceId = deviceId.trim();
+      }
+      if (Object.keys(updates).length > 0) {
+        await db.update(users).set(updates).where(eq(users.id, user.id));
       }
     }
 

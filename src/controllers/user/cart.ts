@@ -640,8 +640,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
     if (!isGuestUser && itemFood?.restaurantid) {
         // Whole-cart subtotal from the stored line totals (weighted rows store the weighted
         // line total), excluding rows the restaurant marked unavailable.
+        const orderSource = (req.body?.orderSource || req.query?.orderSource) as string | undefined;
         const cartSubtotalForFod = await sumStoredCartSubtotal(userId, itemFood.restaurantid);
-        const fodResult = await resolveFirstOrderDiscount(userId, itemFood.restaurantid, cartSubtotalForFod);
+        const fodResult = await resolveFirstOrderDiscount(userId, itemFood.restaurantid, cartSubtotalForFod, orderSource);
         if (fodResult) {
             firstOrderDiscount = {
                 discountId: fodResult.discount.id,
@@ -681,6 +682,7 @@ export const getCart = async (req: Request | any, res: Response) => {
     const branchId = req.query.branchId as string | undefined;
     const addressId = req.query.addressId as string | undefined;
     const serviceModule = req.query.serviceModule as ServiceModule | undefined;
+    const orderSource = (req.query.orderSource || req.query.ordersource) as string | undefined;
 
     const conditions = [eq(cartItems.userId, userId)];
     if (queryRestaurantId) {
@@ -1379,7 +1381,7 @@ export const getCart = async (req: Request | any, res: Response) => {
     const isGuestUser = Boolean(req.user?.isGuest);
     let firstOrderDiscount: any = null;
     if (!isGuestUser && restaurantId) {
-        const fodResult = await resolveFirstOrderDiscount(userId, restaurantId, finalSubtotal);
+        const fodResult = await resolveFirstOrderDiscount(userId, restaurantId, finalSubtotal, orderSource);
         if (fodResult) {
             firstOrderDiscount = {
                 discountId: fodResult.discount.id,
@@ -1779,8 +1781,9 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     let firstOrderDiscountUpdate: any = null;
     if (!isGuestUserUpdate && cartItem.restaurantId) {
         // Recompute cart subtotal across all items for this restaurant
+        const orderSource = (req.body?.orderSource || req.query?.orderSource) as string | undefined;
         const cartSubtotalForFod = await sumStoredCartSubtotal(userId, cartItem.restaurantId);
-        const fodResult = await resolveFirstOrderDiscount(userId, cartItem.restaurantId, cartSubtotalForFod);
+        const fodResult = await resolveFirstOrderDiscount(userId, cartItem.restaurantId, cartSubtotalForFod, orderSource);
         if (fodResult) {
             firstOrderDiscountUpdate = {
                 discountId: fodResult.discount.id,

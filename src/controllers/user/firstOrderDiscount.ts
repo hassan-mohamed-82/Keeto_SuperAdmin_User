@@ -1,8 +1,8 @@
 // src/controllers/user/firstOrderDiscount.ts
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { cartItems, firstOrderDiscounts, firstOrderDiscountUsages, orders } from "../../models/schema";
-import { eq, and, ne, count, sql, or, isNull, lte, gte } from "drizzle-orm";
+import { cartItems, firstOrderDiscounts, firstOrderDiscountUsages, orders, users } from "../../models/schema";
+import { eq, and, ne, count, sql, or, isNull, lte, gte, inArray } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
@@ -21,6 +21,7 @@ import { resolveFirstOrderDiscount } from "../../helpers/firstOrderDiscount.help
 export const checkFirstOrderDiscount = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const { restaurantId, subtotal: reqSubtotal } = req.query as any;
+    const orderSource = (req.query.orderSource || req.query.ordersource) as string | undefined;
 
     if (!restaurantId) throw new BadRequest("restaurantId is required");
 
@@ -56,7 +57,7 @@ export const checkFirstOrderDiscount = async (req: Request | any, res: Response)
         }
     }
 
-    const result = await resolveFirstOrderDiscount(userId, restaurantId, subtotal);
+    const result = await resolveFirstOrderDiscount(userId, restaurantId, subtotal, orderSource);
 
     if (!result) {
         return SuccessResponse(res, {
@@ -100,6 +101,7 @@ export const checkFirstOrderDiscount = async (req: Request | any, res: Response)
 export const getAvailableFirstOrderDiscounts = async (req: Request | any, res: Response) => {
     const userId = req.user?.id;
     const { restaurantId } = req.query as any;
+    const orderSource = (req.query.orderSource || req.query.ordersource) as string | undefined;
 
     if (!restaurantId) throw new BadRequest("restaurantId is required");
 
@@ -114,6 +116,17 @@ export const getAvailableFirstOrderDiscounts = async (req: Request | any, res: R
     await validateUserNotBlocked(userId, restaurantId);
 
     const now = new Date();
+    const src = String(orderSource || "").trim().toLowerCase();
+    const targetChannels: ("all" | "app" | "web" | "pos")[] = ["all"];
+    if (src === "pos") {
+        targetChannels.push("pos");
+    } else if (src.includes("web") || src === "food_aggregator" || src === "mykeeto") {
+        targetChannels.push("web");
+    } else if (src.includes("app")) {
+        targetChannels.push("app");
+    } else {
+        targetChannels.push("app", "web");
+    }
 
     const discounts = await db
         .select()
@@ -122,18 +135,41 @@ export const getAvailableFirstOrderDiscounts = async (req: Request | any, res: R
             and(
                 eq(firstOrderDiscounts.restaurantId, restaurantId),
                 eq(firstOrderDiscounts.status, "active"),
+                inArray(firstOrderDiscounts.channel, targetChannels),
                 or(isNull(firstOrderDiscounts.startDate), lte(firstOrderDiscounts.startDate, now)),
                 or(isNull(firstOrderDiscounts.endDate), gte(firstOrderDiscounts.endDate, now)),
             )
         );
 
-    // Count user's completed orders at this restaurant
+    // Anti-fraud: resolve all user accounts linked to this deviceId
+    const [currentUser] = await db
+        .select({ deviceId: users.deviceId })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+    let userIdsToCheck: string[] = [userId];
+    if (currentUser?.deviceId && currentUser.deviceId.trim()) {
+        const sameDeviceUsers = await db
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.deviceId, currentUser.deviceId.trim()));
+        if (sameDeviceUsers.length > 0) {
+            userIdsToCheck = Array.from(new Set([userId, ...sameDeviceUsers.map(u => u.id)]));
+        }
+    }
+
+    // Count user's completed orders at this restaurant across accounts sharing this deviceId
+    const userCondition = userIdsToCheck.length === 1
+        ? eq(orders.userId, userIdsToCheck[0])
+        : inArray(orders.userId, userIdsToCheck);
+
     const [orderCountRow] = await db
         .select({ cnt: count(orders.id) })
         .from(orders)
         .where(
             and(
-                eq(orders.userId, userId),
+                userCondition,
                 eq(orders.restaurantId, restaurantId),
                 ne(orders.status, 'failed'),
                 sql`NOT (${orders.paymentStatus} = 'pending_payment' AND ${orders.status} = 'pending')`,

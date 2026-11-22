@@ -13,7 +13,7 @@ dotenv.config();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export const verifyGoogleToken = async (req: Request, res: Response) => {
-  const { token, restaurantId } = req.body;
+  const { token, restaurantId, deviceId } = req.body;
 
   try {
     // const ticket = await client.verifyIdToken({
@@ -61,6 +61,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         googleId,
         email,
         name,
+        deviceId: deviceId ? String(deviceId).trim() : null,
         isVerified: true,
         isProfileComplete: true,
       });
@@ -69,6 +70,7 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
         name,
         email,
         googleId,
+        deviceId: deviceId ? String(deviceId).trim() : null,
         phone: null,
         photo: null,
         alternatePhone: null,
@@ -92,11 +94,15 @@ export const verifyGoogleToken = async (req: Request, res: Response) => {
       const updates: Record<string, any> = {};
       if (!user.googleId) updates.googleId = googleId;
       if (!user.isProfileComplete) updates.isProfileComplete = true;
+      if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+        updates.deviceId = deviceId.trim();
+      }
 
       if (Object.keys(updates).length > 0) {
         await db.update(users).set(updates).where(eq(users.id, user.id));
         if (updates.googleId) user.googleId = googleId;
         if (updates.isProfileComplete) user.isProfileComplete = true;
+        if (updates.deviceId) user.deviceId = updates.deviceId;
       }
     }
 
