@@ -1,5 +1,7 @@
 import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
+import { createAdapter } from "@socket.io/redis-adapter";
+import redisClient from "../../config/redis";
 import { verifyToken } from "../../utils/auth";
 import { db } from "../../models/connection";
 import { deliveryMen, orders, shippingCompanies } from "../../models/schema";
@@ -93,6 +95,19 @@ export const initSocket = (httpServer: HttpServer): Server => {
             methods: ["GET", "POST"],
         },
     });
+
+    // -------------------------------------------------------------
+    // Redis adapter: share rooms/broadcasts across servers.
+    // Couriers connect to Keeto_Restaurant_User while shipping companies,
+    // admins, and others may connect to Keeto_SuperAdmin_User. Without a shared
+    // adapter, io.to(room).emit() only reaches sockets on the same process.
+    // Both backends MUST point to the same Redis instance.
+    // -------------------------------------------------------------
+    const pubClient = redisClient.duplicate();
+    const subClient = redisClient.duplicate();
+    pubClient.on("error", (err) => console.error("Socket.IO Redis pub error:", err.message));
+    subClient.on("error", (err) => console.error("Socket.IO Redis sub error:", err.message));
+    io.adapter(createAdapter(pubClient, subClient));
 
     // -------------------------------------------------------------
     // Phase 7.1: Mandatory Authentication Middleware
