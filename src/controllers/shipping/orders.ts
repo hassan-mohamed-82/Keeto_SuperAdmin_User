@@ -83,6 +83,7 @@ export const getOrders = catchAsync(async (req: Request, res: Response) => {
         .select({
             id: orders.id,
             orderNumber: orders.orderNumber,
+            dailyOrderNumber:orders.dailyOrderNumber,
             restaurantId: orders.restaurantId,
             restaurantName: restaurants.name,
             restaurantLogo: restaurants.logo,
