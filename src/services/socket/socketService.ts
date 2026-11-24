@@ -349,7 +349,7 @@ export const initSocket = (httpServer: HttpServer): Server => {
         }
 
         // Restaurant-admin notification rooms (admins only — guests/users also carry restaurantId)
-        if (user.role === "restaurant_admin" && user.restaurantId) {
+        if (isRestaurantAdminUser(user)) {
             for (const room of getRestaurantAdminRooms(user)) socket.join(room);
         }
 
@@ -437,6 +437,19 @@ export const notifyRestaurant = (restaurantId: string, event: string, data: any)
 // Mirrors the FCM targeting in sendPushNotification.
 // -------------------------------------------------------------
 const ALL_BRANCH_ADMIN_TYPES = ["owner", "subadmin"];
+const RESTAURANT_ADMIN_TYPES = ["owner", "subadmin", "branch_manager", "staff", "cashier"];
+
+/**
+ * A restaurant admin token comes in two shapes:
+ *   SuperAdmin login:   { role: "restaurant_admin", type: "owner" | ... }
+ *   Restaurant login:   { role: "owner" | "staff" | ..., type: same }
+ * Guests / users / couriers also carry restaurantId, so the type must match too.
+ */
+export const isRestaurantAdminUser = (user: { role?: string | null; type?: string | null; restaurantId?: string | null }): boolean => {
+    if (!user?.restaurantId) return false;
+    if (user.role === "restaurant_admin") return true;
+    return RESTAURANT_ADMIN_TYPES.includes(String(user.type)) && RESTAURANT_ADMIN_TYPES.includes(String(user.role));
+};
 
 export const getRestaurantAdminRooms = (user: { restaurantId?: string | null; branchId?: string | null; type?: string | null }): string[] => {
     const rid = user.restaurantId;
