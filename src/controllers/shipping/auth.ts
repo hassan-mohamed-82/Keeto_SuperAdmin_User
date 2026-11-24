@@ -1,12 +1,13 @@
 import { Request, Response } from "express";
 import { db } from "../../models/connection";
-import { shippingCompanies, shippingCompanyUsers, deliveryMen } from "../../models/schema";
-import { eq, and } from "drizzle-orm";
+import { shippingCompanies, shippingCompanyUsers } from "../../models/schema";
+import { eq } from "drizzle-orm";
 import { SuccessResponse } from "../../utils/response";
 import { UnauthorizedError, NotFound, BadRequest } from "../../Errors";
 import bcrypt from "bcrypt";
-import { generateShippingCompanyToken, generateDeliveryManToken } from "../../utils/jwt";
+import { generateShippingCompanyToken } from "../../utils/jwt";
 import { catchAsync } from "../../utils/catchAsync";
+import { handleImageUpdate, deleteImage } from "../../utils/handleImages";
 
 // =========================================================================
 // 1. Login via shipping_company_users (D6)
@@ -166,6 +167,16 @@ export const updateProfile = catchAsync(async (req: Request, res: Response) => {
         throw new UnauthorizedError("Unauthorized access");
     }
 
+    const [existingCompany] = await db
+        .select()
+        .from(shippingCompanies)
+        .where(eq(shippingCompanies.id, companyId))
+        .limit(1);
+
+    if (!existingCompany) {
+        throw new NotFound("Shipping company not found");
+    }
+
     const { name, nameAr, phone, address, logo, password } = req.body;
 
     const updateData: any = {};
@@ -173,7 +184,17 @@ export const updateProfile = catchAsync(async (req: Request, res: Response) => {
     if (nameAr !== undefined) updateData.nameAr = nameAr;
     if (phone !== undefined) updateData.phone = phone;
     if (address !== undefined) updateData.address = address;
-    if (logo !== undefined) updateData.logo = logo;
+
+    if (logo !== undefined) {
+        if (!logo) {
+            if (existingCompany.logo) {
+                await deleteImage(existingCompany.logo);
+            }
+            updateData.logo = null;
+        } else {
+            updateData.logo = await handleImageUpdate(req, existingCompany.logo, logo, "shipping_companies");
+        }
+    }
 
     if (password) {
         updateData.password = await bcrypt.hash(password, 10);
@@ -184,7 +205,29 @@ export const updateProfile = catchAsync(async (req: Request, res: Response) => {
         .set(updateData)
         .where(eq(shippingCompanies.id, companyId));
 
+    const [updatedCompany] = await db
+        .select({
+            id: shippingCompanies.id,
+            name: shippingCompanies.name,
+            nameAr: shippingCompanies.nameAr,
+            phone: shippingCompanies.phone,
+            email: shippingCompanies.email,
+            address: shippingCompanies.address,
+            logo: shippingCompanies.logo,
+            status: shippingCompanies.status,
+            maxSearchRadius: shippingCompanies.maxSearchRadius,
+            maxActiveOrders: shippingCompanies.maxActiveOrders,
+            maxAttempts: shippingCompanies.maxAttempts,
+            commissionType: shippingCompanies.commissionType,
+            commissionValue: shippingCompanies.commissionValue,
+            updatedAt: shippingCompanies.updatedAt,
+        })
+        .from(shippingCompanies)
+        .where(eq(shippingCompanies.id, companyId))
+        .limit(1);
+
     return SuccessResponse(res, {
         message: "Profile updated successfully",
+        data: updatedCompany,
     });
 });

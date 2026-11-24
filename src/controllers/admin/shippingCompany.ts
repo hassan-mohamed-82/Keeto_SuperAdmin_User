@@ -15,6 +15,7 @@ import { BadRequest, NotFound, ConflictError } from "../../Errors";
 import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
 import { catchAsync } from "../../utils/catchAsync";
+import { handleImageUpdate, deleteImage } from "../../utils/handleImages";
 
 // =========================================================================
 // Helpers: التحقق من أهلية المطاعم وتحديث الربط
@@ -203,6 +204,11 @@ export const createShippingCompany = catchAsync(async (req: Request, res: Respon
         await validateEligibleRestaurants(restaurantIds);
     }
 
+    let savedLogo: string | null = null;
+    if (logo) {
+        savedLogo = (await handleImageUpdate(req, null, logo, "shipping_companies")) || null;
+    }
+
     const companyId = uuidv4();
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -216,7 +222,7 @@ export const createShippingCompany = catchAsync(async (req: Request, res: Respon
             password: hashedPassword,
             phone,
             address,
-            logo,
+            logo: savedLogo,
             status,
             maxSearchRadius,
             maxActiveOrders,
@@ -429,7 +435,7 @@ export const updateShippingCompany = catchAsync(async (req: Request, res: Respon
     } = req.body;
 
     const [company] = await db
-        .select({ id: shippingCompanies.id })
+        .select({ id: shippingCompanies.id, logo: shippingCompanies.logo })
         .from(shippingCompanies)
         .where(eq(shippingCompanies.id, id))
         .limit(1);
@@ -456,7 +462,17 @@ export const updateShippingCompany = catchAsync(async (req: Request, res: Respon
     if (email !== undefined) updateData.email = email;
     if (phone !== undefined) updateData.phone = phone;
     if (address !== undefined) updateData.address = address;
-    if (logo !== undefined) updateData.logo = logo;
+
+    if (logo !== undefined) {
+        if (!logo) {
+            if (company.logo) {
+                await deleteImage(company.logo);
+            }
+            updateData.logo = null;
+        } else {
+            updateData.logo = await handleImageUpdate(req, company.logo, logo, "shipping_companies");
+        }
+    }
     if (status !== undefined) updateData.status = status;
     if (maxSearchRadius !== undefined) updateData.maxSearchRadius = maxSearchRadius;
     if (maxActiveOrders !== undefined) updateData.maxActiveOrders = maxActiveOrders;

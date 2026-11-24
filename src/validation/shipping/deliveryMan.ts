@@ -3,12 +3,12 @@ import { z } from "zod";
 export const createDeliveryManSchema = z.object({
     name: z.string().min(1, "Name is required").max(255),
     phone: z.string().min(1, "Phone number is required").max(50),
-    email: z.string().email("Invalid email format").max(255).optional(),
-    password: z.string().min(6, "Password must be at least 6 characters").max(255).optional(),
-    image: z.string().max(500).optional(),
-    deliveryType: z.enum(["restaurant", "outsource"]).default("outsource"),
-    allZones: z.boolean().default(true),
-    zoneIds: z.array(z.string().uuid("Invalid Zone ID")).optional(),
+    email: z.string().email("Invalid email format").max(255).nullable().optional(),
+    password: z.string().min(6, "Password must be at least 6 characters").max(255).nullable().optional(),
+    image: z.string().nullable().optional(),
+    deliveryType: z.enum(["restaurant", "outsource"]).optional().default("outsource"),
+    allZones: z.boolean().optional().default(true),
+    zoneIds: z.array(z.string().uuid("Invalid Zone ID")).nullable().optional(),
     restaurantId: z.string().uuid("Invalid Restaurant ID").nullable().optional(),
     branchId: z.string().uuid("Invalid Branch ID").nullable().optional(),
 }).refine((data) => {
@@ -37,15 +37,15 @@ export const assignExistingDeliveryManSchema = z.object({
 });
 
 export const updateDeliveryManSchema = z.object({
-    name: z.string().min(1).max(255).optional(),
-    phone: z.string().min(1).max(50).optional(),
-    email: z.string().email("Invalid email format").max(255).optional(),
-    password: z.string().min(6).max(255).optional(),
-    image: z.string().max(500).optional(),
-    deliveryType: z.enum(["restaurant", "outsource"]).optional(),
-    allZones: z.boolean().optional(),
-    shiftStatus: z.enum(["active", "inactive"]).optional(),
-    isActive: z.boolean().optional(),
+    name: z.string().min(1).max(255).nullable().optional(),
+    phone: z.string().min(1).max(50).nullable().optional(),
+    email: z.string().email("Invalid email format").max(255).nullable().optional(),
+    password: z.string().min(6).max(255).nullable().optional(),
+    image: z.string().nullable().optional(),
+    deliveryType: z.enum(["restaurant", "outsource"]).nullable().optional(),
+    allZones: z.boolean().nullable().optional(),
+    shiftStatus: z.enum(["active", "inactive"]).nullable().optional(),
+    isActive: z.boolean().nullable().optional(),
     restaurantId: z.string().uuid().nullable().optional(),
     branchId: z.string().uuid().nullable().optional(),
 });

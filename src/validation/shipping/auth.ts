@@ -11,12 +11,12 @@ export const courierLoginSchema = z.object({
 });
 
 export const shippingUpdateProfileSchema = z.object({
-    name: z.string().min(1).max(255).optional(),
-    nameAr: z.string().max(255).optional(),
-    phone: z.string().min(1).max(50).optional(),
-    address: z.string().optional(),
-    logo: z.string().max(500).optional(),
-    password: z.string().min(6, "Password must be at least 6 characters").optional(),
+    name: z.string().min(1).max(255).nullable().optional(),
+    nameAr: z.string().max(255).nullable().optional(),
+    phone: z.string().min(1).max(50).nullable().optional(),
+    address: z.string().nullable().optional(),
+    logo: z.string().nullable().optional(),
+    password: z.string().min(6, "Password must be at least 6 characters").nullable().optional(),
 });
 
 export const createCompanyUserSchema = z.object({

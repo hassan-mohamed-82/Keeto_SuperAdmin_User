@@ -17,6 +17,7 @@ import bcrypt from "bcrypt";
 import { notifyShippingCompany } from "../../services/socket/socketService";
 import { removeCourierFromRedis } from "../../services/shipping/dispatchEngine";
 import { catchAsync } from "../../utils/catchAsync";
+import { handleImageUpdate, deleteImage } from "../../utils/handleImages";
 
 // =========================================================================
 // 0. عرض المناديب الأحرار المتاحين للربط بشركة الشحن (Available Free Couriers)
@@ -93,6 +94,11 @@ export const createDeliveryMan = catchAsync(async (req: Request, res: Response) 
         hashedPassword = await bcrypt.hash(password, 10);
     }
 
+    let savedImage: string | null = null;
+    if (image) {
+        savedImage = (await handleImageUpdate(req, null, image, "delivery_men")) || null;
+    }
+
     let createdId = "";
 
     await db.transaction(async (tx) => {
@@ -105,7 +111,7 @@ export const createDeliveryMan = catchAsync(async (req: Request, res: Response) 
             phone,
             email,
             password: hashedPassword,
-            image,
+            image: savedImage,
             deliveryType: "outsource",
             allZones: Boolean(allZones),
             shiftStatus: "inactive",
@@ -355,7 +361,7 @@ export const updateDeliveryMan = catchAsync(async (req: Request, res: Response) 
     }
 
     const [dm] = await db
-        .select({ id: deliveryMen.id })
+        .select({ id: deliveryMen.id, image: deliveryMen.image })
         .from(deliveryMen)
         .where(
             and(
@@ -423,7 +429,18 @@ export const updateDeliveryMan = catchAsync(async (req: Request, res: Response) 
     if (name !== undefined) updateData.name = name;
     if (phone !== undefined) updateData.phone = phone;
     if (email !== undefined) updateData.email = email;
-    if (image !== undefined) updateData.image = image;
+
+    if (image !== undefined) {
+        if (!image) {
+            if (dm.image) {
+                await deleteImage(dm.image);
+            }
+            updateData.image = null;
+        } else {
+            updateData.image = await handleImageUpdate(req, dm.image, image, "delivery_men");
+        }
+    }
+
     if (deliveryType !== undefined) updateData.deliveryType = deliveryType;
     if (allZones !== undefined) updateData.allZones = allZones;
     if (shiftStatus !== undefined) updateData.shiftStatus = shiftStatus;
