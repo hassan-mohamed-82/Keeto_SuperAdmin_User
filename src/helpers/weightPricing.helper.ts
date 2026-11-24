@@ -166,7 +166,7 @@ export const isSaneWeight = (weight: number, unit?: "kg" | "gm" | string | null)
 export interface WeightInputFood {
     sold_by?: "unit" | "weight" | string | null;
     weight_unit?: "kg" | "gm" | string | null;
-    /** food.allow_custom_weight. undefined / null = allowed (column default true). */
+    /** food.allow_custom_weight (column default false). undefined / null = allowed: only false blocks a custom weight. */
     allow_custom_weight?: boolean | null;
 }
 
@@ -308,7 +308,9 @@ export interface WeightGroupVariationConfig {
  * - every option of a weight group needs weight_value > 0 (max 3 decimals, within the sane maximum),
  *   unique inside the group; options of normal groups must have no weight_value;
  * - allow_custom_weight = false requires a weight group;
- * - unit foods always store allow_custom_weight = true.
+ * - unit foods always store allow_custom_weight = false (a value sent for them is ignored);
+ * - weight foods default to false when it is not sent; with no weight group a custom
+ *   weight is the only way to order, so they then default to true.
  * The option's price on a weight group is an OPTIONAL extra fee (fixed or per_weight), normally 0:
  * the weight itself is always priced as weight × unit price.
  * Throws BadRequest with a clear message, prefixed with the variation / option name.
@@ -327,7 +329,6 @@ export const validateWeightGroupConfig = (input: {
 } => {
     const isWeightFood = input.soldBy === "weight";
     const unit = input.weightUnit === "gm" ? "gm" : "kg";
-    const allowCustomWeight = input.allowCustomWeight === false ? false : true;
     const variations = Array.isArray(input.variations) ? input.variations : [];
     const weightGroups = new Map<number, { isRequired: boolean; selectionType: "single" }>();
     const weightValues = new Map<string, string | null>();
@@ -342,11 +343,13 @@ export const validateWeightGroupConfig = (input: {
     if (groupIndexes.length > 1) {
         throw new BadRequest("A product can have at most one weight group");
     }
-    if (!isWeightFood) {
-        if (input.allowCustomWeight === false) {
-            throw new BadRequest("allow_custom_weight can only be turned off for products sold by weight");
-        }
-    } else if (!allowCustomWeight && groupIndexes.length === 0) {
+    // Not sent → false (the default), unless the weight food has no weight group to pick from.
+    const allowCustomWeight = !isWeightFood
+        ? false
+        : (input.allowCustomWeight === true || input.allowCustomWeight === false)
+            ? input.allowCustomWeight
+            : groupIndexes.length === 0;
+    if (isWeightFood && !allowCustomWeight && groupIndexes.length === 0) {
         throw new BadRequest("When a custom weight is not allowed, the product must have a weight group with weight options");
     }
 
@@ -389,7 +392,7 @@ export const validateWeightGroupConfig = (input: {
         }
     });
 
-    return { allowCustomWeight: isWeightFood ? allowCustomWeight : true, weightGroups, weightValues };
+    return { allowCustomWeight, weightGroups, weightValues };
 };
 
 /**

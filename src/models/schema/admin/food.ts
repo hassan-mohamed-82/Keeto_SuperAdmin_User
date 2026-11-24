@@ -71,7 +71,7 @@ export const food = mysqlTable("food", {
     sold_by: mysqlEnum("sold_by", ["unit", "weight"]).notNull().default("unit"),
     weight_unit: mysqlEnum("weight_unit", ["kg", "gm"]),
     /** Weighted foods: may the customer type any weight, or only pick a weight-group option? */
-    allow_custom_weight: boolean("allow_custom_weight").notNull().default(true),
+    allow_custom_weight: boolean("allow_custom_weight").notNull().default(false),
 
     isDeleted: boolean("is_deleted").notNull().default(false),
     deletedAt: timestamp("deleted_at"),

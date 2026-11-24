@@ -362,7 +362,7 @@ export const formatFoodsList = async (
             addons: foodAddons,
             sold_by: (row as any).sold_by ?? "unit",
             weight_unit: (row as any).weight_unit ?? null,
-            allow_custom_weight: (row as any).allow_custom_weight ?? true,
+            allow_custom_weight: (row as any).allow_custom_weight ?? false,
             unavailableBranches,
             category: row.categoryId ? {
                 id: row.categoryId,

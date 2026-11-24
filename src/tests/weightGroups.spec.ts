@@ -88,10 +88,12 @@ describe("validateWeightGroupConfig (admin / import)", () => {
         expect(() => validateWeightGroupConfig({ ...base, variations: [group(["150"])] })).toThrow(/maximum/);
         expect(() => validateWeightGroupConfig({ ...base, variations: [normal([{ optionName: "Big", weightValue: "1" }])] }))
             .toThrow(/cannot have a weight_value/);
-        expect(() => validateWeightGroupConfig({ soldBy: "unit", weightUnit: null, allowCustomWeight: false, variations: [] }))
-            .toThrow(/only be turned off for products sold by weight/);
-        // unit foods always store allow_custom_weight = true
-        expect(validateWeightGroupConfig({ soldBy: "unit", weightUnit: null, allowCustomWeight: undefined, variations: [normal()] }).allowCustomWeight).toBe(true);
+        // unit foods always store allow_custom_weight = false, whatever is sent
+        expect(validateWeightGroupConfig({ soldBy: "unit", weightUnit: null, allowCustomWeight: undefined, variations: [normal()] }).allowCustomWeight).toBe(false);
+        expect(validateWeightGroupConfig({ soldBy: "unit", weightUnit: null, allowCustomWeight: true, variations: [] }).allowCustomWeight).toBe(false);
+        // weight foods: not sent → false when there is a weight group, true when there is none
+        expect(validateWeightGroupConfig({ ...base, allowCustomWeight: undefined, variations: [group(["0.5", "1"])] }).allowCustomWeight).toBe(false);
+        expect(validateWeightGroupConfig({ ...base, allowCustomWeight: undefined, variations: [] }).allowCustomWeight).toBe(true);
     });
 });
 
