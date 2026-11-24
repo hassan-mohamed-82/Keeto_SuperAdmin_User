@@ -82,6 +82,11 @@ import { resolveFirstOrderDiscount } from "../../helpers/firstOrderDiscount.help
 const normalizeVariations = (variations: any) => {
     const safe = Array.isArray(variations) ? variations : [];
     return safe
+        .map(v => {
+            const optionId = v?.optionId || v?.option_id || (Array.isArray(v?.options) ? v.options[0] : undefined);
+            const variationId = v?.variationId || v?.variation_id || v?.id;
+            return optionId ? { ...v, optionId, variationId } : v;
+        })
         .filter(v => v?.optionId)
         .sort((a, b) => String(a.optionId).localeCompare(String(b.optionId)));
 };
@@ -1621,7 +1626,11 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     // ⚖️ Weight groups / allow_custom_weight (same rule as addToCart).
     const hasWeightOption = selectedWeightOptions.some(o => o.isWeightGroup);
     if (isWeightedFood) {
-        const inputWeight = weight !== undefined ? weight : cartItem.weight;
+        const hasExplicitWeight = weight !== undefined && weight !== null && weight !== "" && Number(weight) > 0;
+        // If a weight option is selected and no explicit weight was provided in this update request,
+        // use null so validateWeightInput derives it directly from the selected option instead of
+        // keeping an outdated cartItem.weight from a previous option.
+        const inputWeight = hasExplicitWeight ? weight : (hasWeightOption ? null : cartItem.weight);
         newWeight = validateWeightInput(itemFood, inputWeight, selectedWeightOptions);
         if (hasWeightOption) {
             newQty = quantity !== undefined ? Math.max(1, Number(quantity)) : cartItem.quantity;
