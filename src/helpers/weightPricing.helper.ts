@@ -217,7 +217,8 @@ export const validateWeightInput = (
     weight: number | string | null | undefined,
     selectedOptions: SelectedWeightOption[] = []
 ): number | null => {
-    let hasWeight = weight !== undefined && weight !== null && weight !== "";
+    const parsedNumericWeight = (weight !== undefined && weight !== null && weight !== "") ? Number(weight) : null;
+    let hasWeight = parsedNumericWeight !== null && Number.isFinite(parsedNumericWeight) && parsedNumericWeight > 0;
 
     if (food.sold_by !== "weight") {
         if (hasWeight) throw new BadRequest("Weight cannot be specified for unit-sold products");
@@ -228,7 +229,7 @@ export const validateWeightInput = (
     // weight automatically from that option's weightValue so the caller doesn't have to
     // send a redundant field.
     if (!hasWeight && selectedOptions.length > 0) {
-        const weightGroupOption = selectedOptions.find((o) => o && o.isWeightGroup && o.weightValue != null);
+        const weightGroupOption = selectedOptions.find((o) => o && o.isWeightGroup && o.weightValue != null && Number(o.weightValue) > 0);
         if (weightGroupOption) {
             weight = weightGroupOption.weightValue as string | number;
             hasWeight = true;

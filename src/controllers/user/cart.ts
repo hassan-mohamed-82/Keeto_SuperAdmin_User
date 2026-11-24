@@ -281,8 +281,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
     const isWeightedFood = itemFood.sold_by === "weight";
     // Full weight validation (including weight-group option derivation) runs after the selected
     // options are loaded below (line ~393). Here we only do a quick unit-sold guard: if the food
-    // is NOT weight-based, reject any weight that was sent so we fail fast.
-    if (!isWeightedFood && weight !== undefined && weight !== null && weight !== "") {
+    // is NOT weight-based, reject any positive weight that was sent so we fail fast.
+    const numericWeight = (weight !== undefined && weight !== null && weight !== "") ? Number(weight) : null;
+    if (!isWeightedFood && numericWeight !== null && Number.isFinite(numericWeight) && numericWeight > 0) {
         throw new BadRequest("Weight cannot be specified for unit-sold products");
     }
     // Placeholder; will be assigned after full validation below.
@@ -383,8 +384,9 @@ export const addToCart = async (req: Request | any, res: Response) => {
 
     const selectedWeightOptions: SelectedWeightOption[] = [];
     for (const selected of safeVariations) {
-        const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
-        if (!validDbVariation) throw new BadRequest(`Invalid variation ID sent: ${selected.variationId}`);
+        const varId = selected.variationId || selected.variation_id || selected.id;
+        const validDbVariation = dbVariations.find(v => v.id === varId);
+        if (!validDbVariation) throw new BadRequest(`Invalid variation ID sent: ${varId}`);
         if (validDbVariation.status === false) throw new BadRequest(`Variation ${validDbVariation.name} is currently unavailable`);
 
         const dbOptions = await db
@@ -392,7 +394,8 @@ export const addToCart = async (req: Request | any, res: Response) => {
             .from(variationOptions)
             .where(eq(variationOptions.variationId, validDbVariation.id));
 
-        const foundOption = dbOptions.find(o => o.id === selected.optionId);
+        const optId = selected.optionId || selected.option_id || (Array.isArray(selected.options) ? selected.options[0] : null);
+        const foundOption = dbOptions.find(o => o.id === optId);
         if (!foundOption) throw new BadRequest(`Invalid option selected for variation: ${validDbVariation.name}`);
         if (foundOption.status === false) throw new BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
         selectedWeightOptions.push({ isWeightGroup: validDbVariation.isWeightGroup, weightValue: foundOption.weightValue });
@@ -1556,7 +1559,8 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
     let newWeight: number | null = null;
     let newQty: number = 1;
 
-    if (!isWeightedFood && weight !== undefined && weight !== null && weight !== "") {
+    const numericWeight = (weight !== undefined && weight !== null && weight !== "") ? Number(weight) : null;
+    if (!isWeightedFood && numericWeight !== null && Number.isFinite(numericWeight) && numericWeight > 0) {
         throw new BadRequest("Weight cannot be specified for unit-sold products");
     }
 
@@ -1601,12 +1605,14 @@ export const updateCartItem = async (req: Request | any, res: Response) => {
 
     const selectedWeightOptions: SelectedWeightOption[] = [];
     for (const selected of safeVariations) {
-        const validDbVariation = dbVariations.find(v => v.id === selected.variationId);
+        const varId = selected.variationId || selected.variation_id || selected.id;
+        const validDbVariation = dbVariations.find(v => v.id === varId);
         if (!validDbVariation) throw new BadRequest("Invalid variation ID");
         if (validDbVariation.status === false) throw new BadRequest(`Variation ${validDbVariation.name} is currently unavailable`);
 
         const dbOptions = await db.select().from(variationOptions).where(eq(variationOptions.variationId, validDbVariation.id));
-        const foundOption = dbOptions.find(o => o.id === selected.optionId);
+        const optId = selected.optionId || selected.option_id || (Array.isArray(selected.options) ? selected.options[0] : null);
+        const foundOption = dbOptions.find(o => o.id === optId);
         if (!foundOption) throw new BadRequest("Invalid option selected");
         if (foundOption.status === false) throw new BadRequest(`Option ${foundOption.optionName} is currently unavailable`);
         selectedWeightOptions.push({ isWeightGroup: validDbVariation.isWeightGroup, weightValue: foundOption.weightValue });
