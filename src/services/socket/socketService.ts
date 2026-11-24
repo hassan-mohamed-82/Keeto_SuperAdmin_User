@@ -348,6 +348,11 @@ export const initSocket = (httpServer: HttpServer): Server => {
             socket.join(`restaurant:${user.restaurantId}`);
         }
 
+        // Restaurant-admin notification rooms (admins only — guests/users also carry restaurantId)
+        if (user.role === "restaurant_admin" && user.restaurantId) {
+            for (const room of getRestaurantAdminRooms(user)) socket.join(room);
+        }
+
         // Shipping company room: ONLY shipping_company users join (Phase 7.2)
         if (user.role === "shipping_company" && user.shippingCompanyId) {
             socket.join(`shipping_company:${user.shippingCompanyId}`);
@@ -422,6 +427,45 @@ export const notifyRestaurant = (restaurantId: string, event: string, data: any)
     if (io) {
         io.to(`restaurant:${restaurantId}`).emit(event, data);
     }
+};
+
+// -------------------------------------------------------------
+// Restaurant-admin rooms
+//   restaurant_admin:{rid}                -> every admin of the restaurant
+//   restaurant_admin:{rid}:all            -> admins who see all branches (owner/subadmin or no branch)
+//   restaurant_admin:{rid}:branch:{bid}   -> admins bound to a specific branch
+// Mirrors the FCM targeting in sendPushNotification.
+// -------------------------------------------------------------
+const ALL_BRANCH_ADMIN_TYPES = ["owner", "subadmin"];
+
+export const getRestaurantAdminRooms = (user: { restaurantId?: string | null; branchId?: string | null; type?: string | null }): string[] => {
+    const rid = user.restaurantId;
+    if (!rid) return [];
+    const rooms = [`restaurant_admin:${rid}`];
+    if (!user.branchId || ALL_BRANCH_ADMIN_TYPES.includes(String(user.type))) {
+        rooms.push(`restaurant_admin:${rid}:all`);
+    }
+    if (user.branchId) {
+        rooms.push(`restaurant_admin:${rid}:branch:${user.branchId}`);
+    }
+    return rooms;
+};
+
+/**
+ * Emit to the restaurant's admins. With a branchId only that branch's admins
+ * plus all-branch admins (owner/subadmin) receive it; without, every admin does.
+ */
+export const notifyRestaurantAdmins = (
+    restaurantId: string,
+    branchId: string | null | undefined,
+    event: string,
+    data: any
+) => {
+    if (!io) return;
+    const rooms = branchId
+        ? [`restaurant_admin:${restaurantId}:all`, `restaurant_admin:${restaurantId}:branch:${branchId}`]
+        : [`restaurant_admin:${restaurantId}`];
+    io.to(rooms).emit(event, data);
 };
 
 export const notifyAdmins = (event: string, data: any) => {

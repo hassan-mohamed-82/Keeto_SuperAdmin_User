@@ -6,6 +6,8 @@ import {
 } from "../models/schema";
 import { eq, and, or, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { notifyRestaurantAdmins } from "../services/socket/socketService";
+import { SOCKET_EVENTS } from "../services/socket/socketEvents";
 
 export const sendPushNotification = async (params: {
     recipientType: "user" | "restaurant" | "superadmin";
@@ -52,15 +54,37 @@ export const sendPushNotification = async (params: {
     }
 
     // 1. حفظ الإشعار
+    const notificationId = uuidv4();
+    const createdAt = new Date();
     await db.insert(notifications).values({
-        id: uuidv4(),
+        id: notificationId,
         recipientType,
         recipientId,
         title,
         body,
         data: payloadData,
-        createdAt: new Date()
+        createdAt
     });
+
+    // 1.b Real-time (Socket.IO, shared via Redis adapter) — للأدمن المتصل حالياً على لوحة التحكم
+    if (recipientType === "restaurant") {
+        try {
+            notifyRestaurantAdmins(recipientId, payloadData.branchId, SOCKET_EVENTS.NOTIFICATION, {
+                id: notificationId,
+                recipientType,
+                recipientId,
+                restaurantId: recipientId,
+                branchId: payloadData.branchId,
+                title,
+                body,
+                data: payloadData,
+                isRead: false,
+                createdAt,
+            });
+        } catch (err) {
+            console.error("[SOCKET] Failed to emit restaurant admin notification:", err);
+        }
+    }
 
     try {
         // 2. تجميع التوكنات مع مشروعها
