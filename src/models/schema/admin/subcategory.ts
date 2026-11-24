@@ -27,6 +27,8 @@ export const subcategories = mysqlTable("subcategories", {
     order_Level: int("order_level").default(0), // تم تغيير الاسم هنا
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
     isOutOfStock: boolean("is_out_of_stock").default(false),
+    isDeleted: boolean("is_deleted").notNull().default(false),
+    deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });

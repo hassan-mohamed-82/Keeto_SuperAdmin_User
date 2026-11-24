@@ -26,7 +26,7 @@ async function resolveLinkData(
                 status: subcategories.status,
             })
             .from(subcategories)
-            .where(eq(subcategories.id, subcategoryId))
+            .where(and(eq(subcategories.id, subcategoryId), eq(subcategories.isDeleted, false)))
             .limit(1);
         return sub ?? null;
     }

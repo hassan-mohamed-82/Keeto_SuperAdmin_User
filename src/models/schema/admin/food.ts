@@ -73,6 +73,7 @@ export const food = mysqlTable("food", {
     /** Weighted foods: may the customer type any weight, or only pick a weight-group option? */
     allow_custom_weight: boolean("allow_custom_weight").notNull().default(true),
 
+    isDeleted: boolean("is_deleted").notNull().default(false),
     deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),

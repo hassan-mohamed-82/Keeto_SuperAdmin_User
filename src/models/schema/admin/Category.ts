@@ -5,7 +5,8 @@ import {
     mysqlEnum,
     json,
     char,
-    text
+    text,
+    boolean
 , longtext } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
@@ -24,6 +25,8 @@ export const categories = mysqlTable("categories", {
     meta_titleFr: text("meta_title_fr").notNull().default(''),
     priority: mysqlEnum("priority", ["low", "medium", "high"]).default("low"),
     status: mysqlEnum("status", ["active", "inactive"]).default("active"),
+    isDeleted: boolean("is_deleted").notNull().default(false),
+    deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
