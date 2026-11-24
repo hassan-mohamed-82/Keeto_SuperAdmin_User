@@ -22,6 +22,7 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
             variationNameFr: schema_1.foodVariations.nameFr,
             isRequired: schema_1.foodVariations.isRequired,
             selectionType: schema_1.foodVariations.selectionType,
+            isWeightGroup: schema_1.foodVariations.isWeightGroup,
             min: schema_1.foodVariations.min,
             max: schema_1.foodVariations.max,
             optionId: schema_1.variationOptions.id,
@@ -29,6 +30,8 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
             optionNameAr: schema_1.variationOptions.optionNameAr,
             optionNameFr: schema_1.variationOptions.optionNameFr,
             additionalPrice: schema_1.variationOptions.additionalPrice,
+            priceMode: schema_1.variationOptions.priceMode,
+            weightValue: schema_1.variationOptions.weightValue,
         })
             .from(schema_1.foodVariations)
             .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId), (0, drizzle_orm_1.eq)(schema_1.variationOptions.status, true)))
@@ -110,6 +113,8 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
                 selectionType: v.selectionType,
                 min: v.min,
                 max: v.max,
+                // the weight choices of a weighted food; its options carry weight_value
+                is_weight_group: Boolean(v.isWeightGroup),
                 options: []
             };
             currentVars.push(existingVar);
@@ -127,7 +132,10 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
                 name: v.optionName,
                 nameAr: v.optionNameAr,
                 nameFr: v.optionNameFr,
-                additionalPrice: optionPrice
+                additionalPrice: optionPrice,
+                price_mode: v.priceMode || "fixed",
+                // weight-group options: the weight to send as `weight` (additionalPrice is an optional extra fee)
+                weight_value: v.weightValue ?? null,
             });
         }
     }
@@ -293,6 +301,9 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
             isFavorite: userId ? favoriteFoodIds.has(foodId) : false,
             variations: foodVariationsMap.get(foodId) || [],
             addons: foodAddons,
+            sold_by: row.sold_by ?? "unit",
+            weight_unit: row.weight_unit ?? null,
+            allow_custom_weight: row.allow_custom_weight ?? true,
             unavailableBranches,
             category: row.categoryId ? {
                 id: row.categoryId,
@@ -300,6 +311,7 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
                 nameAr: row.categoryNameAr,
                 nameFr: row.categoryNameFr,
             } : null,
+            order_level: row.foodOrderLevel ?? null,
             subcategory: row.subcategoryId ? {
                 id: row.subcategoryId,
                 name: row.subcategoryName,

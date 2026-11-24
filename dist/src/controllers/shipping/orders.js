@@ -53,6 +53,7 @@ exports.getOrders = (0, catchAsync_1.catchAsync)(async (req, res) => {
         .select({
         id: schema_1.orders.id,
         orderNumber: schema_1.orders.orderNumber,
+        dailyOrderNumber: schema_1.orders.dailyOrderNumber,
         restaurantId: schema_1.orders.restaurantId,
         restaurantName: schema_1.restaurants.name,
         restaurantLogo: schema_1.restaurants.logo,

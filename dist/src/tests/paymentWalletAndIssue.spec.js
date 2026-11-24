@@ -4,6 +4,11 @@ const vitest_1 = require("vitest");
 vitest_1.vi.mock("../utils/notifications", () => ({
     sendPushNotification: vitest_1.vi.fn(),
 }));
+// These are normal (non-weighted) orders: the weight-request hooks must stay out of the way.
+vitest_1.vi.mock("../helpers/weightPayment.helper", async (importOriginal) => ({
+    ...(await importOriginal()),
+    isWeightedOrder: vitest_1.vi.fn(async () => false),
+}));
 const connection_1 = require("../models/connection");
 const orderPaymentConfirmation_1 = require("../helpers/orderPaymentConfirmation");
 const orderNotificationCron_1 = require("../services/orderNotificationCron");

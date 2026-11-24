@@ -11,7 +11,7 @@ const connection_1 = require("../models/connection");
 const drizzle_orm_1 = require("drizzle-orm");
 const uuid_1 = require("uuid");
 const verifyAppleToken = async (req, res) => {
-    const { token, fullName } = req.body;
+    const { token, fullName, deviceId } = req.body;
     let { restaurantId } = req.body;
     if (!token) {
         return res.status(400).json({ success: false, message: "Token is required" });
@@ -88,7 +88,12 @@ const verifyAppleToken = async (req, res) => {
                 .limit(1);
             user = usersByEmail[0];
             if (user) {
-                await connection_1.db.update(schema_1.users).set({ appleId }).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
+                const updates = { appleId };
+                if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+                    updates.deviceId = deviceId.trim();
+                    user.deviceId = deviceId.trim();
+                }
+                await connection_1.db.update(schema_1.users).set(updates).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
                 user.appleId = appleId;
             }
         }
@@ -103,6 +108,7 @@ const verifyAppleToken = async (req, res) => {
                 appleId,
                 email: finalEmail,
                 name: finalName,
+                deviceId: deviceId ? String(deviceId).trim() : null,
                 isVerified: true,
                 isProfileComplete,
             });
@@ -111,16 +117,25 @@ const verifyAppleToken = async (req, res) => {
                 name: finalName,
                 email: finalEmail,
                 appleId,
+                deviceId: deviceId ? String(deviceId).trim() : null,
                 isProfileComplete,
                 status: "active",
             };
         }
         else {
             // If user exists and isProfileComplete was false but now email is real, update it
+            const updates = {};
             const shouldBeComplete = !(user.email && user.email.endsWith("@privaterelay.appleid.com"));
             if (!user.isProfileComplete && shouldBeComplete) {
-                await connection_1.db.update(schema_1.users).set({ isProfileComplete: true }).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
+                updates.isProfileComplete = true;
                 user.isProfileComplete = true;
+            }
+            if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+                updates.deviceId = deviceId.trim();
+                user.deviceId = deviceId.trim();
+            }
+            if (Object.keys(updates).length > 0) {
+                await connection_1.db.update(schema_1.users).set(updates).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
             }
         }
         // 6️⃣ Check account status

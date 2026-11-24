@@ -12,7 +12,7 @@ const connection_1 = require("../models/connection");
 const schema_1 = require("../models/schema");
 const facebookLoginOrSignup = async (req, res) => {
     try {
-        const { accessToken, restaurantId } = req.body;
+        const { accessToken, restaurantId, deviceId } = req.body;
         if (!accessToken) {
             return res.status(400).json({ success: false, message: "Access Token is required" });
         }
@@ -31,11 +31,15 @@ const facebookLoginOrSignup = async (req, res) => {
             const userByEmail = await connection_1.db.select().from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.email, fbUser.email)).limit(1);
             if (userByEmail[0]) {
                 // ✅ تحديث السجل في MySQL بدون .returning()
-                await connection_1.db.update(schema_1.users)
-                    .set({
+                const updateFields = {
                     facebookId: fbUser.id,
                     photo: userByEmail[0].photo || fbPhotoUrl,
-                })
+                };
+                if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+                    updateFields.deviceId = deviceId.trim();
+                }
+                await connection_1.db.update(schema_1.users)
+                    .set(updateFields)
                     .where((0, drizzle_orm_1.eq)(schema_1.users.id, userByEmail[0].id));
                 // جلب البيانات المحدثة
                 const updatedUsers = await connection_1.db.select().from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, userByEmail[0].id)).limit(1);
@@ -52,6 +56,7 @@ const facebookLoginOrSignup = async (req, res) => {
                 email: fbUser.email || null,
                 facebookId: fbUser.id,
                 photo: fbPhotoUrl,
+                deviceId: deviceId ? String(deviceId).trim() : null,
                 isVerified: true,
                 isProfileComplete: true,
             });
@@ -59,9 +64,19 @@ const facebookLoginOrSignup = async (req, res) => {
             const newUsers = await connection_1.db.select().from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, newUserId)).limit(1);
             userRecord = newUsers[0];
         }
-        else if (!userRecord.isProfileComplete) {
-            await connection_1.db.update(schema_1.users).set({ isProfileComplete: true }).where((0, drizzle_orm_1.eq)(schema_1.users.id, userRecord.id));
-            userRecord.isProfileComplete = true;
+        else {
+            const updates = {};
+            if (!userRecord.isProfileComplete) {
+                updates.isProfileComplete = true;
+                userRecord.isProfileComplete = true;
+            }
+            if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+                updates.deviceId = deviceId.trim();
+                userRecord.deviceId = deviceId.trim();
+            }
+            if (Object.keys(updates).length > 0) {
+                await connection_1.db.update(schema_1.users).set(updates).where((0, drizzle_orm_1.eq)(schema_1.users.id, userRecord.id));
+            }
         }
         // 5. فحص حالة الحساب (Blocked)
         if (userRecord.status === "blocked") {

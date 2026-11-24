@@ -15,6 +15,8 @@ exports.foodVariations = (0, mysql_core_2.mysqlTable)("food_variations", {
     nameFr: (0, mysql_core_2.varchar)("name_fr", { length: 255 }).notNull().default(''),
     isRequired: (0, mysql_core_2.boolean)("is_required").default(false), // Required
     selectionType: (0, mysql_core_2.mysqlEnum)("selection_type", ["single", "multiple"]).default("single"), // Single vs Multiple
+    /** The weight choices of a weighted food (at most one per food, single-select). */
+    isWeightGroup: (0, mysql_core_2.boolean)("is_weight_group").notNull().default(false),
     min: (0, mysql_core_1.int)("min"), // Min
     max: (0, mysql_core_1.int)("max"), // Max
     status: (0, mysql_core_2.boolean)("status").default(true), // حالة الفارييشن (شغال / مقفول)
@@ -30,6 +32,9 @@ exports.variationOptions = (0, mysql_core_2.mysqlTable)("variation_options", {
     optionNameAr: (0, mysql_core_2.varchar)("option_name_ar", { length: 255 }).notNull().default(''),
     optionNameFr: (0, mysql_core_2.varchar)("option_name_fr", { length: 255 }).notNull().default(''),
     additionalPrice: (0, mysql_core_2.varchar)("additional_price", { length: 255 }).notNull().default("0"),
+    priceMode: (0, mysql_core_2.mysqlEnum)("price_mode", ["fixed", "per_weight"]).notNull().default("fixed"),
+    /** Weight-group options only: the weight this option stands for, in the food's weight_unit. */
+    weightValue: (0, mysql_core_2.decimal)("weight_value", { precision: 10, scale: 3 }),
     // 👇 الحقل الجديد للتحكم في الاختيار الافتراضي
     isDefault: (0, mysql_core_2.boolean)("is_default").default(false),
     status: (0, mysql_core_2.boolean)("status").default(true),

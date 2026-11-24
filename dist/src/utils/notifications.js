@@ -6,6 +6,8 @@ const connection_1 = require("../models/connection");
 const schema_1 = require("../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const uuid_1 = require("uuid");
+const socketService_1 = require("../services/socket/socketService");
+const socketEvents_1 = require("../services/socket/socketEvents");
 const sendPushNotification = async (params) => {
     const { recipientType, recipientId, branchId, title, body, data } = params;
     let payloadData = {
@@ -41,15 +43,37 @@ const sendPushNotification = async (params) => {
         }
     }
     // 1. حفظ الإشعار
+    const notificationId = (0, uuid_1.v4)();
+    const createdAt = new Date();
     await connection_1.db.insert(schema_1.notifications).values({
-        id: (0, uuid_1.v4)(),
+        id: notificationId,
         recipientType,
         recipientId,
         title,
         body,
         data: payloadData,
-        createdAt: new Date()
+        createdAt
     });
+    // 1.b Real-time (Socket.IO, shared via Redis adapter) — للأدمن المتصل حالياً على لوحة التحكم
+    if (recipientType === "restaurant") {
+        try {
+            (0, socketService_1.notifyRestaurantAdmins)(recipientId, payloadData.branchId, socketEvents_1.SOCKET_EVENTS.NOTIFICATION, {
+                id: notificationId,
+                recipientType,
+                recipientId,
+                restaurantId: recipientId,
+                branchId: payloadData.branchId,
+                title,
+                body,
+                data: payloadData,
+                isRead: false,
+                createdAt,
+            });
+        }
+        catch (err) {
+            console.error("[SOCKET] Failed to emit restaurant admin notification:", err);
+        }
+    }
     try {
         // 2. تجميع التوكنات مع مشروعها
         const records = [];

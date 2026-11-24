@@ -34,5 +34,7 @@ exports.createFoodSchema = zod_1.z.object({
     Maximum_Purchase: zod_1.z.coerce.number().int().min(1).optional(),
     stock_type: zod_1.z.enum(["limited", "unlimited", "daily"]).optional(),
     status: zod_1.z.enum(["active", "inactive"]).optional(),
+    sold_by: zod_1.z.enum(["unit", "weight"]).optional().default("unit"),
+    weight_unit: zod_1.z.enum(["kg", "gm"]).optional().nullable(),
 });
 exports.updateFoodSchema = exports.createFoodSchema.partial();

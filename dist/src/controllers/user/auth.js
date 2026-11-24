@@ -25,7 +25,7 @@ const generateOTP = (length = 6) => {
 // 1. Signup
 // ===================================
 const signup = async (req, res) => {
-    const { name, email, phone, alternatePhone, password, photo, restaurantId } = req.body;
+    const { name, email, phone, alternatePhone, password, photo, restaurantId, deviceId } = req.body;
     const resolvedAlternatePhone = alternatePhone || null;
     if (!name || !email || !phone || !password) {
         throw new BadRequest_1.BadRequest("Please provide all required fields");
@@ -49,6 +49,7 @@ const signup = async (req, res) => {
                 alternatePhone: resolvedAlternatePhone ? resolvedAlternatePhone.trim() : null,
                 password: hashedPassword,
                 photo,
+                deviceId: deviceId !== undefined ? (deviceId ? String(deviceId).trim() : null) : existingUser.deviceId,
                 isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
             }).where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
             // delete old tokens
@@ -63,6 +64,7 @@ const signup = async (req, res) => {
                 alternatePhone: resolvedAlternatePhone ? resolvedAlternatePhone.trim() : null,
                 password: hashedPassword,
                 photo,
+                deviceId: deviceId ? String(deviceId).trim() : null,
                 isVerified: false,
                 isProfileComplete: !(email && email.endsWith("@privaterelay.appleid.com"))
             });
@@ -208,7 +210,7 @@ exports.verifyEmail = verifyEmail;
 // 3. Login
 // ===================================
 const login = async (req, res) => {
-    const { email, password, restaurantId } = req.body;
+    const { email, password, restaurantId, deviceId } = req.body;
     if (!email || !password)
         throw new BadRequest_1.BadRequest("Email and password are required");
     const [user] = await connection_1.db.select().from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.email, email)).limit(1);
@@ -234,6 +236,11 @@ const login = async (req, res) => {
         if (existingLink.length === 0) {
             await connection_1.db.insert(schema_1.restaurant_users).values({ restaurantId, userId: user.id });
         }
+    }
+    // 📱 تحديث الـ deviceId للمستخدم في حالة إرساله
+    if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+        await connection_1.db.update(schema_1.users).set({ deviceId: deviceId.trim() }).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
+        user.deviceId = deviceId.trim();
     }
     const token = (0, jwt_1.generateUserToken)({ id: user.id, name: user.name, restaurantId });
     // For older users where DB default might be false, fallback to checking email
@@ -279,11 +286,16 @@ const forgotPassword = async (req, res) => {
             expiresAt
         });
     });
-    await (0, sendEmails_1.sendEmail)({
-        to: email,
-        subject: "Password Reset Code (Keeto)",
-        html: `<h1>Hello ${user.name}</h1><p>Your password reset code is: <b>${code}</b></p><p>It will expire in 15 minutes.</p>`
-    });
+    try {
+        await (0, sendEmails_1.sendEmail)({
+            to: email,
+            subject: "Password Reset Code (Keeto)",
+            html: `<h1>Hello ${user.name}</h1><p>Your password reset code is: <b>${code}</b></p><p>It will expire in 15 minutes.</p>`
+        });
+    }
+    catch (emailErr) {
+        console.error("⚠️ Failed to send reset email but code was saved:", emailErr);
+    }
     return (0, response_1.SuccessResponse)(res, { message: "If this email is registered, a password reset code has been sent." });
 };
 exports.forgotPassword = forgotPassword;
@@ -333,12 +345,13 @@ exports.resetPassword = resetPassword;
 // 7. Guest Session (Shadow User)
 // ===================================
 const initGuestSession = async (req, res) => {
-    const { restaurantId } = req.body;
+    const { restaurantId, deviceId } = req.body;
     const guestId = (0, uuid_1.v4)();
     // Create shadow user row — minimal data, no email/password
     await connection_1.db.insert(schema_1.users).values({
         id: guestId,
         name: "Guest",
+        deviceId: deviceId ? String(deviceId).trim() : null,
         isGuest: true,
         authProvider: "guest",
         isVerified: false,

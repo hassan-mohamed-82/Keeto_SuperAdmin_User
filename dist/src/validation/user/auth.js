@@ -12,4 +12,5 @@ exports.signupSchema = zod_1.z.object({
     password: zod_1.z.string({ required_error: "Password is required" }).min(6, "Password must be at least 6 characters"),
     photo: zod_1.z.string().optional().nullable(),
     restaurantId: zod_1.z.string().optional().nullable(),
+    deviceId: zod_1.z.string().optional().nullable(),
 });

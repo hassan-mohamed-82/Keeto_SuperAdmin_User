@@ -20,6 +20,7 @@ exports.users = (0, mysql_core_1.mysqlTable)("users", {
     // ✅ الحقل الجديد الخاص بالفيس بوك
     facebookId: (0, mysql_core_1.varchar)("facebook_id", { length: 255 }).unique(),
     googleId: (0, mysql_core_1.varchar)("google_id", { length: 255 }).unique(),
+    deviceId: (0, mysql_core_1.varchar)("device_id", { length: 255 }),
     isVerified: (0, mysql_core_1.boolean)("is_verified").default(false),
     isProfileComplete: (0, mysql_core_1.boolean)("is_profile_complete").default(false),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "blocked"]).default("active"),

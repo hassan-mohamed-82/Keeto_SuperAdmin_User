@@ -11,7 +11,7 @@ const router = (0, express_1.Router)();
 router.get("/dashboard", (0, catchAsync_1.catchAsync)(dashboard_1.getSuperAdminDashboard));
 router.get("/performance", (0, middlewares_1.hasPermission)("reports", "View"), (0, validation_1.validate)(report_1.getPerformanceReportQuerySchema, "query"), (0, catchAsync_1.catchAsync)(Report_1.getOperationsPerformanceReport));
 router.get("/charts", (0, middlewares_1.hasPermission)("reports", "View"), (0, validation_1.validate)(report_1.getChartsQuerySchema, "query"), (0, catchAsync_1.catchAsync)(Report_1.getOperationsCharts));
-router.get("/", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getFinancialReport));
+router.get("/", (0, middlewares_1.hasPermission)("reports", "View"), (0, validation_1.validate)(report_1.getFinancialReportQuerySchema, "query"), (0, catchAsync_1.catchAsync)(Report_1.getFinancialReport));
 router.get("/detailed", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getDetailedRestaurantReport));
 router.get("/restaurant/:restaurantId", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getSingleRestaurantReport));
 router.get("/restaurant/:restaurantId/invoices", (0, middlewares_1.hasPermission)("reports", "View"), (0, catchAsync_1.catchAsync)(Report_1.getRestaurantInvoices));

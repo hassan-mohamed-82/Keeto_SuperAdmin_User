@@ -13,7 +13,25 @@ const restaurantWalletService_1 = require("../../services/restaurantWalletServic
  * دالة مساعدة لجلب حركات المحفظة مربوطة ببيانات الأوردر (dailyOrderNumber, orderNumber, ...)
  * إذا كان نوع الحركة order_payment
  */
-async function getWalletTransactionsWithOrderDetails(restaurantId, limit) {
+async function getWalletTransactionsWithOrderDetails(restaurantId, limit, options) {
+    const conditions = [];
+    if (restaurantId && restaurantId !== "all") {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.restaurantId, restaurantId));
+    }
+    if (options?.visaSwitchConditionType) {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.visaSwitchConditionType, options.visaSwitchConditionType));
+    }
+    if (options?.cancelType) {
+        conditions.push((0, drizzle_orm_1.sql) `COALESCE(${schema_1.orders.cancelReasonType}, ${schema_1.selectReasons.type}) = ${options.cancelType}`);
+    }
+    if (options?.startDate) {
+        conditions.push((0, drizzle_orm_1.gte)(schema_1.restaurantWalletTransactions.createdAt, new Date(options.startDate)));
+    }
+    if (options?.endDate) {
+        const end = new Date(options.endDate);
+        end.setHours(23, 59, 59, 999);
+        conditions.push((0, drizzle_orm_1.lte)(schema_1.restaurantWalletTransactions.createdAt, end));
+    }
     const query = connection_1.db
         .select({
         id: schema_1.restaurantWalletTransactions.id,
@@ -31,6 +49,9 @@ async function getWalletTransactionsWithOrderDetails(restaurantId, limit) {
         orderAmount: schema_1.restaurantWalletTransactions.orderAmount,
         note: schema_1.restaurantWalletTransactions.note,
         createdAt: schema_1.restaurantWalletTransactions.createdAt,
+        visaSwitchConditionType: (0, drizzle_orm_1.sql) `COALESCE(${schema_1.restaurantSettings.visaSwitchConditionType}, 'none')`,
+        cancelType: (0, drizzle_orm_1.sql) `COALESCE(${schema_1.orders.cancelReasonType}, ${schema_1.selectReasons.type})`,
+        cancelReason: (0, drizzle_orm_1.sql) `COALESCE(${schema_1.orders.cancelReason}, ${schema_1.selectReasons.nameAr}, ${schema_1.selectReasons.name})`,
         order: {
             id: schema_1.orders.id,
             orderNumber: schema_1.orders.orderNumber,
@@ -44,7 +65,9 @@ async function getWalletTransactionsWithOrderDetails(restaurantId, limit) {
     })
         .from(schema_1.restaurantWalletTransactions)
         .leftJoin(schema_1.orders, (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.orderId, schema_1.orders.id), (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.type, "order_payment"), (0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.reference, schema_1.orders.orderNumber))))
-        .where((0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.restaurantId, restaurantId))
+        .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
+        .leftJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurantWalletTransactions.restaurantId, schema_1.restaurantSettings.restaurantId))
+        .where(conditions.length > 0 ? (0, drizzle_orm_1.and)(...conditions) : undefined)
         .orderBy((0, drizzle_orm_1.desc)(schema_1.restaurantWalletTransactions.createdAt));
     const rows = limit ? await query.limit(limit) : await query;
     return rows.map(r => ({
@@ -62,9 +85,12 @@ async function getWalletTransactionsWithOrderDetails(restaurantId, limit) {
         visaCommission: r.visaCommission,
         orderAmount: r.orderAmount,
         note: r.note,
+        visaSwitchConditionType: r.visaSwitchConditionType || "none",
+        cancelType: r.cancelType ?? null,
+        cancelReason: r.cancelReason ?? null,
         createdAt: r.createdAt,
-        // إذا كان نوع الحركة order_payment يتم إرجاع تفاصيل الأوردر مع dailyOrderNumber
-        order: (r.type === "order_payment" && r.order?.id) ? {
+        // إذا كان هناك أوردر مرتبط بالحركة
+        order: (r.order?.id) ? {
             id: r.order.id,
             orderNumber: r.order.orderNumber,
             dailyOrderNumber: r.order.dailyOrderNumber,
@@ -72,6 +98,8 @@ async function getWalletTransactionsWithOrderDetails(restaurantId, limit) {
             orderType: r.order.orderType,
             orderSource: r.order.orderSource,
             totalAmount: r.order.totalAmount,
+            cancelType: r.cancelType ?? null,
+            cancelReason: r.cancelReason ?? null,
             createdAt: r.order.createdAt,
         } : null
     }));
@@ -421,11 +449,14 @@ exports.approveWithdrawal = approveWithdrawal;
 // 6. WALLET TRANSACTIONS HISTORY
 // ==========================================
 const getWalletTransactions = async (req, res) => {
-    // 👇 التعديل هنا
-    const restaurantId = req.params.restaurantId || req.params.id;
-    if (!restaurantId)
-        throw new BadRequest_1.BadRequest("Restaurant ID is required");
-    const data = await getWalletTransactionsWithOrderDetails(restaurantId);
+    const restaurantId = req.params.restaurantId || req.params.id || req.query.restaurantId;
+    const { visaSwitchConditionType, cancelType, cancelReasonType, startDate, endDate, limit } = req.query;
+    const data = await getWalletTransactionsWithOrderDetails(restaurantId && restaurantId !== "all" ? restaurantId : undefined, limit ? parseInt(limit, 10) : undefined, {
+        visaSwitchConditionType: visaSwitchConditionType,
+        cancelType: (cancelType || cancelReasonType),
+        startDate: startDate,
+        endDate: endDate,
+    });
     return (0, response_1.SuccessResponse)(res, { data });
 };
 exports.getWalletTransactions = getWalletTransactions;

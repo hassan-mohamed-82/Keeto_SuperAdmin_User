@@ -14,6 +14,7 @@ const Errors_1 = require("../../Errors");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const uuid_1 = require("uuid");
 const catchAsync_1 = require("../../utils/catchAsync");
+const handleImages_1 = require("../../utils/handleImages");
 // =========================================================================
 // Helpers: التحقق من أهلية المطاعم وتحديث الربط
 // =========================================================================
@@ -143,6 +144,10 @@ exports.createShippingCompany = (0, catchAsync_1.catchAsync)(async (req, res) =>
     if (restaurantIds && Array.isArray(restaurantIds) && restaurantIds.length > 0) {
         await validateEligibleRestaurants(restaurantIds);
     }
+    let savedLogo = null;
+    if (logo) {
+        savedLogo = (await (0, handleImages_1.handleImageUpdate)(req, null, logo, "shipping_companies")) || null;
+    }
     const companyId = (0, uuid_1.v4)();
     const hashedPassword = await bcrypt_1.default.hash(password, 10);
     await connection_1.db.transaction(async (tx) => {
@@ -155,7 +160,7 @@ exports.createShippingCompany = (0, catchAsync_1.catchAsync)(async (req, res) =>
             password: hashedPassword,
             phone,
             address,
-            logo,
+            logo: savedLogo,
             status,
             maxSearchRadius,
             maxActiveOrders,
@@ -323,7 +328,7 @@ exports.updateShippingCompany = (0, catchAsync_1.catchAsync)(async (req, res) =>
     const { id } = req.params;
     const { name, nameAr, email, password, phone, address, logo, status, maxSearchRadius, maxActiveOrders, maxAttempts, commissionType, commissionValue, restaurantIds, } = req.body;
     const [company] = await connection_1.db
-        .select({ id: schema_1.shippingCompanies.id })
+        .select({ id: schema_1.shippingCompanies.id, logo: schema_1.shippingCompanies.logo })
         .from(schema_1.shippingCompanies)
         .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, id))
         .limit(1);
@@ -351,8 +356,17 @@ exports.updateShippingCompany = (0, catchAsync_1.catchAsync)(async (req, res) =>
         updateData.phone = phone;
     if (address !== undefined)
         updateData.address = address;
-    if (logo !== undefined)
-        updateData.logo = logo;
+    if (logo !== undefined) {
+        if (!logo) {
+            if (company.logo) {
+                await (0, handleImages_1.deleteImage)(company.logo);
+            }
+            updateData.logo = null;
+        }
+        else {
+            updateData.logo = await (0, handleImages_1.handleImageUpdate)(req, company.logo, logo, "shipping_companies");
+        }
+    }
     if (status !== undefined)
         updateData.status = status;
     if (maxSearchRadius !== undefined)

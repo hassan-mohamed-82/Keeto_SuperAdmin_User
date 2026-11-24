@@ -19,6 +19,8 @@ exports.subcategories = (0, mysql_core_1.mysqlTable)("subcategories", {
     order_Level: (0, mysql_core_1.int)("order_level").default(0), // تم تغيير الاسم هنا
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     isOutOfStock: (0, mysql_core_1.boolean)("is_out_of_stock").default(false),
+    isDeleted: (0, mysql_core_1.boolean)("is_deleted").notNull().default(false),
+    deletedAt: (0, mysql_core_1.timestamp)("deleted_at"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

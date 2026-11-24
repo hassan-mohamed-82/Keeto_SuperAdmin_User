@@ -273,14 +273,24 @@ const updateUser = async (req, res) => {
     return (0, response_1.SuccessResponse)(res, { message: "User updated successfully", data: { id } }, 200);
 };
 exports.updateUser = updateUser;
-// Delete a user
+// Delete a user (soft delete)
 const deleteUser = async (req, res) => {
     const { id } = req.params;
-    const [existingUser] = await connection_1.db.select().from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, id)).limit(1);
+    const [existingUser] = await connection_1.db
+        .select()
+        .from(schema_1.users)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.users.id, id), (0, drizzle_orm_1.eq)(schema_1.users.isDeleted, false)))
+        .limit(1);
     if (!existingUser) {
         throw new NotFound_1.NotFound("User not found");
     }
-    await connection_1.db.delete(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, id));
+    await connection_1.db
+        .update(schema_1.users)
+        .set({
+        isDeleted: true,
+        deletedAt: new Date(),
+    })
+        .where((0, drizzle_orm_1.eq)(schema_1.users.id, id));
     return (0, response_1.SuccessResponse)(res, { message: "User deleted successfully", data: { id } }, 200);
 };
 exports.deleteUser = deleteUser;

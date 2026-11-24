@@ -12,6 +12,7 @@ const Errors_1 = require("../../Errors");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const dispatchEngine_1 = require("../../services/shipping/dispatchEngine");
 const catchAsync_1 = require("../../utils/catchAsync");
+const handleImages_1 = require("../../utils/handleImages");
 // =========================================================================
 // 0. عرض المناديب الأحرار المتاحين للربط بشركة الشحن (Available Free Couriers)
 // =========================================================================
@@ -59,6 +60,10 @@ exports.createDeliveryMan = (0, catchAsync_1.catchAsync)(async (req, res) => {
     if (password) {
         hashedPassword = await bcrypt_1.default.hash(password, 10);
     }
+    let savedImage = null;
+    if (image) {
+        savedImage = (await (0, handleImages_1.handleImageUpdate)(req, null, image, "delivery_men")) || null;
+    }
     let createdId = "";
     await connection_1.db.transaction(async (tx) => {
         // Always deliveryType = 'outsource' per D4
@@ -70,7 +75,7 @@ exports.createDeliveryMan = (0, catchAsync_1.catchAsync)(async (req, res) => {
             phone,
             email,
             password: hashedPassword,
-            image,
+            image: savedImage,
             deliveryType: "outsource",
             allZones: Boolean(allZones),
             shiftStatus: "inactive",
@@ -274,7 +279,7 @@ exports.updateDeliveryMan = (0, catchAsync_1.catchAsync)(async (req, res) => {
         throw new Errors_1.UnauthorizedError("Unauthorized access");
     }
     const [dm] = await connection_1.db
-        .select({ id: schema_1.deliveryMen.id })
+        .select({ id: schema_1.deliveryMen.id, image: schema_1.deliveryMen.image })
         .from(schema_1.deliveryMen)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.deliveryMen.id, id), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.shippingCompanyId, companyId), (0, drizzle_orm_1.eq)(schema_1.deliveryMen.isDeleted, false)))
         .limit(1);
@@ -310,8 +315,17 @@ exports.updateDeliveryMan = (0, catchAsync_1.catchAsync)(async (req, res) => {
         updateData.phone = phone;
     if (email !== undefined)
         updateData.email = email;
-    if (image !== undefined)
-        updateData.image = image;
+    if (image !== undefined) {
+        if (!image) {
+            if (dm.image) {
+                await (0, handleImages_1.deleteImage)(dm.image);
+            }
+            updateData.image = null;
+        }
+        else {
+            updateData.image = await (0, handleImages_1.handleImageUpdate)(req, dm.image, image, "delivery_men");
+        }
+    }
     if (deliveryType !== undefined)
         updateData.deliveryType = deliveryType;
     if (allZones !== undefined)

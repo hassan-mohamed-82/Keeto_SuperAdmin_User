@@ -19,7 +19,8 @@ const restaurantWalletService_1 = require("../restaurantWalletService");
  * and generates the hosted payment session URL for the customer.
  */
 async function createOrderPaymentSession(params) {
-    const { orderId, orderNumber, restaurantId, totalAmount, userInfo, preferredGateway, restaurantSlug } = params;
+    const { orderId, orderNumber, restaurantId, totalAmount, userInfo, preferredGateway, restaurantSlug, sessionExpiresAt } = params;
+    const kashierExpiry = sessionExpiresAt ? { expireAt: sessionExpiresAt.toISOString() } : {};
     // Build frontend redirect URL with callbackSlug when a restaurant slug is available
     const appBaseUrl = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
     const frontendRedirectUrl = restaurantSlug
@@ -54,6 +55,7 @@ async function createOrderPaymentSession(params) {
                 ? `${backendBaseUrl}/api/payments/kashier/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
                 : `${backendBaseUrl}/api/payments/kashier/callback`;
             const kashierSession = await kashier_service_1.KashierService.createPaymentSession({
+                ...kashierExpiry,
                 orderId,
                 amount: totalAmount,
                 currency: "EGP",
@@ -188,6 +190,7 @@ async function createOrderPaymentSession(params) {
                 ? `${backendBaseUrl}/api/payments/kashier/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
                 : `${backendBaseUrl}/api/payments/kashier/callback`;
             const kashierSession = await kashier_service_1.KashierService.createPaymentSession({
+                ...kashierExpiry,
                 orderId,
                 amount: totalAmount,
                 currency: "EGP",
@@ -215,6 +218,7 @@ async function createOrderPaymentSession(params) {
                 ? `${backendBaseUrl}/api/payments/kashier/callback?callbackSlug=${encodeURIComponent(restaurantSlug)}`
                 : `${backendBaseUrl}/api/payments/kashier/callback`;
             const kashierSession = await kashier_service_1.KashierService.createPaymentSession({
+                ...kashierExpiry,
                 orderId,
                 amount: totalAmount,
                 currency: "EGP",

@@ -12,7 +12,8 @@ router.get("/system", (0, middlewares_1.hasPermission)("RestaurantWallets", "Vie
 router.get("/restaurant/:restaurantId", (0, middlewares_1.hasPermission)("RestaurantWallets", "View"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.getRestaurantWallet));
 // تفصيل كامل للمحفظة: service fees + commission + الاشتراكات
 router.get("/restaurant/:restaurantId/details", (0, middlewares_1.hasPermission)("RestaurantWallets", "View"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.getDetailedWallet));
-router.get("/transactions/:restaurantId", (0, middlewares_1.hasPermission)("RestaurantWallets", "View"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.getWalletTransactions));
+router.get("/transactions", (0, middlewares_1.hasPermission)("RestaurantWallets", "View"), (0, validation_1.validate)(restaurant_wallets_2.getWalletTransactionsQuerySchema, "query"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.getWalletTransactions));
+router.get("/transactions/:restaurantId", (0, middlewares_1.hasPermission)("RestaurantWallets", "View"), (0, validation_1.validate)(restaurant_wallets_2.getWalletTransactionsQuerySchema, "query"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.getWalletTransactions));
 router.put("/approve/:id", (0, middlewares_1.hasPermission)("RestaurantWallets", "Edit"), (0, validation_1.validate)(restaurant_wallets_2.updateWalletTransactionSchema), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.approveWithdrawal));
 router.put("/collect/:id", (0, middlewares_1.hasPermission)("RestaurantWallets", "Edit"), (0, catchAsync_1.catchAsync)(restaurant_wallets_1.collectCashFromRestaurant));
 // تسجيل اشتراك دوري يدويًا (شهري/ربع سنوي/سنوي) في محفظة المطعم

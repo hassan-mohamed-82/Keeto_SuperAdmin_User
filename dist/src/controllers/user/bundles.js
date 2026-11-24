@@ -42,6 +42,7 @@ const getFoodVariationsMap = async (foodIds) => {
         optionNameAr: schema_1.variationOptions.optionNameAr,
         optionNameFr: schema_1.variationOptions.optionNameFr,
         additionalPrice: schema_1.variationOptions.additionalPrice,
+        priceMode: schema_1.variationOptions.priceMode,
     })
         .from(schema_1.foodVariations)
         .leftJoin(schema_1.variationOptions, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, schema_1.variationOptions.variationId), (0, drizzle_orm_1.eq)(schema_1.variationOptions.status, true)))
@@ -75,6 +76,7 @@ const getFoodVariationsMap = async (foodIds) => {
                 nameAr: v.optionNameAr,
                 nameFr: v.optionNameFr,
                 additionalPrice: Number(v.additionalPrice || 0),
+                price_mode: v.priceMode || "fixed",
             });
         }
     }
@@ -159,6 +161,8 @@ const getAllBundles = async (req, res) => {
             .select({
             id: schema_1.offers.id,
             name: schema_1.offers.name,
+            nameAr: schema_1.offers.nameAr,
+            nameFr: schema_1.offers.nameFr,
             image: schema_1.offers.image,
             price: schema_1.offers.price,
             startDate: schema_1.offers.startDate,
@@ -213,6 +217,8 @@ const getAllBundles = async (req, res) => {
         const result = offersRows.map((o) => ({
             id: o.id,
             name: o.name,
+            nameAr: o.nameAr,
+            nameFr: o.nameFr,
             image: o.image,
             price: Number(o.price),
             startDate: o.startDate,
@@ -252,6 +258,8 @@ const getBundleById = async (req, res) => {
             .select({
             id: schema_1.offers.id,
             name: schema_1.offers.name,
+            nameAr: schema_1.offers.nameAr,
+            nameFr: schema_1.offers.nameFr,
             image: schema_1.offers.image,
             price: schema_1.offers.price,
             startDate: schema_1.offers.startDate,
@@ -308,6 +316,8 @@ const getBundleById = async (req, res) => {
             data: {
                 id: offerRow.id,
                 name: offerRow.name,
+                nameAr: offerRow.nameAr,
+                nameFr: offerRow.nameFr,
                 image: offerRow.image,
                 price: Number(offerRow.price),
                 startDate: offerRow.startDate,

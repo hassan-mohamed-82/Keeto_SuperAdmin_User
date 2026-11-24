@@ -25,12 +25,118 @@ const RESTAURANT_TYPE_POINTS = {
 // ==========================================
 // API 1: التقرير المالي العام 
 // ==========================================
+// الدالة المساعدة لحساب الوقت أو المبلغ المتبقي لتحويل الفيزة تلقائياً مع الشرح باللغة العربية
+function getVisaSwitchProgress({ conditionType, threshold, dayOfWeek, dayOfMonth, balance, applied, }) {
+    if (applied) {
+        return {
+            conditionType: conditionType || "none",
+            isApplied: true,
+            remainingAmount: 0,
+            remainingDays: 0,
+            explanationAr: "تم تحويل بوابة الدفع بالفعل إلى نظام المنصة (SYSTEM)",
+        };
+    }
+    const type = conditionType || "none";
+    const debt = Math.max(0, -balance);
+    if (type === "amount") {
+        const thresholdNum = parseFloat(String(threshold || "0"));
+        const remaining = Math.max(0, thresholdNum - debt);
+        let explanationAr = "";
+        if (debt >= thresholdNum && thresholdNum > 0) {
+            explanationAr = `بلغت مديونية المطعم (${debt.toFixed(2)} ج.م) الحد المستهدف (${thresholdNum.toFixed(2)} ج.م) وسيتم تحويل الفيزة تلقائياً لنظام المنصة.`;
+        }
+        else {
+            explanationAr = `فاضل ${remaining.toFixed(2)} ج.م مديونية وتتحول الفيزة لنظام المنصة (الحد المستهدف: ${thresholdNum.toFixed(2)} ج.م، المديونية الحالية: ${debt.toFixed(2)} ج.م).`;
+        }
+        return {
+            conditionType: "amount",
+            isApplied: false,
+            threshold: thresholdNum.toFixed(2),
+            currentDebt: debt.toFixed(2),
+            remainingAmount: remaining.toFixed(2),
+            remainingDays: null,
+            explanationAr,
+        };
+    }
+    if (type === "day_of_week" && dayOfWeek) {
+        const daysMap = {
+            sunday: { index: 0, nameAr: "الأحد" },
+            monday: { index: 1, nameAr: "الإثنين" },
+            tuesday: { index: 2, nameAr: "الثلاثاء" },
+            wednesday: { index: 3, nameAr: "الأربعاء" },
+            thursday: { index: 4, nameAr: "الخميس" },
+            friday: { index: 5, nameAr: "الجمعة" },
+            saturday: { index: 6, nameAr: "السبت" },
+        };
+        const normalizedDay = String(dayOfWeek).trim().toLowerCase();
+        const target = daysMap[normalizedDay];
+        if (target) {
+            const todayIndex = new Date().getDay();
+            const diffDays = (target.index - todayIndex + 7) % 7;
+            let explanationAr = "";
+            if (diffDays === 0) {
+                explanationAr = `اليوم هو موعد تحويل الفيزة التلقائي (${target.nameAr}).`;
+            }
+            else {
+                explanationAr = `فاضل ${diffDays} يوم في الأسبوع وتتحول الفيزة (يوم ${target.nameAr}).`;
+            }
+            return {
+                conditionType: "day_of_week",
+                isApplied: false,
+                dayOfWeek: normalizedDay,
+                dayOfWeekAr: target.nameAr,
+                remainingAmount: null,
+                remainingDays: diffDays,
+                explanationAr,
+            };
+        }
+    }
+    if (type === "day_of_month" && dayOfMonth != null) {
+        const targetDay = Number(dayOfMonth);
+        const now = new Date();
+        const today = now.getDate();
+        let diffDays = 0;
+        let explanationAr = "";
+        if (today === targetDay) {
+            diffDays = 0;
+            explanationAr = `اليوم (يوم ${targetDay} من الشهر) هو موعد تحويل الفيزة التلقائي.`;
+        }
+        else if (today < targetDay) {
+            diffDays = targetDay - today;
+            explanationAr = `فاضل ${diffDays} يوم في هذا الشهر وتتحول الفيزة (يوم ${targetDay} من الشهر).`;
+        }
+        else {
+            const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+            diffDays = (daysInMonth - today) + targetDay;
+            explanationAr = `فاضل ${diffDays} يوم في الشهر القادم وتتحول الفيزة (يوم ${targetDay} من الشهر).`;
+        }
+        return {
+            conditionType: "day_of_month",
+            isApplied: false,
+            dayOfMonth: targetDay,
+            remainingAmount: null,
+            remainingDays: diffDays,
+            explanationAr,
+        };
+    }
+    return {
+        conditionType: "none",
+        isApplied: false,
+        remainingAmount: null,
+        remainingDays: null,
+        explanationAr: "لا يوجد شرط تحويل تلقائي محدد للفيزة لهذا المطعم.",
+    };
+}
 const getFinancialReport = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     // 1. استقبال متغيرات الفلترة فقط (بدون page و limit)
-    const { restaurantId, startDate, endDate, status, paymentMethod, cityId } = req.query;
+    const { restaurantId, startDate, endDate, status, paymentMethod, cityId, visaSwitchConditionType } = req.query;
     const conditions = [];
+    // استبعاد مطاعم الـ test والمطاعم ذات عمليات demo والمطاعم التي ليست delivered من جميع الحسابات
+    conditions.push((0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"));
+    conditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"));
+    conditions.push((0, drizzle_orm_1.or)((0, drizzle_orm_1.ne)(schema_1.restaurantOperations.status, "demo"), (0, drizzle_orm_1.isNull)(schema_1.restaurantOperations.status)));
     if (restaurantId)
         conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId));
     if (status)
@@ -60,6 +166,7 @@ const getFinancialReport = async (req, res) => {
     })
         .from(schema_1.orders)
         .leftJoin(schema_1.restaurants, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurants.id))
+        .leftJoin(schema_1.restaurantOperations, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, schema_1.restaurantOperations.restaurantId))
         .leftJoin(schema_1.selectReasons, (0, drizzle_orm_1.eq)(schema_1.orders.cancelReasonId, schema_1.selectReasons.id))
         .leftJoin(schema_1.paymentMethods, (0, drizzle_orm_1.eq)(schema_1.orders.paymentMethod, schema_1.paymentMethods.id))
         .where(conditions.length > 0 ? (0, drizzle_orm_1.and)(...conditions) : undefined);
@@ -136,19 +243,41 @@ const getFinancialReport = async (req, res) => {
     // ==========================================
     // 💼 3.1 إدارة المحافظ لجميع المطاعم (Wallet Management)
     // ==========================================
-    const walletConditions = [];
+    const walletConditions = [
+        (0, drizzle_orm_1.ne)(schema_1.restaurants.type, "test"),
+        (0, drizzle_orm_1.eq)(schema_1.restaurants.deliverystatus, "delivered"),
+        (0, drizzle_orm_1.or)((0, drizzle_orm_1.ne)(schema_1.restaurantOperations.status, "demo"), (0, drizzle_orm_1.isNull)(schema_1.restaurantOperations.status)),
+    ];
     if (restaurantId)
         walletConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId));
     if (cityId)
         walletConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurants.cityId, cityId));
+    if (startDate) {
+        walletConditions.push((0, drizzle_orm_1.gte)(schema_1.restaurantWallets.updatedAt, new Date(startDate)));
+    }
+    if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        walletConditions.push((0, drizzle_orm_1.lte)(schema_1.restaurantWallets.updatedAt, end));
+    }
+    if (visaSwitchConditionType) {
+        walletConditions.push((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.visaSwitchConditionType, visaSwitchConditionType));
+    }
     const walletsData = await connection_1.db
         .select({
         restaurantId: schema_1.restaurants.id,
         restaurantName: schema_1.restaurants.name,
         balance: schema_1.restaurantWallets.balance,
+        visaSwitchConditionType: schema_1.restaurantSettings.visaSwitchConditionType,
+        visaSwitchAmountThreshold: schema_1.restaurantSettings.visaSwitchAmountThreshold,
+        visaSwitchDayOfWeek: schema_1.restaurantSettings.visaSwitchDayOfWeek,
+        visaSwitchDayOfMonth: schema_1.restaurantSettings.visaSwitchDayOfMonth,
+        visaSwitchApplied: schema_1.restaurantSettings.visaSwitchApplied,
     })
         .from(schema_1.restaurants)
         .leftJoin(schema_1.restaurantWallets, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantWallets.restaurantId))
+        .leftJoin(schema_1.restaurantOperations, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantOperations.restaurantId))
+        .leftJoin(schema_1.restaurantSettings, (0, drizzle_orm_1.eq)(schema_1.restaurants.id, schema_1.restaurantSettings.restaurantId))
         .where(walletConditions.length > 0 ? (0, drizzle_orm_1.and)(...walletConditions) : undefined);
     let totalPlatformBalance = 0;
     let totalDueOnRestaurants = 0;
@@ -156,20 +285,34 @@ const getFinancialReport = async (req, res) => {
     const restaurantWalletsList = [];
     walletsData.forEach((row) => {
         const numBalance = parseFloat(row.balance || "0");
+        // استبعاد المطاعم التي رصيد محفظتها 0 (خالص)
         if (numBalance === 0)
             return;
         totalPlatformBalance += numBalance;
         if (numBalance < 0) {
             totalDueOnRestaurants += Math.abs(numBalance);
         }
-        else {
+        else if (numBalance > 0) {
             totalDueToRestaurants += numBalance;
         }
+        const visaSwitchProgress = getVisaSwitchProgress({
+            conditionType: row.visaSwitchConditionType,
+            threshold: row.visaSwitchAmountThreshold,
+            dayOfWeek: row.visaSwitchDayOfWeek,
+            dayOfMonth: row.visaSwitchDayOfMonth,
+            balance: numBalance,
+            applied: row.visaSwitchApplied,
+        });
         restaurantWalletsList.push({
             restaurantId: row.restaurantId,
             restaurantName: row.restaurantName,
             balance: numBalance > 0 ? `+${numBalance.toFixed(2)}` : numBalance.toFixed(2),
             claimSide: numBalance < 0 ? "المنصة تريد من المطعم" : "المطعم يريد من المنصة",
+            visaSwitchConditionType: row.visaSwitchConditionType || "none",
+            visaSwitchAmountThreshold: row.visaSwitchAmountThreshold ? Number(row.visaSwitchAmountThreshold).toFixed(2) : null,
+            visaSwitchDayOfWeek: row.visaSwitchDayOfWeek || null,
+            visaSwitchDayOfMonth: row.visaSwitchDayOfMonth != null ? Number(row.visaSwitchDayOfMonth) : null,
+            visaSwitchProgress,
         });
     });
     const platformClaimSide = totalPlatformBalance < 0

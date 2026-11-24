@@ -21,6 +21,7 @@ const firstOrderDiscount_helper_1 = require("../../helpers/firstOrderDiscount.he
 const checkFirstOrderDiscount = async (req, res) => {
     const userId = req.user?.id;
     const { restaurantId, subtotal: reqSubtotal } = req.query;
+    const orderSource = (req.query.orderSource || req.query.ordersource);
     if (!restaurantId)
         throw new BadRequest_1.BadRequest("restaurantId is required");
     // First-order discount is only for registered (non-guest) users
@@ -45,7 +46,7 @@ const checkFirstOrderDiscount = async (req, res) => {
             }, 0);
         }
     }
-    const result = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, restaurantId, subtotal);
+    const result = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, restaurantId, subtotal, orderSource);
     if (!result) {
         return (0, response_1.SuccessResponse)(res, {
             message: "No first-order discount is currently available for this user.",
@@ -86,6 +87,7 @@ exports.checkFirstOrderDiscount = checkFirstOrderDiscount;
 const getAvailableFirstOrderDiscounts = async (req, res) => {
     const userId = req.user?.id;
     const { restaurantId } = req.query;
+    const orderSource = (req.query.orderSource || req.query.ordersource);
     if (!restaurantId)
         throw new BadRequest_1.BadRequest("restaurantId is required");
     // First-order discount is only for registered (non-guest) users
@@ -97,15 +99,48 @@ const getAvailableFirstOrderDiscounts = async (req, res) => {
     }
     await (0, userBlockCheck_1.validateUserNotBlocked)(userId, restaurantId);
     const now = new Date();
+    const src = String(orderSource || "").trim().toLowerCase();
+    const targetChannels = ["all"];
+    if (src === "pos") {
+        targetChannels.push("pos");
+    }
+    else if (src.includes("web") || src === "food_aggregator" || src === "mykeeto") {
+        targetChannels.push("web");
+    }
+    else if (src.includes("app")) {
+        targetChannels.push("app");
+    }
+    else {
+        targetChannels.push("app", "web");
+    }
     const discounts = await connection_1.db
         .select()
         .from(schema_1.firstOrderDiscounts)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.firstOrderDiscounts.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.firstOrderDiscounts.status, "active"), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.firstOrderDiscounts.startDate), (0, drizzle_orm_1.lte)(schema_1.firstOrderDiscounts.startDate, now)), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.firstOrderDiscounts.endDate), (0, drizzle_orm_1.gte)(schema_1.firstOrderDiscounts.endDate, now))));
-    // Count user's completed orders at this restaurant
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.firstOrderDiscounts.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.firstOrderDiscounts.status, "active"), (0, drizzle_orm_1.inArray)(schema_1.firstOrderDiscounts.channel, targetChannels), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.firstOrderDiscounts.startDate), (0, drizzle_orm_1.lte)(schema_1.firstOrderDiscounts.startDate, now)), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNull)(schema_1.firstOrderDiscounts.endDate), (0, drizzle_orm_1.gte)(schema_1.firstOrderDiscounts.endDate, now))));
+    // Anti-fraud: resolve all user accounts linked to this deviceId
+    const [currentUser] = await connection_1.db
+        .select({ deviceId: schema_1.users.deviceId })
+        .from(schema_1.users)
+        .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId))
+        .limit(1);
+    let userIdsToCheck = [userId];
+    if (currentUser?.deviceId && currentUser.deviceId.trim()) {
+        const sameDeviceUsers = await connection_1.db
+            .select({ id: schema_1.users.id })
+            .from(schema_1.users)
+            .where((0, drizzle_orm_1.eq)(schema_1.users.deviceId, currentUser.deviceId.trim()));
+        if (sameDeviceUsers.length > 0) {
+            userIdsToCheck = Array.from(new Set([userId, ...sameDeviceUsers.map(u => u.id)]));
+        }
+    }
+    // Count user's completed orders at this restaurant across accounts sharing this deviceId
+    const userCondition = userIdsToCheck.length === 1
+        ? (0, drizzle_orm_1.eq)(schema_1.orders.userId, userIdsToCheck[0])
+        : (0, drizzle_orm_1.inArray)(schema_1.orders.userId, userIdsToCheck);
     const [orderCountRow] = await connection_1.db
         .select({ cnt: (0, drizzle_orm_1.count)(schema_1.orders.id) })
         .from(schema_1.orders)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.ne)(schema_1.orders.status, 'failed'), (0, drizzle_orm_1.sql) `NOT (${schema_1.orders.paymentStatus} = 'pending_payment' AND ${schema_1.orders.status} = 'pending')`, (0, drizzle_orm_1.sql) `NOT (${schema_1.orders.status} = 'cancelled' AND ${schema_1.orders.cancelReasonType} = 'restaurant')`));
+        .where((0, drizzle_orm_1.and)(userCondition, (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.ne)(schema_1.orders.status, 'failed'), (0, drizzle_orm_1.sql) `NOT (${schema_1.orders.paymentStatus} = 'pending_payment' AND ${schema_1.orders.status} = 'pending')`, (0, drizzle_orm_1.sql) `NOT (${schema_1.orders.status} = 'cancelled' AND ${schema_1.orders.cancelReasonType} = 'restaurant')`));
     const userOrderCount = Number(orderCountRow?.cnt ?? 0);
     // Filter eligible discounts
     const eligible = discounts.filter(d => {

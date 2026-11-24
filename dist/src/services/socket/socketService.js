@@ -1,7 +1,12 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.notifyOrderTracking = exports.notifyAdmins = exports.notifyRestaurant = exports.notifyShippingCompany = exports.notifyDeliveryMan = exports.getIO = exports.initSocket = exports.invalidateCourierCache = void 0;
+exports.notifyOrderTracking = exports.notifyAdmins = exports.notifyRestaurantAdmins = exports.getRestaurantAdminRooms = exports.notifyRestaurant = exports.notifyShippingCompany = exports.notifyDeliveryMan = exports.getIO = exports.initSocket = exports.invalidateCourierCache = void 0;
 const socket_io_1 = require("socket.io");
+const redis_adapter_1 = require("@socket.io/redis-adapter");
+const redis_1 = __importDefault(require("../../config/redis"));
 const auth_1 = require("../../utils/auth");
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
@@ -68,6 +73,18 @@ const initSocket = (httpServer) => {
             methods: ["GET", "POST"],
         },
     });
+    // -------------------------------------------------------------
+    // Redis adapter: share rooms/broadcasts across servers.
+    // Couriers connect to Keeto_Restaurant_User while shipping companies,
+    // admins, and others may connect to Keeto_SuperAdmin_User. Without a shared
+    // adapter, io.to(room).emit() only reaches sockets on the same process.
+    // Both backends MUST point to the same Redis instance.
+    // -------------------------------------------------------------
+    const pubClient = redis_1.default.duplicate();
+    const subClient = redis_1.default.duplicate();
+    pubClient.on("error", (err) => console.error("Socket.IO Redis pub error:", err.message));
+    subClient.on("error", (err) => console.error("Socket.IO Redis sub error:", err.message));
+    io.adapter((0, redis_adapter_1.createAdapter)(pubClient, subClient));
     // -------------------------------------------------------------
     // Phase 7.1: Mandatory Authentication Middleware
     // -------------------------------------------------------------
@@ -279,6 +296,11 @@ const initSocket = (httpServer) => {
         if (user.restaurantId) {
             socket.join(`restaurant:${user.restaurantId}`);
         }
+        // Restaurant-admin notification rooms (admins only — guests/users also carry restaurantId)
+        if (user.role === "restaurant_admin" && user.restaurantId) {
+            for (const room of (0, exports.getRestaurantAdminRooms)(user))
+                socket.join(room);
+        }
         // Shipping company room: ONLY shipping_company users join (Phase 7.2)
         if (user.role === "shipping_company" && user.shippingCompanyId) {
             socket.join(`shipping_company:${user.shippingCompanyId}`);
@@ -353,6 +375,41 @@ const notifyRestaurant = (restaurantId, event, data) => {
     }
 };
 exports.notifyRestaurant = notifyRestaurant;
+// -------------------------------------------------------------
+// Restaurant-admin rooms
+//   restaurant_admin:{rid}                -> every admin of the restaurant
+//   restaurant_admin:{rid}:all            -> admins who see all branches (owner/subadmin or no branch)
+//   restaurant_admin:{rid}:branch:{bid}   -> admins bound to a specific branch
+// Mirrors the FCM targeting in sendPushNotification.
+// -------------------------------------------------------------
+const ALL_BRANCH_ADMIN_TYPES = ["owner", "subadmin"];
+const getRestaurantAdminRooms = (user) => {
+    const rid = user.restaurantId;
+    if (!rid)
+        return [];
+    const rooms = [`restaurant_admin:${rid}`];
+    if (!user.branchId || ALL_BRANCH_ADMIN_TYPES.includes(String(user.type))) {
+        rooms.push(`restaurant_admin:${rid}:all`);
+    }
+    if (user.branchId) {
+        rooms.push(`restaurant_admin:${rid}:branch:${user.branchId}`);
+    }
+    return rooms;
+};
+exports.getRestaurantAdminRooms = getRestaurantAdminRooms;
+/**
+ * Emit to the restaurant's admins. With a branchId only that branch's admins
+ * plus all-branch admins (owner/subadmin) receive it; without, every admin does.
+ */
+const notifyRestaurantAdmins = (restaurantId, branchId, event, data) => {
+    if (!io)
+        return;
+    const rooms = branchId
+        ? [`restaurant_admin:${restaurantId}:all`, `restaurant_admin:${restaurantId}:branch:${branchId}`]
+        : [`restaurant_admin:${restaurantId}`];
+    io.to(rooms).emit(event, data);
+};
+exports.notifyRestaurantAdmins = notifyRestaurantAdmins;
 const notifyAdmins = (event, data) => {
     if (io) {
         io.to("superadmin:room").emit(event, data);

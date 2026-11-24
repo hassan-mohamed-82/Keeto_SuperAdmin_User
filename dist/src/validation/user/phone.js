@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.optionalEgyptPhoneSchema = exports.egyptPhoneSchema = exports.egyptPhoneErrorMessage = exports.egyptPhoneRegex = void 0;
+exports.optionalEgyptPhoneSchema = exports.egyptPhoneSchema = exports.normalizePhoneInput = exports.egyptPhoneErrorMessage = exports.egyptPhoneRegex = void 0;
 const zod_1 = require("zod");
 /**
  * Egyptian mobile numbers format:
@@ -13,19 +13,46 @@ const zod_1 = require("zod");
  */
 exports.egyptPhoneRegex = /^01[0125][0-9]{8}$/;
 exports.egyptPhoneErrorMessage = "Phone number must be 11 digits and start with 01.";
-exports.egyptPhoneSchema = zod_1.z
+const normalizePhoneInput = (val) => {
+    let trimmed = val.trim();
+    if (!trimmed)
+        return trimmed;
+    if (trimmed.startsWith("00")) {
+        trimmed = trimmed.slice(1); // removes one '0' -> leaves single '0'
+    }
+    else if (!trimmed.startsWith("0")) {
+        trimmed = `0${trimmed}`; // adds '0' if missing
+    }
+    return trimmed;
+};
+exports.normalizePhoneInput = normalizePhoneInput;
+exports.egyptPhoneSchema = zod_1.z.preprocess((val) => {
+    if (typeof val === "string") {
+        return (0, exports.normalizePhoneInput)(val);
+    }
+    return val;
+}, zod_1.z
     .string({ required_error: "Phone number is required" })
-    .trim()
     .regex(exports.egyptPhoneRegex, {
     message: exports.egyptPhoneErrorMessage,
-});
+}));
 exports.optionalEgyptPhoneSchema = zod_1.z
-    .union([
-    zod_1.z.string().trim().regex(exports.egyptPhoneRegex, {
+    .preprocess((val) => {
+    if (val === null || val === undefined)
+        return val;
+    if (typeof val === "string") {
+        const normalized = (0, exports.normalizePhoneInput)(val);
+        if (normalized === "")
+            return normalized;
+        return normalized;
+    }
+    return val;
+}, zod_1.z.union([
+    zod_1.z.string().regex(exports.egyptPhoneRegex, {
         message: exports.egyptPhoneErrorMessage,
     }),
     zod_1.z.literal(""),
     zod_1.z.null(),
     zod_1.z.undefined(),
-])
+]))
     .optional();

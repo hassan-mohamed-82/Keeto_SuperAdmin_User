@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.toggleOptionDefault = exports.toggleOptionStatus = exports.toggleVariationStatus = exports.getFoodSelectData = exports.getFoodsByRestaurantId = exports.deleteFood = exports.updateFood = exports.getFoodById = exports.getAllFoods = exports.createFood = void 0;
+const weightPricing_helper_1 = require("../../helpers/weightPricing.helper");
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -295,6 +296,9 @@ const getFoodById = async (req, res) => {
         Maximum_Purchase: schema_1.food.Maximum_Purchase,
         stock_type: schema_1.food.stock_type,
         status: schema_1.food.status,
+        sold_by: schema_1.food.sold_by,
+        weight_unit: schema_1.food.weight_unit,
+        allow_custom_weight: schema_1.food.allow_custom_weight,
         createdAt: schema_1.food.createdAt,
         updatedAt: schema_1.food.updatedAt,
         restaurant: {
@@ -427,6 +431,35 @@ const updateFood = async (req, res) => {
     if (incomingSubcategoryId !== undefined) {
         updateData.subcategoryid = incomingSubcategoryId === "" ? null : incomingSubcategoryId;
     }
+    // ⚖️ Weight groups: when variations are sent, validate the resulting setup BEFORE any write
+    // (same rules as the restaurant panel: one single-select weight group on weight foods only,
+    // weight_value > 0 and unique inside it, none on normal groups, allow_custom_weight = false needs one).
+    let weightConfig = null;
+    if (Array.isArray(data.variations)) {
+        const storedVars = await connection_1.db.select().from(schema_1.foodVariations).where((0, drizzle_orm_1.eq)(schema_1.foodVariations.foodId, id));
+        const storedOpts = storedVars.length > 0
+            ? await connection_1.db.select().from(schema_1.variationOptions).where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.variationId, storedVars.map(v => v.id)))
+            : [];
+        weightConfig = (0, weightPricing_helper_1.validateWeightGroupConfig)({
+            soldBy: existingFood[0].sold_by,
+            weightUnit: existingFood[0].weight_unit,
+            allowCustomWeight: existingFood[0].allow_custom_weight,
+            variations: data.variations.map((v) => {
+                const stored = v.id ? storedVars.find(sv => sv.id === v.id) : undefined;
+                const flag = (0, weightPricing_helper_1.parseBooleanInput)(v.isWeightGroup ?? v.is_weight_group);
+                return {
+                    name: v.name ?? stored?.name,
+                    isWeightGroup: flag !== undefined ? flag : Boolean(stored?.isWeightGroup),
+                    selectionType: v.selectionType ?? stored?.selectionType,
+                    options: (Array.isArray(v.options) ? v.options : []).map((o) => {
+                        const storedOpt = o.id ? storedOpts.find(so => so.id === o.id) : undefined;
+                        const wv = o.weightValue ?? o.weight_value;
+                        return { optionName: o.optionName ?? storedOpt?.optionName, weightValue: wv !== undefined ? wv : (storedOpt?.weightValue ?? null) };
+                    }),
+                };
+            }),
+        });
+    }
     if (Object.keys(updateData).length > 1) {
         await connection_1.db.update(schema_1.food).set(updateData).where(queryCondition);
     }
@@ -446,20 +479,22 @@ const updateFood = async (req, res) => {
             : [];
         const incomingVarIds = new Set();
         const incomingOptIds = new Set();
-        for (const variation of data.variations) {
+        for (const [variationIndex, variation] of data.variations.entries()) {
             let variationId = variation.id;
             const existingVar = variationId ? oldVars.find(v => v.id === variationId) : null;
+            const weightGroup = weightConfig?.weightGroups.get(variationIndex);
             if (existingVar) {
                 // Update existing variation
                 await connection_1.db.update(schema_1.foodVariations).set({
                     name: variation.name,
                     nameAr: variation.nameAr ?? existingVar.nameAr,
                     nameFr: variation.nameFr ?? existingVar.nameFr,
-                    isRequired: variation.isRequired !== undefined ? variation.isRequired : existingVar.isRequired,
-                    selectionType: variation.selectionType || existingVar.selectionType,
-                    min: variation.min !== undefined ? variation.min : existingVar.min,
-                    max: variation.max !== undefined ? variation.max : existingVar.max,
+                    isRequired: weightGroup ? weightGroup.isRequired : (variation.isRequired !== undefined ? variation.isRequired : existingVar.isRequired),
+                    selectionType: weightGroup ? weightGroup.selectionType : (variation.selectionType || existingVar.selectionType),
+                    min: weightGroup ? null : (variation.min !== undefined ? variation.min : existingVar.min),
+                    max: weightGroup ? null : (variation.max !== undefined ? variation.max : existingVar.max),
                     status: variation.status !== undefined ? variation.status : existingVar.status,
+                    isWeightGroup: Boolean(weightGroup),
                 }).where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, variationId));
             }
             else {
@@ -471,19 +506,21 @@ const updateFood = async (req, res) => {
                     name: variation.name,
                     nameAr: variation.nameAr || '',
                     nameFr: variation.nameFr || '',
-                    isRequired: variation.isRequired || false,
-                    selectionType: variation.selectionType || "single",
-                    min: variation.min ?? null,
-                    max: variation.max ?? null,
+                    isRequired: weightGroup ? weightGroup.isRequired : (variation.isRequired || false),
+                    selectionType: weightGroup ? weightGroup.selectionType : (variation.selectionType || "single"),
+                    min: weightGroup ? null : (variation.min ?? null),
+                    max: weightGroup ? null : (variation.max ?? null),
                     status: variation.status !== undefined ? variation.status : true,
+                    isWeightGroup: Boolean(weightGroup),
                 });
             }
             incomingVarIds.add(variationId);
             // Handle options for this variation
             if (variation.options && Array.isArray(variation.options)) {
-                for (const option of variation.options) {
+                for (const [optionIndex, option] of variation.options.entries()) {
                     let optionId = option.id;
                     const existingOpt = optionId ? oldOptions.find(o => o.id === optionId) : null;
+                    const optionWeightValue = weightConfig?.weightValues.get(`${variationIndex}:${optionIndex}`) ?? null;
                     const additionalPriceStr = option.additionalPrice !== undefined && option.additionalPrice !== null
                         ? option.additionalPrice.toString()
                         : "0";
@@ -495,6 +532,7 @@ const updateFood = async (req, res) => {
                             optionNameAr: option.optionNameAr ?? existingOpt.optionNameAr,
                             optionNameFr: option.optionNameFr ?? existingOpt.optionNameFr,
                             additionalPrice: additionalPriceStr,
+                            weightValue: optionWeightValue,
                             status: option.status !== undefined ? option.status : existingOpt.status,
                             isDefault: option.isDefault !== undefined ? option.isDefault : existingOpt.isDefault,
                         }).where((0, drizzle_orm_1.eq)(schema_1.variationOptions.id, optionId));
@@ -509,6 +547,7 @@ const updateFood = async (req, res) => {
                             optionNameAr: option.optionNameAr || '',
                             optionNameFr: option.optionNameFr || '',
                             additionalPrice: additionalPriceStr,
+                            weightValue: optionWeightValue,
                             status: option.status !== undefined ? option.status : true,
                             isDefault: option.isDefault !== undefined ? option.isDefault : false,
                         });

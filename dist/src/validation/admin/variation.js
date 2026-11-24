@@ -34,6 +34,7 @@ exports.createVariationOptionSchema = zod_1.z.object({
     optionNameFr: zod_1.z.string().max(255).optional(),
     // السعر الإضافي متسجل كـ varchar فبنتعامل معاه كـ string
     additionalPrice: zod_1.z.string().max(255).optional(),
+    priceMode: zod_1.z.enum(["fixed", "per_weight"]).optional().default("fixed"),
     status: zod_1.z.boolean().optional(),
 });
 exports.updateVariationOptionSchema = exports.createVariationOptionSchema.partial();

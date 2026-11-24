@@ -289,7 +289,9 @@ const getRestaurantsBranches = async (req, res) => {
         .from(schema_1.branches)
         .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.branches.cityId, schema_1.cities.id))
         .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, schema_1.zones.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId)
+    // eq(branches.status, "active")
+    ));
     return (0, response_1.SuccessResponse)(res, {
         message: "Restaurant branches fetched successfully",
         data: allBranches

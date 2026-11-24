@@ -25,7 +25,7 @@ exports.paymentTransactions = (0, mysql_core_1.mysqlTable)("payment_transactions
     gatewayOrderId: (0, mysql_core_1.varchar)("gateway_order_id", { length: 150 }),
     amount: (0, mysql_core_1.decimal)("amount", { precision: 10, scale: 2 }).notNull(),
     currency: (0, mysql_core_1.varchar)("currency", { length: 10 }).default("EGP"),
-    status: (0, mysql_core_1.mysqlEnum)("status", ["pending", "success", "failed"]).default("pending").notNull(),
+    status: (0, mysql_core_1.mysqlEnum)("status", ["pending", "success", "failed", "needs_review"]).default("pending").notNull(),
     // سبب الفشل أو رسالة الخطأ القادمة من البوابة
     failureReason: (0, mysql_core_1.text)("failure_reason"),
     // الـ Payload / Webhook Data بالكامل للرجوع إليه وتتبعه

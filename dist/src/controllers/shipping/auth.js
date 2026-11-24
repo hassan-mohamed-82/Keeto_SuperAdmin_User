@@ -12,6 +12,7 @@ const Errors_1 = require("../../Errors");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const jwt_1 = require("../../utils/jwt");
 const catchAsync_1 = require("../../utils/catchAsync");
+const handleImages_1 = require("../../utils/handleImages");
 // =========================================================================
 // 1. Login via shipping_company_users (D6)
 // =========================================================================
@@ -148,6 +149,14 @@ exports.updateProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
     if (!companyId) {
         throw new Errors_1.UnauthorizedError("Unauthorized access");
     }
+    const [existingCompany] = await connection_1.db
+        .select()
+        .from(schema_1.shippingCompanies)
+        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, companyId))
+        .limit(1);
+    if (!existingCompany) {
+        throw new Errors_1.NotFound("Shipping company not found");
+    }
     const { name, nameAr, phone, address, logo, password } = req.body;
     const updateData = {};
     if (name !== undefined)
@@ -158,8 +167,17 @@ exports.updateProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
         updateData.phone = phone;
     if (address !== undefined)
         updateData.address = address;
-    if (logo !== undefined)
-        updateData.logo = logo;
+    if (logo !== undefined) {
+        if (!logo) {
+            if (existingCompany.logo) {
+                await (0, handleImages_1.deleteImage)(existingCompany.logo);
+            }
+            updateData.logo = null;
+        }
+        else {
+            updateData.logo = await (0, handleImages_1.handleImageUpdate)(req, existingCompany.logo, logo, "shipping_companies");
+        }
+    }
     if (password) {
         updateData.password = await bcrypt_1.default.hash(password, 10);
     }
@@ -167,7 +185,28 @@ exports.updateProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
         .update(schema_1.shippingCompanies)
         .set(updateData)
         .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, companyId));
+    const [updatedCompany] = await connection_1.db
+        .select({
+        id: schema_1.shippingCompanies.id,
+        name: schema_1.shippingCompanies.name,
+        nameAr: schema_1.shippingCompanies.nameAr,
+        phone: schema_1.shippingCompanies.phone,
+        email: schema_1.shippingCompanies.email,
+        address: schema_1.shippingCompanies.address,
+        logo: schema_1.shippingCompanies.logo,
+        status: schema_1.shippingCompanies.status,
+        maxSearchRadius: schema_1.shippingCompanies.maxSearchRadius,
+        maxActiveOrders: schema_1.shippingCompanies.maxActiveOrders,
+        maxAttempts: schema_1.shippingCompanies.maxAttempts,
+        commissionType: schema_1.shippingCompanies.commissionType,
+        commissionValue: schema_1.shippingCompanies.commissionValue,
+        updatedAt: schema_1.shippingCompanies.updatedAt,
+    })
+        .from(schema_1.shippingCompanies)
+        .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, companyId))
+        .limit(1);
     return (0, response_1.SuccessResponse)(res, {
         message: "Profile updated successfully",
+        data: updatedCompany,
     });
 });

@@ -18,6 +18,8 @@ exports.categories = (0, mysql_core_1.mysqlTable)("categories", {
     meta_titleFr: (0, mysql_core_1.text)("meta_title_fr").notNull().default(''),
     priority: (0, mysql_core_1.mysqlEnum)("priority", ["low", "medium", "high"]).default("low"),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
+    isDeleted: (0, mysql_core_1.boolean)("is_deleted").notNull().default(false),
+    deletedAt: (0, mysql_core_1.timestamp)("deleted_at"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
 });

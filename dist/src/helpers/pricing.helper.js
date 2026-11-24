@@ -86,15 +86,13 @@ const resolveBranchIdFromAddress = async (addressId, restaurantId) => {
     if (matchedFee.branchId) {
         return matchedFee.branchId;
     }
-    // 4b. No dedicated branch → find an active branch in that zone
-    if (matchedFee.zoneId) {
-        const [branch] = await connection_1.db
-            .select({ id: schema_1.branches.id })
-            .from(schema_1.branches)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, matchedFee.zoneId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")))
-            .limit(1);
-        if (branch)
-            return branch.id;
+    // 4b. No dedicated branch → check if restaurant has a single branch
+    const activeBranches = await connection_1.db
+        .select({ id: schema_1.branches.id })
+        .from(schema_1.branches)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")));
+    if (activeBranches.length === 1) {
+        return activeBranches[0].id;
     }
     throw new NotFound_1.NotFound("No active branch found serving your delivery zone. Please try again later.");
 };
@@ -128,6 +126,7 @@ const calculateCalculatedPrice = async (foodId, variantOptionIds, branchId, serv
             ? connection_1.db.select({
                 id: schema_1.variationOptions.id,
                 additionalPrice: schema_1.variationOptions.additionalPrice,
+                priceMode: schema_1.variationOptions.priceMode,
                 status: schema_1.variationOptions.status,
             })
                 .from(schema_1.variationOptions)
@@ -162,7 +161,7 @@ const calculateCalculatedPrice = async (foodId, variantOptionIds, branchId, serv
     for (const optionId of variantOptionIds) {
         const baseOption = baseVarMap.get(optionId);
         if (!baseOption) {
-            resolvedVariants.push({ variantOptionId: optionId, price: 0, isAvailable: false });
+            resolvedVariants.push({ variantOptionId: optionId, price: 0, priceMode: "fixed", isAvailable: false });
             continue;
         }
         const winning = (0, pricing_overrides_1.pickBestOverride)(overridesByVariant.get(optionId) ?? []);
@@ -172,6 +171,7 @@ const calculateCalculatedPrice = async (foodId, variantOptionIds, branchId, serv
         resolvedVariants.push({
             variantOptionId: optionId,
             price: varPrice,
+            priceMode: (baseOption.priceMode ?? "fixed"),
             isAvailable: varAvailable,
         });
     }

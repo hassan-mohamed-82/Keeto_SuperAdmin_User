@@ -22,7 +22,7 @@ async function resolveLinkData(linkType, subcategoryId, foodId, discountId) {
             status: subcategory_1.subcategories.status,
         })
             .from(subcategory_1.subcategories)
-            .where((0, drizzle_orm_1.eq)(subcategory_1.subcategories.id, subcategoryId))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(subcategory_1.subcategories.id, subcategoryId), (0, drizzle_orm_1.eq)(subcategory_1.subcategories.isDeleted, false)))
             .limit(1);
         return sub ?? null;
     }

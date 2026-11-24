@@ -330,6 +330,19 @@ const getOrderDetails = async (req, res) => {
             throw new Errors_1.BadRequest("Unauthorized: Order does not belong to your branch");
         }
     }
+    // ── Fetch discount & coupon names in separate queries (avoid JOIN name collisions) ──
+    let discountRow = null;
+    if (orderDetail.order.discountId) {
+        const [d] = await connection_1.db.select({ name: schema_1.discounts.name, nameAr: schema_1.discounts.nameAr, nameFr: schema_1.discounts.nameFr })
+            .from(schema_1.discounts).where((0, drizzle_orm_1.eq)(schema_1.discounts.id, orderDetail.order.discountId)).limit(1);
+        discountRow = d ?? null;
+    }
+    let couponRow = null;
+    if (orderDetail.order.couponId) {
+        const [c] = await connection_1.db.select({ code: schema_1.coupons.code, name: schema_1.coupons.name, nameAr: schema_1.coupons.nameAr, nameFr: schema_1.coupons.nameFr })
+            .from(schema_1.coupons).where((0, drizzle_orm_1.eq)(schema_1.coupons.id, orderDetail.order.couponId)).limit(1);
+        couponRow = c ?? null;
+    }
     // ==========================================
     // 🗺️ Fallback: استنتاج الزون من إحداثيات العنوان إذا كان zone فارغاً
     // ==========================================
@@ -393,6 +406,9 @@ const getOrderDetails = async (req, res) => {
         variationsPrice: schema_1.orderItems.variationsPrice,
         addonsPrice: schema_1.orderItems.addonsPrice,
         totalPrice: schema_1.orderItems.totalPrice,
+        finalWeight: schema_1.orderItems.finalWeight,
+        orderedWeight: schema_1.orderItems.orderedWeight,
+        weightUnit: schema_1.orderItems.weightUnit,
         note: schema_1.orderItems.note,
         variations: schema_1.orderItems.variations,
         addons: schema_1.orderItems.addons,
@@ -401,6 +417,9 @@ const getOrderDetails = async (req, res) => {
         foodNameFr: schema_1.food.nameFr,
         foodImage: schema_1.food.image,
         foodDescription: schema_1.food.description,
+        sold_by: schema_1.food.sold_by,
+        foodWeightUnit: schema_1.food.weight_unit,
+        allowCustomWeight: schema_1.food.allow_custom_weight,
     })
         .from(schema_1.orderItems)
         .leftJoin(schema_1.food, (0, drizzle_orm_1.eq)(schema_1.orderItems.foodId, schema_1.food.id))
@@ -424,16 +443,23 @@ const getOrderDetails = async (req, res) => {
             cleanVariations = await Promise.all(cleanVariations.map(async (v) => {
                 let variationName = v.variationName || "Unknown";
                 let variationNameAr = v.variationNameAr || "غير معروف";
+                let variationNameFr = v.variationNameFr || "";
                 let optionName = v.optionName || "Unknown";
                 let optionNameAr = v.optionNameAr || "غير معروف";
+                let optionNameFr = v.optionNameFr || "";
                 let price = parseFloat(v.price || v.additionalPrice || "0");
-                const hasSnapshotDetails = Boolean(v.variationName && v.optionName);
+                let priceMode = v.priceMode || "fixed";
+                let weightValue = v.weightValue != null ? String(v.weightValue) : null;
+                let isWeightGroup = v.isWeightGroup !== undefined ? Boolean(v.isWeightGroup) : false;
+                const hasSnapshotDetails = Boolean(v.variationName && v.optionName && v.priceMode !== undefined && v.isWeightGroup !== undefined);
                 if (!hasSnapshotDetails) {
                     if (v.variationId) {
                         const [varDb] = await connection_1.db.select().from(schema_1.foodVariations).where((0, drizzle_orm_1.eq)(schema_1.foodVariations.id, v.variationId)).limit(1);
                         if (varDb) {
                             variationName = varDb.name || variationName;
                             variationNameAr = varDb.nameAr || variationNameAr;
+                            variationNameFr = varDb.nameFr || variationNameFr;
+                            isWeightGroup = Boolean(varDb.isWeightGroup);
                         }
                     }
                     if (v.optionId) {
@@ -441,7 +467,10 @@ const getOrderDetails = async (req, res) => {
                         if (optDb) {
                             optionName = optDb.optionName || optionName;
                             optionNameAr = optDb.optionNameAr || optionNameAr;
+                            optionNameFr = optDb.optionNameFr || optionNameFr;
                             price = parseFloat(optDb.price || optDb.additionalPrice || "0");
+                            priceMode = optDb.priceMode || priceMode;
+                            weightValue = optDb.weightValue != null ? String(optDb.weightValue) : weightValue;
                         }
                     }
                 }
@@ -450,16 +479,24 @@ const getOrderDetails = async (req, res) => {
                     ...v,
                     variationName,
                     variationNameAr,
+                    variationNameFr,
                     optionName,
                     optionNameAr,
+                    optionNameFr,
                     price: price.toString(),
-                    additionalPrice: price.toString()
+                    additionalPrice: price.toString(),
+                    priceMode,
+                    weightValue,
+                    isWeightGroup,
                 };
             }));
         }
         const finalVarPrice = parseFloat(item.variationsPrice || "0") > 0 ? parseFloat(item.variationsPrice || "0") : totalCalculatedVarPrice;
         const finalAddonsPrice = parseFloat(item.addonsPrice || "0");
-        const finalTotalPrice = (parseFloat(item.basePrice || "0") + finalVarPrice + finalAddonsPrice) * item.quantity;
+        // Weighted rows: basePrice is per weight unit, so the stored line total is authoritative.
+        const finalTotalPrice = item.finalWeight != null
+            ? parseFloat(item.totalPrice || "0")
+            : (parseFloat(item.basePrice || "0") + finalVarPrice + finalAddonsPrice) * item.quantity;
         // 🌟 جلب تفاصيل الـ Addons اللي اختارها العميل فعلاً
         let foodAddons = [];
         let selectedAddonIds = item.addons;
@@ -499,6 +536,13 @@ const getOrderDetails = async (req, res) => {
         }
         return {
             ...item,
+            sold_by: item.sold_by ?? (item.orderedWeight || item.finalWeight ? "weight" : "unit"),
+            isSoldByWeight: item.sold_by === "weight" || Boolean(item.orderedWeight || item.finalWeight),
+            weightUnit: item.weightUnit || item.foodWeightUnit || null,
+            allowCustomWeight: item.allowCustomWeight ?? true,
+            weight: item.orderedWeight ? String(item.orderedWeight) : null,
+            orderedWeight: item.orderedWeight ? String(item.orderedWeight) : null,
+            finalWeight: item.finalWeight ? String(item.finalWeight) : null,
             addons: foodAddons,
             variationsPrice: finalVarPrice.toFixed(2),
             addonsPrice: finalAddonsPrice.toFixed(2),
@@ -563,6 +607,23 @@ const getOrderDetails = async (req, res) => {
             serviceFee: orderDetail.order.serviceFee,
             appCommission: orderDetail.order.appCommission,
             visaCommission: orderDetail.order.visaCommission,
+            discountAmount: orderDetail.order.discountAmount,
+            couponCode: orderDetail.order.couponCode ?? couponRow?.code ?? null,
+            discount: {
+                discountId: orderDetail.order.discountId ?? null,
+                discountAmount: orderDetail.order.discountAmount ? String(orderDetail.order.discountAmount) : "0.00",
+                discountType: orderDetail.order.discountType ?? null,
+                discountValue: orderDetail.order.discountValue ? String(orderDetail.order.discountValue) : null,
+                discountSource: orderDetail.order.discountSource ?? null,
+                discountName: discountRow?.name ?? null,
+                discountNameAr: discountRow?.nameAr ?? null,
+                discountNameFr: discountRow?.nameFr ?? null,
+                couponId: orderDetail.order.couponId ?? null,
+                couponCode: orderDetail.order.couponCode ?? couponRow?.code ?? null,
+                couponName: couponRow?.name ?? null,
+                couponNameAr: couponRow?.nameAr ?? null,
+                couponNameFr: couponRow?.nameFr ?? null,
+            },
             totalAmount: orderDetail.order.totalAmount,
             createdAt: orderDetail.order.createdAt,
             updatedAt: orderDetail.order.updatedAt,
@@ -720,6 +781,7 @@ const updateOrderStatus = async (req, res) => {
         await tx.update(schema_1.orders)
             .set({
             status: status,
+            cancelledAt: status === "cancelled" ? new Date() : null,
             cancelReasonId: status === "cancelled" ? reason.id : null,
             cancelReason: status === "cancelled" ? reason.name : null,
             cancelReasonType: status === "cancelled" ? reason.type : null,
@@ -1021,6 +1083,7 @@ const generateOrderInvoicePDF = async (req, res) => {
         basePrice: schema_1.orderItems.basePrice,
         variationsPrice: schema_1.orderItems.variationsPrice,
         totalPrice: schema_1.orderItems.totalPrice,
+        finalWeight: schema_1.orderItems.finalWeight,
         variations: schema_1.orderItems.variations,
         foodName: schema_1.food.name,
         foodNameAr: schema_1.food.nameAr,
@@ -1061,7 +1124,10 @@ const generateOrderInvoicePDF = async (req, res) => {
             }));
         }
         const finalVarPrice = parseFloat(item.variationsPrice || "0") > 0 ? parseFloat(item.variationsPrice || "0") : totalCalculatedVarPrice;
-        const finalTotalPrice = (parseFloat(item.basePrice || "0") + finalVarPrice) * item.quantity;
+        // Weighted rows: basePrice is per weight unit, so the stored line total is authoritative.
+        const finalTotalPrice = item.finalWeight != null
+            ? parseFloat(item.totalPrice || "0")
+            : (parseFloat(item.basePrice || "0") + finalVarPrice) * item.quantity;
         return {
             ...item,
             finalTotalPrice,

@@ -20,7 +20,7 @@ exports.food = (0, mysql_core_1.mysqlTable)("food", {
         .references(() => schema_1.restaurants.id, { onDelete: "cascade" })
         .notNull(),
     categoryid: (0, mysql_core_1.char)("categoryid", { length: 36 }).references(() => schema_1.categories.id).notNull(),
-    subcategoryid: (0, mysql_core_1.char)("subcategoryid", { length: 36 }).references(() => schema_1.subcategories.id).notNull(),
+    subcategoryid: (0, mysql_core_1.char)("subcategoryid", { length: 36 }).references(() => schema_1.subcategories.id),
     foodtype: (0, mysql_core_1.mysqlEnum)("foodtype", ["veg", "non-veg"]).default("veg"),
     Nutrition: (0, mysql_core_1.text)("nutrition"),
     allergen_ingredients: (0, mysql_core_1.text)("allergen_ingredients"),
@@ -30,8 +30,8 @@ exports.food = (0, mysql_core_1.mysqlTable)("food", {
         .references(() => noteGroup_1.noteGroups.id, { onDelete: "set null" }),
     discountId: (0, mysql_core_1.char)("discount_id", { length: 36 })
         .references(() => discount_1.discountGroups.id, { onDelete: "set null" }),
-    startTime: (0, mysql_core_1.varchar)("start_time", { length: 255 }).notNull(),
-    endTime: (0, mysql_core_1.varchar)("end_time", { length: 255 }).notNull(),
+    startTime: (0, mysql_core_1.varchar)("start_time", { length: 255 }),
+    endTime: (0, mysql_core_1.varchar)("end_time", { length: 255 }),
     search_tags: (0, mysql_core_1.varchar)("search_tags", { length: 255 }),
     price: (0, mysql_core_1.decimal)("price", { precision: 10, scale: 2 }).notNull(),
     discount_type: (0, mysql_core_1.mysqlEnum)("discount_type", ["percentage", "amount"]).default("percentage"),
@@ -45,6 +45,14 @@ exports.food = (0, mysql_core_1.mysqlTable)("food", {
     isOutOfStock: (0, mysql_core_1.boolean)("is_out_of_stock").default(false),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"]).default("active"),
     points: (0, mysql_core_1.int)("points").default(0),
+    // Display ordering
+    order_level: (0, mysql_core_1.int)("order_level").notNull().default(0),
+    // Weight-based selling
+    sold_by: (0, mysql_core_1.mysqlEnum)("sold_by", ["unit", "weight"]).notNull().default("unit"),
+    weight_unit: (0, mysql_core_1.mysqlEnum)("weight_unit", ["kg", "gm"]),
+    /** Weighted foods: may the customer type any weight, or only pick a weight-group option? */
+    allow_custom_weight: (0, mysql_core_1.boolean)("allow_custom_weight").notNull().default(true),
+    isDeleted: (0, mysql_core_1.boolean)("is_deleted").notNull().default(false),
     deletedAt: (0, mysql_core_1.timestamp)("deleted_at"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),

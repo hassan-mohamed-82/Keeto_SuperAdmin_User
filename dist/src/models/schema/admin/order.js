@@ -122,6 +122,7 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     shippingAssignedAt: (0, mysql_core_1.timestamp)("shipping_assigned_at"),
     pickedUpAt: (0, mysql_core_1.timestamp)("picked_up_at"),
     deliveredAt: (0, mysql_core_1.timestamp)("delivered_at"),
+    cancelledAt: (0, mysql_core_1.timestamp)("cancelled_at"),
     updatedAt: (0, mysql_core_1.timestamp)("updated_at").defaultNow().onUpdateNow(),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),
 });
@@ -144,6 +145,16 @@ exports.orderItems = (0, mysql_core_1.mysqlTable)("order_items", {
     variations: (0, mysql_core_1.json)("variations"),
     addons: (0, mysql_core_1.json)("addons"),
     note: (0, mysql_core_1.text)("note"),
+    // ── Weight-based item columns ──────────────────────────────────────────
+    // NULL for unit-sold items. Populated when food.sold_by = 'weight'.
+    // NOTE: basePrice already stores the per-weight_unit price snapshot for
+    // weighted items (price per kg or per gm). No separate unit_price needed.
+    /** Weight the customer originally requested (in food's weight_unit). */
+    orderedWeight: (0, mysql_core_1.decimal)("ordered_weight", { precision: 10, scale: 3 }),
+    /** Actual weight confirmed by the restaurant (copied from cart_items.final_weight). */
+    finalWeight: (0, mysql_core_1.decimal)("final_weight", { precision: 10, scale: 3 }),
+    /** Snapshot of food.weight_unit at order-creation time. */
+    weightUnit: (0, mysql_core_1.mysqlEnum)("weight_unit", ["kg", "gm"]),
 });
 // ==========================================
 // 3. Drizzle ORM Relations (للربط البرمجي)

@@ -31,6 +31,8 @@ exports.firstOrderDiscounts = (0, mysql_core_1.mysqlTable)("first_order_discount
      * e.g. 5 → applies to a user's 1st, 2nd, 3rd, 4th, and 5th order.
      */
     firstOrderCount: (0, mysql_core_1.int)("first_order_count").notNull().default(1),
+    /** Channel where this discount applies */
+    channel: (0, mysql_core_1.mysqlEnum)("channel", ["all", "app", "web", "pos"]).notNull().default("all"),
     /** How the discount value is interpreted */
     discountType: (0, mysql_core_1.mysqlEnum)("discount_type", ["percentage", "fixed"]).notNull().default("percentage"),
     /** Discount amount: percentage (e.g. 15 = 15%) or fixed currency amount */

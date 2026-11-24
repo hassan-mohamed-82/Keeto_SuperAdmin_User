@@ -14,6 +14,7 @@ const calculateVisaCommission_1 = require("../utils/calculateVisaCommission");
 const getActiveCustomGateway_1 = require("../utils/getActiveCustomGateway");
 const getSystemVisaSettings_1 = require("../utils/getSystemVisaSettings");
 const firstOrderDiscount_helper_1 = require("./firstOrderDiscount.helper");
+const weightPayment_helper_1 = require("./weightPayment.helper");
 const roundMoney = (amount) => Math.round(amount * 100) / 100;
 /**
  * دالة مركزية لتأكيد نجاح عملية الدفع الإلكتروني (Paymob / Kashier / Geidea)
@@ -38,6 +39,13 @@ async function confirmOrderPayment({ orderId, gateway, transactionId, gatewayOrd
         console.log(`[ConfirmPayment]: Order ${order.orderNumber} already paid.`);
         return { success: true, alreadyProcessed: true };
     }
+    // ⚖️ Weight-request orders only (no-op for every other order).
+    const isWeighted = await (0, weightPayment_helper_1.isWeightedOrder)(order.id);
+    const weightedInfo = { gateway, transactionId, gatewayOrderId, rawPayload };
+    if (isWeighted && await (0, weightPayment_helper_1.handleLateWeightedPayment)(order, weightedInfo)) {
+        return { success: true, needsReview: true };
+    }
+    let weightedGate = "confirm";
     const now = new Date();
     let assignedDailyOrderNumber = order.dailyOrderNumber;
     // استخراج طريقة الدفع الرقمية
@@ -53,6 +61,13 @@ async function confirmOrderPayment({ orderId, gateway, transactionId, gatewayOrd
         .where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, order.restaurantId))
         .limit(1);
     await connection_1.db.transaction(async (tx) => {
+        // ⚖️ Weighted only: lock + claim the confirmation (pending_payment → paid). Not "confirm"
+        // means another webhook / redirect already confirmed it, or it turned into a late payment.
+        if (isWeighted) {
+            weightedGate = await (0, weightPayment_helper_1.claimWeightedConfirmationInTx)(tx, order.id, weightedInfo, now);
+            if (weightedGate !== "confirm")
+                return;
+        }
         // إذا لم يكن لديه رقم يومي بعد (أوردر أونلاين تم تأجيل رقمه)، نحسبه الآن
         if (!assignedDailyOrderNumber) {
             assignedDailyOrderNumber = await (0, getNextDailyOrderNumber_1.getNextDailyOrderNumber)(tx, order.restaurantId, settings, now);
@@ -121,7 +136,18 @@ async function confirmOrderPayment({ orderId, gateway, transactionId, gatewayOrd
         }
         // تفريغ سلة العميل بعد نجاح وتأكيد الدفع الإلكتروني
         await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, order.userId));
+        // ⚖️ Weighted only: checking_out → approved (conditional on order_id and status).
+        if (isWeighted) {
+            await (0, weightPayment_helper_1.approveWeightRequestInTx)(tx, order.id, now);
+        }
     });
+    if (weightedGate === "already_paid") {
+        console.log(`[ConfirmPayment]: Order ${order.orderNumber} already paid (weighted, confirmed by another call).`);
+        return { success: true, alreadyProcessed: true };
+    }
+    if (weightedGate === "needs_review") {
+        return { success: true, needsReview: true };
+    }
     // إرسال الإشعار للمطعم بالرقم اليومي المؤكد
     const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
         timeZone: "Africa/Cairo",
@@ -168,7 +194,18 @@ async function recordFailedPayment({ orderId, gateway, transactionId, gatewayOrd
         return { success: false, message: "Order not found" };
     }
     const now = new Date();
+    // ⚖️ Weight-request orders only (no-op for every other order).
+    const isWeighted = await (0, weightPayment_helper_1.isWeightedOrder)(order.id);
+    let weightedGate = null;
+    let weightedExpired = null;
     await connection_1.db.transaction(async (tx) => {
+        // ⚖️ Weighted only: lock order + request; never overwrite an order that is already paid
+        // (or already failed: gateway retry).
+        if (isWeighted) {
+            weightedGate = await (0, weightPayment_helper_1.weightedFailureGateInTx)(tx, order.id);
+            if (weightedGate.outcome === "ignore")
+                return;
+        }
         // 1. تحديث حالة الأوردر إلى failed بدل cancelled أو الحذف
         await tx
             .update(schema_1.orders)
@@ -214,7 +251,23 @@ async function recordFailedPayment({ orderId, gateway, transactionId, gatewayOrd
                     .where((0, drizzle_orm_1.eq)(schema_1.coupons.id, usage.couponId));
             }
         }
+        // ⚖️ Weighted only: request back to awaiting_customer_approval (attempts + 1, fresh window)
+        // or expired at the attempt limit.
+        if (isWeighted && weightedGate) {
+            weightedExpired = await (0, weightPayment_helper_1.applyWeightedFailureToRequestInTx)(tx, weightedGate, now);
+        }
     });
+    if (isWeighted) {
+        const gate = weightedGate;
+        if (gate?.outcome === "ignore") {
+            console.log(`[RecordFailedPayment]: Order ${order.orderNumber} is weighted and already paid / failed; nothing changed.`);
+            return { success: true };
+        }
+        if (weightedExpired) {
+            const e = weightedExpired;
+            await (0, weightPayment_helper_1.notifyWeightRequestExpiredAfterPayments)(e.userId, e.requestId); // after commit
+        }
+    }
     try {
         const claimed = await (0, orderNotificationCron_1.claimPaymentIssueNotification)(order.id, "payment_failed", "payment_failed");
         if (!claimed) {

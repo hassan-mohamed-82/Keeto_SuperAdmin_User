@@ -14,7 +14,7 @@ const uuid_1 = require("uuid");
 dotenv_1.default.config();
 const client = new google_auth_library_1.OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const verifyGoogleToken = async (req, res) => {
-    const { token, restaurantId } = req.body;
+    const { token, restaurantId, deviceId } = req.body;
     try {
         // const ticket = await client.verifyIdToken({
         //   idToken: token,
@@ -56,6 +56,7 @@ const verifyGoogleToken = async (req, res) => {
                 googleId,
                 email,
                 name,
+                deviceId: deviceId ? String(deviceId).trim() : null,
                 isVerified: true,
                 isProfileComplete: true,
             });
@@ -64,6 +65,7 @@ const verifyGoogleToken = async (req, res) => {
                 name,
                 email,
                 googleId,
+                deviceId: deviceId ? String(deviceId).trim() : null,
                 phone: null,
                 photo: null,
                 alternatePhone: null,
@@ -90,12 +92,17 @@ const verifyGoogleToken = async (req, res) => {
                 updates.googleId = googleId;
             if (!user.isProfileComplete)
                 updates.isProfileComplete = true;
+            if (deviceId && typeof deviceId === "string" && deviceId.trim()) {
+                updates.deviceId = deviceId.trim();
+            }
             if (Object.keys(updates).length > 0) {
                 await connection_1.db.update(schema_1.users).set(updates).where((0, drizzle_orm_1.eq)(schema_1.users.id, user.id));
                 if (updates.googleId)
                     user.googleId = googleId;
                 if (updates.isProfileComplete)
                     user.isProfileComplete = true;
+                if (updates.deviceId)
+                    user.deviceId = updates.deviceId;
             }
         }
         // 🚫 Check if user is blocked

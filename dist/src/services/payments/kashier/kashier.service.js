@@ -35,8 +35,9 @@ class KashierService {
         // Use baseUrl from DB creds if present, otherwise derive from environment field stored in DB.
         // Default: test sandbox.
         const baseUrl = creds.baseUrl || "https://api.kashier.io";
-        // Session expires in 24 hours from now
-        const expireAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        // Session expires in 24 hours from now, unless the caller passes a shorter expiry
+        // (only weighted orders do: see createOrderPaymentSession.sessionExpiresAt).
+        const expireAt = input.expireAt ?? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         // Redirect URL after Kashier hosted checkout completes
         const appBaseUrl = (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
         const backendBaseUrl = (process.env.Back_BASE_URL || "").replace(/\/$/, "");

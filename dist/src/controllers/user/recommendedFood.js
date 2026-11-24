@@ -49,6 +49,7 @@ const getRecommendedFoodsForUser = async (req, res) => {
         isOutOfStock: schema_1.food.isOutOfStock,
         points: schema_1.food.points,
         addonsId: schema_1.food.addonsId,
+        foodOrderLevel: schema_1.food.order_level,
         categoryId: schema_1.categories.id,
         categoryName: schema_1.categories.name,
         categoryNameAr: schema_1.categories.nameAr,

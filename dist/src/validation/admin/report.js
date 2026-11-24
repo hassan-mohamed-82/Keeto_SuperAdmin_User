@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getChartsQuerySchema = exports.getPerformanceReportQuerySchema = exports.optionalDateQuerySchema = void 0;
+exports.getFinancialReportQuerySchema = exports.getChartsQuerySchema = exports.getPerformanceReportQuerySchema = exports.optionalDateQuerySchema = void 0;
 const zod_1 = require("zod");
 exports.optionalDateQuerySchema = zod_1.z
     .string()
@@ -44,6 +44,25 @@ exports.getChartsQuerySchema = zod_1.z
     testOrdersThreshold: zod_1.z.coerce.number().int().min(0).optional().default(10),
     // Optional list of restaurant IDs to limit the low-order chart
     restaurantIds: restaurantIdsSchema,
+})
+    .refine((data) => {
+    if (data.startDate && data.endDate) {
+        return new Date(data.startDate) <= new Date(data.endDate);
+    }
+    return true;
+}, {
+    message: "startDate must be before or equal to endDate",
+    path: ["startDate"],
+});
+exports.getFinancialReportQuerySchema = zod_1.z
+    .object({
+    restaurantId: zod_1.z.string().trim().optional(),
+    startDate: exports.optionalDateQuerySchema,
+    endDate: exports.optionalDateQuerySchema,
+    status: zod_1.z.enum(["pending", "accepted", "preparing", "out_for_delivery", "delivered", "cancelled", "refund"]).optional(),
+    paymentMethod: zod_1.z.string().optional(),
+    cityId: zod_1.z.string().trim().optional(),
+    visaSwitchConditionType: zod_1.z.enum(["none", "amount", "day_of_week", "day_of_month"]).optional(),
 })
     .refine((data) => {
     if (data.startDate && data.endDate) {

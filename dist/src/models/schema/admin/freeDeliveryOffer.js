@@ -10,6 +10,7 @@ exports.freeDeliveryOffers = (0, mysql_core_1.mysqlTable)("free_delivery_offers"
         .references(() => restaurants_1.restaurants.id, { onDelete: "cascade" })
         .notNull()
         .unique(),
+    branchIds: (0, mysql_core_1.json)("branch_ids").$type().default([]).notNull(),
     status: (0, mysql_core_1.mysqlEnum)("status", ["active", "inactive"])
         .default("active")
         .notNull(),

@@ -10,5 +10,5 @@ const router = (0, express_1.Router)();
 router.post("/login", (0, validation_1.validate)(auth_2.shippingLoginSchema), auth_1.login);
 router.get("/profile", authenticated_1.authenticated, (0, shippingAuth_1.requireShippingCompany)(), auth_1.getProfile);
 router.get("/me", authenticated_1.authenticated, (0, shippingAuth_1.requireShippingCompany)(), auth_1.getMyUserProfile);
-router.put("/profile", authenticated_1.authenticated, auth_1.updateProfile);
+router.put("/profile", authenticated_1.authenticated, (0, validation_1.validate)(auth_2.shippingUpdateProfileSchema), auth_1.updateProfile);
 exports.default = router;

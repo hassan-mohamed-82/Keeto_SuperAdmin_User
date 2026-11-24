@@ -1,9 +1,19 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.restaurantSchedules = exports.restaurantSettings = void 0;
+exports.restaurantSchedules = exports.restaurantSettings = exports.defaultOrderNowSetting = void 0;
 const drizzle_orm_1 = require("drizzle-orm");
 const mysql_core_1 = require("drizzle-orm/mysql-core");
-const shippingCompany_1 = require("./shippingCompany");
+exports.defaultOrderNowSetting = {
+    hotline: true,
+    branches: true,
+    name: true,
+    orderNow: true,
+    eMenu: true,
+    socialMedia: true,
+    menuPdf: true,
+    iosIcon: true,
+    androidIcon: true,
+};
 // 1. جدول الإعدادات العامة
 exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings", {
     id: (0, mysql_core_1.int)("id").autoincrement().primaryKey(),
@@ -14,8 +24,7 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     posSection: (0, mysql_core_1.boolean)("pos_section").default(false),
     selfDelivery: (0, mysql_core_1.boolean)("self_delivery").default(false),
     homeDelivery: (0, mysql_core_1.boolean)("home_delivery").default(true),
-    shippingCompanyId: (0, mysql_core_1.char)("shipping_company_id", { length: 36 })
-        .references(() => shippingCompany_1.shippingCompanies.id, { onDelete: "set null" }),
+    shippingCompanyId: (0, mysql_core_1.char)("shipping_company_id", { length: 36 }),
     takeaway: (0, mysql_core_1.boolean)("takeaway").default(false),
     orderSubscription: (0, mysql_core_1.boolean)("order_subscription").default(false),
     instantOrder: (0, mysql_core_1.boolean)("instant_order").default(true),
@@ -67,6 +76,21 @@ exports.restaurantSettings = (0, mysql_core_1.mysqlTable)("restaurant_settings",
     gatewayAutoSwitchTriggeredAt: (0, mysql_core_1.timestamp)("gateway_auto_switch_triggered_at"),
     // العداد التراكمي للسيرفيس فيز أثناء تشغيل بوابة CUSTOM لمقارنتها بالـ Threshold
     customGatewayAccumulatedFees: (0, mysql_core_1.decimal)("custom_gateway_accumulated_fees", { precision: 10, scale: 2 }).default("0.00"),
+    // ==========================================
+    // إعدادات صفحة "اطلب الآن" (Order Now Settings)
+    // ==========================================
+    orderNowSetting: (0, mysql_core_1.json)("order_now_setting")
+        .$type()
+        .default(exports.defaultOrderNowSetting),
+    // ==========================================
+    // Weight-based order settings
+    // ==========================================
+    /** Max % a final weight may exceed the ordered weight (0–20). */
+    weightMaxIncreasePercent: (0, mysql_core_1.int)("weight_max_increase_percent").notNull().default(10),
+    /** Minutes the restaurant has to submit weights before the request is auto-cancelled (5–60). */
+    weightRestaurantTimeoutMin: (0, mysql_core_1.int)("weight_restaurant_timeout_min").notNull().default(10),
+    /** Minutes the customer has to approve/cancel after weighing before auto-cancel (5–60). */
+    weightCustomerTimeoutMin: (0, mysql_core_1.int)("weight_customer_timeout_min").notNull().default(15),
 });
 // 2. جدول مواعيد العمل (يدعم الفترات المتعددة)
 exports.restaurantSchedules = (0, mysql_core_1.mysqlTable)("restaurant_schedules", {

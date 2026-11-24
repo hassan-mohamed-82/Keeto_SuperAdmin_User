@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rateOrder = exports.getCancelReasons = exports.cancelOrder = exports.getOrderPrerequisites = exports.getOrderDetails = exports.getOrderHistory = exports.getActiveOrders = exports.checkout = exports.normalizeEgPhone = void 0;
+exports.rateOrder = exports.getCancelReasons = exports.cancelOrder = exports.getOrderPrerequisites = exports.getOrderDetails = exports.getOrderHistory = exports.getActiveOrders = exports.checkout = void 0;
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const dispatchEngine_1 = require("../../services/shipping/dispatchEngine");
@@ -12,32 +12,11 @@ const uuid_1 = require("uuid");
 const Errors_1 = require("../../Errors");
 const notifications_1 = require("../../utils/notifications");
 const geo_1 = require("../../utils/geo");
-const discount_service_1 = require("../../services/discount.service");
-const userBlockCheck_1 = require("../../utils/userBlockCheck");
-const restaurantFeatures_1 = require("./restaurantFeatures");
-const pricing_helper_1 = require("../../helpers/pricing.helper");
-const coupon_helper_1 = require("../../helpers/coupon.helper");
-const firstOrderDiscount_helper_1 = require("../../helpers/firstOrderDiscount.helper");
+const userPhoneCheck_1 = require("../../utils/userPhoneCheck");
 const foodConditions_1 = require("../../helpers/foodConditions");
-const paymentSession_service_1 = require("../../services/payments/paymentSession.service");
-const getNextDailyOrderNumber_1 = require("../../helpers/getNextDailyOrderNumber");
 const restaurantWalletService_1 = require("../../services/restaurantWalletService");
-const calculateVisaCommission_1 = require("../../utils/calculateVisaCommission");
-const getActiveCustomGateway_1 = require("../../utils/getActiveCustomGateway");
-const getSystemVisaSettings_1 = require("../../utils/getSystemVisaSettings");
-// 👇 1. دالة تظبيط الوقت لتوقيت مصر عشان نص الإشعار
-const formatToEgyptTime = (date) => {
-    return new Intl.DateTimeFormat("ar-EG", {
-        timeZone: "Africa/Cairo",
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-    }).format(date);
-};
-// 🗓️ Helper لتحويل التاريخ لصيغة مقروءة وواضحة
+const order_1 = require("../../services/order");
+// 🗓️ Helper to format date 
 const formatDate = (date) => {
     if (!date)
         return null;
@@ -51,20 +30,6 @@ const formatDate = (date) => {
         second: "2-digit",
         hour12: true,
     }).format(new Date(date));
-};
-const parseJsonArray = (val) => {
-    if (!val)
-        return [];
-    if (typeof val === "string") {
-        try {
-            const parsed = JSON.parse(val);
-            return typeof parsed === "string" ? JSON.parse(parsed) : (Array.isArray(parsed) ? parsed : []);
-        }
-        catch {
-            return [];
-        }
-    }
-    return Array.isArray(val) ? val : [];
 };
 // Helper to format order items variations, supporting both snapshot-stored variations and old database lookup fallback
 const formatOrderItemsVariations = async (items) => {
@@ -85,22 +50,19 @@ const formatOrderItemsVariations = async (items) => {
             cleanVariations = [];
         return { item, cleanVariations };
     });
-    // ✅ FIX: collect option IDs per-variation, not per-item, so a single
-    // incomplete variation doesn't force a re-fetch (and possible drop) of
-    // its siblings that already have full details.
-    const allOldOptionIds = new Set();
+    // Collect option IDs that need fetching from DB (either missing names or missing weight metadata)
+    const optionsToFetch = new Set();
     for (const { cleanVariations } of parsedItems) {
         for (const v of cleanVariations) {
+            const optId = v?.optionId || v?.id;
             const hasFullDetails = Boolean(v?.variationName && v?.optionName);
-            if (!hasFullDetails) {
-                const optId = v?.optionId || v?.id;
-                if (optId)
-                    allOldOptionIds.add(optId);
+            if (optId && (!hasFullDetails || v?.priceMode === undefined || v?.isWeightGroup === undefined)) {
+                optionsToFetch.add(optId);
             }
         }
     }
     const optionsMap = new Map();
-    if (allOldOptionIds.size > 0) {
+    if (optionsToFetch.size > 0) {
         const optionsWithParent = await connection_1.db
             .select({
             optionId: schema_1.variationOptions.id,
@@ -108,1434 +70,317 @@ const formatOrderItemsVariations = async (items) => {
             optionNameAr: schema_1.variationOptions.optionNameAr,
             optionNameFr: schema_1.variationOptions.optionNameFr,
             additionalPrice: schema_1.variationOptions.additionalPrice,
+            priceMode: schema_1.variationOptions.priceMode,
+            weightValue: schema_1.variationOptions.weightValue,
             variationId: schema_1.foodVariations.id,
             variationName: schema_1.foodVariations.name,
             variationNameAr: schema_1.foodVariations.nameAr,
             variationNameFr: schema_1.foodVariations.nameFr,
+            isWeightGroup: schema_1.foodVariations.isWeightGroup,
         })
             .from(schema_1.variationOptions)
             .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, schema_1.foodVariations.id))
-            .where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.id, Array.from(allOldOptionIds)));
+            .where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.id, Array.from(optionsToFetch)));
         for (const opt of optionsWithParent) {
             optionsMap.set(opt.optionId, opt);
         }
     }
     return parsedItems.map(({ item, cleanVariations }) => {
         const variationDetails = cleanVariations.map((v) => {
-            const hasFullDetails = Boolean(v?.variationName && v?.optionName);
-            if (hasFullDetails) {
-                return {
-                    optionId: v.optionId,
-                    optionName: v.optionName,
-                    optionNameAr: v.optionNameAr,
-                    optionNameFr: v.optionNameFr || '',
-                    additionalPrice: v.price || v.additionalPrice || '0',
-                    variationId: v.variationId,
-                    variationName: v.variationName,
-                    variationNameAr: v.variationNameAr,
-                    variationNameFr: v.variationNameFr || '',
-                };
-            }
             const optId = v?.optionId || v?.id;
             const optDetails = optId ? optionsMap.get(optId) : null;
-            if (optDetails) {
-                return optDetails;
+            const variationName = v.variationName || optDetails?.variationName || null;
+            const optionName = v.optionName || optDetails?.optionName || null;
+            if (!variationName && !optionName && !optId) {
+                return null;
             }
-            // ✅ FIX: option/variation no longer exists in the DB (deleted after
-            // the order was placed) — fall back to the order-item snapshot
-            // instead of dropping the row, flagged as unavailable.
-            if (v && (v.optionId || v.id)) {
-                return {
-                    optionId: v.optionId || v.id || null,
-                    optionName: v.optionName || null,
-                    optionNameAr: v.optionNameAr || null,
-                    optionNameFr: v.optionNameFr || '',
-                    additionalPrice: v.price || v.additionalPrice || '0',
-                    variationId: v.variationId || null,
-                    variationName: v.variationName || null,
-                    variationNameAr: v.variationNameAr || null,
-                    variationNameFr: v.variationNameFr || '',
-                    isAvailable: false,
-                };
-            }
-            return null;
+            const variationNameAr = v.variationNameAr || optDetails?.variationNameAr || null;
+            const variationNameFr = v.variationNameFr || optDetails?.variationNameFr || '';
+            const optionNameAr = v.optionNameAr || optDetails?.optionNameAr || null;
+            const optionNameFr = v.optionNameFr || optDetails?.optionNameFr || '';
+            const additionalPrice = v.price || v.additionalPrice || optDetails?.additionalPrice || '0';
+            const priceMode = v.priceMode || optDetails?.priceMode || 'fixed';
+            const weightValue = v.weightValue != null ? String(v.weightValue) : (optDetails?.weightValue != null ? String(optDetails.weightValue) : null);
+            const isWeightGroup = Boolean(v.isWeightGroup ?? optDetails?.isWeightGroup ?? false);
+            const variationId = v.variationId || optDetails?.variationId || null;
+            return {
+                optionId: optId || null,
+                optionName,
+                optionNameAr,
+                optionNameFr,
+                additionalPrice,
+                priceMode,
+                weightValue,
+                variationId,
+                variationName,
+                variationNameAr,
+                variationNameFr,
+                isWeightGroup,
+                ...(v.isAvailable !== undefined ? { isAvailable: v.isAvailable } : (!optDetails && optId && !v.variationName ? { isAvailable: false } : {})),
+            };
         }).filter(Boolean);
         return {
             ...item,
+            sold_by: item.sold_by ?? (item.orderedWeight || item.finalWeight ? "weight" : "unit"),
+            isSoldByWeight: item.sold_by === "weight" || Boolean(item.orderedWeight || item.finalWeight),
+            weightUnit: item.weightUnit || item.foodWeightUnit || null,
+            allowCustomWeight: item.allowCustomWeight ?? true,
+            weight: item.orderedWeight ? String(item.orderedWeight) : null,
+            orderedWeight: item.orderedWeight ? String(item.orderedWeight) : null,
+            finalWeight: item.finalWeight ? String(item.finalWeight) : null,
             variations: variationDetails,
         };
     });
 };
 // ==========================================
-// 1. إنشاء الطلب (Checkout)
+// 1. Create Order (Checkout)
 // ==========================================
-// دالة مساعدة لضمان سلامة العمليات الحسابية المالية
-const roundMoney = (amount) => Math.round(amount * 100) / 100;
-// ==========================================================================
-// ✏️ NEW HELPERS (put them in a utils file and import them if you prefer)
-// ==========================================================================
-/**
- * Normalizes an Egyptian mobile number to E.164 (+201XXXXXXXXX).
- * Accepts: 01012345678 / +201012345678 / 00201012345678 / 201012345678
- * Throws BadRequest if the format is invalid.
- */
-const normalizeEgPhone = (raw) => {
-    if (typeof raw !== "string")
-        throw new BadRequest_1.BadRequest("Phone number is required.");
-    const trimmed = raw.trim();
-    if (!/^01[0125][0-9]{8}$/.test(trimmed)) {
-        throw new BadRequest_1.BadRequest("Phone number must be 11 digits and start with 01.");
-    }
-    return trimmed;
-};
-exports.normalizeEgPhone = normalizeEgPhone;
-/** All formats a phone may have been stored in (for matching legacy data). */
-const phoneVariants = (phone11) => {
-    const withoutZero = phone11.startsWith("0") ? phone11.slice(1) : phone11;
-    return [phone11, `+20${withoutZero}`, `20${withoutZero}`, `0020${withoutZero}`];
-};
-/** Validates + builds the guest address row. It is NOT inserted here — it is inserted inside the transaction. */
-const buildGuestAddress = (guestAddress, userId) => {
-    if (!guestAddress || typeof guestAddress !== "object") {
-        throw new BadRequest_1.BadRequest("Delivery address is required.");
-    }
-    const lat = Number(guestAddress.lat);
-    const lng = Number(guestAddress.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !lat || !lng || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-        throw new BadRequest_1.BadRequest("Delivery address requires valid latitude and longitude coordinates.");
-    }
-    if (!guestAddress.street || String(guestAddress.street).trim() === "") {
-        throw new BadRequest_1.BadRequest("Street is required for the delivery address.");
-    }
-    const number = guestAddress.number != null ? String(guestAddress.number).trim() : "";
-    return {
-        id: (0, uuid_1.v4)(),
-        userId,
-        title: guestAddress.title || "Guest Address",
-        street: String(guestAddress.street).trim(),
-        number: number || "-",
-        floor: guestAddress.floor ? String(guestAddress.floor) : null,
-        apartment: guestAddress.apartment ? String(guestAddress.apartment) : null,
-        landmark: guestAddress.landmark || null,
-        location: guestAddress.location || null,
-        fulladdress: guestAddress.fulladdress || `${number} ${String(guestAddress.street).trim()}`.trim(),
-        lat: String(lat),
-        lng: String(lng),
-    };
-};
 const checkout = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const isGuestUser = Boolean(req.user.isGuest);
-    const { orderSource, paymentMethod, orderType, idempotencyKey, zoneId, branchId, addressId: inputAddressId, note, couponCode, guestInfo, guestAddress, restaurantName } = req.body;
+    const { orderSource, paymentMethod, orderType, idempotencyKey, zoneId, branchId, addressId: inputAddressId, note, couponCode, guestAddress, restaurantName, } = req.body;
     let addressId = inputAddressId || null;
-    // ✏️ CHANGED: no more identity merge. The user id is always the authenticated one.
     const userId = req.user.id;
-    // ==========================================
-    // 🛡️ Guest Checkout — validation only (NO DB writes here)
-    // ✏️ CHANGED: only runs for real guest sessions. `guestInfo` is ignored for registered users,
-    // so a registered account can never be renamed / re-phoned / soft-deleted through this endpoint.
-    // All writes happen later inside the transaction.
-    // ==========================================
-    let guestName = null;
-    let guestPhone = null;
-    if (isGuestUser) {
-        guestName = String(guestInfo?.name || req.user.name || "Guest").trim().slice(0, 100) || "Guest";
-        guestPhone = (0, exports.normalizeEgPhone)(guestInfo?.phone); // throws BadRequest if missing / invalid
-        const altPhone = guestInfo?.alternatePhone || guestInfo?.alternativePhone;
-        if (altPhone) {
-            (0, exports.normalizeEgPhone)(altPhone);
-        }
-        // A phone that belongs to a registered account can't be used by a guest (no silent merge, no takeover).
-        const [registered] = await connection_1.db
-            .select({ id: schema_1.users.id })
-            .from(schema_1.users)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.users.phone, phoneVariants(guestPhone)), (0, drizzle_orm_1.eq)(schema_1.users.isGuest, false), (0, drizzle_orm_1.eq)(schema_1.users.isDeleted, false)))
-            .limit(1);
-        if (registered) {
-            throw new BadRequest_1.BadRequest("An account already exists with this phone number. Please log in to continue, or use a different phone number.");
-        }
-    }
-    // ==========================================
-    // 🏠 Guest Address (Delivery) — built in memory, inserted inside the transaction
-    // ✏️ CHANGED: validated, and not inserted before the order is validated.
-    // ==========================================
+    // 1. User Phone & Guest Validation
+    const phoneValidation = await (0, userPhoneCheck_1.validateUserPhone)(userId, isGuestUser, {
+        ...req.body,
+        name: req.user.name,
+    }, "Phone number or alternative phone number is required to complete checkout.");
+    const user = phoneValidation.user;
+    const guestName = isGuestUser ? (phoneValidation.guestName || "Guest") : null;
+    const guestPhone = isGuestUser ? phoneValidation.phone : null;
+    const guestAltPhone = isGuestUser ? phoneValidation.alternatePhone : null;
+    const registeredPhone = !isGuestUser ? phoneValidation.phone : null;
+    // 2. Guest Address (in-memory)
     let pendingGuestAddress = null;
     if (isGuestUser && orderType === "delivery" && !addressId) {
-        pendingGuestAddress = buildGuestAddress(guestAddress, userId);
+        pendingGuestAddress = (0, order_1.buildGuestAddress)(guestAddress, userId);
         addressId = pendingGuestAddress.id;
     }
-    // ==========================================
-    // 🛡️ 1. Validation
-    // ==========================================
-    const validOrderSources = ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"];
-    if (!validOrderSources.includes(orderSource)) {
-        throw new BadRequest_1.BadRequest("Invalid order source");
+    // 3. Payment Method Validation
+    const { isWalletPayment, isCashPayment, isVisaPayment, } = await (0, order_1.resolvePaymentMethod)(paymentMethod, isGuestUser);
+    // 4. Idempotency Check
+    const existingOrder = await (0, order_1.checkCheckoutIdempotency)(idempotencyKey, userId);
+    if (existingOrder) {
+        return (0, response_1.SuccessResponse)(res, { message: "Order already processed", data: existingOrder });
     }
-    const [selectedPayment] = await connection_1.db.select().from(schema_1.paymentMethods).where((0, drizzle_orm_1.eq)(schema_1.paymentMethods.id, paymentMethod)).limit(1);
-    if (!selectedPayment || !selectedPayment.isActive) {
-        throw new BadRequest_1.BadRequest("Invalid or inactive payment method");
-    }
-    const paymentMethodName = selectedPayment.name;
-    const paymentMethodNameAr = selectedPayment.nameAr;
-    const isWalletPayment = paymentMethodName === "wallet" || paymentMethodNameAr === "محفظتى";
-    const isCashPayment = paymentMethodName === "cash_on_delivery" || paymentMethodNameAr === "الدفع عند الاستلام" || paymentMethodName === "cash";
-    // 🛡️ Prevent wallet payment for guest accounts
-    if (isGuestUser && isWalletPayment) {
-        throw new BadRequest_1.BadRequest("Wallet payment is only available for registered accounts.");
-    }
-    const isVisaPayment = paymentMethodName?.toLowerCase() === "visa" ||
-        paymentMethodNameAr === "بطاقة";
-    // ==========================================
-    // 2. Idempotency Check
-    // ✏️ CHANGED: scoped by userId so one user can never receive another user's order.
-    // (Also add a unique index on (user_id, idempotency_key).)
-    // ==========================================
-    if (idempotencyKey) {
-        const [existing] = await connection_1.db
-            .select()
-            .from(schema_1.orders)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.idempotencyKey, idempotencyKey), (0, drizzle_orm_1.eq)(schema_1.orders.userId, userId)))
-            .limit(1);
-        if (existing)
-            return (0, response_1.SuccessResponse)(res, { message: "Order already processed", data: existing });
-    }
-    // ==========================================
-    // 3. Get Cart Items & User Verification
-    // ==========================================
-    const userCart = await connection_1.db.select().from(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-    if (!userCart.length)
-        throw new BadRequest_1.BadRequest("Your cart is empty");
-    const restaurantId = userCart[0].restaurantId;
-    const storedOrderSource = orderSource === "mykeeto" ? "my_keeto" : orderSource;
-    await (0, userBlockCheck_1.validateUserNotBlocked)(userId, restaurantId);
-    // ==========================================
-    // 4. Get Restaurant, Business Plan, Schedules & Settings (Parallelized)
-    // ==========================================
-    const [[restaurant], [plan], schedulesList, [settings]] = await Promise.all([
-        connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId)).limit(1),
-        connection_1.db.select()
-            .from(schema_1.restaurantBusinessPlans)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantBusinessPlans.platformType, (0, restaurantWalletService_1.mapOrderSourceToPlatformType)(orderSource))))
-            .limit(1),
-        connection_1.db.select().from(schema_1.restaurantSchedules).where((0, drizzle_orm_1.eq)(schema_1.restaurantSchedules.restaurantId, restaurantId)),
-        connection_1.db.select().from(schema_1.restaurantSettings).where((0, drizzle_orm_1.eq)(schema_1.restaurantSettings.restaurantId, restaurantId)).limit(1)
-    ]);
-    if (!restaurant)
-        throw new BadRequest_1.BadRequest("Restaurant not found");
-    if (!plan) {
-        throw new BadRequest_1.BadRequest(`Order failed. This restaurant has no active business plan for ${orderSource}.`);
-    }
-    if (!restaurant.slug && restaurantName) {
-        await connection_1.db
-            .update(schema_1.restaurants)
-            .set({
-            slug: restaurantName,
-        })
-            .where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurant.id));
-    }
-    // ==========================================
-    // 🛡️ 4.5 Operating Hours & Channel Validation
-    // ==========================================
-    const validOrderTypes = ["delivery", "takeaway", "dine_in"];
-    if (!orderType || !validOrderTypes.includes(orderType)) {
-        throw new BadRequest_1.BadRequest("orderType is required and must be one of: delivery, takeaway, dine_in");
-    }
-    const resolvedOrderType = orderType;
-    const status = (0, restaurantFeatures_1.calculateCurrentStatus)(settings, schedulesList);
-    if (!status.isOpenNow)
-        throw new BadRequest_1.BadRequest(`Order failed. ${status.reason}`);
-    if (resolvedOrderType === "delivery" && !status.canDeliveryNow)
-        throw new BadRequest_1.BadRequest("Order failed. Delivery service is currently disabled for this restaurant.");
-    if (resolvedOrderType === "takeaway" && !status.canTakeawayNow)
-        throw new BadRequest_1.BadRequest("Order failed. Takeaway service is currently disabled for this restaurant.");
-    // 🛡️ Cash payment guard
-    if (isCashPayment && settings?.cashEnabled === false) {
-        throw new BadRequest_1.BadRequest("Cash payment is not accepted by this restaurant. Please choose a different payment method.");
-    }
-    let defaultPreparingDuration;
-    if (resolvedOrderType === "takeaway") {
-        defaultPreparingDuration = settings?.maxTakeAwayTime ?? 25;
-    }
-    else if (resolvedOrderType === "dine_in") {
-        defaultPreparingDuration = settings?.maxDineInTime ?? 25;
-    }
-    else {
-        defaultPreparingDuration = settings?.maxDeliveryTime ?? 25;
-    }
-    // ==========================================
-    // ⚡ 5. Channel Pricing Engine — Subtotal, Variations & Addons
-    // orderType IS the serviceModule (they are the same concept)
-    // ==========================================
+    // 5. Get User Cart & Validate User Not Blocked
+    const { userCart, restaurantId } = await (0, order_1.getAndValidateUserCart)(userId);
+    // 6. Restaurant, Business Plan & Schedules
+    const { restaurant, plan, schedulesList, settings, storedOrderSource, } = await (0, order_1.validateRestaurantAndPlan)(restaurantId, orderSource, restaurantName);
+    // 7. Operating Hours & Channel Validation
+    const { defaultPreparingDuration, resolvedOrderType, } = (0, order_1.validateOperatingHoursAndChannel)(settings, schedulesList, orderType, isCashPayment);
+    // 8. Branch Resolution for Pricing
     const serviceModule = resolvedOrderType;
-    let pricingBranchId = branchId || null;
-    if (resolvedOrderType === "delivery") {
-        if (!addressId)
-            throw new BadRequest_1.BadRequest("Delivery address is required.");
-        if (!pricingBranchId) {
-            try {
-                // ✏️ CHANGED: a pending guest address isn't in the DB yet, so skip the DB-based resolver
-                // and go straight to the coordinate-based fallback below.
-                if (pendingGuestAddress)
-                    throw new Error("GUEST_ADDRESS_NOT_SAVED_YET");
-                pricingBranchId = await (0, pricing_helper_1.resolveBranchIdFromAddress)(addressId, restaurantId);
-            }
-            catch (err) {
-                const storedBranch = userCart.find(c => c.branchId);
-                pricingBranchId = storedBranch?.branchId || null;
-                if (!pricingBranchId && (settings?.shippingCompanyId || pendingGuestAddress)) {
-                    let addr;
-                    if (pendingGuestAddress) {
-                        addr = { lat: pendingGuestAddress.lat, lng: pendingGuestAddress.lng };
-                    }
-                    else {
-                        [addr] = await connection_1.db
-                            .select({ lat: schema_1.addresses.lat, lng: schema_1.addresses.lng })
-                            .from(schema_1.addresses)
-                            .where((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId))
-                            .limit(1);
-                    }
-                    const cLat = parseFloat(addr?.lat || "0");
-                    const cLng = parseFloat(addr?.lng || "0");
-                    const activeBranches = await connection_1.db
-                        .select({ id: schema_1.branches.id, lat: schema_1.branches.lat, lng: schema_1.branches.lng })
-                        .from(schema_1.branches)
-                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")));
-                    if (activeBranches.length > 0) {
-                        let closest = activeBranches[0];
-                        let minDist = Infinity;
-                        for (const b of activeBranches) {
-                            const bLat = parseFloat(b.lat || "0");
-                            const bLng = parseFloat(b.lng || "0");
-                            if (bLat && bLng && cLat && cLng) {
-                                const dist = (0, geo_1.calculateDistance)(cLat, cLng, bLat, bLng);
-                                if (dist < minDist) {
-                                    minDist = dist;
-                                    closest = b;
-                                }
-                            }
-                        }
-                        pricingBranchId = closest.id;
-                    }
-                }
-            }
-        }
-    }
-    else {
-        // Takeaway / dine_in: branchId is required
-        if (!branchId)
-            throw new BadRequest_1.BadRequest("Branch is required for takeaway or dine-in orders.");
-    }
-    // ─── Subcategory-branch availability guard ──────────────────────────
-    if (pricingBranchId) {
-        const cartFoodIds = userCart.filter(c => !c.offerId).map(c => c.foodId).filter(Boolean);
-        const cartFoods = cartFoodIds.length > 0
-            ? await connection_1.db
-                .select({ id: schema_1.food.id, subcategoryid: schema_1.food.subcategoryid })
-                .from(schema_1.food)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.food.id, cartFoodIds), foodConditions_1.activeFoodCondition))
-            : [];
-        const subcatIdsInCart = [...new Set(cartFoods.map(f => f.subcategoryid).filter(Boolean))];
-        if (subcatIdsInCart.length > 0) {
-            const inactiveSubcats = await connection_1.db
-                .select({ subcategoryId: schema_1.branchSubcategories.subcategoryId })
-                .from(schema_1.branchSubcategories)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branchSubcategories.branchId, pricingBranchId), (0, drizzle_orm_1.inArray)(schema_1.branchSubcategories.subcategoryId, subcatIdsInCart), (0, drizzle_orm_1.eq)(schema_1.branchSubcategories.status, "inactive")));
-            if (inactiveSubcats.length > 0) {
-                const inactiveSet = new Set(inactiveSubcats.map(r => r.subcategoryId));
-                const blockedFoodIds = cartFoods
-                    .filter(f => f.subcategoryid && inactiveSet.has(f.subcategoryid))
-                    .map(f => f.id);
-                return res.status(422).json({
-                    success: false,
-                    message: "One or more items in your cart are not available at the selected branch or location.",
-                    data: {
-                        unavailableItems: blockedFoodIds.map(foodId => ({ foodId })),
-                    },
-                });
-            }
-        }
-    }
-    // Parse cart variations + addons (needed for pricing engine + order items)
-    const allAddonIds = [];
-    const cartParsed = userCart.map(item => {
-        let safeVars = typeof item.variations === "string" ? JSON.parse(item.variations) : item.variations;
-        if (typeof safeVars === "string")
-            safeVars = JSON.parse(safeVars);
-        let parsedVariations = [];
-        let parsedAddons = [];
-        if (Array.isArray(safeVars)) {
-            parsedVariations = safeVars;
-        }
-        else if (safeVars && typeof safeVars === "object") {
-            parsedVariations = Array.isArray(safeVars.variations) ? safeVars.variations : [];
-            parsedAddons = Array.isArray(safeVars.addons) ? safeVars.addons : [];
-        }
-        let safeAddons = typeof item.addons === "string" ? JSON.parse(item.addons) : item.addons;
-        if (typeof safeAddons === "string")
-            safeAddons = JSON.parse(safeAddons);
-        if (Array.isArray(safeAddons)) {
-            parsedAddons = [...parsedAddons, ...safeAddons];
-        }
-        parsedAddons.forEach((a) => { if (a.addonId || a.id)
-            allAddonIds.push(a.addonId || a.id); });
-        return { cartItem: item, parsedVariations, parsedAddons };
-    });
-    // Batch fetch variation details for snapshot storage
-    const allCheckoutOptionIds = new Set();
-    for (const { parsedVariations } of cartParsed) {
-        for (const v of parsedVariations) {
-            if (v.optionId) {
-                allCheckoutOptionIds.add(v.optionId);
-            }
-        }
-    }
-    const uniqueFoodIds = [...new Set(userCart.filter(c => !c.offerId && c.foodId).map(c => c.foodId))];
-    const [optionsWithParent, addonsListDb, foodItemsDb] = await Promise.all([
-        allCheckoutOptionIds.size > 0
-            ? connection_1.db
-                .select({
-                optionId: schema_1.variationOptions.id,
-                optionName: schema_1.variationOptions.optionName,
-                optionNameAr: schema_1.variationOptions.optionNameAr,
-                optionNameFr: schema_1.variationOptions.optionNameFr,
-                additionalPrice: schema_1.variationOptions.additionalPrice,
-                status: schema_1.variationOptions.status,
-                variationId: schema_1.foodVariations.id,
-                variationName: schema_1.foodVariations.name,
-                variationNameAr: schema_1.foodVariations.nameAr,
-                variationNameFr: schema_1.foodVariations.nameFr,
-                variationStatus: schema_1.foodVariations.status,
-            })
-                .from(schema_1.variationOptions)
-                .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, schema_1.foodVariations.id))
-                .where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.id, Array.from(allCheckoutOptionIds)))
-            : [],
-        allAddonIds.length > 0
-            ? connection_1.db.select().from(schema_1.addons).where((0, drizzle_orm_1.inArray)(schema_1.addons.id, [...new Set(allAddonIds)]))
-            : [],
-        uniqueFoodIds.length > 0
-            ? connection_1.db.select({ id: schema_1.food.id, price: schema_1.food.price, status: schema_1.food.status, isOutOfStock: schema_1.food.isOutOfStock, discountId: schema_1.food.discountId, discount_type: schema_1.food.discount_type, discount_value: schema_1.food.discount_value })
-                .from(schema_1.food).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.food.id, uniqueFoodIds), foodConditions_1.activeFoodCondition))
-            : []
-    ]);
-    const optionsWithParentMap = new Map(optionsWithParent.map(o => [o.optionId, o]));
-    const addonsMap = new Map(addonsListDb.map(a => [a.id, a]));
-    const foodMap = new Map(foodItemsDb.map(f => [f.id, f]));
-    const checkoutOfferIds = [...new Set(userCart.filter(c => c.offerId).map(c => c.offerId))];
-    const [dbOffersForCheckout, dbOfferFoodsForCheckout] = checkoutOfferIds.length > 0
-        ? await Promise.all([
-            connection_1.db.select().from(schema_1.offers).where((0, drizzle_orm_1.inArray)(schema_1.offers.id, checkoutOfferIds)),
-            connection_1.db.select().from(schema_1.offerFoods).where((0, drizzle_orm_1.inArray)(schema_1.offerFoods.offerId, checkoutOfferIds))
-        ])
-        : [[], []];
-    const checkoutOffersMap = new Map(dbOffersForCheckout.map(o => [o.id, o]));
-    const checkoutOfferFoodsMap = new Map();
-    for (const ofRow of dbOfferFoodsForCheckout) {
-        if (!checkoutOfferFoodsMap.has(ofRow.offerId)) {
-            checkoutOfferFoodsMap.set(ofRow.offerId, []);
-        }
-        checkoutOfferFoodsMap.get(ofRow.offerId).push(ofRow);
-    }
-    if (dbOfferFoodsForCheckout.length > 0) {
-        const bundleOptionIds = new Set();
-        const bundleAddonIds = new Set();
-        for (const ofRow of dbOfferFoodsForCheckout) {
-            const rawOpts = parseJsonArray(ofRow.optionIds);
-            rawOpts.forEach((id) => id && bundleOptionIds.add(String(id)));
-            const rawVars = parseJsonArray(ofRow.variations);
-            for (const pv of rawVars) {
-                if (pv?.optionId)
-                    bundleOptionIds.add(String(pv.optionId));
-                if (Array.isArray(pv?.options)) {
-                    pv.options.forEach((id) => id && bundleOptionIds.add(String(id)));
-                }
-            }
-            const rawAddonIds = parseJsonArray(ofRow.addonIds);
-            rawAddonIds.forEach((id) => id && bundleAddonIds.add(String(id)));
-        }
-        const missingOptionIds = Array.from(bundleOptionIds).filter((id) => !optionsWithParentMap.has(id));
-        if (missingOptionIds.length > 0) {
-            const extraOptions = await connection_1.db
-                .select({
-                optionId: schema_1.variationOptions.id,
-                optionName: schema_1.variationOptions.optionName,
-                optionNameAr: schema_1.variationOptions.optionNameAr,
-                optionNameFr: schema_1.variationOptions.optionNameFr,
-                additionalPrice: schema_1.variationOptions.additionalPrice,
-                status: schema_1.variationOptions.status,
-                variationId: schema_1.foodVariations.id,
-                variationName: schema_1.foodVariations.name,
-                variationNameAr: schema_1.foodVariations.nameAr,
-                variationNameFr: schema_1.foodVariations.nameFr,
-                variationStatus: schema_1.foodVariations.status,
-            })
-                .from(schema_1.variationOptions)
-                .leftJoin(schema_1.foodVariations, (0, drizzle_orm_1.eq)(schema_1.variationOptions.variationId, schema_1.foodVariations.id))
-                .where((0, drizzle_orm_1.inArray)(schema_1.variationOptions.id, missingOptionIds));
-            for (const opt of extraOptions) {
-                optionsWithParentMap.set(opt.optionId, opt);
-            }
-        }
-        const missingAddonIds = Array.from(bundleAddonIds).filter((id) => !addonsMap.has(id));
-        if (missingAddonIds.length > 0) {
-            const extraAddons = await connection_1.db
-                .select({ id: schema_1.addons.id, name: schema_1.addons.name, nameAr: schema_1.addons.nameAr, nameFr: schema_1.addons.nameFr, price: schema_1.addons.price })
-                .from(schema_1.addons)
-                .where((0, drizzle_orm_1.inArray)(schema_1.addons.id, missingAddonIds));
-            for (const a of extraAddons) {
-                addonsMap.set(a.id, a);
-            }
-        }
-    }
-    // ─── Calculate pricing per item ───
-    let subtotal = 0;
-    let initialSubtotal = 0;
-    const itemsWithData = [];
-    let checkoutHasUnavailable = false;
-    let checkoutPriceChanged = false;
-    const priceChangedItems = [];
-    let hasFoodLevelDiscount = false;
-    for (const { cartItem, parsedVariations, parsedAddons } of cartParsed) {
-        if (cartItem.offerId) {
-            const offer = checkoutOffersMap.get(cartItem.offerId);
-            if (!offer) {
-                return res.status(422).json({
-                    success: false,
-                    message: "An offer in your cart was not found. Please refresh your cart.",
-                });
-            }
-            const nowForOffer = new Date();
-            const isOfferActive = offer.status === "active" && new Date(offer.endDate) >= nowForOffer && new Date(offer.startDate) <= nowForOffer;
-            if (!isOfferActive) {
-                return res.status(422).json({
-                    success: false,
-                    message: `Offer "${offer.name}" is no longer active or has expired. Please remove it from your cart.`,
-                });
-            }
-            const offerUnitPrice = parseFloat(offer.price);
-            const storedUnit = parseFloat(cartItem.unitPrice || "0");
-            if (Math.abs(offerUnitPrice - storedUnit) > 0.01) {
-                checkoutPriceChanged = true;
-                priceChangedItems.push({
-                    foodId: cartItem.foodId,
-                    oldUnitPrice: storedUnit,
-                    newUnitPrice: offerUnitPrice,
-                });
-            }
-            const offerTotal = roundMoney(offerUnitPrice * cartItem.quantity);
-            initialSubtotal += offerTotal;
-            itemsWithData.push({
-                cartItem,
-                isOffer: true,
-                offer,
-                offerUnitPrice,
-                offerTotal,
-                itemIsAvailable: true,
-            });
-            continue;
-        }
-        const optionIds = parsedVariations.map((v) => v.optionId).filter(Boolean);
-        let addonPrice = 0;
-        for (const a of parsedAddons) {
-            const addonId = a.addonId || a.id;
-            const dbAddon = addonsMap.get(addonId);
-            if (dbAddon) {
-                if (dbAddon.status === "inactive") {
-                    return res.status(422).json({
-                        success: false,
-                        message: `Add-on "${dbAddon.name}" is currently unavailable.`,
-                    });
-                }
-                const p = parseFloat((dbAddon.price || "0"));
-                addonPrice += p;
-                a.price = p.toString();
-                a.name = dbAddon.name;
-                a.nameAr = dbAddon.nameAr;
-                a.nameFr = dbAddon.nameFr;
-            }
-            else {
-                return res.status(422).json({
-                    success: false,
-                    message: `Add-on is no longer available. Please refresh your cart.`,
-                    data: { affectedFoodId: cartItem.foodId, addonId },
-                });
-            }
-        }
-        let channelBasePrice;
-        let varPrice;
-        let itemIsAvailable = true;
-        const priceResult = await (0, pricing_helper_1.calculateCalculatedPrice)(cartItem.foodId, optionIds, pricingBranchId || null, serviceModule);
-        channelBasePrice = priceResult.basePrice;
-        varPrice = priceResult.variants.reduce((s, v) => s + v.price, 0);
-        itemIsAvailable = priceResult.isAvailable;
-        for (const v of parsedVariations) {
-            if (v.optionId) {
-                const resolved = priceResult.variants.find(r => r.variantOptionId === v.optionId);
-                if (resolved)
-                    v.additionalPrice = resolved.price.toString();
-            }
-        }
-        const storedUnit = parseFloat(cartItem.unitPrice || "0");
-        const liveUnit = channelBasePrice + varPrice + addonPrice;
-        if (Math.abs(liveUnit - storedUnit) > 0.01) {
-            checkoutPriceChanged = true;
-            priceChangedItems.push({
-                foodId: cartItem.foodId,
-                oldUnitPrice: storedUnit,
-                newUnitPrice: liveUnit,
-            });
-        }
-        if (!itemIsAvailable)
-            checkoutHasUnavailable = true;
-        const originalBasePrice = channelBasePrice;
-        const foodItem = foodMap.get(cartItem.foodId);
-        let initialDiscountPrice = originalBasePrice;
-        if (foodItem?.discount_value && Number(foodItem.discount_value) > 0) {
-            hasFoodLevelDiscount = true;
-            if (foodItem.discount_type === "percentage") {
-                initialDiscountPrice = Math.max(0, originalBasePrice - (originalBasePrice * Number(foodItem.discount_value) / 100));
-            }
-            else if (foodItem.discount_type === "amount" || foodItem.discount_type === "fixed") {
-                initialDiscountPrice = Math.max(0, originalBasePrice - Number(foodItem.discount_value));
-            }
-        }
-        initialSubtotal += (initialDiscountPrice + varPrice + addonPrice) * cartItem.quantity;
-        const detailedVariations = parsedVariations.map((v) => {
-            const optDetails = optionsWithParentMap.get(v.optionId);
-            const resolvedPrice = (v.additionalPrice ?? optDetails?.additionalPrice ?? v.price ?? "0.00");
-            return {
-                variationId: optDetails?.variationId ?? v.variationId ?? null,
-                variationName: optDetails?.variationName ?? v.variationName ?? null,
-                variationNameAr: optDetails?.variationNameAr ?? v.variationNameAr ?? null,
-                variationNameFr: optDetails?.variationNameFr ?? v.variationNameFr ?? null,
-                optionId: optDetails?.optionId ?? v.optionId ?? null,
-                optionName: optDetails?.optionName ?? v.optionName ?? null,
-                optionNameAr: optDetails?.optionNameAr ?? v.optionNameAr ?? null,
-                optionNameFr: optDetails?.optionNameFr ?? v.optionNameFr ?? null,
-                price: Number(resolvedPrice).toFixed(2),
-                additionalPrice: Number(resolvedPrice).toFixed(2)
-            };
-        });
-        const hasMissingDetails = detailedVariations.some(v => !v.variationName && !v.optionName);
-        if (hasMissingDetails) {
-            return res.status(422).json({
-                success: false,
-                message: "Some selected options are no longer available. Please refresh your cart.",
-                data: {
-                    affectedFoodId: cartItem.foodId,
-                },
-            });
-        }
-        itemsWithData.push({
-            cartItem,
-            foodItem,
-            originalBasePrice,
-            varPrice,
-            addonPrice,
-            vars: detailedVariations,
-            addonsList: parsedAddons,
-            itemIsAvailable,
-        });
-    }
-    // ─── 422: Unavailable items guard ────────────────────────────────────
-    if (checkoutHasUnavailable) {
+    const pricingBranchId = await (0, order_1.resolveBranchForPricing)(resolvedOrderType, addressId, branchId, restaurantId, pendingGuestAddress, settings, userCart);
+    // 9. Subcategory-branch Availability Guard
+    const blockedFoodIds = await (0, order_1.checkSubcategoryBranchAvailability)(pricingBranchId, userCart);
+    if (blockedFoodIds && blockedFoodIds.length > 0) {
         return res.status(422).json({
             success: false,
-            message: "One or more items in your cart are unavailable. Please review your cart before placing the order.",
+            message: "One or more items in your cart are not available at the selected branch or location.",
             data: {
-                unavailableItems: itemsWithData
-                    .filter(d => !d.itemIsAvailable)
-                    .map(d => ({ foodId: d.cartItem.foodId })),
+                unavailableItems: blockedFoodIds.map((foodId) => ({ foodId })),
             },
         });
     }
-    const resolvedOrderProducts = await (0, discount_service_1.formatProductsWithDiscounts)(itemsWithData
-        .filter(data => !data.isOffer && data.foodItem)
-        .map(data => ({
-        id: data.foodItem.id,
-        price: data.originalBasePrice,
-        discountId: data.foodItem.discountId,
-        discountType: data.foodItem.discount_type,
-        discountValue: data.foodItem.discount_value,
-    })), restaurantId);
-    const resolvedOrderProductMap = new Map(resolvedOrderProducts.map(product => [product.id, product]));
-    const appliedDiscountIds = new Set(resolvedOrderProducts
-        .map(product => product.appliedDiscountId)
-        .filter((id) => Boolean(id)));
-    const itemsToInsert = [];
-    for (const data of itemsWithData) {
-        if (data.isOffer) {
-            const { cartItem, offer, offerUnitPrice, offerTotal } = data;
-            subtotal += offerTotal;
-            const bFoods = checkoutOfferFoodsMap.get(offer.id) || [];
-            const perFoodPrice = bFoods.length > 0 ? roundMoney(offerUnitPrice / bFoods.length) : offerUnitPrice;
-            for (const bf of bFoods) {
-                const rawOpts = parseJsonArray(bf.optionIds);
-                const rawVars = parseJsonArray(bf.variations);
-                const bfOptionIds = new Set(rawOpts.map((id) => String(id)).filter(Boolean));
-                for (const pv of rawVars) {
-                    if (pv?.optionId)
-                        bfOptionIds.add(String(pv.optionId));
-                    if (Array.isArray(pv?.options)) {
-                        pv.options.forEach((id) => id && bfOptionIds.add(String(id)));
-                    }
-                }
-                const bundleDetailedVariations = Array.from(bfOptionIds).map((optId) => {
-                    const optDetails = optionsWithParentMap.get(optId);
-                    const resolvedPrice = optDetails?.additionalPrice ?? "0.00";
-                    return {
-                        variationId: optDetails?.variationId ?? null,
-                        variationName: optDetails?.variationName ?? null,
-                        variationNameAr: optDetails?.variationNameAr ?? null,
-                        variationNameFr: optDetails?.variationNameFr ?? null,
-                        optionId: optDetails?.optionId ?? optId,
-                        optionName: optDetails?.optionName ?? null,
-                        optionNameAr: optDetails?.optionNameAr ?? null,
-                        optionNameFr: optDetails?.optionNameFr ?? null,
-                        price: Number(resolvedPrice).toFixed(2),
-                        additionalPrice: Number(resolvedPrice).toFixed(2),
-                    };
-                });
-                const rawBfAddonIds = parseJsonArray(bf.addonIds);
-                const bundleDetailedAddons = [];
-                let bundleAddonsPrice = 0;
-                for (const addonId of rawBfAddonIds) {
-                    const dbAddon = addonsMap.get(String(addonId));
-                    if (dbAddon) {
-                        const addonPrice = Number(dbAddon.price || 0);
-                        bundleAddonsPrice += addonPrice;
-                        bundleDetailedAddons.push({
-                            addonId: dbAddon.id,
-                            name: dbAddon.name,
-                            nameAr: dbAddon.nameAr,
-                            nameFr: dbAddon.nameFr,
-                            price: addonPrice.toFixed(2),
-                        });
-                    }
-                }
-                const bundleItemTotal = roundMoney(perFoodPrice * cartItem.quantity + bundleAddonsPrice);
-                itemsToInsert.push({
-                    id: (0, uuid_1.v4)(),
-                    foodId: bf.foodId,
-                    quantity: bf.quantity * cartItem.quantity,
-                    basePrice: perFoodPrice.toFixed(2),
-                    variationsPrice: "0.00",
-                    addonsPrice: bundleAddonsPrice.toFixed(2),
-                    totalPrice: bundleItemTotal.toFixed(2),
-                    variations: bundleDetailedVariations,
-                    addons: bundleDetailedAddons,
-                    note: cartItem.note || null,
-                    isBundle: true,
-                });
-            }
-            continue;
-        }
-        const { cartItem, foodItem, originalBasePrice, varPrice, addonPrice, vars, addonsList } = data;
-        const resolvedProduct = resolvedOrderProductMap.get(foodItem.id);
-        const discountedBasePrice = resolvedProduct?.finalPrice ?? originalBasePrice;
-        const itemTotal = roundMoney((discountedBasePrice + varPrice + addonPrice) * cartItem.quantity);
-        subtotal += itemTotal;
-        itemsToInsert.push({
-            id: (0, uuid_1.v4)(),
-            foodId: cartItem.foodId,
-            quantity: cartItem.quantity,
-            basePrice: discountedBasePrice.toFixed(2),
-            variationsPrice: varPrice.toFixed(2),
-            addonsPrice: addonPrice.toFixed(2),
-            totalPrice: itemTotal.toFixed(2),
-            variations: vars,
-            addons: addonsList,
-            note: cartItem.note || null,
-            isBundle: false,
+    // 10. Weight-based Cart Gating
+    const { activeWeightRequest, hasWeightedItems, checkoutCart, cartFoodSoldBy, assertWeightCartUnchanged, } = await (0, order_1.evaluateCartWeightGating)(userCart, userId, restaurantId);
+    // 11. Fetch Cart Lookup Maps
+    const { cartParsed, optionsWithParentMap, addonsMap, foodMap, checkoutOffersMap, checkoutOfferFoodsMap, } = await (0, order_1.fetchCartLookupMaps)(checkoutCart);
+    // 12. Calculate Cart Pricing & Item Details
+    const pricingResult = await (0, order_1.calculateCartPricingAndItems)({
+        cartParsed,
+        checkoutOffersMap,
+        checkoutOfferFoodsMap,
+        optionsWithParentMap,
+        addonsMap,
+        foodMap,
+        pricingBranchId,
+        serviceModule,
+        hasWeightedItems,
+        cartFoodSoldBy,
+        restaurantId,
+    });
+    if ("error" in pricingResult && pricingResult.error) {
+        return res.status(pricingResult.error.status).json({
+            success: false,
+            message: pricingResult.error.message,
+            ...(pricingResult.error.data ? { data: pricingResult.error.data } : {}),
         });
     }
-    subtotal = roundMoney(subtotal);
-    // ==========================================
-    // 5.2 Fees & Commission
-    // ==========================================
+    const { subtotal, initialSubtotal, hasFoodLevelDiscount, resolvedOrderProducts, appliedDiscountIds, itemsToInsert, } = pricingResult;
+    // 13. Fees & Commission
     const serviceFee = parseFloat(plan.serviceFee || "0");
     const commissionRate = parseFloat(plan.commissionRate || "0");
-    const appCommission = roundMoney(subtotal * (commissionRate / 100));
-    // ==========================================
-    // 5.5 Check Coupons & Order Level Discounts
-    // ==========================================
-    let totalDiscount = 0;
-    let appliedCoupon = null;
-    let isFreeDelivery = false;
-    let orderDiscountId = null;
-    let orderCouponId = null;
-    let orderDiscountType = null;
-    let orderDiscountValue = null;
-    let orderDiscountSource = null;
-    const appliedProduct = resolvedOrderProducts.find(product => product.discountAmount > 0);
-    if (appliedProduct?.discountDetails) {
-        orderDiscountId = appliedProduct.discountDetails.id;
-        orderDiscountSource = appliedProduct.discountDetails.source === "product"
-            ? "food_level"
-            : appliedProduct.discountDetails.source === "global" ? "global_discount" : "restaurant_discount";
-        orderDiscountType = appliedProduct.discountDetails.type === "percentage" ? "percentage" : "fixed_amount";
-        orderDiscountValue = String(appliedProduct.discountDetails.value);
-    }
-    else if (hasFoodLevelDiscount) {
-        orderDiscountSource = "food_level";
-        orderDiscountValue = roundMoney(initialSubtotal - subtotal).toFixed(2);
-    }
-    // First Orders Discount — applies the maximum discount available
-    let appliedFirstOrderDiscount = null;
-    let firstOrderDiscountAmount = 0;
-    let orderFirstOrderDiscountId = null;
-    const existingProductDiscountAmount = roundMoney(Math.max(0, initialSubtotal - subtotal));
-    // First-order discount is only for registered (non-guest) users
-    if (!isGuestUser) {
-        const eligibleFirstOrder = await (0, firstOrderDiscount_helper_1.resolveFirstOrderDiscount)(userId, restaurantId, initialSubtotal > 0 ? initialSubtotal : subtotal);
-        if (eligibleFirstOrder) {
-            firstOrderDiscountAmount = eligibleFirstOrder.discountAmount;
-            appliedFirstOrderDiscount = eligibleFirstOrder.discount;
-        }
-    }
-    if (appliedFirstOrderDiscount && firstOrderDiscountAmount > existingProductDiscountAmount) {
-        const additionalDiscount = roundMoney(firstOrderDiscountAmount - existingProductDiscountAmount);
-        totalDiscount += additionalDiscount;
-        orderFirstOrderDiscountId = appliedFirstOrderDiscount.id;
-        orderDiscountSource = "first_order_discount";
-        orderDiscountType = appliedFirstOrderDiscount.discountType === "percentage" ? "percentage" : "fixed_amount";
-        orderDiscountValue = appliedFirstOrderDiscount.discountValue ? String(appliedFirstOrderDiscount.discountValue) : String(firstOrderDiscountAmount);
-    }
-    else {
-        appliedFirstOrderDiscount = null;
-    }
-    // Coupon
-    if (couponCode) {
-        const couponResult = await (0, coupon_helper_1.validateAndCalculateCoupon)(couponCode, userId, restaurantId, subtotal, 0, itemsToInsert.map((c) => c.foodId).filter(Boolean), itemsToInsert.map((c) => ({
-            foodId: c.foodId,
-            totalPrice: parseFloat(c.totalPrice || "0"),
-        })));
-        appliedCoupon = couponResult.coupon;
-        const couponDiscountAmount = couponResult.discountAmount;
-        isFreeDelivery = couponResult.isFreeDelivery;
-        if (appliedCoupon) {
-            orderCouponId = appliedCoupon.id || null;
-            totalDiscount += couponDiscountAmount;
-            if (!orderDiscountSource) {
-                orderDiscountSource = "coupon";
-                orderDiscountType = appliedCoupon.discountType === "percentage" ? "percentage" : "fixed_amount";
-                orderDiscountValue = appliedCoupon.discountValue ? appliedCoupon.discountValue.toString() : couponDiscountAmount.toFixed(2);
-            }
-        }
-    }
-    totalDiscount = roundMoney(totalDiscount);
-    // ==========================================
-    // 6. Dynamic Delivery & Turf Zone Logic
-    // ==========================================
-    let deliveryFee = 0;
-    let resolvedZoneId = zoneId || null;
-    let resolvedBranchId = branchId || null;
-    let deliveryGenericZoneId = null;
-    let shippingAddressSnapshot = null;
-    let targetShippingCompanyId = null;
-    let isCompanyActive = false; // ✏️ CHANGED: hoisted so it's visible outside the delivery block
-    if (resolvedOrderType === "delivery") {
-        if (!addressId)
-            throw new BadRequest_1.BadRequest("Delivery address is required");
-        // ✏️ CHANGED: use the in-memory guest address if it hasn't been saved yet
-        let userAddress;
-        if (pendingGuestAddress) {
-            userAddress = pendingGuestAddress;
-        }
-        else {
-            [userAddress] = await connection_1.db.select().from(schema_1.addresses)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.addresses.id, addressId), (0, drizzle_orm_1.eq)(schema_1.addresses.userId, userId))).limit(1);
-        }
-        if (!userAddress)
-            throw new BadRequest_1.BadRequest("Invalid delivery address");
-        const lat = parseFloat(userAddress.lat || "0");
-        const lng = parseFloat(userAddress.lng || "0");
-        if (!lat || !lng) {
-            throw new BadRequest_1.BadRequest("Delivery address requires valid latitude and longitude coordinates.");
-        }
-        targetShippingCompanyId = settings?.shippingCompanyId || null;
-        if (!targetShippingCompanyId) {
-            const [junctionLink] = await connection_1.db
-                .select({
-                shippingCompanyId: schema_1.shippingCompanyRestaurants.shippingCompanyId,
-                shippingCompanyStatus: schema_1.shippingCompanies.status,
-            })
-                .from(schema_1.shippingCompanyRestaurants)
-                .innerJoin(schema_1.shippingCompanies, (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.shippingCompanyId, schema_1.shippingCompanies.id))
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.shippingCompanyRestaurants.status, "active"), (0, drizzle_orm_1.eq)(schema_1.shippingCompanies.status, "active")))
-                .limit(1);
-            if (junctionLink) {
-                targetShippingCompanyId = junctionLink.shippingCompanyId;
-                isCompanyActive = true;
-            }
-        }
-        else {
-            const [company] = await connection_1.db
-                .select({ id: schema_1.shippingCompanies.id, status: schema_1.shippingCompanies.status })
-                .from(schema_1.shippingCompanies)
-                .where((0, drizzle_orm_1.eq)(schema_1.shippingCompanies.id, targetShippingCompanyId))
-                .limit(1);
-            if (company && company.status === "active") {
-                isCompanyActive = true;
-            }
-            else {
-                targetShippingCompanyId = null;
-            }
-        }
-        let applicableFee = null;
-        let maxDeliveryFee = -1;
-        if (targetShippingCompanyId && isCompanyActive) {
-            const companyZones = await connection_1.db
-                .select({
-                id: schema_1.shippingZones.id,
-                name: schema_1.shippingZones.name,
-                nameAr: schema_1.shippingZones.nameAr,
-                coordinates: schema_1.shippingZones.coordinates,
-                coverageAreaRadiusKm: schema_1.shippingZones.coverageAreaRadiusKm,
-                deliveryFee: schema_1.shippingZones.deliveryFee,
-                minOrderAmount: schema_1.shippingZones.minOrderAmount,
-                status: schema_1.shippingZones.status,
-            })
-                .from(schema_1.shippingZones)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.shippingZones.shippingCompanyId, targetShippingCompanyId), (0, drizzle_orm_1.eq)(schema_1.shippingZones.status, "active")));
-            for (const sz of companyZones) {
-                let coords = sz.coordinates;
-                if (typeof coords === "string") {
-                    try {
-                        coords = JSON.parse(coords);
-                    }
-                    catch {
-                        coords = [];
-                    }
-                }
-                const isPolygon = Array.isArray(coords) && coords.length >= 3;
-                const feeObj = {
-                    id: sz.id,
-                    zoneId: sz.id,
-                    branchId: null,
-                    branchStatus: "active",
-                    deliveryFee: sz.deliveryFee,
-                    coverageType: isPolygon ? "POLYGON" : "RADIUS",
-                    customCoordinates: coords,
-                    customRadiusKm: sz.coverageAreaRadiusKm,
-                    defaultCoordinates: coords,
-                    defaultRadiusKm: sz.coverageAreaRadiusKm,
-                    zoneName: sz.name,
-                    zoneNameAr: sz.nameAr,
-                };
-                if ((0, geo_1.isLocationInZone)(lat, lng, feeObj.zoneId, feeObj)) {
-                    const currentFee = parseFloat(feeObj.deliveryFee || "0");
-                    if (currentFee > maxDeliveryFee) {
-                        maxDeliveryFee = currentFee;
-                        applicableFee = feeObj;
-                    }
-                }
-            }
-        }
-        // If not linked to a shipping company or no zone matched, check the restaurant's own zones
-        if (!applicableFee) {
-            const restaurantFees = await connection_1.db.select({
-                id: schema_1.restaurantZoneDeliveryFees.id,
-                zoneId: schema_1.restaurantZoneDeliveryFees.zoneId,
-                branchId: schema_1.restaurantZoneDeliveryFees.branchId,
-                deliveryFee: schema_1.restaurantZoneDeliveryFees.deliveryFee,
-                coverageType: schema_1.restaurantZoneDeliveryFees.coverageType,
-                customCoordinates: schema_1.restaurantZoneDeliveryFees.customCoordinates,
-                customRadiusKm: schema_1.restaurantZoneDeliveryFees.customRadiusKm,
-                defaultCoordinates: schema_1.zones.coordinates,
-                defaultRadiusKm: schema_1.zones.coverageAreaRadiusKm,
-                zoneName: schema_1.zones.name,
-                zoneNameAr: schema_1.zones.nameAr
-            })
-                .from(schema_1.restaurantZoneDeliveryFees)
-                .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, schema_1.zones.id))
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.status, "active"), branchId ? (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.branchId, branchId) : undefined));
-            for (const fee of restaurantFees) {
-                if ((0, geo_1.isLocationInZone)(lat, lng, fee.zoneId, fee)) {
-                    const currentFee = parseFloat(fee.deliveryFee || "0");
-                    if (currentFee > maxDeliveryFee) {
-                        maxDeliveryFee = currentFee;
-                        applicableFee = fee;
-                    }
-                }
-            }
-        }
-        if (!applicableFee) {
-            throw new BadRequest_1.BadRequest("Your delivery address is outside our covered delivery zones.");
-        }
-        const genericZoneId = applicableFee.zoneId;
-        deliveryGenericZoneId = genericZoneId;
-        resolvedZoneId = applicableFee.id;
-        if (!resolvedZoneId) {
-            throw new BadRequest_1.BadRequest("No delivery zone found for this address.");
-        }
-        deliveryFee = parseFloat(applicableFee.deliveryFee || "0");
-        if (applicableFee.branchId) {
-            resolvedBranchId = applicableFee.branchId;
-        }
-        else if (branchId) {
-            const [selectedBranch] = await connection_1.db.select({ id: schema_1.branches.id })
-                .from(schema_1.branches)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.id, branchId), (0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")))
-                .limit(1);
-            if (!selectedBranch)
-                throw new BadRequest_1.BadRequest("Selected branch not found or inactive.");
-            resolvedBranchId = selectedBranch.id;
-        }
-        else if (targetShippingCompanyId && isCompanyActive) {
-            // 🚚 Shipping-company orders: pick the closest active branch to the customer
-            const activeBranches = await connection_1.db.select({
-                id: schema_1.branches.id,
-                name: schema_1.branches.name,
-                lat: schema_1.branches.lat,
-                lng: schema_1.branches.lng,
-            })
-                .from(schema_1.branches)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")));
-            if (!activeBranches || activeBranches.length === 0) {
-                throw new BadRequest_1.BadRequest("No active branch found for this restaurant.");
-            }
-            if (activeBranches.length === 1) {
-                resolvedBranchId = activeBranches[0].id;
-            }
-            else {
-                let closestBranch = activeBranches[0];
-                let minDistance = Infinity;
-                for (const b of activeBranches) {
-                    const bLat = parseFloat(b.lat || "0");
-                    const bLng = parseFloat(b.lng || "0");
-                    if (bLat && bLng) {
-                        const dist = (0, geo_1.calculateDistance)(lat, lng, bLat, bLng);
-                        if (dist < minDistance) {
-                            minDistance = dist;
-                            closestBranch = b;
-                        }
-                    }
-                }
-                resolvedBranchId = closestBranch.id;
-            }
-        }
-        else {
-            const [matchedBranch] = await connection_1.db.select({ id: schema_1.branches.id })
-                .from(schema_1.branches)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), genericZoneId ? (0, drizzle_orm_1.eq)(schema_1.branches.zoneId, genericZoneId) : undefined, (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")))
-                .limit(1);
-            if (!matchedBranch)
-                throw new BadRequest_1.BadRequest("No active branch found serving your delivery zone.");
-            resolvedBranchId = matchedBranch.id;
-        }
-        // ✏️ CHANGED: for guests the phone comes from the validated guestInfo (not yet saved on the user row)
-        let snapshotPhone = guestPhone;
-        if (!isGuestUser) {
-            const [userInfoForAddress] = await connection_1.db.select({ phone: schema_1.users.phone }).from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, userId)).limit(1);
-            snapshotPhone = userInfoForAddress?.phone || null;
-        }
-        shippingAddressSnapshot = {
-            title: userAddress.title,
-            street: userAddress.street,
-            building: userAddress.number || null,
-            floor: userAddress.floor || null,
-            apartment: userAddress.apartment || null,
-            landmark: userAddress.landmark || null,
-            location: userAddress.location || null,
-            fulladdress: userAddress.fulladdress || null,
-            lat: lat,
-            lng: lng,
-            phone: snapshotPhone,
-            addressZoneId: genericZoneId || null,
-            restaurantZoneId: resolvedZoneId || null,
-            addressZoneName: applicableFee.zoneName || null,
-            addressZoneNameAr: applicableFee.zoneNameAr || null,
-        };
-    }
-    else {
-        if (!branchId)
-            throw new BadRequest_1.BadRequest("Branch is required for takeaway or dine-in orders.");
-        const [branch] = await connection_1.db.select({ id: schema_1.branches.id, zoneId: schema_1.branches.zoneId })
-            .from(schema_1.branches)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.branches.id, branchId), (0, drizzle_orm_1.eq)(schema_1.branches.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.branches.status, "active")))
-            .limit(1);
-        if (!branch)
-            throw new BadRequest_1.BadRequest("Invalid or inactive branch selected.");
-        resolvedBranchId = branch.id;
-        resolvedZoneId = branch.zoneId;
-    }
-    // Branch Snapshot — zone data comes from the restaurant's own zone config
-    // (restaurantZoneDeliveryFees) matching the order delivery zone, or the branch's zone.
-    let branchSnapshotData = null;
-    if (resolvedBranchId) {
-        const [branchDetails] = await connection_1.db
-            .select({
-            id: schema_1.branches.id,
-            name: schema_1.branches.name,
-            nameAr: schema_1.branches.nameAr,
-            nameFr: schema_1.branches.nameFr,
-            address: schema_1.branches.address,
-            addressAr: schema_1.branches.addressAr,
-            addressFr: schema_1.branches.addressFr,
-            phoneNumber: schema_1.branches.phoneNumber,
-            status: schema_1.branches.status,
-            cityId: schema_1.branches.cityId,
-            cityName: schema_1.cities.name,
-            cityNameAr: schema_1.cities.nameAr,
-            zoneId: deliveryGenericZoneId ? schema_1.restaurantZoneDeliveryFees.zoneId : schema_1.branches.zoneId,
-            zoneName: schema_1.zones.name,
-            zoneNameAr: schema_1.zones.nameAr,
-            zoneDeliveryFee: schema_1.restaurantZoneDeliveryFees.deliveryFee,
-        })
-            .from(schema_1.branches)
-            .leftJoin(schema_1.cities, (0, drizzle_orm_1.eq)(schema_1.branches.cityId, schema_1.cities.id))
-            .leftJoin(schema_1.restaurantZoneDeliveryFees, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.branchId, schema_1.branches.id), (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.restaurantId, restaurantId), deliveryGenericZoneId ? (0, drizzle_orm_1.eq)(schema_1.restaurantZoneDeliveryFees.zoneId, deliveryGenericZoneId) : (0, drizzle_orm_1.sql) `1=0`))
-            .leftJoin(schema_1.zones, (0, drizzle_orm_1.eq)(schema_1.zones.id, deliveryGenericZoneId ? schema_1.restaurantZoneDeliveryFees.zoneId : schema_1.branches.zoneId))
-            .where((0, drizzle_orm_1.eq)(schema_1.branches.id, resolvedBranchId))
-            .limit(1);
-        if (branchDetails) {
-            branchSnapshotData = {
-                id: branchDetails.id,
-                name: branchDetails.name,
-                nameAr: branchDetails.nameAr || null,
-                nameFr: branchDetails.nameFr || null,
-                address: branchDetails.address,
-                addressAr: branchDetails.addressAr || null,
-                addressFr: branchDetails.addressFr || null,
-                phone: branchDetails.phoneNumber || null,
-                status: branchDetails.status,
-                zoneId: branchDetails.zoneId || null,
-                zoneName: branchDetails.zoneName || null,
-                zoneNameAr: branchDetails.zoneNameAr || null,
-                zoneDeliveryFee: branchDetails.zoneDeliveryFee
-                    ? parseFloat(branchDetails.zoneDeliveryFee)
-                    : null,
-                cityId: branchDetails.cityId || null,
-                cityName: branchDetails.cityName || null,
-                cityNameAr: branchDetails.cityNameAr || null,
-            };
-        }
-    }
-    const calculatedDeliveryFee = deliveryFee;
-    if (isFreeDelivery)
-        deliveryFee = 0;
-    // ==========================================
-    // 6.5 Free Delivery Offer Check (schema-based)
-    // ==========================================
-    if (!isFreeDelivery && resolvedOrderType === "delivery") {
-        const nowForOffer = new Date();
-        const [freeDeliveryOffer] = await connection_1.db
-            .select()
-            .from(schema_1.freeDeliveryOffers)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.freeDeliveryOffers.restaurantId, restaurantId), (0, drizzle_orm_1.eq)(schema_1.freeDeliveryOffers.status, "active")))
-            .limit(1);
-        if (freeDeliveryOffer) {
-            const startOk = !freeDeliveryOffer.startDate || new Date(freeDeliveryOffer.startDate) <= nowForOffer;
-            const endOk = !freeDeliveryOffer.endDate || new Date(freeDeliveryOffer.endDate) >= nowForOffer;
-            const minAmountOk = !freeDeliveryOffer.minOrderAmount || subtotal >= parseFloat(freeDeliveryOffer.minOrderAmount);
-            let userLimitOk = true;
-            if (freeDeliveryOffer.maxOrdersPerUser && freeDeliveryOffer.maxOrdersPerUser > 0) {
-                const [userOrdersRow] = await connection_1.db
-                    .select({ cnt: (0, drizzle_orm_1.sql) `count(*)` })
-                    .from(schema_1.orders)
-                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.userId, userId), (0, drizzle_orm_1.eq)(schema_1.orders.restaurantId, restaurantId), (0, drizzle_orm_1.sql) `${schema_1.orders.status} NOT IN ('cancelled', 'failed')`));
-                const userOrderCount = Number(userOrdersRow?.cnt ?? 0);
-                if (userOrderCount >= freeDeliveryOffer.maxOrdersPerUser) {
-                    userLimitOk = false;
-                }
-            }
-            if (startOk && endOk && minAmountOk && userLimitOk) {
-                deliveryFee = 0;
-                isFreeDelivery = true;
-            }
-        }
-    }
-    let totalAmount = roundMoney(subtotal + deliveryFee + serviceFee - totalDiscount);
+    const appCommission = (0, order_1.roundMoney)(subtotal * (commissionRate / 100));
+    // 14. Discounts & Coupons
+    const discountResult = await (0, order_1.resolveDiscounts)({
+        subtotal,
+        initialSubtotal,
+        hasFoodLevelDiscount,
+        resolvedOrderProducts,
+        appliedDiscountIds,
+        isGuestUser,
+        userId,
+        restaurantId,
+        couponCode,
+        itemsToInsert,
+        orderSource,
+    });
+    const { totalDiscount, appliedCoupon, isFreeDelivery: couponFreeDelivery, orderDiscountId, orderCouponId, orderFirstOrderDiscountId, orderDiscountType, orderDiscountValue, orderDiscountSource, firstOrderDiscountAmount, } = discountResult;
+    // 15. Delivery & Zone Resolution
+    const deliveryResult = await (0, order_1.resolveDeliveryAndZones)({
+        resolvedOrderType,
+        addressId,
+        pendingGuestAddress,
+        userId,
+        restaurantId,
+        branchId,
+        zoneId,
+        settings,
+        guestPhone,
+        registeredPhone,
+        isGuestUser,
+        subtotal,
+        initialIsFreeDelivery: couponFreeDelivery,
+    });
+    const { deliveryFee, calculatedDeliveryFee, resolvedZoneId, resolvedBranchId, shippingAddressSnapshot, targetShippingCompanyId, branchSnapshotData, isFreeDelivery, } = deliveryResult;
+    let totalAmount = (0, order_1.roundMoney)(subtotal + deliveryFee + serviceFee - totalDiscount);
     if (totalAmount < 0)
         totalAmount = 0;
     const orderId = (0, uuid_1.v4)();
     const orderNumber = `ORD-${Date.now()}`;
-    const [userRow] = await connection_1.db.select({ id: schema_1.users.id, name: schema_1.users.name, phone: schema_1.users.phone, email: schema_1.users.email })
-        .from(schema_1.users).where((0, drizzle_orm_1.eq)(schema_1.users.id, userId)).limit(1);
-    // ✏️ CHANGED: for guests, name/phone come from the validated guestInfo (they're saved in the transaction)
     const userInfo = isGuestUser
-        ? { ...userRow, name: guestName, phone: guestPhone }
-        : userRow;
-    // ==========================================
-    // 11. Create Payment Session BEFORE the DB transaction (if Visa/Online)
-    // If this fails the order is never written to DB — no rollback needed.
-    // ==========================================
-    let paymentSessionData = null;
-    if (isVisaPayment) {
-        if (!settings?.enableOnlinePayment) {
-            throw new BadRequest_1.BadRequest("Online payment is not enabled for this restaurant.");
-        }
-        paymentSessionData = await (0, paymentSession_service_1.createOrderPaymentSession)({
-            orderId,
-            orderNumber,
-            restaurantId,
-            totalAmount,
-            restaurantSlug: restaurant?.slug || restaurantName || undefined,
-            userInfo: {
-                name: userInfo?.name,
-                email: userInfo?.email,
-                phone: userInfo?.phone,
-            },
-        });
-    }
-    const finalPaymentGatewayType = isWalletPayment ? "SYSTEM" : (paymentSessionData?.gatewayType ?? settings?.paymentGatewayType ?? "SYSTEM");
-    let visaCommission = 0;
-    if (isVisaPayment && finalPaymentGatewayType === "CUSTOM") {
-        try {
-            const activeCustom = await (0, getActiveCustomGateway_1.getActiveCustomGateway)(restaurantId);
-            if (activeCustom?.record) {
-                visaCommission = (0, calculateVisaCommission_1.calculateVisaCommission)(totalAmount, activeCustom.record.percentageValue, activeCustom.record.fixedValue, activeCustom.record.tax);
-            }
-        }
-        catch (e) {
-            console.warn("[order] Failed to calculate custom gateway visaCommission:", e);
-        }
-    }
-    else if (isVisaPayment && finalPaymentGatewayType === "SYSTEM") {
-        const systemSettings = await (0, getSystemVisaSettings_1.getSystemVisaSettings)();
-        visaCommission = (0, calculateVisaCommission_1.calculateVisaCommission)(totalAmount, systemSettings.percentageValue, systemSettings.fixedValue, systemSettings.tax);
-    }
-    // ==========================================
-    // 🛡️ 10. Execute Order (Transaction)
-    // ==========================================
+        ? { ...user, name: guestName, phone: guestPhone }
+        : { ...user, phone: registeredPhone || user.phone };
+    // 16. Prepare Payment Session & Visa Commission (Pre-Transaction)
+    const paymentPrep = await (0, order_1.preparePaymentSessionAndCommission)({
+        isVisaPayment,
+        isWalletPayment,
+        hasWeightedItems,
+        activeWeightRequest,
+        assertWeightCartUnchanged,
+        settings,
+        orderId,
+        orderNumber,
+        restaurantId,
+        branchId: resolvedBranchId,
+        totalAmount,
+        restaurant,
+        restaurantName,
+        userInfo,
+    });
+    const { weightClaimRequestId, paymentSessionData, finalPaymentGatewayType, visaCommission, } = paymentPrep;
     const now = new Date();
+    let orderCommitted = false;
     let createdDailyOrderNumber = 1;
-    await connection_1.db.transaction(async (tx) => {
-        // ✏️ NEW: guest side-effects now happen ONLY here, atomically with the order.
-        // If anything below fails, the guest row and the address are rolled back too.
-        if (isGuestUser) {
-            await tx.update(schema_1.users)
-                .set({ name: guestName, phone: guestPhone })
-                .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
-            if (pendingGuestAddress) {
-                await tx.insert(schema_1.addresses).values(pendingGuestAddress);
-            }
-        }
-        // 🔒 1. Wallet deduction with FOR UPDATE
-        if (isWalletPayment) {
-            const [userWallet] = await tx.select()
-                .from(schema_1.userWallets)
-                .where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId))
-                .for("update");
-            const currentBalance = parseFloat(userWallet?.balance || "0");
-            if (!userWallet || currentBalance < totalAmount) {
-                throw new BadRequest_1.BadRequest("Insufficient wallet balance");
-            }
-            const newBalance = roundMoney(currentBalance - totalAmount);
-            await tx.update(schema_1.userWallets)
-                .set({ balance: newBalance.toFixed(2) })
-                .where((0, drizzle_orm_1.eq)(schema_1.userWallets.userId, userId));
-            await tx.insert(schema_1.userWalletTransactions).values({
-                id: (0, uuid_1.v4)(),
-                userId,
-                type: "debit",
-                transactionType: "order_payment",
-                amount: totalAmount.toFixed(2),
-                balanceBefore: currentBalance.toFixed(2),
-                reference: orderNumber,
-                status: "approved",
-                createdAt: now
-            });
-        }
-        // 🔒 2. Daily order number calculation
-        // For cash / wallet orders, calculate dailyOrderNumber immediately.
-        // For online visa orders, defer dailyOrderNumber until confirmed paid by webhook.
-        if (!isVisaPayment) {
-            createdDailyOrderNumber = await (0, getNextDailyOrderNumber_1.getNextDailyOrderNumber)(tx, restaurantId, settings, now);
-        }
-        // 3. Create order record
-        await tx.insert(schema_1.orders).values({
-            id: orderId,
-            orderNumber,
-            idempotencyKey,
+    // 17. Execute Order DB Transaction
+    try {
+        const txResult = await (0, order_1.executeOrderTransaction)({
+            now,
+            hasWeightedItems,
+            activeWeightRequest,
+            weightClaimRequestId,
+            assertWeightCartUnchanged,
+            isGuestUser,
+            guestName,
+            guestPhone,
+            guestAltPhone,
+            pendingGuestAddress,
+            isWalletPayment,
+            isCashPayment,
+            isVisaPayment,
             userId,
+            totalAmount,
+            orderNumber,
             restaurantId,
-            branchId: resolvedBranchId,
-            zoneId: resolvedZoneId,
-            addressId: addressId || null,
-            orderSource: storedOrderSource,
+            settings,
+            orderId,
+            idempotencyKey,
+            resolvedBranchId,
+            resolvedZoneId,
+            addressId,
+            storedOrderSource,
             paymentMethod,
-            paymentGatewayType: finalPaymentGatewayType,
-            paymentGateway: paymentSessionData?.gateway
-                ? paymentSessionData.gateway.toLowerCase()
-                : null,
-            paymentOrderId: (paymentSessionData?.paymentOrderId ||
-                paymentSessionData?.paymobOrderId ||
-                paymentSessionData?.geideaOrderId ||
-                paymentSessionData?.sessionId ||
-                null),
-            paymentStatus: isVisaPayment ? "pending_payment" : "paid",
-            orderType: resolvedOrderType,
-            subtotal: subtotal.toFixed(2),
-            deliveryFee: deliveryFee.toFixed(2),
-            serviceFee: serviceFee.toFixed(2),
-            appCommission: appCommission.toFixed(2),
-            visaCommission: visaCommission.toFixed(2),
-            shippingAddress: shippingAddressSnapshot,
-            branchSnapshot: branchSnapshotData,
-            discountId: orderDiscountId,
-            couponId: orderCouponId,
-            firstOrderDiscountId: orderFirstOrderDiscountId,
-            discountAmount: totalDiscount.toFixed(2),
-            discountType: orderDiscountType,
-            discountValue: orderDiscountValue,
-            discountSource: orderDiscountSource,
-            couponCode: couponCode || null,
-            totalAmount: totalAmount.toFixed(2),
-            note: note || null,
-            shippingCompanyId: targetShippingCompanyId || null,
-            shippingStatus: "pending_dispatch",
-            status: "pending",
-            dailyOrderNumber: isVisaPayment ? null : createdDailyOrderNumber,
-            durationOrderPreparing: defaultPreparingDuration,
-            offerId: userCart.find(c => c.offerId)?.offerId || null,
-            isBundle: Boolean(userCart.some(c => c.offerId)),
-            createdAt: now
+            finalPaymentGatewayType,
+            paymentSessionData,
+            resolvedOrderType,
+            subtotal,
+            deliveryFee,
+            serviceFee,
+            appCommission,
+            visaCommission,
+            shippingAddressSnapshot,
+            branchSnapshotData,
+            orderDiscountId,
+            orderCouponId,
+            orderFirstOrderDiscountId,
+            totalDiscount,
+            orderDiscountType,
+            orderDiscountValue,
+            orderDiscountSource,
+            couponCode,
+            note,
+            targetShippingCompanyId,
+            defaultPreparingDuration,
+            userCart,
+            itemsToInsert,
+            restaurant,
+            appliedCoupon,
+            calculatedDeliveryFee,
+            firstOrderDiscountAmount,
+            appliedDiscountIds,
         });
-        if (isCashPayment) {
-            await (0, restaurantWalletService_1.chargePendingServiceFee)(orderId, tx, "cash_pending");
-        }
-        await tx.insert(schema_1.orderItems).values(itemsToInsert.map(i => ({ ...i, orderId })));
-        // Clear the cart immediately for cash / wallet. For visa the cart stays until payment is confirmed.
-        if (!isVisaPayment) {
-            await tx.delete(schema_1.cartItems).where((0, drizzle_orm_1.eq)(schema_1.cartItems.userId, userId));
-        }
-        // Increment user's total orders count
-        await tx.update(schema_1.users)
-            .set({ totalOrders: (0, drizzle_orm_1.sql) `${schema_1.users.totalOrders} + 1` })
-            .where((0, drizzle_orm_1.eq)(schema_1.users.id, userId));
-        // Increment user's total orders count for this restaurant
-        const [existingPointRecord] = await tx.select().from(schema_1.userRestaurantPoints)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userRestaurantPoints.userId, userId), (0, drizzle_orm_1.eq)(schema_1.userRestaurantPoints.restaurantId, restaurantId))).for("update");
-        if (existingPointRecord) {
-            await tx.update(schema_1.userRestaurantPoints)
-                .set({ totalOrders: (0, drizzle_orm_1.sql) `${schema_1.userRestaurantPoints.totalOrders} + 1` })
-                .where((0, drizzle_orm_1.eq)(schema_1.userRestaurantPoints.id, existingPointRecord.id));
-        }
-        else {
-            await tx.insert(schema_1.userRestaurantPoints).values({
-                id: (0, uuid_1.v4)(),
-                userId,
-                restaurantId,
-                totalOrders: 1,
-                points: 0
-            });
-        }
-        // Superadmin notification (only for confirmed orders)
-        if (!isVisaPayment) {
-            await tx.insert(schema_1.notifications).values({
-                recipientType: "superadmin",
-                recipientId: "superadmin",
-                title: "New Order",
-                body: `Order #${createdDailyOrderNumber} has been placed at ${restaurant?.name}.`,
-                data: { orderId, orderNumber, createdDailyOrderNumber, restaurantName: restaurant?.name }
-            });
-        }
-        // 4. Coupons and Discounts tracking
-        if (appliedCoupon) {
-            await tx.insert(schema_1.couponUsages).values({
-                id: (0, uuid_1.v4)(),
-                couponId: appliedCoupon.id,
-                userId,
-                orderId,
-                discountAmount: appliedCoupon.discountType === "free_delivery"
-                    ? calculatedDeliveryFee.toFixed(2)
-                    : totalDiscount.toFixed(2)
-            });
-            await tx.update(schema_1.coupons)
-                .set({ usedCount: (0, drizzle_orm_1.sql) `used_count + 1` })
-                .where((0, drizzle_orm_1.eq)(schema_1.coupons.id, appliedCoupon.id));
-        }
-        // Record first-order discount usage for confirmed (cash / wallet) orders
-        if (orderFirstOrderDiscountId && !isVisaPayment) {
-            await (0, firstOrderDiscount_helper_1.recordFirstOrderDiscountUsage)(orderFirstOrderDiscountId, userId, orderId, firstOrderDiscountAmount, tx);
-        }
-        if (appliedDiscountIds.size > 0) {
-            for (const dId of appliedDiscountIds) {
-                await tx.update(schema_1.discounts)
-                    .set({ usedCount: (0, drizzle_orm_1.sql) `used_count + 1` })
-                    .where((0, drizzle_orm_1.eq)(schema_1.discounts.id, dId));
-            }
-        }
-        // Wallet settlement is recorded once the restaurant marks the order delivered.
-    });
-    // ==========================================
-    // 11. Send Notification to Restaurant (non-visa only; visa orders are notified via webhook)
-    // ==========================================
-    if (!isVisaPayment) {
-        const cairoTimeFormatted = new Intl.DateTimeFormat("ar-EG", {
-            timeZone: "Africa/Cairo",
-            hour: "numeric",
-            minute: "numeric",
-            hour12: true
-        }).format(now);
-        await (0, notifications_1.sendPushNotification)({
-            recipientType: "restaurant",
-            recipientId: restaurantId,
-            branchId: resolvedBranchId || null,
-            title: "طلب جديد! 🛒",
-            body: `تم استلام طلب جديد #${createdDailyOrderNumber} بقيمة ${totalAmount} ج.م الساعة ${cairoTimeFormatted}.`,
-            data: {
-                restaurantId,
-                orderId,
-                orderNumber,
-                branchId: resolvedBranchId || null,
-                type: "new_order",
-                createdAt: now.toISOString(),
-                dailyOrderNumber: createdDailyOrderNumber
-            }
-        });
+        createdDailyOrderNumber = txResult.createdDailyOrderNumber;
+        orderCommitted = true;
     }
-    // ==========================================
-    // 📤 Response
-    // ==========================================
-    return (0, response_1.SuccessResponse)(res, {
-        message: "Order created successfully",
-        payment: paymentSessionData ? {
-            gateway: paymentSessionData.gateway, // "KASHIER" | "PAYMOB"
-            type: paymentSessionData.type, // "redirect" | "iframe"
-            sessionId: paymentSessionData.sessionId,
-            sessionUrl: paymentSessionData.sessionUrl,
-            status: paymentSessionData.status,
-            expireAt: paymentSessionData.expireAt,
-            error: paymentSessionData.error,
-        } : null,
-        order_level: {
-            orderDetails: {
-                orderId,
-                orderNumber,
-                paymentSessionUrl: paymentSessionData?.sessionUrl || null,
-                zoneId: resolvedZoneId,
-                subtotal,
-                deliveryFee,
-                serviceFee,
-                discountAmount: totalDiscount,
-                couponCode: couponCode || null,
-                totalAmount,
-                createdAt: now.toISOString(),
-                dailyOrderNumber: createdDailyOrderNumber,
-                durationOrderPreparing: defaultPreparingDuration,
-            },
-            discountDetails: {
-                discountId: orderDiscountId,
-                couponId: orderCouponId,
-                firstOrderDiscountId: orderFirstOrderDiscountId,
-                discountAmount: totalDiscount,
-                discountType: orderDiscountType,
-                discountValue: orderDiscountValue,
-                discountSource: orderDiscountSource,
-                couponCode: couponCode || null,
-                isFreeDelivery
-            },
-            customerDetails: userInfo
+    finally {
+        if (weightClaimRequestId && !orderCommitted) {
+            await (0, order_1.releaseWeightCheckoutClaim)(weightClaimRequestId);
         }
+    }
+    // 18. Send Push Notification to Restaurant
+    await (0, order_1.notifyRestaurantAfterOrder)({
+        isVisaPayment,
+        restaurantId,
+        resolvedBranchId,
+        createdDailyOrderNumber,
+        totalAmount,
+        orderId,
+        orderNumber,
+        now,
     });
+    // 19. Response
+    const responsePayload = (0, order_1.formatCheckoutResponsePayload)({
+        orderId,
+        orderNumber,
+        paymentSessionData,
+        resolvedZoneId,
+        subtotal,
+        deliveryFee,
+        serviceFee,
+        totalDiscount,
+        couponCode,
+        totalAmount,
+        now,
+        createdDailyOrderNumber,
+        defaultPreparingDuration,
+        orderDiscountId,
+        orderCouponId,
+        orderFirstOrderDiscountId,
+        orderDiscountType,
+        orderDiscountValue,
+        orderDiscountSource,
+        isFreeDelivery,
+        userInfo,
+    });
+    return (0, response_1.SuccessResponse)(res, responsePayload);
 };
 exports.checkout = checkout;
 // ==========================================
-// 2. جلب الطلبات النشطة (الحالية)
+// 2. Get Active Orders
 // ==========================================
 const getActiveOrders = async (req, res) => {
     if (!req.user)
@@ -1600,7 +445,13 @@ const getActiveOrders = async (req, res) => {
             totalPrice: schema_1.orderItems.totalPrice,
             note: schema_1.orderItems.note,
             variations: schema_1.orderItems.variations,
-            addons: schema_1.orderItems.addons
+            addons: schema_1.orderItems.addons,
+            sold_by: schema_1.food.sold_by,
+            foodWeightUnit: schema_1.food.weight_unit,
+            allowCustomWeight: schema_1.food.allow_custom_weight,
+            orderedWeight: schema_1.orderItems.orderedWeight,
+            finalWeight: schema_1.orderItems.finalWeight,
+            weightUnit: schema_1.orderItems.weightUnit,
         })
             .from(schema_1.orderItems)
             .leftJoin(schema_1.food, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orderItems.foodId, schema_1.food.id), foodConditions_1.activeFoodCondition))
@@ -1640,7 +491,7 @@ const getActiveOrders = async (req, res) => {
 };
 exports.getActiveOrders = getActiveOrders;
 // ==========================================
-// 3. جلب سجل الطلبات (History) - المكتملة والملغية
+// 3. Get History Orders
 // ==========================================
 const getOrderHistory = async (req, res) => {
     if (!req.user)
@@ -1707,7 +558,13 @@ const getOrderHistory = async (req, res) => {
             totalPrice: schema_1.orderItems.totalPrice,
             note: schema_1.orderItems.note,
             variations: schema_1.orderItems.variations,
-            addons: schema_1.orderItems.addons
+            addons: schema_1.orderItems.addons,
+            sold_by: schema_1.food.sold_by,
+            foodWeightUnit: schema_1.food.weight_unit,
+            allowCustomWeight: schema_1.food.allow_custom_weight,
+            orderedWeight: schema_1.orderItems.orderedWeight,
+            finalWeight: schema_1.orderItems.finalWeight,
+            weightUnit: schema_1.orderItems.weightUnit,
         })
             .from(schema_1.orderItems)
             .leftJoin(schema_1.food, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orderItems.foodId, schema_1.food.id), foodConditions_1.activeFoodCondition))
@@ -1749,13 +606,14 @@ const getOrderHistory = async (req, res) => {
 };
 exports.getOrderHistory = getOrderHistory;
 // ==========================================
-// 4. تفاصيل الطلب (Order Details)
+// 4. Order Details
 // ==========================================
 const getOrderDetails = async (req, res) => {
     if (!req.user)
         throw new Errors_1.UnauthorizedError("Unauthenticated");
     const userId = req.user.id;
     const { orderId } = req.params;
+    // ── Main order query (no discount/coupon joins to avoid column name collisions) ──
     const orderInfo = await connection_1.db
         .select({
         orderId: schema_1.orders.id,
@@ -1777,6 +635,12 @@ const getOrderDetails = async (req, res) => {
         discountAmount: schema_1.orders.discountAmount,
         couponCode: schema_1.orders.couponCode,
         totalAmount: schema_1.orders.totalAmount,
+        // Raw discount/coupon IDs — names fetched separately
+        discountId: schema_1.orders.discountId,
+        discountType: schema_1.orders.discountType,
+        discountValue: schema_1.orders.discountValue,
+        discountSource: schema_1.orders.discountSource,
+        couponId: schema_1.orders.couponId,
         note: schema_1.orders.note,
         rating: schema_1.orders.rating,
         ratingComment: schema_1.orders.ratingComment,
@@ -1814,6 +678,19 @@ const getOrderDetails = async (req, res) => {
         throw new NotFound_1.NotFound("Order not found");
     }
     const o = orderInfo[0];
+    // ── Fetch discount & coupon names in separate queries (avoid JOIN name collisions) ──
+    let discountRow = null;
+    if (o.discountId) {
+        const [d] = await connection_1.db.select({ name: schema_1.discounts.name, nameAr: schema_1.discounts.nameAr, nameFr: schema_1.discounts.nameFr })
+            .from(schema_1.discounts).where((0, drizzle_orm_1.eq)(schema_1.discounts.id, o.discountId)).limit(1);
+        discountRow = d ?? null;
+    }
+    let couponRow = null;
+    if (o.couponId) {
+        const [c] = await connection_1.db.select({ code: schema_1.coupons.code, name: schema_1.coupons.name, nameAr: schema_1.coupons.nameAr, nameFr: schema_1.coupons.nameFr })
+            .from(schema_1.coupons).where((0, drizzle_orm_1.eq)(schema_1.coupons.id, o.couponId)).limit(1);
+        couponRow = c ?? null;
+    }
     // 1. جلب عناصر الطلب الأساسية
     const itemsRaw = await connection_1.db
         .select({
@@ -1832,7 +709,13 @@ const getOrderDetails = async (req, res) => {
         totalPrice: schema_1.orderItems.totalPrice,
         note: schema_1.orderItems.note,
         variations: schema_1.orderItems.variations,
-        addons: schema_1.orderItems.addons
+        addons: schema_1.orderItems.addons,
+        sold_by: schema_1.food.sold_by,
+        foodWeightUnit: schema_1.food.weight_unit,
+        allowCustomWeight: schema_1.food.allow_custom_weight,
+        orderedWeight: schema_1.orderItems.orderedWeight,
+        finalWeight: schema_1.orderItems.finalWeight,
+        weightUnit: schema_1.orderItems.weightUnit,
     })
         .from(schema_1.orderItems)
         .leftJoin(schema_1.food, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orderItems.foodId, schema_1.food.id), foodConditions_1.activeFoodCondition))
@@ -1855,6 +738,21 @@ const getOrderDetails = async (req, res) => {
             serviceFee: o.serviceFee,
             discountAmount: o.discountAmount,
             couponCode: o.couponCode,
+            discount: {
+                discountId: o.discountId ?? null,
+                discountAmount: o.discountAmount ? String(o.discountAmount) : "0.00",
+                discountType: o.discountType ?? null,
+                discountValue: o.discountValue ? String(o.discountValue) : null,
+                discountSource: o.discountSource ?? null,
+                discountName: discountRow?.name ?? null,
+                discountNameAr: discountRow?.nameAr ?? null,
+                discountNameFr: discountRow?.nameFr ?? null,
+                couponId: o.couponId ?? null,
+                couponCode: o.couponCode ?? couponRow?.code ?? null,
+                couponName: couponRow?.name ?? null,
+                couponNameAr: couponRow?.nameAr ?? null,
+                couponNameFr: couponRow?.nameFr ?? null,
+            },
             totalAmount: o.totalAmount,
             note: o.note,
             rating: o.rating,
@@ -1888,8 +786,90 @@ const getOrderDetails = async (req, res) => {
     });
 };
 exports.getOrderDetails = getOrderDetails;
+/**
+ * مطابقة عنوان العميل بنطاقات التوصيل واختيار النطاق المناسب والسعر الأعلى
+ */
+const matchAddressToDeliveryZone = (address, zoneFees) => {
+    if (!address) {
+        return {
+            isDeliverable: false,
+            deliveryFee: null,
+            matchedZoneId: null,
+            matchedRestaurantDeliveryZoneId: null,
+            applicableFee: null,
+        };
+    }
+    const addrLat = parseFloat(address.lat || "0");
+    const addrLng = parseFloat(address.lng || "0");
+    if (!addrLat || !addrLng) {
+        return {
+            isDeliverable: false,
+            deliveryFee: null,
+            matchedZoneId: null,
+            matchedRestaurantDeliveryZoneId: null,
+            applicableFee: null,
+        };
+    }
+    let isDeliverable = false;
+    let applicableDeliveryFee = null;
+    let matchedZoneId = null;
+    let matchedRestaurantDeliveryZoneId = null;
+    let applicableFee = null;
+    for (const fee of zoneFees) {
+        // فحص وقوع النقط جغرافياً داخل الـ restaurantDeliveryZone مع zoneId كآخر احتمال (Fallback)
+        const matchesZone = (0, geo_1.isLocationInZone)(addrLat, addrLng, address.zoneId || fee.zoneId, fee);
+        if (matchesZone) {
+            const isBranchActive = !fee.branchId || fee.branchStatus === "active";
+            if (!isBranchActive)
+                continue;
+            isDeliverable = true;
+            const currentFee = parseFloat((fee.deliveryFee || "0"));
+            // 🚀 اختيار السعر الأعلى والـ restaurantDeliveryZoneId التابع له
+            if (applicableDeliveryFee === null || currentFee > applicableDeliveryFee) {
+                applicableDeliveryFee = currentFee;
+                matchedZoneId = fee.zoneId;
+                matchedRestaurantDeliveryZoneId = fee.id;
+                applicableFee = fee;
+            }
+        }
+    }
+    return {
+        isDeliverable,
+        deliveryFee: applicableDeliveryFee,
+        matchedZoneId,
+        matchedRestaurantDeliveryZoneId,
+        applicableFee,
+    };
+};
+/**
+ * تحديد الفرع المسؤول عن الطلب بناءً على branchId أو نطاق التوصيل الفعلي للعنوان (restaurantDeliveryZone)
+ */
+const resolveServingBranchId = (params) => {
+    const { branchId, address, zoneFees, restaurantBranches } = params;
+    // 1. إذا تم إرسال branchId صراحة، نستخدمه مباشرة
+    if (branchId) {
+        return branchId;
+    }
+    // 2. إذا لم يتم إرسال عنوان، لا يمكن تحديد الفرع
+    if (!address) {
+        return null;
+    }
+    // 3. مطابقة العنوان مع نقاط الـ restaurantDeliveryZone
+    const zoneMatch = matchAddressToDeliveryZone(address, zoneFees);
+    if (!zoneMatch.isDeliverable || !zoneMatch.applicableFee) {
+        return null;
+    }
+    // حساب الفرع من الـ restaurantDeliveryZone مباشرة وليس من zoneId
+    if (zoneMatch.applicableFee.branchId) {
+        return zoneMatch.applicableFee.branchId;
+    }
+    else if (restaurantBranches.length === 1) {
+        return restaurantBranches[0].id;
+    }
+    return null;
+};
 // ==========================================
-// 5. متطلبات الطلب المسبقة (Order Prerequisites)
+// 5. Order Prerequisites
 // ==========================================
 const getOrderPrerequisites = async (req, res) => {
     if (!req.user) {
@@ -1898,6 +878,8 @@ const getOrderPrerequisites = async (req, res) => {
     const userId = req.user.id;
     const restaurantId = req.query.restaurantId;
     const orderSource = req.query.orderSource;
+    const addressId = (req.query.addressId || req.query.addressid);
+    const branchId = (req.query.branchId || req.query.branchid);
     if (!restaurantId) {
         throw new BadRequest_1.BadRequest("restaurantId is required");
     }
@@ -2054,47 +1036,42 @@ const getOrderPrerequisites = async (req, res) => {
     }
     // 2. معالجة كل عنوان عند المستخدم ومعرفة هل هو قابل للتوصيل ومعرفة zoneId الخاص به
     const addressesWithDeliveryInfo = userAddresses.map((addr) => {
-        let isDeliverable = false;
-        let applicableDeliveryFee = null;
-        let matchedZoneId = null;
-        let matchedRestaurantDeliveryZoneId = null;
-        const addrLat = parseFloat(addr.lat || "0");
-        const addrLng = parseFloat(addr.lng || "0");
-        if (!addrLat || !addrLng) {
-            return {
-                ...addr,
-                isDeliverable: false,
-                deliveryFee: null,
-                restaurantDeliveryZoneId: null,
-                zoneId: null,
-            };
-        }
-        for (const fee of zoneFees) {
-            let matchesZone = (0, geo_1.isLocationInZone)(addrLat, addrLng, addr.zoneId, fee);
-            // لو النطاق ده طابق موقع العميل
-            if (matchesZone) {
-                const isBranchActive = !fee.branchId || fee.branchStatus === "active";
-                if (!isBranchActive) {
-                    continue;
-                }
-                isDeliverable = true;
-                const currentFee = parseFloat((fee.deliveryFee || "0"));
-                // 🚀 اختيار السعر الأعلى والـ zoneId التابع له في حالة مطابقة أكثر من نطاق
-                if (applicableDeliveryFee === null || currentFee > applicableDeliveryFee) {
-                    applicableDeliveryFee = currentFee;
-                    matchedZoneId = fee.zoneId;
-                    matchedRestaurantDeliveryZoneId = fee.id;
-                }
-            }
-        }
+        const match = matchAddressToDeliveryZone(addr, zoneFees);
         return {
             ...addr,
-            isDeliverable,
-            deliveryFee: applicableDeliveryFee,
-            zoneId: matchedRestaurantDeliveryZoneId,
+            isDeliverable: match.isDeliverable,
+            deliveryFee: match.deliveryFee,
+            restaurantDeliveryZoneId: match.matchedRestaurantDeliveryZoneId,
+            zoneId: match.matchedRestaurantDeliveryZoneId,
         };
     });
     const serviceFee = parseFloat((plan.serviceFee || "0"));
+    // 🏢 تحديد الفرع المسؤول عن الطلب (سواء من branchId أو addressId)
+    const targetAddress = addressId ? userAddresses.find((a) => a.id === addressId) || null : null;
+    const resolvedBranchId = (branchId || addressId)
+        ? resolveServingBranchId({
+            branchId,
+            address: targetAddress,
+            zoneFees,
+            restaurantBranches,
+        })
+        : null;
+    // 🔍 Resolve branch-level visa status when addressId or branchId provided
+    let visaEnabledForLocation = enableOnlinePayment;
+    if (addressId || branchId) {
+        if (!enableOnlinePayment || !resolvedBranchId) {
+            // إذا كان الدفع أونلاين مغلق عاماً، أو لم يتطابق العنوان مع أي نطاق توصيل للمطعم
+            visaEnabledForLocation = false;
+        }
+        else {
+            const [branchRow] = await connection_1.db
+                .select({ visa_status: schema_1.branches.visa_status })
+                .from(schema_1.branches)
+                .where((0, drizzle_orm_1.eq)(schema_1.branches.id, resolvedBranchId))
+                .limit(1);
+            visaEnabledForLocation = branchRow?.visa_status ?? true;
+        }
+    }
     // Free delivery offer — check validity window
     const nowForPrereq = new Date();
     const activeFreeDeliveryOffer = freeDeliveryOfferRows[0] ?? null;
@@ -2103,20 +1080,128 @@ const getOrderPrerequisites = async (req, res) => {
         const startOk = !activeFreeDeliveryOffer.startDate || new Date(activeFreeDeliveryOffer.startDate) <= nowForPrereq;
         const endOk = !activeFreeDeliveryOffer.endDate || new Date(activeFreeDeliveryOffer.endDate) >= nowForPrereq;
         if (startOk && endOk) {
-            freeDeliveryOfferData = {
-                minOrderAmount: parseFloat(activeFreeDeliveryOffer.minOrderAmount || "0"),
-                startDate: activeFreeDeliveryOffer.startDate ? activeFreeDeliveryOffer.startDate.toISOString() : null,
-                endDate: activeFreeDeliveryOffer.endDate ? activeFreeDeliveryOffer.endDate.toISOString() : null,
-            };
+            let offerBranchIds = [];
+            const rawBranchIds = activeFreeDeliveryOffer.branchIds;
+            if (Array.isArray(rawBranchIds)) {
+                offerBranchIds = rawBranchIds.map(String).filter(Boolean);
+            }
+            else if (typeof rawBranchIds === "string") {
+                try {
+                    const parsed = JSON.parse(rawBranchIds);
+                    if (Array.isArray(parsed))
+                        offerBranchIds = parsed.map(String).filter(Boolean);
+                }
+                catch {
+                    offerBranchIds = [];
+                }
+            }
+            const branchMap = new Map();
+            for (const b of restaurantBranches) {
+                branchMap.set(b.id, {
+                    id: b.id,
+                    name: b.name,
+                    nameAr: b.nameAr || null,
+                    nameFr: b.nameFr || null,
+                });
+            }
+            const missingBranchIds = offerBranchIds.filter(id => !branchMap.has(id));
+            if (missingBranchIds.length > 0) {
+                const extraBranches = await connection_1.db
+                    .select({
+                    id: schema_1.branches.id,
+                    name: schema_1.branches.name,
+                    nameAr: schema_1.branches.nameAr,
+                    nameFr: schema_1.branches.nameFr,
+                })
+                    .from(schema_1.branches)
+                    .where((0, drizzle_orm_1.inArray)(schema_1.branches.id, missingBranchIds));
+                for (const b of extraBranches) {
+                    branchMap.set(b.id, {
+                        id: b.id,
+                        name: b.name,
+                        nameAr: b.nameAr || null,
+                        nameFr: b.nameFr || null,
+                    });
+                }
+            }
+            const allBranchObjects = offerBranchIds.length > 0
+                ? offerBranchIds.map((id) => {
+                    const b = branchMap.get(id);
+                    return {
+                        id,
+                        name: b?.name || "Branch",
+                        nameAr: b?.nameAr || null,
+                        nameFr: b?.nameFr || null,
+                    };
+                })
+                : restaurantBranches.map(b => ({
+                    id: b.id,
+                    name: b.name,
+                    nameAr: b.nameAr || null,
+                    nameFr: b.nameFr || null,
+                }));
+            // إذا تم إرسال addressId أو branchId في الـ query، نحدد الفرع الذي يخدم هذا الطلب ونرجع العرض الخاص به فقط
+            if (addressId || branchId) {
+                if (resolvedBranchId) {
+                    const isBranchIncluded = offerBranchIds.length === 0 || offerBranchIds.includes(resolvedBranchId);
+                    if (isBranchIncluded) {
+                        const b = branchMap.get(resolvedBranchId);
+                        const singleBranchObject = b ? {
+                            id: b.id,
+                            name: b.name || "Branch",
+                            nameAr: b.nameAr || null,
+                            nameFr: b.nameFr || null,
+                        } : {
+                            id: resolvedBranchId,
+                            name: "Branch",
+                            nameAr: null,
+                            nameFr: null,
+                        };
+                        freeDeliveryOfferData = {
+                            minOrderAmount: parseFloat(activeFreeDeliveryOffer.minOrderAmount || "0"),
+                            startDate: activeFreeDeliveryOffer.startDate ? activeFreeDeliveryOffer.startDate.toISOString() : null,
+                            endDate: activeFreeDeliveryOffer.endDate ? activeFreeDeliveryOffer.endDate.toISOString() : null,
+                            branches: [singleBranchObject],
+                        };
+                    }
+                    else {
+                        // الفرع غير مشمول في عرض التوصيل المجاني
+                        freeDeliveryOfferData = null;
+                    }
+                }
+                else {
+                    freeDeliveryOfferData = null;
+                }
+            }
+            else {
+                // في حال عدم إرسال addressId أو branchId، نرجع كل الفروع كما هي
+                freeDeliveryOfferData = {
+                    minOrderAmount: parseFloat(activeFreeDeliveryOffer.minOrderAmount || "0"),
+                    startDate: activeFreeDeliveryOffer.startDate ? activeFreeDeliveryOffer.startDate.toISOString() : null,
+                    endDate: activeFreeDeliveryOffer.endDate ? activeFreeDeliveryOffer.endDate.toISOString() : null,
+                    branches: allBranchObjects,
+                };
+            }
         }
     }
+    // إرجاع طرق الدفع وتوضيح حالة الفيزا للفرع/العنوان المحدد للفرونت إند لعمل disable إن لزم
+    const formattedPaymentMethods = activePaymentMethods.map((pm) => {
+        const name = pm.name?.toLowerCase() ?? "";
+        const nameAr = pm.nameAr ?? "";
+        const isVisa = name === "visa" || name === "card" || nameAr === "بطاقة";
+        return {
+            ...pm,
+            ...(isVisa ? { visaEnabledForLocation } : {}),
+        };
+    });
     return (0, response_1.SuccessResponse)(res, {
         data: {
             addresses: addressesWithDeliveryInfo,
             branches: restaurantBranches,
             zones: zoneFees, // 👈 إرجاع مناطق التوصيل وأسعارها الخاصة بشركة الشحن أو المطعم
-            paymentMethods: activePaymentMethods, // visa filtered out when enableOnlinePayment=false
+            paymentMethods: formattedPaymentMethods, // visa filtered out only when enableOnlinePayment=false
             enableOnlinePayment, // 👈 هل الدفع الإلكتروني (فيزا) مفعّل لهذا المطعم؟
+            visaEnabledForLocation, // 👈 هل الفيزا مفعّلة لهذا الفرع/العنوان تحديداً؟
             reasons: getCancelReasons,
             serviceFee: serviceFee.toFixed(2),
             freeDeliveryOffer: freeDeliveryOfferData,
@@ -2129,7 +1214,7 @@ const getOrderPrerequisites = async (req, res) => {
 };
 exports.getOrderPrerequisites = getOrderPrerequisites;
 // ==========================================
-// 6. إلغاء الطلب من قبل المستخدم (Cancel Order)
+// 6. Cancel Order
 // ==========================================
 const cancelOrder = async (req, res) => {
     if (!req.user)
@@ -2168,6 +1253,7 @@ const cancelOrder = async (req, res) => {
         await tx.update(schema_1.orders)
             .set({
             status: "cancelled",
+            cancelledAt: new Date(),
             cancelReasonId: finalReasonId,
             cancelReason: finalReasonText,
             cancelReasonType: "user",

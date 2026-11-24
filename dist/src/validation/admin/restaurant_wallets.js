@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.recordSubscriptionSchema = exports.updateWalletTransactionSchema = exports.createWalletTransactionSchema = exports.updateRestaurantWalletSchema = exports.createRestaurantWalletSchema = void 0;
+exports.getWalletTransactionsQuerySchema = exports.recordSubscriptionSchema = exports.updateWalletTransactionSchema = exports.createWalletTransactionSchema = exports.updateRestaurantWalletSchema = exports.createRestaurantWalletSchema = void 0;
 const zod_1 = require("zod");
 // ==========================================
 // 1. Restaurant Wallets Validation
@@ -47,4 +47,17 @@ exports.recordSubscriptionSchema = zod_1.z.object({
     amount: zod_1.z.coerce.number().positive("Amount must be > 0"),
     subscriptionDate: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "subscriptionDate must be in YYYY-MM-DD format").optional(),
     note: zod_1.z.string().optional(),
+});
+// ==========================================
+// 4. Get Wallet Transactions Query Validation
+// ==========================================
+exports.getWalletTransactionsQuerySchema = zod_1.z.object({
+    restaurantId: zod_1.z.string().trim().optional(),
+    visaSwitchConditionType: zod_1.z.enum(["none", "amount", "day_of_week", "day_of_month"]).optional(),
+    cancelType: zod_1.z.enum(["user", "restaurant"]).optional(),
+    cancelReasonType: zod_1.z.enum(["user", "restaurant"]).optional(),
+    startDate: zod_1.z.string().trim().optional(),
+    endDate: zod_1.z.string().trim().optional(),
+    page: zod_1.z.coerce.number().int().positive().optional(),
+    limit: zod_1.z.coerce.number().int().positive().optional(),
 });

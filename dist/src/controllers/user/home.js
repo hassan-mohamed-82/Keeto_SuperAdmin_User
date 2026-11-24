@@ -51,7 +51,7 @@ const getHomeScreen = async (req, res) => {
         nameAr: schema_1.categories.nameAr,
         nameFr: schema_1.categories.nameFr,
         image: schema_1.categories.Image
-    }).from(schema_1.categories).where((0, drizzle_orm_1.eq)(schema_1.categories.status, "active"));
+    }).from(schema_1.categories).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.categories.status, "active"), (0, drizzle_orm_1.eq)(schema_1.categories.isDeleted, false)));
     const restaurantsData = await connection_1.db.select({
         id: schema_1.restaurants.id,
         name: schema_1.restaurants.name,
@@ -136,6 +136,10 @@ const getFoodsByCategory = async (req, res) => {
         isOutOfStock: schema_1.food.isOutOfStock,
         points: schema_1.food.points,
         addonsId: schema_1.food.addonsId,
+        sold_by: schema_1.food.sold_by,
+        weight_unit: schema_1.food.weight_unit,
+        allow_custom_weight: schema_1.food.allow_custom_weight,
+        foodOrderLevel: schema_1.food.order_level,
         categoryId: schema_1.categories.id,
         categoryName: schema_1.categories.name,
         categoryNameAr: schema_1.categories.nameAr,
@@ -284,6 +288,10 @@ const getRestaurantDetails = async (req, res) => {
         image: schema_1.food.image,
         points: schema_1.food.points,
         addonsId: schema_1.food.addonsId,
+        sold_by: schema_1.food.sold_by,
+        weight_unit: schema_1.food.weight_unit,
+        allow_custom_weight: schema_1.food.allow_custom_weight,
+        foodOrderLevel: schema_1.food.order_level,
         categoryId: schema_1.categories.id,
         categoryName: schema_1.categories.name,
         categoryNameAr: schema_1.categories.nameAr,

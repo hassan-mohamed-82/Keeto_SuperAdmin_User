@@ -1,26 +1,26 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkoutSchema = exports.guestAddressSchema = exports.guestInfoSchema = void 0;
+exports.getOrderPrerequisitesQuerySchema = exports.checkoutSchema = exports.guestAddressSchema = exports.guestInfoSchema = void 0;
 const zod_1 = require("zod");
 const phone_1 = require("./phone");
 // ============================================================
 // Guest Info & Address Schemas
 // ============================================================
 exports.guestInfoSchema = zod_1.z.object({
-    name: zod_1.z.string().min(2, { message: "Guest name must be at least 2 characters" }),
-    phone: phone_1.egyptPhoneSchema,
+    name: zod_1.z.string().min(2, { message: "Guest name must be at least 2 characters" }).nullable().optional(),
+    phone: phone_1.optionalEgyptPhoneSchema,
     alternatePhone: phone_1.optionalEgyptPhoneSchema,
     alternativePhone: phone_1.optionalEgyptPhoneSchema,
 });
 exports.guestAddressSchema = zod_1.z.object({
-    title: zod_1.z.string().optional().default("Guest Address"),
+    title: zod_1.z.string().nullable().optional().default("Guest Address"),
     street: zod_1.z.string().min(1, { message: "Street is required" }),
     number: zod_1.z.string().min(1, { message: "Building/House number is required" }),
-    floor: zod_1.z.string().optional(),
-    apartment: zod_1.z.string().optional(),
-    landmark: zod_1.z.string().optional(),
-    location: zod_1.z.string().optional(),
-    fulladdress: zod_1.z.string().optional(),
+    floor: zod_1.z.string().nullable().optional(),
+    apartment: zod_1.z.string().nullable().optional(),
+    landmark: zod_1.z.string().nullable().optional(),
+    location: zod_1.z.string().nullable().optional(),
+    fulladdress: zod_1.z.string().nullable().optional(),
     lat: zod_1.z.union([zod_1.z.number(), zod_1.z.string().regex(/^-?\d+(\.\d+)?$/)]).transform(Number),
     lng: zod_1.z.union([zod_1.z.number(), zod_1.z.string().regex(/^-?\d+(\.\d+)?$/)]).transform(Number),
 });
@@ -33,15 +33,19 @@ exports.checkoutSchema = zod_1.z.object({
     orderType: zod_1.z.enum(["delivery", "takeaway", "dine_in"], {
         required_error: "orderType is required and must be one of: delivery, takeaway, dine_in",
     }),
-    idempotencyKey: zod_1.z.string().optional(),
-    zoneId: zod_1.z.string().optional(),
-    branchId: zod_1.z.string().optional(),
-    addressId: zod_1.z.string().optional(),
-    note: zod_1.z.string().max(500).optional(),
-    couponCode: zod_1.z.string().optional(),
+    idempotencyKey: zod_1.z.string().nullable().optional(),
+    zoneId: zod_1.z.string().nullable().optional(),
+    branchId: zod_1.z.string().nullable().optional(),
+    addressId: zod_1.z.string().nullable().optional(),
+    note: zod_1.z.string().max(500).nullable().optional(),
+    couponCode: zod_1.z.string().nullable().optional(),
+    // Contact Phone Fields (can be supplied directly or via guestInfo)
+    phone: phone_1.optionalEgyptPhoneSchema,
+    alternatePhone: phone_1.optionalEgyptPhoneSchema,
+    alternativePhone: phone_1.optionalEgyptPhoneSchema,
     // Guest Flow Fields
-    guestInfo: exports.guestInfoSchema.optional(),
-    guestAddress: exports.guestAddressSchema.optional(),
+    guestInfo: exports.guestInfoSchema.nullable().optional(),
+    guestAddress: exports.guestAddressSchema.nullable().optional(),
 }).superRefine((data, ctx) => {
     // If delivery, either addressId or guestAddress with lat/lng must be provided
     if (data.orderType === "delivery") {
@@ -61,4 +65,31 @@ exports.checkoutSchema = zod_1.z.object({
             path: ["branchId"],
         });
     }
+    // If guestInfo is explicitly provided, verify that at least one phone field is present
+    if (data.guestInfo) {
+        const hasPhone = Boolean(data.guestInfo.phone ||
+            data.guestInfo.alternatePhone ||
+            data.guestInfo.alternativePhone ||
+            data.phone ||
+            data.alternatePhone ||
+            data.alternativePhone);
+        if (!hasPhone) {
+            ctx.addIssue({
+                code: zod_1.z.ZodIssueCode.custom,
+                message: "Phone number or alternative phone number is required.",
+                path: ["guestInfo", "phone"],
+            });
+        }
+    }
+});
+// ============================================================
+// Order Prerequisites Validation Schema
+// ============================================================
+exports.getOrderPrerequisitesQuerySchema = zod_1.z.object({
+    restaurantId: zod_1.z.string({ required_error: "restaurantId is required" }),
+    orderSource: zod_1.z.enum(["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"], {
+        required_error: "Invalid or missing order source",
+    }),
+    addressId: zod_1.z.string().nullable().optional(),
+    addressid: zod_1.z.string().nullable().optional(),
 });
