@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PLAN_PLATFORM_TYPES } from "../../types/orderSources";
 
 // ==========================================
 // Restaurant Business Plans Validation
@@ -8,9 +9,9 @@ export const createBusinessPlanSchema = z.object({
     // الحقول الأساسية والعلاقات (Required)
     restaurantId: z.string().uuid("Invalid Restaurant ID"),
     
-    platformType: z.enum(["online_order_app", "online_order_web", "food_aggregator", "mykeeto"], {
+    platformType: z.enum(PLAN_PLATFORM_TYPES, {
         required_error: "Platform type is required",
-        invalid_type_error: "Platform type must be either 'online_order_app' or 'online_order_web' or 'food_aggregator' or 'mykeeto'",
+        invalid_type_error: `Platform type must be one of: ${PLAN_PLATFORM_TYPES.join(", ")}`,
     }),
 
     // الاشتراكات الشهرية

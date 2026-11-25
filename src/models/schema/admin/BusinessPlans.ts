@@ -1,13 +1,15 @@
 import { mysqlTable, varchar, char, timestamp, decimal, boolean, mysqlEnum, date as mysqlDate } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
-import { restaurants } from "./restaurants"; 
+import { restaurants } from "./restaurants";
+import { PLATFORM_TYPES } from "../../../types/orderSources";
 
 export const restaurantBusinessPlans = mysqlTable("restaurant_business_plans", {
     id: char("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
     restaurantId: char("restaurant_id", { length: 36 }).references(() => restaurants.id).notNull(),
 
     // 💡 التعديل هنا: زودنا "pos"
-    platformType: mysqlEnum("platform_type", ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"]).notNull(),
+    // online_order_web | online_order_app | food_aggregator | food_aggregator_web | mykeeto | mykeeto_web | pos
+    platformType: mysqlEnum("platform_type", PLATFORM_TYPES).notNull(),
 
     // الاشتراكات
     isMonthlyActive: boolean("is_monthly_active").default(false),

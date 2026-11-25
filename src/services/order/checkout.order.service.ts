@@ -80,6 +80,9 @@ export const executeOrderTransaction = async (params: {
     calculatedDeliveryFee: number;
     firstOrderDiscountAmount: number;
     appliedDiscountIds: Set<string>;
+    taxAmount?: number;
+    includedTaxAmount?: number;
+    taxDetails?: any[];
 }): Promise<{ createdDailyOrderNumber: number }> => {
     const {
         now,
@@ -265,6 +268,9 @@ export const executeOrderTransaction = async (params: {
             discountSource: orderDiscountSource,
 
             couponCode: couponCode || null,
+            taxAmount: (params.taxAmount ?? 0).toFixed(2),
+            includedTaxAmount: (params.includedTaxAmount ?? 0).toFixed(2),
+            taxDetails: params.taxDetails ?? [],
             totalAmount: totalAmount.toFixed(2),
             note: note || null,
             shippingCompanyId: targetShippingCompanyId || null,
@@ -484,6 +490,9 @@ export const formatCheckoutResponsePayload = (params: {
     orderDiscountSource: any;
     isFreeDelivery: boolean;
     userInfo: any;
+    taxAmount?: number;
+    includedTaxAmount?: number;
+    taxDetails?: any[];
 }) => {
     const {
         orderId,
@@ -533,6 +542,8 @@ export const formatCheckoutResponsePayload = (params: {
                 serviceFee,
                 discountAmount: totalDiscount,
                 couponCode: couponCode || null,
+                taxAmount: params.taxAmount ?? 0,
+                includedTaxAmount: params.includedTaxAmount ?? 0,
                 totalAmount,
                 createdAt: now.toISOString(),
                 dailyOrderNumber: createdDailyOrderNumber,
@@ -548,6 +559,11 @@ export const formatCheckoutResponsePayload = (params: {
                 discountSource: orderDiscountSource,
                 couponCode: couponCode || null,
                 isFreeDelivery,
+            },
+            taxDetails: {
+                taxAmount: params.taxAmount ?? 0,
+                includedTaxAmount: params.includedTaxAmount ?? 0,
+                taxes: params.taxDetails ?? [],
             },
             customerDetails: userInfo,
         },

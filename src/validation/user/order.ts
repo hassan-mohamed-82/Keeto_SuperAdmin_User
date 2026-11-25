@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHECKOUT_ORDER_SOURCES } from "../../types/orderSources";
 import { egyptPhoneSchema, optionalEgyptPhoneSchema } from "./phone";
 
 // ============================================================
@@ -29,7 +30,7 @@ export const guestAddressSchema = z.object({
 // ============================================================
 export const checkoutSchema = z.object({
     orderSource: z.enum(
-        ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"],
+        CHECKOUT_ORDER_SOURCES,
         { required_error: "orderSource is required" }
     ),
     paymentMethod: z.string({ required_error: "paymentMethod is required" }),
@@ -99,7 +100,7 @@ export type CheckoutInput = z.infer<typeof checkoutSchema>;
 // ============================================================
 export const getOrderPrerequisitesQuerySchema = z.object({
     restaurantId: z.string({ required_error: "restaurantId is required" }),
-    orderSource: z.enum(["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"], {
+    orderSource: z.enum(CHECKOUT_ORDER_SOURCES, {
         required_error: "Invalid or missing order source",
     }),
     addressId: z.string().nullable().optional(),

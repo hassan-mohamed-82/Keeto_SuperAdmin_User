@@ -17,6 +17,7 @@ import { food } from "./food";
 import { users } from "../user/Users";
 import { branches, coupons, discounts, offers } from "../../schema";
 import { addresses } from "../user/address";
+import { ORDER_SOURCES } from "../../../types/orderSources";
 import { selectReasons } from "./selectReasons";
 import { deliveryMen } from "./delivery_man";
 import { shippingCompanies } from "./shippingCompany";
@@ -45,13 +46,8 @@ export const orders = mysqlTable("orders", {
 
     zoneId: char("zone_id", { length: 36 }),
 
-    orderSource: mysqlEnum("order_source", [
-        "online_order_web",
-        "online_order_app",
-        "food_aggregator",
-        "my_keeto",
-        "pos"
-    ]).notNull(),
+    // online_order_web | online_order_app | food_aggregator | food_aggregator_web | my_keeto | mykeeto_web | pos
+    orderSource: mysqlEnum("order_source", ORDER_SOURCES).notNull(),
 
     paymentMethod: char("payment_method", { length: 36 }),
 
@@ -77,6 +73,13 @@ export const orders = mysqlTable("orders", {
 
     firstOrderDiscountId: char("first_order_discount_id", { length: 36 }),
     // ---------------------------------
+
+    // --- Tax Fields ---
+    // taxAmount = sum of active "exclude" taxes (already added to totalAmount)
+    taxAmount: decimal("tax_amount", { precision: 10, scale: 2 }).default("0.00").notNull(),
+    // includedTaxAmount = tax already inside food prices ("include" taxes, display only)
+    includedTaxAmount: decimal("included_tax_amount", { precision: 10, scale: 2 }).default("0.00").notNull(),
+    taxDetails: json("tax_details").$type<any[]>(),
 
     totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
 

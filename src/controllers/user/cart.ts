@@ -75,6 +75,7 @@ import {
     weightedLineTotal,
 } from "../../helpers/weightCart.helper";
 import { resolveFirstOrderDiscount } from "../../helpers/firstOrderDiscount.helper";
+import { resolveOrderTaxes } from "../../helpers/tax.helper";
 
 /* =========================================
    Helpers
@@ -1415,6 +1416,19 @@ export const getCart = async (req: Request | any, res: Response) => {
         }
     }
 
+    // ─── Taxes preview (ACTIVE taxes only) ───────────────────────────────
+    // exclude → added to the total, include → already inside the prices (display only)
+    const taxPreview = restaurantId
+        ? await resolveOrderTaxes({
+            restaurantId,
+            branchId: targetBranchId || null,
+            orderSource: orderSource || null,
+            items: allAvailableCartItems
+                .filter((i: any) => i.isAvailable !== false)
+                .map((i: any) => ({ foodId: i.foodId, totalPrice: i.totalPrice })),
+        })
+        : { taxAmount: 0, includedTaxAmount: 0, taxes: [] };
+
     let activeWeightRequest: any = null;
     if (restaurantId) {
         const [activeReq] = await db
@@ -1482,6 +1496,10 @@ export const getCart = async (req: Request | any, res: Response) => {
                 isEstimated: isEstimatedTotal,
                 freeDelivery: freeDeliveryInfo,
                 firstOrderDiscount,
+                taxAmount: taxPreview.taxAmount,
+                includedTaxAmount: taxPreview.includedTaxAmount,
+                taxes: taxPreview.taxes,
+                totalWithTax: parseFloat((finalSubtotal + taxPreview.taxAmount).toFixed(2)),
             },
             activeWeightRequest,
         },

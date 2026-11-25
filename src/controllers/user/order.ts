@@ -39,6 +39,8 @@ import { calculateDistance, isLocationInZone } from "../../utils/geo";
 import { validateUserPhone } from "../../utils/userPhoneCheck";
 import { type ServiceModule } from "../../helpers/pricing.helper";
 import { activeFoodCondition } from "../../helpers/foodConditions";
+import { resolveOrderTaxes } from "../../helpers/tax.helper";
+import { CHECKOUT_ORDER_SOURCES } from "../../types/orderSources";
 import { handleCancelledOrder, mapOrderSourceToPlatformType } from "../../services/restaurantWalletService";
 import {
     roundMoney,
@@ -401,7 +403,16 @@ export const checkout = async (req: Request | any, res: Response) => {
         isFreeDelivery,
     } = deliveryResult;
 
-    let totalAmount = roundMoney(subtotal + deliveryFee + serviceFee - totalDiscount);
+    // 15b. Taxes (only ACTIVE taxes). "exclude" taxes are added to the total,
+    // "include" taxes are already inside the food prices (display only).
+    const taxResult = await resolveOrderTaxes({
+        restaurantId,
+        branchId: resolvedBranchId || pricingBranchId,
+        orderSource: storedOrderSource,
+        items: itemsToInsert,
+    });
+
+    let totalAmount = roundMoney(subtotal + deliveryFee + serviceFee + taxResult.taxAmount - totalDiscount);
     if (totalAmount < 0) totalAmount = 0;
 
     const orderId = uuidv4();
@@ -496,6 +507,9 @@ export const checkout = async (req: Request | any, res: Response) => {
             calculatedDeliveryFee,
             firstOrderDiscountAmount,
             appliedDiscountIds,
+            taxAmount: taxResult.taxAmount,
+            includedTaxAmount: taxResult.includedTaxAmount,
+            taxDetails: taxResult.taxes,
         });
         createdDailyOrderNumber = txResult.createdDailyOrderNumber;
         orderCommitted = true;
@@ -540,6 +554,9 @@ export const checkout = async (req: Request | any, res: Response) => {
         orderDiscountSource,
         isFreeDelivery,
         userInfo,
+        taxAmount: taxResult.taxAmount,
+        includedTaxAmount: taxResult.includedTaxAmount,
+        taxDetails: taxResult.taxes,
     });
 
     return SuccessResponse(res, responsePayload);
@@ -1126,8 +1143,7 @@ export const getOrderPrerequisites = async (req: Request | any, res: Response) =
         throw new BadRequest("restaurantId is required");
     }
 
-    const validOrderSources = ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"];
-    if (!orderSource || !validOrderSources.includes(orderSource)) {
+    if (!orderSource || !(CHECKOUT_ORDER_SOURCES as readonly string[]).includes(orderSource)) {
         throw new BadRequest("Invalid or missing order source");
     }
 

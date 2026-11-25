@@ -25,6 +25,18 @@ import { saveBase64Image, handleImageUpdate } from "../../utils/handleImages";
 import { encryptSecret } from "../../utils/encryption";
 import { applyGatewaySwitch } from "../../services/restaurantWalletService";
 import { MODULES, ACTION_NAMES } from "../../types/constant";
+import { PLATFORM_TYPES } from "../../types/orderSources";
+
+/** Rejects unknown platform types (MySQL would silently save them as '' in non-strict mode). */
+const assertValidPlatformTypes = (plans: any[] | undefined) => {
+    for (const plan of plans || []) {
+        if (plan?.platformType && !(PLATFORM_TYPES as readonly string[]).includes(plan.platformType)) {
+            throw new BadRequest(
+                `Invalid platformType "${plan.platformType}". Allowed: ${PLATFORM_TYPES.join(", ")}`
+            );
+        }
+    }
+};
 import { Permission } from "../../types/custom";
 
 // Helper: Parse payment credentials from request body (accepts array, single object, or JSON string)
@@ -375,6 +387,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             parsedBusinessPlans = businessPlans;
         }
     }
+    assertValidPlatformTypes(parsedBusinessPlans);
 
     const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
     const parsedPaymentCredentials: any[] = parsePaymentCredentialsInput(paymentCredsRaw);
@@ -955,6 +968,7 @@ export const updateRestaurant = async (req: Request, res: Response) => {
             parsedBusinessPlans = businessPlans;
         }
     }
+    assertValidPlatformTypes(parsedBusinessPlans);
 
     const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
     const parsedPaymentCredentials: any[] | undefined = paymentCredsRaw !== undefined ? parsePaymentCredentialsInput(paymentCredsRaw) : undefined;

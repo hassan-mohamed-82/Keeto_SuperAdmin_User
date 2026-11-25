@@ -11,6 +11,7 @@ import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { BadRequest } from "../../Errors/BadRequest";
 import { mapOrderSourceToPlatformType } from "../restaurantWalletService";
+import { CHECKOUT_ORDER_SOURCES, toStoredOrderSource } from "../../types/orderSources";
 import { calculateCurrentStatus } from "../../controllers/user/restaurantFeatures";
 import {
     GuestAddressRow,
@@ -122,12 +123,11 @@ export const validateRestaurantAndPlan = async (
     orderSource: string,
     restaurantName?: string
 ): Promise<RestaurantAndPlanInfo> => {
-    const validOrderSources = ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"];
-    if (!validOrderSources.includes(orderSource)) {
+    if (!(CHECKOUT_ORDER_SOURCES as readonly string[]).includes(orderSource)) {
         throw new BadRequest("Invalid order source");
     }
 
-    const storedOrderSource = orderSource === "mykeeto" ? "my_keeto" : orderSource;
+    const storedOrderSource = toStoredOrderSource(orderSource);
 
     const [
         [restaurant],

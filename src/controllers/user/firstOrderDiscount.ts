@@ -7,6 +7,7 @@ import { SuccessResponse } from "../../utils/response";
 import { BadRequest } from "../../Errors/BadRequest";
 import { validateUserNotBlocked } from "../../utils/userBlockCheck";
 import { resolveFirstOrderDiscount } from "../../helpers/firstOrderDiscount.helper";
+import { toSalesChannel } from "../../types/orderSources";
 
 /**
  * GET /user/first-order-discount/check?restaurantId=...
@@ -118,12 +119,10 @@ export const getAvailableFirstOrderDiscounts = async (req: Request | any, res: R
     const now = new Date();
     const src = String(orderSource || "").trim().toLowerCase();
     const targetChannels: ("all" | "app" | "web" | "pos")[] = ["all"];
-    if (src === "pos") {
-        targetChannels.push("pos");
-    } else if (src.includes("web") || src === "food_aggregator" || src === "mykeeto") {
-        targetChannels.push("web");
-    } else if (src.includes("app")) {
-        targetChannels.push("app");
+    // *_web → web, other online sources (online_order_app, mykeeto, food_aggregator) → app
+    const salesChannel = toSalesChannel(src);
+    if (salesChannel) {
+        targetChannels.push(salesChannel);
     } else {
         targetChannels.push("app", "web");
     }

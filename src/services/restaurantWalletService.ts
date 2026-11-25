@@ -17,18 +17,14 @@ import { v4 as uuidv4 } from "uuid";
 
 const roundMoney = (num: number) => Math.round((num + Number.EPSILON) * 100) / 100;
 
-export type PlatformType = "online_order_app" | "online_order_web" | "food_aggregator" | "mykeeto" | "pos";
+import { toPlatformType, type PlatformType } from "../types/orderSources";
+export type { PlatformType };
 
 /**
  * Maps any orderSource string to the corresponding platformType enum in restaurant_business_plans
  */
 export function mapOrderSourceToPlatformType(orderSource: string): PlatformType {
-    const normalized = String(orderSource ?? "").trim().toLowerCase();
-    if (normalized === "my_keeto" || normalized === "mykeeto") return "mykeeto";
-    if (normalized === "online_order_web") return "online_order_web";
-    if (normalized === "food_aggregator") return "food_aggregator";
-    if (normalized === "online_order_app") return "online_order_app";
-    return "pos";
+    return toPlatformType(orderSource);
 }
 
 export async function applyGatewaySwitch(

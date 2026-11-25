@@ -8,6 +8,7 @@ import {
 } from "../models/schema";
 import { eq, and, ne, sql, count, lte, gte, isNull, or, inArray } from "drizzle-orm";
 import { BadRequest } from "../Errors/BadRequest";
+import { toSalesChannel } from "../types/orderSources";
 
 export type FirstOrderDiscountResult = {
     discount: typeof firstOrderDiscounts.$inferSelect;
@@ -45,12 +46,10 @@ export const resolveFirstOrderDiscount = async (
     // Channel matching: resolve target channels based on orderSource ("pos", "online_order_app", "online_order_web", etc.)
     const src = String(orderSource || "").trim().toLowerCase();
     const targetChannels: ("all" | "app" | "web" | "pos")[] = ["all"];
-    if (src === "pos") {
-        targetChannels.push("pos");
-    } else if (src.includes("web") || src === "food_aggregator" || src === "mykeeto") {
-        targetChannels.push("web");
-    } else if (src.includes("app")) {
-        targetChannels.push("app");
+    // *_web → web, other online sources (online_order_app, mykeeto, food_aggregator) → app
+    const salesChannel = toSalesChannel(src);
+    if (salesChannel) {
+        targetChannels.push(salesChannel);
     } else {
         // Fallback if unspecified: allow both app and web
         targetChannels.push("app", "web");
