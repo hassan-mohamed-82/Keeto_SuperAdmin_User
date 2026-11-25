@@ -43,6 +43,12 @@ export const createRestaurantSchema = z.object({
     visaSwitchAmountThreshold: z.coerce.string().optional(),
     visaSwitchDayOfWeek: z.enum(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]).optional(),
     visaSwitchDayOfMonth: z.coerce.number().int().min(1).max(31).optional(),
+
+    iosApp: z.string().max(500).optional(),
+    androidApp: z.string().max(500).optional(),
+    appBundleId: z.string().max(255).nullable().optional(),
+    androidPackageName: z.string().max(255).nullable().optional(),
+    appleAppId: z.string().regex(/^\d{6,12}$/, "appleAppId must be numeric").nullable().optional(),
 });
 
 export const updateRestaurantSchema = createRestaurantSchema.partial();

@@ -58,6 +58,9 @@ export const restaurants = mysqlTable("restaurants", {
     operationStatus: mysqlEnum("operation_status", ["active", "inactive"]).default("inactive"),
 
     appBundleId: varchar("app_bundle_id", { length: 255 }).unique(),
+    // Store identifiers used to pull download stats (Google Play package name / App Store numeric Apple ID)
+    androidPackageName: varchar("android_package_name", { length: 255 }).unique(),
+    appleAppId: varchar("apple_app_id", { length: 20 }).unique(),
     iosFirebaseProject: varchar("ios_firebase_project", { length: 50 }).notNull().default("secondary"),
     androidFirebaseProject: varchar("android_firebase_project", { length: 50 }).notNull().default("secondary"),
 

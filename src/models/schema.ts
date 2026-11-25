@@ -77,3 +77,4 @@ export * from "./schema/admin/videos";
 export * from "./schema/admin/restaurantDomains";
 export * from "./schema/user/authHandoffCodes";
 export * from "./schema/admin/weightRequests";
+export * from "./schema/admin/restaurantAppDownloads";

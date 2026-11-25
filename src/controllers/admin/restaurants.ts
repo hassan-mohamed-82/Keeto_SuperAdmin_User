@@ -15,7 +15,13 @@ import {
     restaurantOperations,
     role_restaurant,
 } from "../../models/schema";
-import { eq, sql, inArray, and } from "drizzle-orm";
+import { eq, sql, inArray, and, ne } from "drizzle-orm";
+import {
+    extractAndroidPackageName,
+    extractAppleAppId,
+    isValidAndroidPackageName,
+    isValidAppleAppId,
+} from "../../utils/appStoreIdentifiers";
 import { SuccessResponse } from "../../utils/response";
 import { NotFound } from "../../Errors/NotFound";
 import { BadRequest } from "../../Errors/BadRequest";
@@ -334,6 +340,77 @@ const adjustSalesRepPoints = async (tx: any, salesId: string | null | undefined,
 };
 
 // ==========================================
+// App identifiers (bundle id / Play package name / Apple app id)
+// ==========================================
+type AppIdentifierKey = "appBundleId" | "androidPackageName" | "appleAppId";
+
+const APP_IDENTIFIER_COLUMNS = {
+    appBundleId: restaurants.appBundleId,
+    androidPackageName: restaurants.androidPackageName,
+    appleAppId: restaurants.appleAppId,
+} as const;
+
+// undefined = not sent (leave as is), null = clear, string = set
+const normalizeAppIdentifier = (key: AppIdentifierKey, value: unknown): string | null | undefined => {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    const v = String(value).trim();
+    if (v === "" || v === "null") return null;
+
+    if (key === "appleAppId" && !isValidAppleAppId(v)) {
+        throw new BadRequest("appleAppId must be the numeric Apple ID of the app (e.g. 6471234567)");
+    }
+    if (key === "androidPackageName" && !isValidAndroidPackageName(v)) {
+        throw new BadRequest("androidPackageName must look like com.company.app");
+    }
+    // iOS bundle ids may also contain hyphens
+    if (key === "appBundleId" && !/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(v)) {
+        throw new BadRequest("appBundleId must look like com.company.app");
+    }
+    return v;
+};
+
+const resolveAppIdentifiers = async (
+    body: any,
+    links: { iosApp?: string | null; androidApp?: string | null },
+    existing?: { id: string; appBundleId: string | null; androidPackageName: string | null; appleAppId: string | null }
+) => {
+    const result: Partial<Record<AppIdentifierKey, string | null>> = {
+        appBundleId: normalizeAppIdentifier("appBundleId", body.appBundleId),
+        androidPackageName: normalizeAppIdentifier("androidPackageName", body.androidPackageName),
+        appleAppId: normalizeAppIdentifier("appleAppId", body.appleAppId),
+    };
+
+    // Not sent and not saved yet -> try to read it from the store link
+    if (result.androidPackageName === undefined && !existing?.androidPackageName) {
+        result.androidPackageName = extractAndroidPackageName(links.androidApp) ?? undefined;
+    }
+    if (result.appleAppId === undefined && !existing?.appleAppId) {
+        result.appleAppId = extractAppleAppId(links.iosApp) ?? undefined;
+    }
+
+    for (const key of Object.keys(APP_IDENTIFIER_COLUMNS) as AppIdentifierKey[]) {
+        const value = result[key];
+        if (value === undefined) {
+            delete result[key];
+            continue;
+        }
+        if (value === null || value === existing?.[key]) continue;
+
+        const conditions = [eq(APP_IDENTIFIER_COLUMNS[key], value)];
+        if (existing) conditions.push(ne(restaurants.id, existing.id));
+        const [taken] = await db
+            .select({ id: restaurants.id, name: restaurants.name })
+            .from(restaurants)
+            .where(and(...conditions))
+            .limit(1);
+        if (taken) throw new BadRequest(`${key} "${value}" is already used by restaurant "${taken.name}"`);
+    }
+
+    return result;
+};
+
+// ==========================================
 // 1. CREATE RESTAURANT
 // ==========================================
 export const createRestaurant = async (req: Request, res: Response) => {
@@ -365,6 +442,8 @@ export const createRestaurant = async (req: Request, res: Response) => {
         .limit(1);
 
     if (existingUser[0]) throw new BadRequest("Email already exists for a restaurant user");
+
+    const appIdentifiers = await resolveAppIdentifiers(req.body, { iosApp, androidApp });
 
     let logoUrl: string | undefined = undefined;
     if (logo) logoUrl = (await saveBase64Image(req, logo, "restaurants")).url;
@@ -514,6 +593,7 @@ export const createRestaurant = async (req: Request, res: Response) => {
             deliverystatus: deliverystatus || "not_delivered",
             iosApp: iosApp || '',
             androidApp: androidApp || '',
+            ...appIdentifiers,
         });
 
         // 2. إنشاء المالك
@@ -734,6 +814,9 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
         deliverystatus: restaurants.deliverystatus,
         iosApp: restaurants.iosApp,
         androidApp: restaurants.androidApp,
+        appBundleId: restaurants.appBundleId,
+        androidPackageName: restaurants.androidPackageName,
+        appleAppId: restaurants.appleAppId,
         paymentGatewayType: restaurantSettings.paymentGatewayType, // 👈 نوع بوابة الدفع
         enableOnlinePayment: restaurantSettings.enableOnlinePayment, // 👈 تفعيل الدفع أونلاين
         // 👈 إعدادات التحويل التلقائي للفيزة
@@ -822,6 +905,9 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
             deliverystatus: r.deliverystatus,
             iosApp: r.iosApp || null,
             androidApp: r.androidApp || null,
+            appBundleId: r.appBundleId || null,
+            androidPackageName: r.androidPackageName || null,
+            appleAppId: r.appleAppId || null,
             paymentGatewayType: r.paymentGatewayType || "SYSTEM", // 👈
             enableOnlinePayment: r.enableOnlinePayment ?? true, // 👈
             visaSwitch: {
@@ -1083,6 +1169,16 @@ export const updateRestaurant = async (req: Request, res: Response) => {
 
     if (iosApp !== undefined) restaurantUpdateData.iosApp = iosApp;
     if (androidApp !== undefined) restaurantUpdateData.androidApp = androidApp;
+
+    const appIdentifiers = await resolveAppIdentifiers(
+        req.body,
+        {
+            iosApp: iosApp !== undefined ? iosApp : existingRestaurant.iosApp,
+            androidApp: androidApp !== undefined ? androidApp : existingRestaurant.androidApp,
+        },
+        existingRestaurant
+    );
+    Object.assign(restaurantUpdateData, appIdentifiers);
 
     if (cityId !== undefined) restaurantUpdateData.cityId = (cityId && clean(cityId)) ? clean(cityId) : null;
     if (zoneId !== undefined) restaurantUpdateData.zoneId = (zoneId && clean(zoneId)) ? clean(zoneId) : null;

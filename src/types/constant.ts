@@ -42,6 +42,7 @@ export const MODULES = [
     "PlatformPaymentGateways",
     "Videos",
     "Taxes",
+    "AppDownloads",
 ] as const;
 
 export const ACTION_NAMES = ["View", "Add", "Edit", "Delete", "Status"] as const;
