@@ -4,11 +4,13 @@ exports.restaurantBusinessPlans = void 0;
 const mysql_core_1 = require("drizzle-orm/mysql-core");
 const drizzle_orm_1 = require("drizzle-orm");
 const restaurants_1 = require("./restaurants");
+const orderSources_1 = require("../../../types/orderSources");
 exports.restaurantBusinessPlans = (0, mysql_core_1.mysqlTable)("restaurant_business_plans", {
     id: (0, mysql_core_1.char)("id", { length: 36 }).primaryKey().default((0, drizzle_orm_1.sql) `(UUID())`),
     restaurantId: (0, mysql_core_1.char)("restaurant_id", { length: 36 }).references(() => restaurants_1.restaurants.id).notNull(),
     // 💡 التعديل هنا: زودنا "pos"
-    platformType: (0, mysql_core_1.mysqlEnum)("platform_type", ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"]).notNull(),
+    // online_order_web | online_order_app | food_aggregator | food_aggregator_web | mykeeto | mykeeto_web | pos
+    platformType: (0, mysql_core_1.mysqlEnum)("platform_type", orderSources_1.PLATFORM_TYPES).notNull(),
     // الاشتراكات
     isMonthlyActive: (0, mysql_core_1.boolean)("is_monthly_active").default(false),
     monthlyAmount: (0, mysql_core_1.decimal)("monthly_amount", { precision: 10, scale: 2 }).default("0.00"),

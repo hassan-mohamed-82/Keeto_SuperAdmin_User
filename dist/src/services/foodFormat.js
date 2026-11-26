@@ -303,7 +303,7 @@ const formatFoodsList = async (rawMenu, restaurantId, userId, favoriteFoodIds = 
             addons: foodAddons,
             sold_by: row.sold_by ?? "unit",
             weight_unit: row.weight_unit ?? null,
-            allow_custom_weight: row.allow_custom_weight ?? true,
+            allow_custom_weight: row.allow_custom_weight ?? false,
             unavailableBranches,
             category: row.categoryId ? {
                 id: row.categoryId,

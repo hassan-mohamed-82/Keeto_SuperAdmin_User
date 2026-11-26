@@ -69,10 +69,12 @@ const normalOpt = { isWeightGroup: false, weightValue: null };
         (0, vitest_1.expect)(() => (0, weightPricing_helper_1.validateWeightGroupConfig)({ ...base, variations: [group(["150"])] })).toThrow(/maximum/);
         (0, vitest_1.expect)(() => (0, weightPricing_helper_1.validateWeightGroupConfig)({ ...base, variations: [normal([{ optionName: "Big", weightValue: "1" }])] }))
             .toThrow(/cannot have a weight_value/);
-        (0, vitest_1.expect)(() => (0, weightPricing_helper_1.validateWeightGroupConfig)({ soldBy: "unit", weightUnit: null, allowCustomWeight: false, variations: [] }))
-            .toThrow(/only be turned off for products sold by weight/);
-        // unit foods always store allow_custom_weight = true
-        (0, vitest_1.expect)((0, weightPricing_helper_1.validateWeightGroupConfig)({ soldBy: "unit", weightUnit: null, allowCustomWeight: undefined, variations: [normal()] }).allowCustomWeight).toBe(true);
+        // unit foods always store allow_custom_weight = false, whatever is sent
+        (0, vitest_1.expect)((0, weightPricing_helper_1.validateWeightGroupConfig)({ soldBy: "unit", weightUnit: null, allowCustomWeight: undefined, variations: [normal()] }).allowCustomWeight).toBe(false);
+        (0, vitest_1.expect)((0, weightPricing_helper_1.validateWeightGroupConfig)({ soldBy: "unit", weightUnit: null, allowCustomWeight: true, variations: [] }).allowCustomWeight).toBe(false);
+        // weight foods: not sent → false when there is a weight group, true when there is none
+        (0, vitest_1.expect)((0, weightPricing_helper_1.validateWeightGroupConfig)({ ...base, allowCustomWeight: undefined, variations: [group(["0.5", "1"])] }).allowCustomWeight).toBe(false);
+        (0, vitest_1.expect)((0, weightPricing_helper_1.validateWeightGroupConfig)({ ...base, allowCustomWeight: undefined, variations: [] }).allowCustomWeight).toBe(true);
     });
 });
 (0, vitest_1.describe)("line totals with extras (weight × unit price + extras)", () => {

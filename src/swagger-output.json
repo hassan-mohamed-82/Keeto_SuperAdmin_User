@@ -3542,7 +3542,9 @@
                       "online_order_app",
                       "food_aggregator",
                       "my_keeto",
-                      "pos"
+                      "pos",
+                      "food_aggregator_web",
+                      "mykeeto_web"
                     ]
                   },
                   "paymentMethod": {
@@ -3605,6 +3607,15 @@
                   },
                   "firstOrderDiscountId": {
                     "type": "string"
+                  },
+                  "taxAmount": {
+                    "type": "string"
+                  },
+                  "includedTaxAmount": {
+                    "type": "string"
+                  },
+                  "taxDetails": {
+                    "type": "object"
                   },
                   "totalAmount": {
                     "type": "string"
@@ -3833,7 +3844,9 @@
                       "online_order_app",
                       "food_aggregator",
                       "my_keeto",
-                      "pos"
+                      "pos",
+                      "food_aggregator_web",
+                      "mykeeto_web"
                     ]
                   },
                   "paymentMethod": {
@@ -3896,6 +3909,15 @@
                   },
                   "firstOrderDiscountId": {
                     "type": "string"
+                  },
+                  "taxAmount": {
+                    "type": "string"
+                  },
+                  "includedTaxAmount": {
+                    "type": "string"
+                  },
+                  "taxDetails": {
+                    "type": "object"
                   },
                   "totalAmount": {
                     "type": "string"
@@ -4124,7 +4146,9 @@
                       "online_order_app",
                       "food_aggregator",
                       "my_keeto",
-                      "pos"
+                      "pos",
+                      "food_aggregator_web",
+                      "mykeeto_web"
                     ]
                   },
                   "paymentMethod": {
@@ -4187,6 +4211,15 @@
                   },
                   "firstOrderDiscountId": {
                     "type": "string"
+                  },
+                  "taxAmount": {
+                    "type": "string"
+                  },
+                  "includedTaxAmount": {
+                    "type": "string"
+                  },
+                  "taxDetails": {
+                    "type": "object"
                   },
                   "totalAmount": {
                     "type": "string"
@@ -5468,6 +5501,12 @@
                   "appBundleId": {
                     "type": "string"
                   },
+                  "androidPackageName": {
+                    "type": "string"
+                  },
+                  "appleAppId": {
+                    "type": "string"
+                  },
                   "iosFirebaseProject": {
                     "type": "string"
                   },
@@ -5721,6 +5760,12 @@
                   "appBundleId": {
                     "type": "string"
                   },
+                  "androidPackageName": {
+                    "type": "string"
+                  },
+                  "appleAppId": {
+                    "type": "string"
+                  },
                   "iosFirebaseProject": {
                     "type": "string"
                   },
@@ -5943,6 +5988,12 @@
                     ]
                   },
                   "appBundleId": {
+                    "type": "string"
+                  },
+                  "androidPackageName": {
+                    "type": "string"
+                  },
+                  "appleAppId": {
                     "type": "string"
                   },
                   "iosFirebaseProject": {
@@ -6173,6 +6224,12 @@
                     ]
                   },
                   "appBundleId": {
+                    "type": "string"
+                  },
+                  "androidPackageName": {
+                    "type": "string"
+                  },
+                  "appleAppId": {
                     "type": "string"
                   },
                   "iosFirebaseProject": {
@@ -13177,6 +13234,561 @@
         }
       }
     },
+    "/api/superadmin/taxes/": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Taxes"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "restaurantId": {
+                    "type": "string"
+                  },
+                  "restaurantIds": {
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "nameAr": {
+                    "type": "string"
+                  },
+                  "nameFr": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "amountType": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "value"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "keeto",
+                      "restaurant"
+                    ]
+                  },
+                  "taxType": {
+                    "type": "string",
+                    "enum": [
+                      "include",
+                      "exclude"
+                    ]
+                  },
+                  "modules": {
+                    "type": "string",
+                    "enum": [
+                      "pos",
+                      "online",
+                      "all"
+                    ]
+                  },
+                  "moduleType": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "app",
+                      "all"
+                    ]
+                  },
+                  "foodIds": {
+                    "type": "object"
+                  },
+                  "branchIds": {
+                    "type": "object"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "inactive"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "amount"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Taxes"
+        ]
+      }
+    },
+    "/api/superadmin/taxes/options": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Taxes"
+        ]
+      }
+    },
+    "/api/superadmin/taxes/{id}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Taxes"
+        ]
+      },
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Taxes"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "restaurantId": {
+                    "type": "string"
+                  },
+                  "restaurantIds": {
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "nameAr": {
+                    "type": "string"
+                  },
+                  "nameFr": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "amountType": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "value"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "keeto",
+                      "restaurant"
+                    ]
+                  },
+                  "taxType": {
+                    "type": "string",
+                    "enum": [
+                      "include",
+                      "exclude"
+                    ]
+                  },
+                  "modules": {
+                    "type": "string",
+                    "enum": [
+                      "pos",
+                      "online",
+                      "all"
+                    ]
+                  },
+                  "moduleType": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "app",
+                      "all"
+                    ]
+                  },
+                  "foodIds": {
+                    "type": "object"
+                  },
+                  "branchIds": {
+                    "type": "object"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "inactive"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Taxes"
+        ]
+      }
+    },
+    "/api/superadmin/taxes/{id}/status": {
+      "patch": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / Taxes"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "restaurantId": {
+                    "type": "string"
+                  },
+                  "restaurantIds": {
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "nameAr": {
+                    "type": "string"
+                  },
+                  "nameFr": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "amountType": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "value"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "keeto",
+                      "restaurant"
+                    ]
+                  },
+                  "taxType": {
+                    "type": "string",
+                    "enum": [
+                      "include",
+                      "exclude"
+                    ]
+                  },
+                  "modules": {
+                    "type": "string",
+                    "enum": [
+                      "pos",
+                      "online",
+                      "all"
+                    ]
+                  },
+                  "moduleType": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "app",
+                      "all"
+                    ]
+                  },
+                  "foodIds": {
+                    "type": "object"
+                  },
+                  "branchIds": {
+                    "type": "object"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "inactive"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/superadmin/app-downloads/sync": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / App Downloads"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "example": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/superadmin/app-downloads/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / App Downloads"
+        ]
+      }
+    },
+    "/api/superadmin/app-downloads/{restaurantId}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "restaurantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "tags": [
+          "Superadmin / App Downloads"
+        ]
+      }
+    },
     "/api/user/home/search": {
       "get": {
         "description": "",
@@ -14893,6 +15505,12 @@
                   "appBundleId": {
                     "type": "string"
                   },
+                  "androidPackageName": {
+                    "type": "string"
+                  },
+                  "appleAppId": {
+                    "type": "string"
+                  },
                   "iosFirebaseProject": {
                     "type": "string"
                   },
@@ -15262,7 +15880,9 @@
                       "online_order_app",
                       "food_aggregator",
                       "my_keeto",
-                      "pos"
+                      "pos",
+                      "food_aggregator_web",
+                      "mykeeto_web"
                     ]
                   },
                   "paymentMethod": {
@@ -15325,6 +15945,15 @@
                   },
                   "firstOrderDiscountId": {
                     "type": "string"
+                  },
+                  "taxAmount": {
+                    "type": "string"
+                  },
+                  "includedTaxAmount": {
+                    "type": "string"
+                  },
+                  "taxDetails": {
+                    "type": "object"
                   },
                   "totalAmount": {
                     "type": "string"
@@ -15553,7 +16182,9 @@
                       "online_order_app",
                       "food_aggregator",
                       "my_keeto",
-                      "pos"
+                      "pos",
+                      "food_aggregator_web",
+                      "mykeeto_web"
                     ]
                   },
                   "paymentMethod": {
@@ -15616,6 +16247,15 @@
                   },
                   "firstOrderDiscountId": {
                     "type": "string"
+                  },
+                  "taxAmount": {
+                    "type": "string"
+                  },
+                  "includedTaxAmount": {
+                    "type": "string"
+                  },
+                  "taxDetails": {
+                    "type": "object"
                   },
                   "totalAmount": {
                     "type": "string"
@@ -15900,7 +16540,9 @@
                       "online_order_app",
                       "food_aggregator",
                       "my_keeto",
-                      "pos"
+                      "pos",
+                      "food_aggregator_web",
+                      "mykeeto_web"
                     ]
                   },
                   "paymentMethod": {
@@ -15963,6 +16605,15 @@
                   },
                   "firstOrderDiscountId": {
                     "type": "string"
+                  },
+                  "taxAmount": {
+                    "type": "string"
+                  },
+                  "includedTaxAmount": {
+                    "type": "string"
+                  },
+                  "taxDetails": {
+                    "type": "object"
                   },
                   "totalAmount": {
                     "type": "string"
@@ -19256,7 +19907,9 @@
                       "online_order_app",
                       "food_aggregator",
                       "my_keeto",
-                      "pos"
+                      "pos",
+                      "food_aggregator_web",
+                      "mykeeto_web"
                     ]
                   },
                   "paymentMethod": {
@@ -19319,6 +19972,15 @@
                   },
                   "firstOrderDiscountId": {
                     "type": "string"
+                  },
+                  "taxAmount": {
+                    "type": "string"
+                  },
+                  "includedTaxAmount": {
+                    "type": "string"
+                  },
+                  "taxDetails": {
+                    "type": "object"
                   },
                   "totalAmount": {
                     "type": "string"
@@ -19555,7 +20217,9 @@
                       "online_order_app",
                       "food_aggregator",
                       "my_keeto",
-                      "pos"
+                      "pos",
+                      "food_aggregator_web",
+                      "mykeeto_web"
                     ]
                   },
                   "paymentMethod": {
@@ -19618,6 +20282,15 @@
                   },
                   "firstOrderDiscountId": {
                     "type": "string"
+                  },
+                  "taxAmount": {
+                    "type": "string"
+                  },
+                  "includedTaxAmount": {
+                    "type": "string"
+                  },
+                  "taxDetails": {
+                    "type": "object"
                   },
                   "totalAmount": {
                     "type": "string"
@@ -19990,7 +20663,9 @@
                       "online_order_app",
                       "food_aggregator",
                       "my_keeto",
-                      "pos"
+                      "pos",
+                      "food_aggregator_web",
+                      "mykeeto_web"
                     ]
                   },
                   "paymentMethod": {
@@ -20053,6 +20728,15 @@
                   },
                   "firstOrderDiscountId": {
                     "type": "string"
+                  },
+                  "taxAmount": {
+                    "type": "string"
+                  },
+                  "includedTaxAmount": {
+                    "type": "string"
+                  },
+                  "taxDetails": {
+                    "type": "object"
                   },
                   "totalAmount": {
                     "type": "string"
@@ -20470,6 +21154,12 @@
     },
     {
       "name": "Superadmin / Domains"
+    },
+    {
+      "name": "Superadmin / Taxes"
+    },
+    {
+      "name": "Superadmin / App Downloads"
     },
     {
       "name": "User / Home"

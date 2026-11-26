@@ -44,6 +44,7 @@ const foodConditions_1 = require("../../helpers/foodConditions");
 const weightPricing_helper_1 = require("../../helpers/weightPricing.helper");
 const weightCart_helper_1 = require("../../helpers/weightCart.helper");
 const firstOrderDiscount_helper_1 = require("../../helpers/firstOrderDiscount.helper");
+const tax_helper_1 = require("../../helpers/tax.helper");
 /* =========================================
    Helpers
 ========================================= */
@@ -1235,6 +1236,18 @@ const getCart = async (req, res) => {
             finalSubtotal = parseFloat(Math.max(0, finalSubtotal - fodResult.discountAmount).toFixed(2));
         }
     }
+    // ─── Taxes preview (ACTIVE taxes only) ───────────────────────────────
+    // exclude → added to the total, include → already inside the prices (display only)
+    const taxPreview = restaurantId
+        ? await (0, tax_helper_1.resolveOrderTaxes)({
+            restaurantId,
+            branchId: targetBranchId || null,
+            orderSource: orderSource || null,
+            items: allAvailableCartItems
+                .filter((i) => i.isAvailable !== false)
+                .map((i) => ({ foodId: i.foodId, totalPrice: i.totalPrice })),
+        })
+        : { taxAmount: 0, includedTaxAmount: 0, taxes: [] };
     let activeWeightRequest = null;
     if (restaurantId) {
         const [activeReq] = await connection_1.db
@@ -1290,6 +1303,10 @@ const getCart = async (req, res) => {
                 isEstimated: isEstimatedTotal,
                 freeDelivery: freeDeliveryInfo,
                 firstOrderDiscount,
+                taxAmount: taxPreview.taxAmount,
+                includedTaxAmount: taxPreview.includedTaxAmount,
+                taxes: taxPreview.taxes,
+                totalWithTax: parseFloat((finalSubtotal + taxPreview.taxAmount).toFixed(2)),
             },
             activeWeightRequest,
         },

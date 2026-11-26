@@ -2,15 +2,16 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateBusinessPlanSchema = exports.createBusinessPlanSchema = void 0;
 const zod_1 = require("zod");
+const orderSources_1 = require("../../types/orderSources");
 // ==========================================
 // Restaurant Business Plans Validation
 // ==========================================
 exports.createBusinessPlanSchema = zod_1.z.object({
     // الحقول الأساسية والعلاقات (Required)
     restaurantId: zod_1.z.string().uuid("Invalid Restaurant ID"),
-    platformType: zod_1.z.enum(["online_order_app", "online_order_web", "food_aggregator", "mykeeto"], {
+    platformType: zod_1.z.enum(orderSources_1.PLAN_PLATFORM_TYPES, {
         required_error: "Platform type is required",
-        invalid_type_error: "Platform type must be either 'online_order_app' or 'online_order_web' or 'food_aggregator' or 'mykeeto'",
+        invalid_type_error: `Platform type must be one of: ${orderSources_1.PLAN_PLATFORM_TYPES.join(", ")}`,
     }),
     // الاشتراكات الشهرية
     isMonthlyActive: zod_1.z.boolean().optional(),

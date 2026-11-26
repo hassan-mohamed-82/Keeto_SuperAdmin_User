@@ -36,5 +36,10 @@ exports.createRestaurantSchema = zod_1.z.object({
     visaSwitchAmountThreshold: zod_1.z.coerce.string().optional(),
     visaSwitchDayOfWeek: zod_1.z.enum(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]).optional(),
     visaSwitchDayOfMonth: zod_1.z.coerce.number().int().min(1).max(31).optional(),
+    iosApp: zod_1.z.string().max(500).optional(),
+    androidApp: zod_1.z.string().max(500).optional(),
+    appBundleId: zod_1.z.string().max(255).nullable().optional(),
+    androidPackageName: zod_1.z.string().max(255).nullable().optional(),
+    appleAppId: zod_1.z.string().regex(/^\d{6,12}$/, "appleAppId must be numeric").nullable().optional(),
 });
 exports.updateRestaurantSchema = exports.createRestaurantSchema.partial();

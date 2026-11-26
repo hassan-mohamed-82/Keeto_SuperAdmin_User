@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getOrderPrerequisitesQuerySchema = exports.checkoutSchema = exports.guestAddressSchema = exports.guestInfoSchema = void 0;
 const zod_1 = require("zod");
+const orderSources_1 = require("../../types/orderSources");
 const phone_1 = require("./phone");
 // ============================================================
 // Guest Info & Address Schemas
@@ -28,7 +29,7 @@ exports.guestAddressSchema = zod_1.z.object({
 // Checkout Validation Schema
 // ============================================================
 exports.checkoutSchema = zod_1.z.object({
-    orderSource: zod_1.z.enum(["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"], { required_error: "orderSource is required" }),
+    orderSource: zod_1.z.enum(orderSources_1.CHECKOUT_ORDER_SOURCES, { required_error: "orderSource is required" }),
     paymentMethod: zod_1.z.string({ required_error: "paymentMethod is required" }),
     orderType: zod_1.z.enum(["delivery", "takeaway", "dine_in"], {
         required_error: "orderType is required and must be one of: delivery, takeaway, dine_in",
@@ -87,7 +88,7 @@ exports.checkoutSchema = zod_1.z.object({
 // ============================================================
 exports.getOrderPrerequisitesQuerySchema = zod_1.z.object({
     restaurantId: zod_1.z.string({ required_error: "restaurantId is required" }),
-    orderSource: zod_1.z.enum(["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"], {
+    orderSource: zod_1.z.enum(orderSources_1.CHECKOUT_ORDER_SOURCES, {
         required_error: "Invalid or missing order source",
     }),
     addressId: zod_1.z.string().nullable().optional(),

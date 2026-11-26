@@ -93,3 +93,4 @@ __exportStar(require("./schema/admin/videos"), exports);
 __exportStar(require("./schema/admin/restaurantDomains"), exports);
 __exportStar(require("./schema/user/authHandoffCodes"), exports);
 __exportStar(require("./schema/admin/weightRequests"), exports);
+__exportStar(require("./schema/admin/restaurantAppDownloads"), exports);

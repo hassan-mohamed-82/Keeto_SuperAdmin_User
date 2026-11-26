@@ -8,6 +8,7 @@ const food_1 = require("./food");
 const Users_1 = require("../user/Users");
 const schema_1 = require("../../schema");
 const address_1 = require("../user/address");
+const orderSources_1 = require("../../../types/orderSources");
 const selectReasons_1 = require("./selectReasons");
 const delivery_man_1 = require("./delivery_man");
 const shippingCompany_1 = require("./shippingCompany");
@@ -29,13 +30,8 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     addressId: (0, mysql_core_1.char)("address_id", { length: 36 })
         .references(() => address_1.addresses.id),
     zoneId: (0, mysql_core_1.char)("zone_id", { length: 36 }),
-    orderSource: (0, mysql_core_1.mysqlEnum)("order_source", [
-        "online_order_web",
-        "online_order_app",
-        "food_aggregator",
-        "my_keeto",
-        "pos"
-    ]).notNull(),
+    // online_order_web | online_order_app | food_aggregator | food_aggregator_web | my_keeto | mykeeto_web | pos
+    orderSource: (0, mysql_core_1.mysqlEnum)("order_source", orderSources_1.ORDER_SOURCES).notNull(),
     paymentMethod: (0, mysql_core_1.char)("payment_method", { length: 36 }),
     orderType: (0, mysql_core_1.mysqlEnum)("order_type", ["delivery", "takeaway", "dine_in"]).default("delivery"),
     subtotal: (0, mysql_core_1.decimal)("subtotal", { precision: 10, scale: 2 }).notNull(),
@@ -55,6 +51,12 @@ exports.orders = (0, mysql_core_1.mysqlTable)("orders", {
     couponCode: (0, mysql_core_1.varchar)("coupon_code", { length: 50 }),
     firstOrderDiscountId: (0, mysql_core_1.char)("first_order_discount_id", { length: 36 }),
     // ---------------------------------
+    // --- Tax Fields ---
+    // taxAmount = sum of active "exclude" taxes (already added to totalAmount)
+    taxAmount: (0, mysql_core_1.decimal)("tax_amount", { precision: 10, scale: 2 }).default("0.00").notNull(),
+    // includedTaxAmount = tax already inside food prices ("include" taxes, display only)
+    includedTaxAmount: (0, mysql_core_1.decimal)("included_tax_amount", { precision: 10, scale: 2 }).default("0.00").notNull(),
+    taxDetails: (0, mysql_core_1.json)("tax_details").$type(),
     totalAmount: (0, mysql_core_1.decimal)("total_amount", { precision: 10, scale: 2 }).notNull(),
     status: (0, mysql_core_1.mysqlEnum)("status", [
         "pending",

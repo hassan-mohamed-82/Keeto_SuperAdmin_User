@@ -14,6 +14,8 @@ const notifications_1 = require("../../utils/notifications");
 const geo_1 = require("../../utils/geo");
 const userPhoneCheck_1 = require("../../utils/userPhoneCheck");
 const foodConditions_1 = require("../../helpers/foodConditions");
+const tax_helper_1 = require("../../helpers/tax.helper");
+const orderSources_1 = require("../../types/orderSources");
 const restaurantWalletService_1 = require("../../services/restaurantWalletService");
 const order_1 = require("../../services/order");
 // 🗓️ Helper to format date 
@@ -247,7 +249,15 @@ const checkout = async (req, res) => {
         initialIsFreeDelivery: couponFreeDelivery,
     });
     const { deliveryFee, calculatedDeliveryFee, resolvedZoneId, resolvedBranchId, shippingAddressSnapshot, targetShippingCompanyId, branchSnapshotData, isFreeDelivery, } = deliveryResult;
-    let totalAmount = (0, order_1.roundMoney)(subtotal + deliveryFee + serviceFee - totalDiscount);
+    // 15b. Taxes (only ACTIVE taxes). "exclude" taxes are added to the total,
+    // "include" taxes are already inside the food prices (display only).
+    const taxResult = await (0, tax_helper_1.resolveOrderTaxes)({
+        restaurantId,
+        branchId: resolvedBranchId || pricingBranchId,
+        orderSource: storedOrderSource,
+        items: itemsToInsert,
+    });
+    let totalAmount = (0, order_1.roundMoney)(subtotal + deliveryFee + serviceFee + taxResult.taxAmount - totalDiscount);
     if (totalAmount < 0)
         totalAmount = 0;
     const orderId = (0, uuid_1.v4)();
@@ -332,6 +342,9 @@ const checkout = async (req, res) => {
             calculatedDeliveryFee,
             firstOrderDiscountAmount,
             appliedDiscountIds,
+            taxAmount: taxResult.taxAmount,
+            includedTaxAmount: taxResult.includedTaxAmount,
+            taxDetails: taxResult.taxes,
         });
         createdDailyOrderNumber = txResult.createdDailyOrderNumber;
         orderCommitted = true;
@@ -375,6 +388,9 @@ const checkout = async (req, res) => {
         orderDiscountSource,
         isFreeDelivery,
         userInfo,
+        taxAmount: taxResult.taxAmount,
+        includedTaxAmount: taxResult.includedTaxAmount,
+        taxDetails: taxResult.taxes,
     });
     return (0, response_1.SuccessResponse)(res, responsePayload);
 };
@@ -883,8 +899,7 @@ const getOrderPrerequisites = async (req, res) => {
     if (!restaurantId) {
         throw new BadRequest_1.BadRequest("restaurantId is required");
     }
-    const validOrderSources = ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"];
-    if (!orderSource || !validOrderSources.includes(orderSource)) {
+    if (!orderSource || !orderSources_1.CHECKOUT_ORDER_SOURCES.includes(orderSource)) {
         throw new BadRequest_1.BadRequest("Invalid or missing order source");
     }
     // 1. جلب البيانات من الداتا بيز بالتوازي

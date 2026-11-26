@@ -8,6 +8,7 @@ const response_1 = require("../../utils/response");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const userBlockCheck_1 = require("../../utils/userBlockCheck");
 const firstOrderDiscount_helper_1 = require("../../helpers/firstOrderDiscount.helper");
+const orderSources_1 = require("../../types/orderSources");
 /**
  * GET /user/first-order-discount/check?restaurantId=...
  *
@@ -101,14 +102,10 @@ const getAvailableFirstOrderDiscounts = async (req, res) => {
     const now = new Date();
     const src = String(orderSource || "").trim().toLowerCase();
     const targetChannels = ["all"];
-    if (src === "pos") {
-        targetChannels.push("pos");
-    }
-    else if (src.includes("web") || src === "food_aggregator" || src === "mykeeto") {
-        targetChannels.push("web");
-    }
-    else if (src.includes("app")) {
-        targetChannels.push("app");
+    // *_web → web, other online sources (online_order_app, mykeeto, food_aggregator) → app
+    const salesChannel = (0, orderSources_1.toSalesChannel)(src);
+    if (salesChannel) {
+        targetChannels.push(salesChannel);
     }
     else {
         targetChannels.push("app", "web");

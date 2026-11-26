@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.notifyOrderTracking = exports.notifyAdmins = exports.notifyRestaurantAdmins = exports.getRestaurantAdminRooms = exports.notifyRestaurant = exports.notifyShippingCompany = exports.notifyDeliveryMan = exports.getIO = exports.initSocket = exports.invalidateCourierCache = void 0;
+exports.notifyOrderTracking = exports.notifyAdmins = exports.notifyRestaurantAdmins = exports.getRestaurantAdminRooms = exports.isRestaurantAdminUser = exports.notifyRestaurant = exports.notifyShippingCompany = exports.notifyDeliveryMan = exports.getIO = exports.initSocket = exports.invalidateCourierCache = void 0;
 const socket_io_1 = require("socket.io");
 const redis_adapter_1 = require("@socket.io/redis-adapter");
 const redis_1 = __importDefault(require("../../config/redis"));
@@ -297,7 +297,7 @@ const initSocket = (httpServer) => {
             socket.join(`restaurant:${user.restaurantId}`);
         }
         // Restaurant-admin notification rooms (admins only — guests/users also carry restaurantId)
-        if (user.role === "restaurant_admin" && user.restaurantId) {
+        if ((0, exports.isRestaurantAdminUser)(user)) {
             for (const room of (0, exports.getRestaurantAdminRooms)(user))
                 socket.join(room);
         }
@@ -383,6 +383,21 @@ exports.notifyRestaurant = notifyRestaurant;
 // Mirrors the FCM targeting in sendPushNotification.
 // -------------------------------------------------------------
 const ALL_BRANCH_ADMIN_TYPES = ["owner", "subadmin"];
+const RESTAURANT_ADMIN_TYPES = ["owner", "subadmin", "branch_manager", "staff", "cashier"];
+/**
+ * A restaurant admin token comes in two shapes:
+ *   SuperAdmin login:   { role: "restaurant_admin", type: "owner" | ... }
+ *   Restaurant login:   { role: "owner" | "staff" | ..., type: same }
+ * Guests / users / couriers also carry restaurantId, so the type must match too.
+ */
+const isRestaurantAdminUser = (user) => {
+    if (!user?.restaurantId)
+        return false;
+    if (user.role === "restaurant_admin")
+        return true;
+    return RESTAURANT_ADMIN_TYPES.includes(String(user.type)) && RESTAURANT_ADMIN_TYPES.includes(String(user.role));
+};
+exports.isRestaurantAdminUser = isRestaurantAdminUser;
 const getRestaurantAdminRooms = (user) => {
     const rid = user.restaurantId;
     if (!rid)

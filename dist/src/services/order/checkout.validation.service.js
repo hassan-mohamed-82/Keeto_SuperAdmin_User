@@ -7,6 +7,7 @@ const drizzle_orm_1 = require("drizzle-orm");
 const uuid_1 = require("uuid");
 const BadRequest_1 = require("../../Errors/BadRequest");
 const restaurantWalletService_1 = require("../restaurantWalletService");
+const orderSources_1 = require("../../types/orderSources");
 const restaurantFeatures_1 = require("../../controllers/user/restaurantFeatures");
 /**
  * Validates and builds an in-memory guest address row.
@@ -93,11 +94,10 @@ exports.checkCheckoutIdempotency = checkCheckoutIdempotency;
  * validating active business plan coverage and updating slug if needed.
  */
 const validateRestaurantAndPlan = async (restaurantId, orderSource, restaurantName) => {
-    const validOrderSources = ["online_order_app", "online_order_web", "food_aggregator", "mykeeto", "pos"];
-    if (!validOrderSources.includes(orderSource)) {
+    if (!orderSources_1.CHECKOUT_ORDER_SOURCES.includes(orderSource)) {
         throw new BadRequest_1.BadRequest("Invalid order source");
     }
-    const storedOrderSource = orderSource === "mykeeto" ? "my_keeto" : orderSource;
+    const storedOrderSource = (0, orderSources_1.toStoredOrderSource)(orderSource);
     const [[restaurant], [plan], schedulesList, [settings],] = await Promise.all([
         connection_1.db.select().from(schema_1.restaurants).where((0, drizzle_orm_1.eq)(schema_1.restaurants.id, restaurantId)).limit(1),
         connection_1.db

@@ -5,6 +5,7 @@ exports.recordFirstOrderDiscountUsage = exports.resolveFirstOrderDiscount = void
 const connection_1 = require("../models/connection");
 const schema_1 = require("../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
+const orderSources_1 = require("../types/orderSources");
 /**
  * Checks whether a user qualifies for ANY active first-order discount
  * at the given restaurant and computes the discount amount.
@@ -30,14 +31,10 @@ const resolveFirstOrderDiscount = async (userId, restaurantId, subtotal, orderSo
     // Channel matching: resolve target channels based on orderSource ("pos", "online_order_app", "online_order_web", etc.)
     const src = String(orderSource || "").trim().toLowerCase();
     const targetChannels = ["all"];
-    if (src === "pos") {
-        targetChannels.push("pos");
-    }
-    else if (src.includes("web") || src === "food_aggregator" || src === "mykeeto") {
-        targetChannels.push("web");
-    }
-    else if (src.includes("app")) {
-        targetChannels.push("app");
+    // *_web → web, other online sources (online_order_app, mykeeto, food_aggregator) → app
+    const salesChannel = (0, orderSources_1.toSalesChannel)(src);
+    if (salesChannel) {
+        targetChannels.push(salesChannel);
     }
     else {
         // Fallback if unspecified: allow both app and web

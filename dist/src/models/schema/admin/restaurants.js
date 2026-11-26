@@ -48,6 +48,9 @@ exports.restaurants = (0, mysql_core_1.mysqlTable)("restaurants", {
     deliverystatus: (0, mysql_core_1.mysqlEnum)("delivery_status", ["delivered", "not_delivered"]).default("not_delivered"),
     operationStatus: (0, mysql_core_1.mysqlEnum)("operation_status", ["active", "inactive"]).default("inactive"),
     appBundleId: (0, mysql_core_1.varchar)("app_bundle_id", { length: 255 }).unique(),
+    // Store identifiers used to pull download stats (Google Play package name / App Store numeric Apple ID)
+    androidPackageName: (0, mysql_core_1.varchar)("android_package_name", { length: 255 }).unique(),
+    appleAppId: (0, mysql_core_1.varchar)("apple_app_id", { length: 20 }).unique(),
     iosFirebaseProject: (0, mysql_core_1.varchar)("ios_firebase_project", { length: 50 }).notNull().default("secondary"),
     androidFirebaseProject: (0, mysql_core_1.varchar)("android_firebase_project", { length: 50 }).notNull().default("secondary"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),

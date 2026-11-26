@@ -7,6 +7,7 @@ exports.getRestaurantSelectData = exports.changeDeliveryStatus = exports.getActi
 const connection_1 = require("../../models/connection");
 const schema_1 = require("../../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
+const appStoreIdentifiers_1 = require("../../utils/appStoreIdentifiers");
 const response_1 = require("../../utils/response");
 const NotFound_1 = require("../../Errors/NotFound");
 const BadRequest_1 = require("../../Errors/BadRequest");
@@ -16,6 +17,15 @@ const handleImages_1 = require("../../utils/handleImages");
 const encryption_1 = require("../../utils/encryption");
 const restaurantWalletService_1 = require("../../services/restaurantWalletService");
 const constant_1 = require("../../types/constant");
+const orderSources_1 = require("../../types/orderSources");
+/** Rejects unknown platform types (MySQL would silently save them as '' in non-strict mode). */
+const assertValidPlatformTypes = (plans) => {
+    for (const plan of plans || []) {
+        if (plan?.platformType && !orderSources_1.PLATFORM_TYPES.includes(plan.platformType)) {
+            throw new BadRequest_1.BadRequest(`Invalid platformType "${plan.platformType}". Allowed: ${orderSources_1.PLATFORM_TYPES.join(", ")}`);
+        }
+    }
+};
 // Helper: Parse payment credentials from request body (accepts array, single object, or JSON string)
 // Helper: Generate Action ID for permission action
 const generateActionId = () => {
@@ -313,6 +323,66 @@ const adjustSalesRepPoints = async (tx, salesId, delta) => {
     const nextPoints = Math.max(0, Number(rep.points ?? 0) + delta);
     await tx.update(schema_1.sales).set({ points: nextPoints }).where((0, drizzle_orm_1.eq)(schema_1.sales.id, salesId));
 };
+const APP_IDENTIFIER_COLUMNS = {
+    appBundleId: schema_1.restaurants.appBundleId,
+    androidPackageName: schema_1.restaurants.androidPackageName,
+    appleAppId: schema_1.restaurants.appleAppId,
+};
+// undefined = not sent (leave as is), null = clear, string = set
+const normalizeAppIdentifier = (key, value) => {
+    if (value === undefined)
+        return undefined;
+    if (value === null)
+        return null;
+    const v = String(value).trim();
+    if (v === "" || v === "null")
+        return null;
+    if (key === "appleAppId" && !(0, appStoreIdentifiers_1.isValidAppleAppId)(v)) {
+        throw new BadRequest_1.BadRequest("appleAppId must be the numeric Apple ID of the app (e.g. 6471234567)");
+    }
+    if (key === "androidPackageName" && !(0, appStoreIdentifiers_1.isValidAndroidPackageName)(v)) {
+        throw new BadRequest_1.BadRequest("androidPackageName must look like com.company.app");
+    }
+    // iOS bundle ids may also contain hyphens
+    if (key === "appBundleId" && !/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(v)) {
+        throw new BadRequest_1.BadRequest("appBundleId must look like com.company.app");
+    }
+    return v;
+};
+const resolveAppIdentifiers = async (body, links, existing) => {
+    const result = {
+        appBundleId: normalizeAppIdentifier("appBundleId", body.appBundleId),
+        androidPackageName: normalizeAppIdentifier("androidPackageName", body.androidPackageName),
+        appleAppId: normalizeAppIdentifier("appleAppId", body.appleAppId),
+    };
+    // Not sent and not saved yet -> try to read it from the store link
+    if (result.androidPackageName === undefined && !existing?.androidPackageName) {
+        result.androidPackageName = (0, appStoreIdentifiers_1.extractAndroidPackageName)(links.androidApp) ?? undefined;
+    }
+    if (result.appleAppId === undefined && !existing?.appleAppId) {
+        result.appleAppId = (0, appStoreIdentifiers_1.extractAppleAppId)(links.iosApp) ?? undefined;
+    }
+    for (const key of Object.keys(APP_IDENTIFIER_COLUMNS)) {
+        const value = result[key];
+        if (value === undefined) {
+            delete result[key];
+            continue;
+        }
+        if (value === null || value === existing?.[key])
+            continue;
+        const conditions = [(0, drizzle_orm_1.eq)(APP_IDENTIFIER_COLUMNS[key], value)];
+        if (existing)
+            conditions.push((0, drizzle_orm_1.ne)(schema_1.restaurants.id, existing.id));
+        const [taken] = await connection_1.db
+            .select({ id: schema_1.restaurants.id, name: schema_1.restaurants.name })
+            .from(schema_1.restaurants)
+            .where((0, drizzle_orm_1.and)(...conditions))
+            .limit(1);
+        if (taken)
+            throw new BadRequest_1.BadRequest(`${key} "${value}" is already used by restaurant "${taken.name}"`);
+    }
+    return result;
+};
 // ==========================================
 // 1. CREATE RESTAURANT
 // ==========================================
@@ -332,6 +402,7 @@ const createRestaurant = async (req, res) => {
         .limit(1);
     if (existingUser[0])
         throw new BadRequest_1.BadRequest("Email already exists for a restaurant user");
+    const appIdentifiers = await resolveAppIdentifiers(req.body, { iosApp, androidApp });
     let logoUrl = undefined;
     if (logo)
         logoUrl = (await (0, handleImages_1.saveBase64Image)(req, logo, "restaurants")).url;
@@ -357,6 +428,7 @@ const createRestaurant = async (req, res) => {
             parsedBusinessPlans = businessPlans;
         }
     }
+    assertValidPlatformTypes(parsedBusinessPlans);
     const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
     const parsedPaymentCredentials = parsePaymentCredentialsInput(paymentCredsRaw);
     // 👈 تفعيل/تعطيل الدفع أونلاين (افتراضي: مفعّل)
@@ -463,6 +535,7 @@ const createRestaurant = async (req, res) => {
             deliverystatus: deliverystatus || "not_delivered",
             iosApp: iosApp || '',
             androidApp: androidApp || '',
+            ...appIdentifiers,
         });
         // 2. إنشاء المالك
         await tx.insert(schema_1.restrauntadmin).values({
@@ -668,6 +741,9 @@ const getAllRestaurants = async (req, res) => {
         deliverystatus: schema_1.restaurants.deliverystatus,
         iosApp: schema_1.restaurants.iosApp,
         androidApp: schema_1.restaurants.androidApp,
+        appBundleId: schema_1.restaurants.appBundleId,
+        androidPackageName: schema_1.restaurants.androidPackageName,
+        appleAppId: schema_1.restaurants.appleAppId,
         paymentGatewayType: schema_1.restaurantSettings.paymentGatewayType, // 👈 نوع بوابة الدفع
         enableOnlinePayment: schema_1.restaurantSettings.enableOnlinePayment, // 👈 تفعيل الدفع أونلاين
         // 👈 إعدادات التحويل التلقائي للفيزة
@@ -749,6 +825,9 @@ const getAllRestaurants = async (req, res) => {
             deliverystatus: r.deliverystatus,
             iosApp: r.iosApp || null,
             androidApp: r.androidApp || null,
+            appBundleId: r.appBundleId || null,
+            androidPackageName: r.androidPackageName || null,
+            appleAppId: r.appleAppId || null,
             paymentGatewayType: r.paymentGatewayType || "SYSTEM", // 👈
             enableOnlinePayment: r.enableOnlinePayment ?? true, // 👈
             visaSwitch: {
@@ -877,6 +956,7 @@ const updateRestaurant = async (req, res) => {
             parsedBusinessPlans = businessPlans;
         }
     }
+    assertValidPlatformTypes(parsedBusinessPlans);
     const paymentCredsRaw = req.body.paymentCredentials ?? req.body.paymentcredition ?? req.body.payment_credentials;
     const parsedPaymentCredentials = paymentCredsRaw !== undefined ? parsePaymentCredentialsInput(paymentCredsRaw) : undefined;
     // 👈 نوع بوابة الدفع (يتحدث فقط لو اتبعت)
@@ -1008,6 +1088,11 @@ const updateRestaurant = async (req, res) => {
         restaurantUpdateData.iosApp = iosApp;
     if (androidApp !== undefined)
         restaurantUpdateData.androidApp = androidApp;
+    const appIdentifiers = await resolveAppIdentifiers(req.body, {
+        iosApp: iosApp !== undefined ? iosApp : existingRestaurant.iosApp,
+        androidApp: androidApp !== undefined ? androidApp : existingRestaurant.androidApp,
+    }, existingRestaurant);
+    Object.assign(restaurantUpdateData, appIdentifiers);
     if (cityId !== undefined)
         restaurantUpdateData.cityId = (cityId && clean(cityId)) ? clean(cityId) : null;
     if (zoneId !== undefined)

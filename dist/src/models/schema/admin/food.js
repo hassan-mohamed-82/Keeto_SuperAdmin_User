@@ -51,7 +51,7 @@ exports.food = (0, mysql_core_1.mysqlTable)("food", {
     sold_by: (0, mysql_core_1.mysqlEnum)("sold_by", ["unit", "weight"]).notNull().default("unit"),
     weight_unit: (0, mysql_core_1.mysqlEnum)("weight_unit", ["kg", "gm"]),
     /** Weighted foods: may the customer type any weight, or only pick a weight-group option? */
-    allow_custom_weight: (0, mysql_core_1.boolean)("allow_custom_weight").notNull().default(true),
+    allow_custom_weight: (0, mysql_core_1.boolean)("allow_custom_weight").notNull().default(false),
     isDeleted: (0, mysql_core_1.boolean)("is_deleted").notNull().default(false),
     deletedAt: (0, mysql_core_1.timestamp)("deleted_at"),
     createdAt: (0, mysql_core_1.timestamp)("created_at").defaultNow(),

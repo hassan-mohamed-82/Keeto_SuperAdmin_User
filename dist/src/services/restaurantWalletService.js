@@ -21,20 +21,12 @@ const schema_1 = require("../models/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const uuid_1 = require("uuid");
 const roundMoney = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
+const orderSources_1 = require("../types/orderSources");
 /**
  * Maps any orderSource string to the corresponding platformType enum in restaurant_business_plans
  */
 function mapOrderSourceToPlatformType(orderSource) {
-    const normalized = String(orderSource ?? "").trim().toLowerCase();
-    if (normalized === "my_keeto" || normalized === "mykeeto")
-        return "mykeeto";
-    if (normalized === "online_order_web")
-        return "online_order_web";
-    if (normalized === "food_aggregator")
-        return "food_aggregator";
-    if (normalized === "online_order_app")
-        return "online_order_app";
-    return "pos";
+    return (0, orderSources_1.toPlatformType)(orderSource);
 }
 async function applyGatewaySwitch(executor, { restaurantId, toType, trigger, balanceAtSwitch, adminId, }) {
     const [settings] = await executor
