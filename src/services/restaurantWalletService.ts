@@ -781,8 +781,12 @@ export async function settleDeliveredOrder(orderId: string, tx: any) {
         await notifyDebtSettledToSuperadmin(tx, order.restaurantId, currentBalance, newBalance);
     }
 
-    const hasFees = appCommission !== 0 || settlementServiceFee !== 0 || effectiveVisaComm !== 0 || (paymentKind === "cash" && totalAmount !== 0);
-    if (hasFees) {
+    // Only record a wallet row when something actually moves: a fee/commission
+    // owed to the platform, or a non-zero balance change (e.g. SYSTEM visa credit).
+    // Cash / CUSTOM orders with zero commission and zero service fee are skipped.
+    const hasFees = appCommission !== 0 || settlementServiceFee !== 0 || effectiveVisaComm !== 0;
+    const hasBalanceChange = roundMoney(transactionAmount) !== 0;
+    if (hasFees || hasBalanceChange) {
         await tx.insert(restaurantWalletTransactions).values({
             id: uuidv4(),
             restaurantId: order.restaurantId,

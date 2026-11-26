@@ -8,6 +8,28 @@ import { SuccessResponse } from "../../utils/response";
 import { BadRequest, NotFound, UnauthorizedError } from "../../Errors";
 import PDFDocument from "pdfkit";
 import { v4 as uuidv4 } from "uuid";
+
+/**
+ * Who actually holds the money for an order (same rules as restaurantWalletService):
+ * - "cash"               → restaurant collected it; restaurant owes commission + service fee
+ * - "digital_restaurant" → CUSTOM gateway, money went to the restaurant's own account; same as cash
+ * - "digital_platform"   → SYSTEM gateway / user wallet, money is with the platform; platform owes the rest
+ * - "unpaid"             → online payment not confirmed yet (pending_payment / payment_failed); ignored
+ */
+type SettlementBucket = "cash" | "digital_restaurant" | "digital_platform" | "unpaid";
+const classifySettlement = (order: {
+    paymentMethodName?: string | null;
+    paymentStatus?: string | null;
+    paymentGatewayType?: string | null;
+    paymentGateway?: string | null;
+}): SettlementBucket => {
+    const payment = (order.paymentMethodName || "").toLowerCase();
+    const isCash = !order.paymentGateway && (payment.includes("cash") || payment.includes("استلام"));
+    if (isCash) return "cash";
+    if (order.paymentStatus && order.paymentStatus !== "paid") return "unpaid";
+    if (order.paymentGatewayType === "CUSTOM") return "digital_restaurant";
+    return "digital_platform";
+};
 // 1. تعريف الأنواع المسموحة للـ Enums
 type OrderStatus = "pending" | "accepted" | "preparing" | "out_for_delivery" | "delivered" | "cancelled" | "refund";
 type PaymentMethod = "cash_on_delivery" | "visa" | "wallet";
@@ -429,6 +451,9 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             orderId: orders.id,
             orderSource: orders.orderSource,
             paymentMethodName: paymentMethods.name,
+            paymentStatus: orders.paymentStatus,
+            paymentGatewayType: orders.paymentGatewayType,
+            paymentGateway: orders.paymentGateway,
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee, // 👈 دي الرسوم الثابتة بتاعة كيتو (الـ 5 جنيه)
@@ -466,7 +491,7 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
                 canceledBreakdown: { user: 0, restaurant: 0 },
                 sales: { totalRevenue: 0, cashCollected: 0, digitalCollected: 0 },
                 platformDues: { totalCommission: 0, totalServiceFee: 0 }, // 👈 رجعنا السيرفس فيز للمنصة
-                settlementRaw: { cashCommission: 0, cashServiceFee: 0, digitalCommission: 0, digitalServiceFee: 0 }
+                settlementRaw: { cashCommission: 0, cashServiceFee: 0, digitalCommission: 0, digitalServiceFee: 0, platformCollected: 0 }
             };
         }
 
@@ -486,6 +511,10 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
             continue;
         }
 
+        // Online payment not confirmed yet → nothing to settle
+        const bucket = classifySettlement(order);
+        if (bucket === "unpaid") continue;
+
         const amount = parseFloat(order.totalAmount as string || "0");
         const commission = parseFloat(order.appCommission as string || "0");
         const svcFee = parseFloat(order.serviceFee as string || "0"); // الـ 5 جنيه
@@ -500,30 +529,34 @@ export const getDetailedRestaurantReport = async (req: Request | any, res: Respo
         grandTotalAmount += amount;
         grandTotalPlatformCommission += (commission + svcFee);
 
-        const payment = (order.paymentMethodName || "").toLowerCase();
-        const isCash = payment.includes("cash") || payment.includes("استلام");
-
-        if (isCash) {
+        if (bucket === "cash") {
             entry.counts.cash += 1;
             entry.sales.cashCollected += amount;
-            entry.settlementRaw.cashCommission += commission;
-            entry.settlementRaw.cashServiceFee += svcFee; // 👈 هنسجل إن الكاش ده عليه سيرفس فيز
         } else {
             entry.counts.digital += 1;
             entry.sales.digitalCollected += amount;
+        }
+
+        if (bucket === "digital_platform") {
+            // Money is with the platform → platform owes the restaurant the rest
+            entry.settlementRaw.platformCollected += amount;
             entry.settlementRaw.digitalCommission += commission;
             entry.settlementRaw.digitalServiceFee += svcFee;
+        } else {
+            // Cash or CUSTOM gateway → restaurant holds the money and owes the fees
+            entry.settlementRaw.cashCommission += commission;
+            entry.settlementRaw.cashServiceFee += svcFee;
         }
     }
 
     const restaurantReports = Object.values(restaurantMap).map(entry => {
         // 💰 تصفية الحسابات (Settlement Logic)
 
-        // المطعم عليه كام؟ (عمولة الكاش + السيرفس فيز الثابتة بتاعت الكاش زي الـ 5 جنيه)
+        // المطعم عليه كام؟ (عمولة + سيرفس فيز للطلبات اللي فلوسها مع المطعم: كاش أو CUSTOM)
         const restaurantOwesToPlatform = entry.settlementRaw.cashCommission + entry.settlementRaw.cashServiceFee;
 
-        // المنصة عليها كام؟ (فلوس الفيزا كلها اللي دخلت البنك - العمولة المئوية - السيرفس فيز الثابتة)
-        const platformOwesToRestaurant = entry.sales.digitalCollected - (entry.settlementRaw.digitalCommission + entry.settlementRaw.digitalServiceFee);
+        // المنصة عليها كام؟ (فلوس الفيزا المدفوعة فعلاً اللي دخلت حساب المنصة - العمولة - السيرفس فيز)
+        const platformOwesToRestaurant = entry.settlementRaw.platformCollected - (entry.settlementRaw.digitalCommission + entry.settlementRaw.digitalServiceFee);
 
         const netBalance = platformOwesToRestaurant - restaurantOwesToPlatform;
 
@@ -620,6 +653,9 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             orderId: orders.id,
             orderSource: orders.orderSource,
             paymentMethodName: paymentMethods.name,
+            paymentStatus: orders.paymentStatus,
+            paymentGatewayType: orders.paymentGatewayType,
+            paymentGateway: orders.paymentGateway,
             subtotal: orders.subtotal,
             deliveryFee: orders.deliveryFee,
             serviceFee: orders.serviceFee, // 👈 رسوم كيتو الثابتة (الـ 5 جنيه)
@@ -634,16 +670,16 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         .where(and(...conditions));
 
     const sourceMap: Record<string, any> = {
-        online_order_web: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
-        online_order_app: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
-        food_aggregator: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
-        food_aggregator_web: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
-        mykeeto: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
-        mykeeto_web: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
-        pos: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 },
+        online_order_web: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0, platDigital: 0 },
+        online_order_app: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0, platDigital: 0 },
+        food_aggregator: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0, platDigital: 0 },
+        food_aggregator_web: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0, platDigital: 0 },
+        mykeeto: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0, platDigital: 0 },
+        mykeeto_web: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0, platDigital: 0 },
+        pos: { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0, platDigital: 0 },
     };
 
-    let grandTotal = { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0 };
+    let grandTotal = { orders: 0, revenue: 0, cash: 0, digital: 0, commission: 0, svcFee: 0, dlvFee: 0, cashComm: 0, cashSvc: 0, digComm: 0, digSvc: 0, platDigital: 0 };
 
     for (const order of ordersData) {
         // orders store "my_keeto" → report key "mykeeto"
@@ -662,6 +698,10 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
             }
             continue;
         }
+
+        // Online payment not confirmed yet → nothing to settle
+        const bucket = classifySettlement(order);
+        if (bucket === "unpaid") continue;
 
         const amount = parseFloat(order.totalAmount as string || "0");
         const commission = parseFloat(order.appCommission as string || "0");
@@ -683,35 +723,30 @@ export const getSingleRestaurantReport = async (req: Request | any, res: Respons
         grandTotal.svcFee += serviceFee;
         grandTotal.dlvFee += deliveryFee;
 
-        const payment = (order.paymentMethodName || "").toLowerCase();
-        const isCash = payment.includes("cash") || payment.includes("استلام");
+        for (const s of [stats, grandTotal]) {
+            if (bucket === "cash") s.cash += amount;
+            else s.digital += amount;
 
-        if (isCash) {
-            stats.cash += amount;
-            stats.cashComm += commission;
-            stats.cashSvc += serviceFee; // 👈 هنسجل إن الكاش ده عليه سيرفس فيز
-
-            grandTotal.cash += amount;
-            grandTotal.cashComm += commission;
-            grandTotal.cashSvc += serviceFee;
-        } else {
-            stats.digital += amount;
-            stats.digComm += commission;
-            stats.digSvc += serviceFee; // 👈 وهنسجل إن الديجيتال عليه سيرفس فيز يتخصم منه
-
-            grandTotal.digital += amount;
-            grandTotal.digComm += commission;
-            grandTotal.digSvc += serviceFee;
+            if (bucket === "digital_platform") {
+                // Money is with the platform → platform owes the restaurant the rest
+                s.platDigital += amount;
+                s.digComm += commission;
+                s.digSvc += serviceFee;
+            } else {
+                // Cash or CUSTOM gateway → restaurant holds the money and owes the fees
+                s.cashComm += commission;
+                s.cashSvc += serviceFee;
+            }
         }
     }
 
     const buildSourceReport = (sourceName: string, stats: any) => {
         // 💰 تصفية الحسابات
-        // المطعم عليه كام؟ (عمولة الكاش + السيرفس فيز الثابتة بتاعت الكاش)
+        // المطعم عليه كام؟ (عمولة + سيرفس فيز للطلبات اللي فلوسها مع المطعم: كاش أو CUSTOM)
         const restOwes = stats.cashComm + stats.cashSvc;
 
-        // المنصة مدينة للمطعم بفلوس الديجيتال ناقص (العمولة المئوية للديجيتال + السيرفس فيز بتاعت الديجيتال)
-        const platOwes = stats.digital - (stats.digComm + stats.digSvc);
+        // المنصة مدينة للمطعم بفلوس الفيزا المدفوعة فعلاً في حساب المنصة ناقص العمولة والسيرفس فيز
+        const platOwes = stats.platDigital - (stats.digComm + stats.digSvc);
 
         const net = platOwes - restOwes;
 
@@ -943,6 +978,9 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
             appCommission: orders.appCommission,
             serviceFee: orders.serviceFee,
             paymentMethodName: paymentMethods.name, // 👈 الربط السليم
+            paymentStatus: orders.paymentStatus,
+            paymentGatewayType: orders.paymentGatewayType,
+            paymentGateway: orders.paymentGateway,
             status: orders.status,
             cancelReasonType: sql<string | null>`COALESCE(${orders.cancelReasonType}, ${selectReasons.type})`,
         })
@@ -953,11 +991,16 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
 
     let totalCash = 0, totalDigital = 0, totalSales = 0;
     let cashComm = 0, cashSvc = 0, digitalComm = 0, digitalSvc = 0;
+    let platformCollected = 0;
     let validOrdersCount = 0;
 
     for (const order of ordersData) {
         const isCancelledByUser = order.status === "cancelled" && order.cancelReasonType === "user";
         if (isCancelledByUser) continue;
+
+        // Online payment not confirmed yet → nothing to settle
+        const bucket = classifySettlement(order);
+        if (bucket === "unpaid") continue;
 
         validOrdersCount++;
         const amount = parseFloat(order.totalAmount as string || "0");
@@ -966,18 +1009,17 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
 
         totalSales += amount;
 
-        // 🛡️ فحص نوع الدفع من الاسم مش الـ UUID
-        const payment = (order.paymentMethodName || "").toLowerCase();
-        const isCash = payment.includes("cash") || payment.includes("استلام");
+        if (bucket === "cash") totalCash += amount;
+        else totalDigital += amount;
 
-        if (isCash) {
-            totalCash += amount;
-            cashComm += comm;
-            cashSvc += svcFee;
-        } else {
-            totalDigital += amount;
+        if (bucket === "digital_platform") {
+            platformCollected += amount;
             digitalComm += comm;
             digitalSvc += svcFee;
+        } else {
+            // Cash or CUSTOM gateway → restaurant holds the money and owes the fees
+            cashComm += comm;
+            cashSvc += svcFee;
         }
     }
 
@@ -986,7 +1028,7 @@ export const generateAndSaveInvoice = async (req: Request | any, res: Response) 
 
     // 💰 حساب المديونية الموحد والدقيق (نفس اللوجيك بتاع التقارير)
     const restaurantOwes = cashComm + cashSvc;
-    const platformOwes = totalDigital - (digitalComm + digitalSvc);
+    const platformOwes = platformCollected - (digitalComm + digitalSvc);
     const netBalance = platformOwes - restaurantOwes;
 
     const invoiceId = uuidv4();
